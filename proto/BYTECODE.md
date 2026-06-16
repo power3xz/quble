@@ -113,6 +113,17 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   VM이 외부에서 `RENDER comp_id`로 진입할 때만 쓰인다.
 - 분기/반복(`@if`/`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다.
 
+### 이스케이프 규칙
+
+출력이 결정적이도록 VM은 다음 이스케이프를 적용한다. 텍스트와 속성값의 규칙이 다르다.
+
+| 위치 | 이스케이프 대상 |
+|---|---|
+| `TEXT` (텍스트 노드) | `&`→`&amp;`, `<`→`&lt;`, `>`→`&gt;` |
+| `ATTR` 의 value (속성값) | 텍스트 규칙 + `"`→`&quot;` |
+
+태그명·속성명은 신뢰된 식별자라 이스케이프하지 않는다.
+
 ---
 
 ## 6. 위 예시의 컴파일 결과 (개념)
@@ -152,14 +163,14 @@ HALT
 proto/
   Cargo.toml            # workspace
   crates/
-    bytecode/   # opcode, 내장 태그 테이블, 사용자 상수풀, 직렬화/역직렬화 (파서·VM 공용)
-    parser/     # .comp 소스 → bytecode
+    bytecode/   # opcode, 내장 태그 테이블, 사용자 상수풀, 직렬화/역직렬화 (컴파일러·VM 공용)
+    compiler/   # .qubc 소스 → bytecode. 프론트엔드(lexer/parse→ast) + 백엔드(codegen)
     vm/         # bytecode → HTML 문자열
-  examples/hello.comp
-  src/main.rs           # comp → 컴파일 → 실행 → stdout
+  examples/hello.qubc
+  src/main.rs           # .qubc → 컴파일 → 실행 → stdout
 ```
 
-`bytecode` 크레이트가 포맷의 단일 정의처(내장 태그 테이블 포함). 파서·VM이 공유해 계약
+`bytecode` 크레이트가 포맷의 단일 정의처(내장 태그 테이블 포함). 컴파일러·VM이 공유해 계약
 불일치를 컴파일타임에 막는다.
 
 ---
@@ -167,9 +178,9 @@ proto/
 ## 8. 진행 순서
 
 1. `bytecode` — opcode enum, 내장 태그 테이블, ConstPool, 컴포넌트 테이블, 직렬화/역직렬화 + 라운드트립 테스트.
-2. `vm` — 손으로 만든 바이트코드 → HTML. (파서 없이 먼저 검증)
-3. `parser` — `.comp` → bytecode.
-4. `main` — end-to-end: hello.comp → HTML. 출력 일치 테스트.
+2. `vm` — 손으로 만든 바이트코드 → HTML. (컴파일러 없이 먼저 검증)
+3. `compiler` — `.qubc` → bytecode.
+4. `main` — end-to-end: hello.qubc → HTML. 출력 일치 테스트.
 
 각 단계는 다음으로 넘어가기 전 테스트로 검증한다.
 ```
