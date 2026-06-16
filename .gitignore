@@ -1,1 +1,3 @@
 /proto/target/
+node_modules/
+dist/
