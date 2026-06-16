@@ -1,0 +1,277 @@
+//! Quble 프로토타입 VM: 직렬화된 바이트코드(`&[u8]`)를 받아 HTML 문자열로 렌더한다.
+//! 출력은 SSR 문자열(브라우저 DOM 아님). 상세는 proto/BYTECODE.md.
+
+use bytecode::{DecodeError, Module, Op};
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum VmError {
+    /// 바이트코드 디코드 실패.
+    Decode(DecodeError),
+    /// 알 수 없는 opcode 바이트.
+    BadOpcode(u8),
+    /// operand 읽다가 코드 끝.
+    UnexpectedEof,
+    /// 범위 밖 컴포넌트 ID.
+    BadComponent(u16),
+    /// 범위 밖 상수풀 인덱스.
+    BadConst(u16),
+    /// 범위 밖 내장 태그 ID.
+    BadTag(u16),
+}
+
+impl From<DecodeError> for VmError {
+    fn from(e: DecodeError) -> Self {
+        VmError::Decode(e)
+    }
+}
+
+/// 바이트코드를 디코드하고 comp_id를 진입점으로 렌더해 HTML 문자열을 만든다.
+pub fn render(bytes: &[u8], comp_id: u16) -> Result<String, VmError> {
+    let module = bytecode::decode(bytes)?;
+    let mut out = String::new();
+    exec(&module, comp_id, &mut out)?;
+    Ok(out)
+}
+
+/// 한 컴포넌트 정의의 코드를 실행한다. RENDER를 만나면 재귀한다.
+fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), VmError> {
+    let def = module.def(comp_id).ok_or(VmError::BadComponent(comp_id))?;
+    let start = def.code_off as usize;
+    let end = start + def.code_len as usize;
+    let code = &module.code[start..end];
+
+    let mut pc = 0usize;
+    while pc < code.len() {
+        let op = Op::from_u8(code[pc]).ok_or(VmError::BadOpcode(code[pc]))?;
+        pc += 1;
+        match op {
+            Op::Halt => break,
+            Op::ElemOpen => {
+                let tag = read_u16(code, &mut pc)?;
+                let name = bytecode::tags::tag_name(tag).ok_or(VmError::BadTag(tag))?;
+                out.push('<');
+                out.push_str(name);
+            }
+            Op::Attr => {
+                let name = read_u16(code, &mut pc)?;
+                let value = read_u16(code, &mut pc)?;
+                out.push(' ');
+                out.push_str(get_const(module, name)?);
+                out.push_str("=\"");
+                escape_attr(get_const(module, value)?, out);
+                out.push('"');
+            }
+            Op::ElemCloseOpen => out.push('>'),
+            Op::Text => {
+                let text = read_u16(code, &mut pc)?;
+                escape_text(get_const(module, text)?, out);
+            }
+            Op::ElemEnd => {
+                let tag = read_u16(code, &mut pc)?;
+                let name = bytecode::tags::tag_name(tag).ok_or(VmError::BadTag(tag))?;
+                out.push_str("</");
+                out.push_str(name);
+                out.push('>');
+            }
+            Op::Render => {
+                let child = read_u16(code, &mut pc)?;
+                exec(module, child, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, VmError> {
+    let b = code.get(*pc..*pc + 2).ok_or(VmError::UnexpectedEof)?;
+    *pc += 2;
+    Ok(u16::from_le_bytes([b[0], b[1]]))
+}
+
+fn get_const(module: &Module, idx: u16) -> Result<&str, VmError> {
+    module.pool.get(idx).ok_or(VmError::BadConst(idx))
+}
+
+/// 텍스트 노드 이스케이프: `& < >`.
+fn escape_text(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+}
+
+/// 속성값 이스케이프: 텍스트 규칙 + `"`.
+fn escape_attr(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytecode::{encode, CompDef, ConstPool, Module};
+
+    /// 바이트코드를 손으로 짜는 어셈블러 (파서 전까지 테스트용).
+    struct Asm {
+        code: Vec<u8>,
+    }
+    impl Asm {
+        fn new() -> Self {
+            Self { code: Vec::new() }
+        }
+        fn open(&mut self, tag: u16) -> &mut Self {
+            self.code.push(Op::ElemOpen as u8);
+            self.code.extend_from_slice(&tag.to_le_bytes());
+            self
+        }
+        fn attr(&mut self, n: u16, v: u16) -> &mut Self {
+            self.code.push(Op::Attr as u8);
+            self.code.extend_from_slice(&n.to_le_bytes());
+            self.code.extend_from_slice(&v.to_le_bytes());
+            self
+        }
+        fn close_open(&mut self) -> &mut Self {
+            self.code.push(Op::ElemCloseOpen as u8);
+            self
+        }
+        fn text(&mut self, t: u16) -> &mut Self {
+            self.code.push(Op::Text as u8);
+            self.code.extend_from_slice(&t.to_le_bytes());
+            self
+        }
+        fn end(&mut self, tag: u16) -> &mut Self {
+            self.code.push(Op::ElemEnd as u8);
+            self.code.extend_from_slice(&tag.to_le_bytes());
+            self
+        }
+        fn render(&mut self, id: u16) -> &mut Self {
+            self.code.push(Op::Render as u8);
+            self.code.extend_from_slice(&id.to_le_bytes());
+            self
+        }
+        fn halt(&mut self) -> &mut Self {
+            self.code.push(Op::Halt as u8);
+            self
+        }
+    }
+
+    fn t(name: &str) -> u16 {
+        bytecode::tags::tag_id(name).unwrap()
+    }
+
+    /// BYTECODE.md §6 hello 예시. encode로 바이트화한 뒤 render에 넘긴다.
+    #[test]
+    fn renders_hello() {
+        let mut pool = ConstPool::new();
+        let class = pool.intern("class");
+        let greeting = pool.intern("greeting");
+        let hello = pool.intern("Hello");
+        let sub = pool.intern("sub");
+        let world = pool.intern("world");
+
+        let mut a = Asm::new();
+        a.open(t("div"))
+            .attr(class, greeting)
+            .close_open()
+            .open(t("h1"))
+            .close_open()
+            .text(hello)
+            .end(t("h1"))
+            .open(t("p"))
+            .attr(class, sub)
+            .close_open()
+            .text(world)
+            .end(t("p"))
+            .end(t("div"))
+            .halt();
+
+        let code = a.code;
+        let defs = vec![CompDef {
+            name_idx: hello,
+            code_off: 0,
+            code_len: code.len() as u32,
+        }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        assert_eq!(
+            render(&bytes, 0).unwrap(),
+            r#"<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>"#
+        );
+    }
+
+    #[test]
+    fn escapes_text_and_attr() {
+        let mut pool = ConstPool::new();
+        let title = pool.intern("title");
+        let attr_val = pool.intern(r#"a"b<c"#);
+        let body = pool.intern("x < y & z");
+        let name = pool.intern("C");
+
+        let mut a = Asm::new();
+        a.open(t("div"))
+            .attr(title, attr_val)
+            .close_open()
+            .text(body)
+            .end(t("div"))
+            .halt();
+
+        let code = a.code;
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        assert_eq!(
+            render(&bytes, 0).unwrap(),
+            r#"<div title="a&quot;b&lt;c">x &lt; y &amp; z</div>"#
+        );
+    }
+
+    /// RENDER로 자식 컴포넌트 합성 (프로토타입 코드엔 없지만 opcode 동작 검증).
+    #[test]
+    fn renders_child_via_render_op() {
+        let mut pool = ConstPool::new();
+        let parent = pool.intern("Parent");
+        let child = pool.intern("Child");
+        let hi = pool.intern("hi");
+
+        let mut c = Asm::new();
+        c.open(t("span")).close_open().text(hi).end(t("span")).halt();
+        let mut p = Asm::new();
+        p.open(t("div")).close_open().render(1).end(t("div")).halt();
+
+        let child_len = c.code.len() as u32;
+        let parent_len = p.code.len() as u32;
+
+        let mut code = c.code;
+        code.extend_from_slice(&p.code);
+
+        let defs = vec![
+            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len },
+            CompDef { name_idx: child, code_off: 0, code_len: child_len },
+        ];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        assert_eq!(render(&bytes, 0).unwrap(), "<div><span>hi</span></div>");
+    }
+
+    #[test]
+    fn bad_component_id() {
+        let bytes = encode(&Module::new(ConstPool::new(), vec![], vec![]));
+        assert_eq!(render(&bytes, 0), Err(VmError::BadComponent(0)));
+    }
+
+    #[test]
+    fn rejects_bad_bytes() {
+        assert!(matches!(render(b"nope", 0), Err(VmError::Decode(_))));
+    }
+}
