@@ -1,0 +1,8 @@
+component Hello {
+  template {
+    div(class="greeting") {
+      h1() { "Hello" }
+      p(class="sub") { "world" }
+    }
+  }
+}

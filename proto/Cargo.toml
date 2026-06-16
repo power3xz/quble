@@ -1,3 +1,12 @@
 [workspace]
 resolver = "2"
 members = ["crates/bytecode", "crates/vm", "crates/compiler"]
+
+[package]
+name = "quble"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+compiler = { path = "crates/compiler" }
+vm = { path = "crates/vm" }
