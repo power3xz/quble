@@ -12,7 +12,9 @@ const TAGS: &[&str] = &[
     "a",      // 6
     "ul",     // 7
     "li",     // 8
-    "button", // 9
+    "button",  // 9
+    "article", // 10
+    "img",     // 11
 ];
 
 /// 태그 ID → 태그명. 범위를 벗어나면 None.

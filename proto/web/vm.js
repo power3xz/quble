@@ -3,7 +3,7 @@
 // 포맷/opcode는 proto/BYTECODE.md, Rust 구현은 crates/bytecode·crates/vm 참고.
 
 // 내장 태그 테이블 (crates/bytecode/src/tags.rs와 동일 순서·고정).
-const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button"];
+const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
 
 // opcode (crates/bytecode/src/opcode.rs와 동일).
 const OP = {
