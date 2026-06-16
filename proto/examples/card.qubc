@@ -1,0 +1,8 @@
+component Card {
+  template {
+    div(class="card") {
+      h2() { "Loaded from server" }
+      p() { "이 컴포넌트는 클라이언트가 qubb로 받아서 렌더했습니다." }
+    }
+  }
+}
