@@ -17,7 +17,7 @@ pub struct CompDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub pool: ConstPool,
-    pub defs: Vec<CompDef>,
+    pub(crate) defs: Vec<CompDef>,
     pub code: Vec<u8>,
 }
 

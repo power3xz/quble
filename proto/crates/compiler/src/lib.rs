@@ -2,10 +2,10 @@
 //! 프론트엔드(lexer/parse → ast)와 백엔드(codegen)를 모듈로 나눠 담는다.
 //! MVP 스코프: 단일 컴포넌트, 문자열 속성값, 표현식 없음. 상세는 proto/BYTECODE.md.
 
-pub mod ast;
-pub mod codegen;
-pub mod lexer;
-pub mod parse;
+mod ast;
+mod codegen;
+mod lexer;
+mod parse;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {

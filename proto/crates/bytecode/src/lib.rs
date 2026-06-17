@@ -2,11 +2,11 @@
 //! 상세는 proto/BYTECODE.md 참고.
 
 pub mod attrs;
-pub mod module;
-pub mod opcode;
-pub mod pool;
-pub mod serialize;
 pub mod tags;
+mod module;
+mod opcode;
+mod pool;
+mod serialize;
 
 pub use module::{CompDef, Module};
 pub use opcode::Op;

@@ -27,21 +27,17 @@ impl ConstPool {
         self.entries.get(idx as usize).map(|s| s.as_str())
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     /// 직렬화/역직렬화용 원시 접근.
-    pub fn entries(&self) -> &[String] {
+    pub(crate) fn entries(&self) -> &[String] {
         &self.entries
     }
 
     /// 역직렬화 시 그대로 채우기 위한 생성자.
-    pub fn from_entries(entries: Vec<String>) -> Self {
+    pub(crate) fn from_entries(entries: Vec<String>) -> Self {
         Self { entries }
     }
 }
