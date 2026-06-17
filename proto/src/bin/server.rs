@@ -23,12 +23,20 @@ fn main() {
         if url == "/" {
             respond(req, page().into_bytes(), "text/html; charset=utf-8");
         } else if url == "/vm.js" {
-            respond(req, fs::read("web/vm.js").unwrap(), "text/javascript; charset=utf-8");
-        } else if let Some(name) = url.strip_prefix("/component/").and_then(|s| s.strip_suffix(".qubb")) {
+            respond(
+                req,
+                fs::read("web/vm.js").unwrap(),
+                "text/javascript; charset=utf-8",
+            );
+        } else if let Some(name) = url
+            .strip_prefix("/component/")
+            .and_then(|s| s.strip_suffix(".qubb"))
+        {
             match component_bytecode(name) {
                 Some(bytes) => respond(req, bytes, "application/octet-stream"),
                 None => {
-                    let _ = req.respond(Response::from_string("no such component").with_status_code(404));
+                    let _ = req
+                        .respond(Response::from_string("no such component").with_status_code(404));
                 }
             }
         } else if url.starts_with("/react/") {
@@ -42,7 +50,10 @@ fn main() {
 /// examples/<name>.qubc를 컴파일해 qubb 바이트로. 없으면 None.
 fn component_bytecode(name: &str) -> Option<Vec<u8>> {
     // 경로 주입 방지: 단순 이름만 허용.
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return None;
     }
     let src = fs::read_to_string(format!("examples/{name}.qubc")).ok()?;
@@ -84,7 +95,9 @@ fn serve_react_asset(req: tiny_http::Request, url: &str) {
             respond(req, bytes, ct);
         }
         Err(_) => {
-            let _ = req.respond(Response::from_string("react asset not found (빌드했나요?)").with_status_code(404));
+            let _ = req.respond(
+                Response::from_string("react asset not found (빌드했나요?)").with_status_code(404),
+            );
         }
     }
 }
