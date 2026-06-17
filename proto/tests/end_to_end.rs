@@ -40,3 +40,30 @@ fn unknown_tag_is_error() {
     let src = r#"component C { template { table() {} } }"#;
     assert!(render_source(src, 0, &[]).is_err());
 }
+
+#[test]
+fn props_var_interpolated_from_scope() {
+    let src = r#"
+        component Greeting {
+          props { name }
+          template {
+            h1() { "Hello, " {name} "!" }
+          }
+        }
+    "#;
+    let scope = vec!["세계 <b>".to_string()];
+    assert_eq!(
+        render_source(src, 0, &scope).unwrap(),
+        "<h1>Hello, 세계 &lt;b&gt;!</h1>"
+    );
+}
+
+#[test]
+fn undeclared_prop_is_error() {
+    let src = r#"
+        component C {
+          template { h1() { {missing} } }
+        }
+    "#;
+    assert!(render_source(src, 0, &[]).is_err());
+}

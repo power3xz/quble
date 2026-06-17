@@ -1,4 +1,4 @@
-//! AST → 바이트코드 Module. MVP: 단일 컴포넌트, 문자열 속성, 표현식 없음.
+//! AST → 바이트코드 Module. 단일 컴포넌트, 문자열 속성. 1단계: props 문자열 보간.
 
 use crate::ast::{Component, Node};
 use bytecode::{encode, tags, CompDef, ConstPool, Module, Op};
@@ -7,6 +7,8 @@ use bytecode::{encode, tags, CompDef, ConstPool, Module, Op};
 pub enum CodegenError {
     /// 내장 태그 테이블에 없는 태그.
     UnknownTag(String),
+    /// props에 선언되지 않은 변수 참조.
+    UnknownProp(String),
 }
 
 /// AST를 직렬화된 바이트코드로. 바이트코드의 정체는 `[u8]`이므로 Box<[u8]>로 반환한다
@@ -17,7 +19,7 @@ pub fn generate(comp: &Component) -> Result<Box<[u8]>, CodegenError> {
 
     let mut code = Vec::new();
     for node in &comp.template {
-        emit_node(node, &mut pool, &mut code)?;
+        emit_node(node, &comp.props, &mut pool, &mut code)?;
     }
     code.push(Op::Halt as u8);
 
@@ -30,11 +32,25 @@ pub fn generate(comp: &Component) -> Result<Box<[u8]>, CodegenError> {
     Ok(encode(&module).into_boxed_slice())
 }
 
-fn emit_node(node: &Node, pool: &mut ConstPool, code: &mut Vec<u8>) -> Result<(), CodegenError> {
+fn emit_node(
+    node: &Node,
+    props: &[String],
+    pool: &mut ConstPool,
+    code: &mut Vec<u8>,
+) -> Result<(), CodegenError> {
     match node {
         Node::Text(s) => {
             let idx = pool.intern(s);
             code.push(Op::Text as u8);
+            code.extend_from_slice(&idx.to_le_bytes());
+        }
+        Node::Var(name) => {
+            // 선언 순서 = scope 인덱스. 미선언이면 에러.
+            let idx = props
+                .iter()
+                .position(|p| p == name)
+                .ok_or_else(|| CodegenError::UnknownProp(name.clone()))? as u16;
+            code.push(Op::TextVar as u8);
             code.extend_from_slice(&idx.to_le_bytes());
         }
         Node::Element { tag, attrs, children } => {
@@ -63,7 +79,7 @@ fn emit_node(node: &Node, pool: &mut ConstPool, code: &mut Vec<u8>) -> Result<()
             code.push(Op::ElemCloseOpen as u8);
 
             for child in children {
-                emit_node(child, pool, code)?;
+                emit_node(child, props, pool, code)?;
             }
 
             // END는 operand 없음 — 가장 최근에 연 태그를 닫는다(중첩이 보장됨).

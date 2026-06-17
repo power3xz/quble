@@ -1,7 +1,9 @@
 //! 재귀하강 파서: 토큰 → AST. MVP 문법.
 //!
-//! component IDENT { template { NODE* } }
-//! NODE    = ELEMENT | STRING
+//! component IDENT { [PROPS] template { NODE* } }
+//! PROPS   = props { IDENT (, IDENT)* }       (선택)
+//! NODE    = ELEMENT | STRING | VAR
+//! VAR     = { IDENT }                         (props 보간)
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
@@ -82,17 +84,49 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // component IDENT { template { NODE* } }
+    // component IDENT { [props { ... }] template { NODE* } }
     fn component(&mut self) -> Result<Component, ParseError> {
         self.keyword("component")?;
         let name = self.ident()?;
         self.expect(&Token::LBrace)?;
+
+        // props 블록은 선택적이며 template 앞에 온다.
+        let props = if matches!(self.peek(), Some(Token::Ident(s)) if s == "props") {
+            self.props()?
+        } else {
+            Vec::new()
+        };
+
         self.keyword("template")?;
         self.expect(&Token::LBrace)?;
         let template = self.nodes()?;
         self.expect(&Token::RBrace)?; // template
         self.expect(&Token::RBrace)?; // component
-        Ok(Component { name, template })
+        Ok(Component { name, props, template })
+    }
+
+    // props { IDENT (, IDENT)* }
+    fn props(&mut self) -> Result<Vec<String>, ParseError> {
+        self.keyword("props")?;
+        self.expect(&Token::LBrace)?;
+        let mut props = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::RBrace) | None => break,
+                Some(Token::Comma) => {
+                    self.next()?;
+                }
+                Some(Token::Ident(_)) => props.push(self.ident()?),
+                Some(t) => {
+                    return Err(ParseError::Expected {
+                        want: "prop name or }".into(),
+                        got: format!("{t:?}"),
+                    })
+                }
+            }
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(props)
     }
 
     // RBrace를 만날 때까지 노드를 모은다.
@@ -106,16 +140,26 @@ impl<'a> Parser<'a> {
                         nodes.push(Node::Text(s.clone()));
                     }
                 }
+                // `{ IDENT }` 보간. (자식 자리의 `{`는 블록이 아니라 보간만 온다.)
+                Some(Token::LBrace) => nodes.push(self.var()?),
                 Some(Token::Ident(_)) => nodes.push(self.element()?),
                 Some(t) => {
                     return Err(ParseError::Expected {
-                        want: "node (element or string)".into(),
+                        want: "node (element, string, or {var})".into(),
                         got: format!("{t:?}"),
                     })
                 }
             }
         }
         Ok(nodes)
+    }
+
+    // { IDENT }
+    fn var(&mut self) -> Result<Node, ParseError> {
+        self.expect(&Token::LBrace)?;
+        let name = self.ident()?;
+        self.expect(&Token::RBrace)?;
+        Ok(Node::Var(name))
     }
 
     // IDENT ( ATTR* ) { NODE* }
