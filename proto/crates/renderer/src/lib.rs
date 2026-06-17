@@ -19,6 +19,8 @@ pub enum RenderError {
     BadTag(u16),
     /// 범위 밖 전역 속성명 ID.
     BadAttr(u16),
+    /// 여는 태그 없이 END (스택 불균형 — 손상된 바이트코드).
+    UnbalancedEnd,
 }
 
 impl From<DecodeError> for RenderError {
@@ -42,6 +44,8 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), RenderErr
     let end = start + def.code_len as usize;
     let code = &module.code[start..end];
 
+    // 연 태그를 쌓아둔다. END는 operand 없이 top을 닫는다(중첩 보장).
+    let mut tag_stack: Vec<&str> = Vec::new();
     let mut pc = 0usize;
     while pc < code.len() {
         let op = Op::from_u8(code[pc]).ok_or(RenderError::BadOpcode(code[pc]))?;
@@ -51,6 +55,7 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), RenderErr
             Op::ElemOpen => {
                 let tag = read_u16(code, &mut pc)?;
                 let name = bytecode::tags::tag_name(tag).ok_or(RenderError::BadTag(tag))?;
+                tag_stack.push(name);
                 out.push('<');
                 out.push_str(name);
             }
@@ -71,8 +76,7 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), RenderErr
                 escape_text(get_const(module, text)?, out);
             }
             Op::ElemEnd => {
-                let tag = read_u16(code, &mut pc)?;
-                let name = bytecode::tags::tag_name(tag).ok_or(RenderError::BadTag(tag))?;
+                let name = tag_stack.pop().ok_or(RenderError::UnbalancedEnd)?;
                 out.push_str("</");
                 out.push_str(name);
                 out.push('>');
@@ -163,9 +167,8 @@ mod tests {
             self.code.extend_from_slice(&t.to_le_bytes());
             self
         }
-        fn end(&mut self, tag: u16) -> &mut Self {
+        fn end(&mut self) -> &mut Self {
             self.code.push(Op::ElemEnd as u8);
-            self.code.extend_from_slice(&tag.to_le_bytes());
             self
         }
         fn render(&mut self, id: u16) -> &mut Self {
@@ -200,13 +203,13 @@ mod tests {
             .open(t("h1"))
             .close_open()
             .text(hello)
-            .end(t("h1"))
+            .end()
             .open(t("p"))
             .attr(class, sub)
             .close_open()
             .text(world)
-            .end(t("p"))
-            .end(t("div"))
+            .end()
+            .end()
             .halt();
 
         let code = a.code;
@@ -236,7 +239,7 @@ mod tests {
             .attr(title, attr_val)
             .close_open()
             .text(body)
-            .end(t("div"))
+            .end()
             .halt();
 
         let code = a.code;
@@ -258,9 +261,9 @@ mod tests {
         let hi = pool.intern("hi");
 
         let mut c = Asm::new();
-        c.open(t("span")).close_open().text(hi).end(t("span")).halt();
+        c.open(t("span")).close_open().text(hi).end().halt();
         let mut p = Asm::new();
-        p.open(t("div")).close_open().render(1).end(t("div")).halt();
+        p.open(t("div")).close_open().render(1).end().halt();
 
         let child_len = c.code.len() as u32;
         let parent_len = p.code.len() as u32;

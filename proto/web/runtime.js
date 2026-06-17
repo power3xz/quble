@@ -124,7 +124,7 @@ function exec(module, compId) {
         break;
       }
       case OP.ELEM_END: {
-        u16at(); // 태그 ID — DOM에선 스택으로 닫으므로 사용 안 함
+        // operand 없음 — 스택 top을 닫는다(부모로 복귀).
         stack.pop();
         break;
       }

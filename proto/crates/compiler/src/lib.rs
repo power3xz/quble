@@ -89,7 +89,6 @@ mod tests {
         code.push(Op::Text as u8);
         push16(&mut code, hello);
         code.push(Op::ElemEnd as u8);
-        push16(&mut code, h1);
         code.push(Op::ElemOpen as u8);
         push16(&mut code, p);
         code.push(Op::AttrG as u8);
@@ -99,9 +98,7 @@ mod tests {
         code.push(Op::Text as u8);
         push16(&mut code, world);
         code.push(Op::ElemEnd as u8);
-        push16(&mut code, p);
         code.push(Op::ElemEnd as u8);
-        push16(&mut code, div);
         code.push(Op::Halt as u8);
 
         let expected = Module::new(

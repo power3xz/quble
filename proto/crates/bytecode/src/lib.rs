@@ -41,13 +41,13 @@ mod tests {
         emit_open(&mut code, h1);
         code.push(Op::ElemCloseOpen as u8);
         emit_text(&mut code, hello_txt);
-        emit_end(&mut code, h1);
+        emit_end(&mut code);
         emit_open(&mut code, p);
         emit_attr(&mut code, class, sub);
         code.push(Op::ElemCloseOpen as u8);
         emit_text(&mut code, world);
-        emit_end(&mut code, p);
-        emit_end(&mut code, div);
+        emit_end(&mut code);
+        emit_end(&mut code);
         code.push(Op::Halt as u8);
 
         let defs = vec![CompDef {
@@ -62,9 +62,8 @@ mod tests {
         code.push(Op::ElemOpen as u8);
         code.extend_from_slice(&tag.to_le_bytes());
     }
-    fn emit_end(code: &mut Vec<u8>, tag: u16) {
+    fn emit_end(code: &mut Vec<u8>) {
         code.push(Op::ElemEnd as u8);
-        code.extend_from_slice(&tag.to_le_bytes());
     }
     fn emit_attr(code: &mut Vec<u8>, name: u16, value: u16) {
         code.push(Op::AttrL as u8);

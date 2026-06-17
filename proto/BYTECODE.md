@@ -37,9 +37,9 @@ component Hello {
 - **속성명은 흔한 것만 전역 상수풀**에 두고, 전역에 없는 임의 속성명(`data-*`, `aria-*` 등)은
   **컴포넌트 상수풀**로 빠진다.
 - **속성값은 항상 컴포넌트 상수풀.** `"card"` 같은 값은 컴포넌트마다 달라 전역에 못 넣는다.
-- 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(§4). `ELEM_OPEN`/`ELEM_END`의 operand는
+- 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(§4). `ELEM_OPEN`의 operand는
   내장 태그 ID, `ATTR_G`의 name은 전역 상수풀 ID, `ATTR_L`의 name과 모든 value·`TEXT`는
-  컴포넌트 상수풀 인덱스.
+  컴포넌트 상수풀 인덱스. (`ELEM_END`는 operand가 없다 — §5.)
 
 ### 내장 태그 테이블 (프로토타입 시작 집합)
 
@@ -115,14 +115,17 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ATTR_G`          | 0x02 | name: u16, value: u16 | name=전역, value=컴포넌트 | ` name="value"` 출력. name은 전역 상수풀 ID.                             |
 | `ELEM_CLOSE_OPEN` | 0x03 | —                     | —                         | `>` 출력. 여는 태그 종료, 자식 시작.                                     |
 | `TEXT`            | 0x04 | text: u16             | 컴포넌트                  | 텍스트 출력 (HTML 이스케이프).                                           |
-| `ELEM_END`        | 0x05 | tag: u16              | 내장 태그                 | `</TAG>` 출력.                                                           |
+| `ELEM_END`        | 0x05 | —                     | —                         | 가장 최근에 연 태그를 닫는다(`</TAG>`). 닫을 태그는 스택 top으로 안다.   |
 | `RENDER`          | 0x06 | comp_id: u16          | —                         | 컴포넌트 ID로 정의를 찾아 렌더(호출).                                    |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
 
 설계 메모:
 
-- `ELEM_OPEN`/`ELEM_END`가 tag ID를 각각 들고 있어 런타임이 태그 스택을 유지하지 않아도 된다
-  (파서가 짝을 보장). 단순/검증 우선의 선택. 스택 기반 축약은 나중.
+- `ELEM_END`는 operand가 없다. 트리는 항상 올바르게 중첩되므로(컴파일러 보장) END는 **가장
+  최근에 연 태그**를 닫을 수밖에 없다 — 어느 태그인지 명시할 필요가 없다. 닫을 대상은 런타임이
+  스택으로 안다: SSR 렌더러는 `</TAG>`를 써야 해 **태그 이름 스택**을, JS 런타임은 부모로
+  복귀만 하면 돼 **DOM 노드 스택**을 유지한다. (이전엔 END가 tag ID를 들었으나 잉여라 제거.
+  요소당 2B 절감 — grid raw −8.7% 실측.)
 - 빈 요소 `h1() {}`도 OPEN → CLOSE_OPEN → END (`<h1></h1>`). void element 최적화는 나중.
 - `RENDER`는 합성·진입점 호출용. 프로토타입은 합성이 없어 **정의 코드 안엔 등장하지 않고**,
   런타임이 외부에서 `RENDER comp_id`로 진입할 때만 쓰인다.
@@ -163,13 +166,13 @@ ELEM_CLOSE_OPEN        ; >
   ELEM_OPEN 3          ; <h1                 (내장 3)
   ELEM_CLOSE_OPEN      ; >
   TEXT 1               ; Hello               (컴포넌트 1)
-  ELEM_END 3           ; </h1>
+  ELEM_END             ; </h1>               (스택 top = h1)
   ELEM_OPEN 2          ; <p                  (내장 2)
   ATTR_G 0 2           ;  class="sub"        (전역 0, 컴포넌트 2)
   ELEM_CLOSE_OPEN      ; >
   TEXT 3               ; world               (컴포넌트 3)
-  ELEM_END 2           ; </p>
-ELEM_END 0             ; </div>
+  ELEM_END             ; </p>                (스택 top = p)
+ELEM_END               ; </div>              (스택 top = div)
 HALT
 ```
 

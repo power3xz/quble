@@ -66,8 +66,8 @@ fn emit_node(node: &Node, pool: &mut ConstPool, code: &mut Vec<u8>) -> Result<()
                 emit_node(child, pool, code)?;
             }
 
+            // END는 operand 없음 — 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
             code.push(Op::ElemEnd as u8);
-            code.extend_from_slice(&tag_id.to_le_bytes());
         }
     }
     Ok(())
