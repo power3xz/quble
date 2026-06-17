@@ -10,5 +10,3 @@ edition = "2021"
 [dependencies]
 compiler = { path = "crates/compiler" }
 vm = { path = "crates/vm" }
-tiny_http = "0.12"
-flate2 = "1"
