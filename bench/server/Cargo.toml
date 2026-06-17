@@ -1,0 +1,13 @@
+[package]
+name = "bench-server"
+version = "0.0.0"
+edition = "2021"
+
+# proto 워크스페이스에 속하지 않는 독립 패키지. compiler·renderer만 라이브러리로 끌어 쓴다.
+[workspace]
+
+[dependencies]
+compiler = { path = "../../proto/crates/compiler" }
+renderer = { path = "../../proto/crates/renderer" }
+tiny_http = "0.12"
+flate2 = "1"

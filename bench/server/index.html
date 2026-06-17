@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><title>Quble bench</title>
+  <link rel="stylesheet" href="/public/style.css">
+</head>
+<body>
+  <h1>좌우 비교 — 같은 컴포넌트, Quble vs React</h1>
+  <div class="cols">
+    <div class="col">
+      <h2><span class="badge-quble">● Quble</span></h2>
+      <p class="size">전송: <span id="q-size">측정 중…</span> (qubb 바이트코드, JS 런타임 렌더)</p>
+      <div id="q-grid">로딩 중…</div>
+      <div id="q-article" style="margin-top:1rem"></div>
+    </div>
+    <div class="col">
+      <h2><span class="badge-react">● React</span></h2>
+      <p class="size">전송: <span id="r-size">측정 중…</span> (lazy chunk, +최초 런타임 별도)</p>
+      <div id="root">React 로딩 중…</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { renderComponent } from "/runtime.js";
+    async function mount(name, slotId) {
+      const res = await fetch(`/components/${name}.qubb`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      document.getElementById(slotId).replaceChildren(renderComponent(bytes, 0));
+    }
+    await mount("grid", "q-grid");
+    await mount("article", "q-article");
+  </script>
+
+  <!-- React 비교: 빌드 엔트리는 서버가 {{REACT_ENTRY}}로 치환 -->
+  <script type="module" src="{{REACT_ENTRY}}"></script>
+  <script>
+    function sumBy(re) {
+      const es = performance.getEntriesByType("resource").filter(e => re.test(e.name));
+      return {
+        raw: es.reduce((s, e) => s + (e.decodedBodySize || 0), 0),
+        wire: es.reduce((s, e) => s + (e.transferSize || 0), 0),
+      };
+    }
+    const fmt = (s) => `raw ${s.raw} B / 전송(gz) ${s.wire} B`;
+    window.addEventListener("load", () => setTimeout(() => {
+      document.getElementById("q-size").textContent =
+        fmt(sumBy(/\/components\/(grid|article)\.qubb$/));
+      document.getElementById("r-size").textContent =
+        fmt(sumBy(/\/react\/assets\/(ProductGrid|Article)-/)) + " (+런타임 별도)";
+    }, 1000));
+  </script>
+</body>
+</html>

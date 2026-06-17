@@ -103,8 +103,8 @@ ${body}
 `;
 }
 
-writeFileSync(new URL("../proto/examples/grid.qubc", import.meta.url), gridQubc());
-writeFileSync(new URL("../proto/examples/article.qubc", import.meta.url), articleQubc());
+writeFileSync(new URL("./components/grid.qubc", import.meta.url), gridQubc());
+writeFileSync(new URL("./components/article.qubc", import.meta.url), articleQubc());
 writeFileSync(new URL("./react/src/ProductGrid.jsx", import.meta.url), gridJsx());
 writeFileSync(new URL("./react/src/Article.jsx", import.meta.url), articleJsx());
 console.log("generated grid.qubc, article.qubc, ProductGrid.jsx, Article.jsx");
