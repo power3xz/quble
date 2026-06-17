@@ -1,6 +1,6 @@
-// Quble 클라이언트 VM (JS). Rust vm 크레이트와 같은 qubb 포맷을 읽어 실제 DOM을 만든다.
-// "기술 중립(어떤 언어로도 VM 구현)"의 증명 — 같은 [u8] 계약을 JS가 해석.
-// 포맷/opcode는 proto/BYTECODE.md, Rust 구현은 crates/bytecode·crates/vm 참고.
+// Quble 클라이언트 런타임 (JS). Rust renderer 크레이트와 같은 qubb 포맷을 읽어 실제 DOM을 만든다.
+// SSR(renderer)과 달리 살아있는 DOM을 만들고(이후 이벤트가 붙는 런타임), 같은 [u8] 계약을 해석.
+// 포맷/opcode는 proto/BYTECODE.md, Rust 구현은 crates/bytecode·crates/renderer 참고.
 
 // 내장 태그 테이블 (crates/bytecode/src/tags.rs와 동일 순서·고정).
 const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
