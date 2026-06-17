@@ -71,7 +71,7 @@ function decode(bytes) {
   return { pool, defs, code };
 }
 
-// 한 컴포넌트 정의를 실행해 DOM 노드(또는 fragment)를 만든다. (Rust vm::exec와 대응)
+// 한 컴포넌트 정의를 실행해 DOM 노드(또는 fragment)를 만든다. (Rust renderer::exec와 대응)
 function exec(module, compId) {
   const def = module.defs[compId];
   if (!def) throw new Error("bad component " + compId);
