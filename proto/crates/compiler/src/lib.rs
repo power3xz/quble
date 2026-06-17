@@ -44,7 +44,11 @@ mod tests {
         assert_eq!(comp.name, "Hello");
         assert_eq!(comp.template.len(), 1);
         match &comp.template[0] {
-            Node::Element { tag, attrs, children } => {
+            Node::Element {
+                tag,
+                attrs,
+                children,
+            } => {
                 assert_eq!(tag, "div");
                 assert_eq!(attrs, &[("class".to_string(), "greeting".to_string())]);
                 assert_eq!(children.len(), 2);
@@ -60,11 +64,12 @@ mod tests {
 
         let mut pool = ConstPool::new();
         let hello = pool.intern("Hello"); // 컴포넌트명
-        let class = pool.intern("class");
         let greeting = pool.intern("greeting");
         let _hello_txt = pool.intern("Hello"); // 텍스트, 같은 인덱스
         let sub = pool.intern("sub");
         let world = pool.intern("world");
+        // "class"는 전역 속성명 → 컴포넌트 상수풀이 아니라 전역 ID로 참조.
+        let class_g = bytecode::attrs::attr_id("class").unwrap();
 
         let mut code = Vec::new();
         let div = tags::tag_id("div").unwrap();
@@ -74,8 +79,8 @@ mod tests {
 
         code.push(Op::ElemOpen as u8);
         push16(&mut code, div);
-        code.push(Op::Attr as u8);
-        push16(&mut code, class);
+        code.push(Op::AttrG as u8);
+        push16(&mut code, class_g);
         push16(&mut code, greeting);
         code.push(Op::ElemCloseOpen as u8);
         code.push(Op::ElemOpen as u8);
@@ -87,8 +92,8 @@ mod tests {
         push16(&mut code, h1);
         code.push(Op::ElemOpen as u8);
         push16(&mut code, p);
-        code.push(Op::Attr as u8);
-        push16(&mut code, class);
+        code.push(Op::AttrG as u8);
+        push16(&mut code, class_g);
         push16(&mut code, sub);
         code.push(Op::ElemCloseOpen as u8);
         code.push(Op::Text as u8);
@@ -101,7 +106,11 @@ mod tests {
 
         let expected = Module::new(
             pool,
-            vec![CompDef { name_idx: hello, code_off: 0, code_len: code.len() as u32 }],
+            vec![CompDef {
+                name_idx: hello,
+                code_off: 0,
+                code_len: code.len() as u32,
+            }],
             code,
         );
 
