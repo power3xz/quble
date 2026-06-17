@@ -21,6 +21,8 @@ pub enum RenderError {
     BadAttr(u16),
     /// 여는 태그 없이 END (스택 불균형 — 손상된 바이트코드).
     UnbalancedEnd,
+    /// 범위 밖 scope 인덱스 (주입 값 부족).
+    BadScope(u16),
 }
 
 impl From<DecodeError> for RenderError {
@@ -30,15 +32,16 @@ impl From<DecodeError> for RenderError {
 }
 
 /// 바이트코드를 디코드하고 comp_id를 진입점으로 렌더해 HTML 문자열을 만든다.
-pub fn render_to_string(bytes: &[u8], comp_id: u16) -> Result<String, RenderError> {
+/// scope는 런타임 주입 값 배열 — `TEXT_VAR idx`가 `scope[idx]`를 참조한다.
+pub fn render_to_string(bytes: &[u8], comp_id: u16, scope: &[String]) -> Result<String, RenderError> {
     let module = bytecode::decode(bytes)?;
     let mut out = String::new();
-    exec(&module, comp_id, &mut out)?;
+    exec(&module, comp_id, scope, &mut out)?;
     Ok(out)
 }
 
 /// 한 컴포넌트 정의의 코드를 실행한다. RENDER를 만나면 재귀한다.
-fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), RenderError> {
+fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Result<(), RenderError> {
     let def = module.def(comp_id).ok_or(RenderError::BadComponent(comp_id))?;
     let start = def.code_off as usize;
     let end = start + def.code_len as usize;
@@ -75,6 +78,11 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), RenderErr
                 let text = read_u16(code, &mut pc)?;
                 escape_text(get_const(module, text)?, out);
             }
+            Op::TextVar => {
+                let idx = read_u16(code, &mut pc)?;
+                let val = scope.get(idx as usize).ok_or(RenderError::BadScope(idx))?;
+                escape_text(val, out);
+            }
             Op::ElemEnd => {
                 let name = tag_stack.pop().ok_or(RenderError::UnbalancedEnd)?;
                 out.push_str("</");
@@ -83,7 +91,7 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), RenderErr
             }
             Op::Render => {
                 let child = read_u16(code, &mut pc)?;
-                exec(module, child, out)?;
+                exec(module, child, scope, out)?;
             }
         }
     }
@@ -167,6 +175,11 @@ mod tests {
             self.code.extend_from_slice(&t.to_le_bytes());
             self
         }
+        fn text_var(&mut self, idx: u16) -> &mut Self {
+            self.code.push(Op::TextVar as u8);
+            self.code.extend_from_slice(&idx.to_le_bytes());
+            self
+        }
         fn end(&mut self) -> &mut Self {
             self.code.push(Op::ElemEnd as u8);
             self
@@ -221,7 +234,7 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
-            render_to_string(&bytes, 0).unwrap(),
+            render_to_string(&bytes, 0, &[]).unwrap(),
             r#"<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>"#
         );
     }
@@ -247,7 +260,7 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
-            render_to_string(&bytes, 0).unwrap(),
+            render_to_string(&bytes, 0, &[]).unwrap(),
             r#"<div title="a&quot;b&lt;c">x &lt; y &amp; z</div>"#
         );
     }
@@ -277,17 +290,51 @@ mod tests {
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
-        assert_eq!(render_to_string(&bytes, 0).unwrap(), "<div><span>hi</span></div>");
+        assert_eq!(render_to_string(&bytes, 0, &[]).unwrap(), "<div><span>hi</span></div>");
+    }
+
+    /// TEXT_VAR가 scope[idx] 값을 출력하고, 텍스트 이스케이프를 적용한다.
+    #[test]
+    fn renders_text_var_from_scope() {
+        let mut pool = ConstPool::new();
+        let name = pool.intern("Greeting");
+
+        let mut a = Asm::new();
+        a.open(t("h1")).close_open().text_var(0).end().halt();
+
+        let code = a.code;
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        let scope = vec!["세계 <b>".to_string()];
+        assert_eq!(
+            render_to_string(&bytes, 0, &scope).unwrap(),
+            "<h1>세계 &lt;b&gt;</h1>"
+        );
+    }
+
+    /// scope에 값이 없으면 BadScope.
+    #[test]
+    fn text_var_out_of_scope() {
+        let mut pool = ConstPool::new();
+        let name = pool.intern("C");
+        let mut a = Asm::new();
+        a.open(t("p")).close_open().text_var(0).end().halt();
+        let code = a.code;
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        assert_eq!(render_to_string(&bytes, 0, &[]), Err(RenderError::BadScope(0)));
     }
 
     #[test]
     fn bad_component_id() {
         let bytes = encode(&Module::new(ConstPool::new(), vec![], vec![]));
-        assert_eq!(render_to_string(&bytes, 0), Err(RenderError::BadComponent(0)));
+        assert_eq!(render_to_string(&bytes, 0, &[]), Err(RenderError::BadComponent(0)));
     }
 
     #[test]
     fn rejects_bad_bytes() {
-        assert!(matches!(render_to_string(b"nope", 0), Err(RenderError::Decode(_))));
+        assert!(matches!(render_to_string(b"nope", 0, &[]), Err(RenderError::Decode(_))));
     }
 }

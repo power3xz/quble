@@ -18,6 +18,7 @@ const OP = {
   ELEM_END: 0x05,
   RENDER: 0x06,
   ATTR_L: 0x07,
+  TEXT_VAR: 0x08,
 };
 
 // 바이트 리더 (리틀엔디안).
@@ -72,7 +73,8 @@ function decode(bytes) {
 }
 
 // 한 컴포넌트 정의를 실행해 DOM 노드(또는 fragment)를 만든다. (Rust renderer::exec와 대응)
-function exec(module, compId) {
+// scope: 런타임 주입 값 배열 — TEXT_VAR idx가 scope[idx]를 참조.
+function exec(module, compId, scope) {
   const def = module.defs[compId];
   if (!def) throw new Error("bad component " + compId);
   const code = module.code.subarray(def.codeOff, def.codeOff + def.codeLen);
@@ -123,6 +125,14 @@ function exec(module, compId) {
         top().appendChild(document.createTextNode(text));
         break;
       }
+      case OP.TEXT_VAR: {
+        const idx = u16at();
+        const val = scope[idx];
+        if (val === undefined) throw new Error("bad scope index " + idx);
+        // createTextNode가 이스케이프를 자동 처리(DOM이므로).
+        top().appendChild(document.createTextNode(val));
+        break;
+      }
       case OP.ELEM_END: {
         // operand 없음 — 스택 top을 닫는다(부모로 복귀).
         stack.pop();
@@ -130,7 +140,7 @@ function exec(module, compId) {
       }
       case OP.RENDER: {
         const child = u16at();
-        top().appendChild(exec(module, child));
+        top().appendChild(exec(module, child, scope));
         break;
       }
       default:
@@ -141,7 +151,8 @@ function exec(module, compId) {
 }
 
 // 공개: qubb 바이트와 진입 컴포넌트 ID로 DOM 노드를 만든다.
-export function renderComponent(bytes, compId) {
+// scope: 런타임 주입 값 배열(생략 시 빈 배열) — TEXT_VAR가 참조.
+export function renderComponent(bytes, compId, scope = []) {
   const module = decode(bytes);
-  return exec(module, compId);
+  return exec(module, compId, scope);
 }

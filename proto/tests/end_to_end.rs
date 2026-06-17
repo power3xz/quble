@@ -15,7 +15,7 @@ fn hello_renders_expected_html() {
         }
     "#;
     assert_eq!(
-        render_source(src, 0).unwrap(),
+        render_source(src, 0, &[]).unwrap(),
         r#"<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>"#
     );
 }
@@ -30,7 +30,7 @@ fn escapes_text_and_attr_values() {
         }
     "#;
     assert_eq!(
-        render_source(src, 0).unwrap(),
+        render_source(src, 0, &[]).unwrap(),
         r#"<div title="a&amp;b">x &lt; y &amp; z</div>"#
     );
 }
@@ -38,5 +38,5 @@ fn escapes_text_and_attr_values() {
 #[test]
 fn unknown_tag_is_error() {
     let src = r#"component C { template { table() {} } }"#;
-    assert!(render_source(src, 0).is_err());
+    assert!(render_source(src, 0, &[]).is_err());
 }

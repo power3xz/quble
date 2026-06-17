@@ -14,6 +14,8 @@ pub enum Op {
     Render = 0x06,
     /// 컴포넌트 상수풀 속성명 인덱스 + 값 인덱스 (전역 테이블에 없는 속성명).
     AttrL = 0x07,
+    /// 텍스트 자리에 scope[idx] 값을 출력 (런타임 주입 값, HTML 이스케이프).
+    TextVar = 0x08,
 }
 
 impl Op {
@@ -28,6 +30,7 @@ impl Op {
             0x05 => Op::ElemEnd,
             0x06 => Op::Render,
             0x07 => Op::AttrL,
+            0x08 => Op::TextVar,
             _ => return None,
         })
     }

@@ -118,6 +118,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ELEM_END`        | 0x05 | —                     | —                         | 가장 최근에 연 태그를 닫는다(`</TAG>`). 닫을 태그는 스택 top으로 안다.   |
 | `RENDER`          | 0x06 | comp_id: u16          | —                         | 컴포넌트 ID로 정의를 찾아 렌더(호출).                                    |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
+| `TEXT_VAR`        | 0x08 | idx: u16              | scope                     | `scope[idx]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).          |
 
 설계 메모:
 
@@ -129,6 +130,10 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 - 빈 요소 `h1() {}`도 OPEN → CLOSE_OPEN → END (`<h1></h1>`). void element 최적화는 나중.
 - `RENDER`는 합성·진입점 호출용. 프로토타입은 합성이 없어 **정의 코드 안엔 등장하지 않고**,
   런타임이 외부에서 `RENDER comp_id`로 진입할 때만 쓰인다.
+- `TEXT_VAR`는 런타임 주입 값을 가리킨다. 렌더 시 `render(qubb, comp_id, scope)`로 **scope**
+  (값 배열)를 넘기고, `TEXT_VAR idx`가 `scope[idx]`를 출력한다. 심볼 이름은 바이트코드에 없다
+  — 컴파일타임에 **scope 인덱스로 확정**되므로(정적 분석), 런타임은 배열 인덱스로 O(1) 접근한다.
+  (1단계: 값은 문자열. 객체·반응성은 이후 단계.)
 - 분기/반복(`@if`/`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다.
 
 ### 이스케이프 규칙

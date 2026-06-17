@@ -49,7 +49,7 @@ fn main() {
             }
         } else if let Some(name) = url.strip_prefix("/ssr/") {
             match components.get(name) {
-                Some(bytes) => match renderer::render_to_string(bytes, 0) {
+                Some(bytes) => match renderer::render_to_string(bytes, 0, &[]) {
                     Ok(html) => respond(req, html.into_bytes(), "text/html; charset=utf-8"),
                     Err(e) => server_error(req, format!("렌더 실패: {e:?}")),
                 },
