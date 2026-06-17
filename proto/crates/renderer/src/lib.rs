@@ -1,10 +1,10 @@
-//! Quble 프로토타입 VM: 직렬화된 바이트코드(`&[u8]`)를 받아 HTML 문자열로 렌더한다.
-//! 출력은 SSR 문자열(브라우저 DOM 아님). 상세는 proto/BYTECODE.md.
+//! Quble SSR 렌더러: 직렬화된 바이트코드(`&[u8]`)를 받아 HTML 문자열로 렌더한다.
+//! 출력은 SSR 문자열(브라우저 DOM 아님). 일회성·무상태 순수 함수. 상세는 proto/BYTECODE.md.
 
 use bytecode::{DecodeError, Module, Op};
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum VmError {
+pub enum RenderError {
     /// 바이트코드 디코드 실패.
     Decode(DecodeError),
     /// 알 수 없는 opcode 바이트.
@@ -21,14 +21,14 @@ pub enum VmError {
     BadAttr(u16),
 }
 
-impl From<DecodeError> for VmError {
+impl From<DecodeError> for RenderError {
     fn from(e: DecodeError) -> Self {
-        VmError::Decode(e)
+        RenderError::Decode(e)
     }
 }
 
 /// 바이트코드를 디코드하고 comp_id를 진입점으로 렌더해 HTML 문자열을 만든다.
-pub fn render(bytes: &[u8], comp_id: u16) -> Result<String, VmError> {
+pub fn render_to_string(bytes: &[u8], comp_id: u16) -> Result<String, RenderError> {
     let module = bytecode::decode(bytes)?;
     let mut out = String::new();
     exec(&module, comp_id, &mut out)?;
@@ -36,28 +36,28 @@ pub fn render(bytes: &[u8], comp_id: u16) -> Result<String, VmError> {
 }
 
 /// 한 컴포넌트 정의의 코드를 실행한다. RENDER를 만나면 재귀한다.
-fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), VmError> {
-    let def = module.def(comp_id).ok_or(VmError::BadComponent(comp_id))?;
+fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), RenderError> {
+    let def = module.def(comp_id).ok_or(RenderError::BadComponent(comp_id))?;
     let start = def.code_off as usize;
     let end = start + def.code_len as usize;
     let code = &module.code[start..end];
 
     let mut pc = 0usize;
     while pc < code.len() {
-        let op = Op::from_u8(code[pc]).ok_or(VmError::BadOpcode(code[pc]))?;
+        let op = Op::from_u8(code[pc]).ok_or(RenderError::BadOpcode(code[pc]))?;
         pc += 1;
         match op {
             Op::Halt => break,
             Op::ElemOpen => {
                 let tag = read_u16(code, &mut pc)?;
-                let name = bytecode::tags::tag_name(tag).ok_or(VmError::BadTag(tag))?;
+                let name = bytecode::tags::tag_name(tag).ok_or(RenderError::BadTag(tag))?;
                 out.push('<');
                 out.push_str(name);
             }
             Op::AttrG => {
                 let name = read_u16(code, &mut pc)?;
                 let value = read_u16(code, &mut pc)?;
-                let name = bytecode::attrs::attr_name(name).ok_or(VmError::BadAttr(name))?;
+                let name = bytecode::attrs::attr_name(name).ok_or(RenderError::BadAttr(name))?;
                 emit_attr(name, get_const(module, value)?, out);
             }
             Op::AttrL => {
@@ -72,7 +72,7 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), VmError> 
             }
             Op::ElemEnd => {
                 let tag = read_u16(code, &mut pc)?;
-                let name = bytecode::tags::tag_name(tag).ok_or(VmError::BadTag(tag))?;
+                let name = bytecode::tags::tag_name(tag).ok_or(RenderError::BadTag(tag))?;
                 out.push_str("</");
                 out.push_str(name);
                 out.push('>');
@@ -86,8 +86,8 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), VmError> 
     Ok(())
 }
 
-fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, VmError> {
-    let b = code.get(*pc..*pc + 2).ok_or(VmError::UnexpectedEof)?;
+fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, RenderError> {
+    let b = code.get(*pc..*pc + 2).ok_or(RenderError::UnexpectedEof)?;
     *pc += 2;
     Ok(u16::from_le_bytes([b[0], b[1]]))
 }
@@ -101,8 +101,8 @@ fn emit_attr(name: &str, value: &str, out: &mut String) {
     out.push('"');
 }
 
-fn get_const(module: &Module, idx: u16) -> Result<&str, VmError> {
-    module.pool.get(idx).ok_or(VmError::BadConst(idx))
+fn get_const(module: &Module, idx: u16) -> Result<&str, RenderError> {
+    module.pool.get(idx).ok_or(RenderError::BadConst(idx))
 }
 
 /// 텍스트 노드 이스케이프: `& < >`.
@@ -218,7 +218,7 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
-            render(&bytes, 0).unwrap(),
+            render_to_string(&bytes, 0).unwrap(),
             r#"<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>"#
         );
     }
@@ -244,7 +244,7 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
-            render(&bytes, 0).unwrap(),
+            render_to_string(&bytes, 0).unwrap(),
             r#"<div title="a&quot;b&lt;c">x &lt; y &amp; z</div>"#
         );
     }
@@ -274,17 +274,17 @@ mod tests {
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
-        assert_eq!(render(&bytes, 0).unwrap(), "<div><span>hi</span></div>");
+        assert_eq!(render_to_string(&bytes, 0).unwrap(), "<div><span>hi</span></div>");
     }
 
     #[test]
     fn bad_component_id() {
         let bytes = encode(&Module::new(ConstPool::new(), vec![], vec![]));
-        assert_eq!(render(&bytes, 0), Err(VmError::BadComponent(0)));
+        assert_eq!(render_to_string(&bytes, 0), Err(RenderError::BadComponent(0)));
     }
 
     #[test]
     fn rejects_bad_bytes() {
-        assert!(matches!(render(b"nope", 0), Err(VmError::Decode(_))));
+        assert!(matches!(render_to_string(b"nope", 0), Err(RenderError::Decode(_))));
     }
 }

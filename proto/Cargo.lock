@@ -18,11 +18,11 @@ name = "quble"
 version = "0.0.0"
 dependencies = [
  "compiler",
- "vm",
+ "renderer",
 ]
 
 [[package]]
-name = "vm"
+name = "renderer"
 version = "0.0.0"
 dependencies = [
  "bytecode",
