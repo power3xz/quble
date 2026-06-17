@@ -5,15 +5,19 @@
 // 내장 태그 테이블 (crates/bytecode/src/tags.rs와 동일 순서·고정).
 const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
 
+// 전역 속성명 테이블 (crates/bytecode/src/attrs.rs와 동일 순서·고정).
+const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
+
 // opcode (crates/bytecode/src/opcode.rs와 동일).
 const OP = {
   HALT: 0x00,
   ELEM_OPEN: 0x01,
-  ATTR: 0x02,
+  ATTR_G: 0x02,
   ELEM_CLOSE_OPEN: 0x03,
   TEXT: 0x04,
   ELEM_END: 0x05,
   RENDER: 0x06,
+  ATTR_L: 0x07,
 };
 
 // 바이트 리더 (리틀엔디안).
@@ -96,7 +100,13 @@ function exec(module, compId) {
         pending = document.createElement(tag);
         break;
       }
-      case OP.ATTR: {
+      case OP.ATTR_G: {
+        const name = ATTRS[u16at()];
+        const value = module.pool[u16at()];
+        pending.setAttribute(name, value);
+        break;
+      }
+      case OP.ATTR_L: {
         const name = module.pool[u16at()];
         const value = module.pool[u16at()];
         pending.setAttribute(name, value);

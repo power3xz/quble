@@ -6,11 +6,14 @@
 pub enum Op {
     Halt = 0x00,
     ElemOpen = 0x01,
-    Attr = 0x02,
+    /// 전역 속성명 테이블 ID + 컴포넌트 상수풀 값 인덱스.
+    AttrG = 0x02,
     ElemCloseOpen = 0x03,
     Text = 0x04,
     ElemEnd = 0x05,
     Render = 0x06,
+    /// 컴포넌트 상수풀 속성명 인덱스 + 값 인덱스 (전역 테이블에 없는 속성명).
+    AttrL = 0x07,
 }
 
 impl Op {
@@ -19,11 +22,12 @@ impl Op {
         Some(match b {
             0x00 => Op::Halt,
             0x01 => Op::ElemOpen,
-            0x02 => Op::Attr,
+            0x02 => Op::AttrG,
             0x03 => Op::ElemCloseOpen,
             0x04 => Op::Text,
             0x05 => Op::ElemEnd,
             0x06 => Op::Render,
+            0x07 => Op::AttrL,
             _ => return None,
         })
     }

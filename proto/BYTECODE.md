@@ -24,29 +24,41 @@ component Hello {
 
 ---
 
-## 2. 두 개의 문자열 풀 — 분리
+## 2. 상수풀 3단 구조 — 분리
 
 | 풀 | 내용 | 정의 위치 | 참조 방식 |
 |---|---|---|---|
-| **내장 풀 (builtin)** | 알려진 HTML **태그명만** (`div`, `h1`, `p`, …) | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 예약 ID (u16) |
-| **상수풀 (user)** | 텍스트·속성명·속성값 등 컴포넌트마다 다른 문자열 | 파일의 상수풀 섹션 | 풀 인덱스 (u16) |
+| **내장 태그 테이블** | 알려진 HTML **태그명만** (`div`, `h1`, `p`, …) | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 예약 ID (u16) |
+| **전역 상수풀** | 흔한 **속성명만** (`class`, `id`, `src`, …) | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 전역 ID (u16) |
+| **컴포넌트 상수풀** | 텍스트·속성값·전역에 없는 속성명 등 컴포넌트마다 다른 문자열 | 파일의 상수풀 섹션 | 풀 인덱스 (u16) |
 
-- 내장 풀은 컴파일러·VM이 **같은 테이블을 코드로** 들고 있다. `div`는 어느 컴포넌트든 항상 같은
-  예약 ID → 파일에 안 실린다. (DESIGN.md 요소 9)
-- **속성명(`class` 등)은 내장이 아니라 사용자 상수풀**에 넣는다. `data-*` 같은 임의 속성을
-  균일하게 다루기 위함.
-- 두 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(§4). `ELEM_OPEN`/`ELEM_END`의 operand는
-  항상 내장 태그 ID, `ATTR`/`TEXT`의 operand는 항상 사용자 상수풀 인덱스.
+- 내장 태그 테이블·전역 상수풀은 컴파일러·VM이 **같은 테이블을 코드로** 들고 있다. `div`/`class`는
+  어느 컴포넌트든 항상 같은 ID → 파일에 안 실린다. (DESIGN.md 요소 9)
+- **속성명은 흔한 것만 전역 상수풀**에 두고, 전역에 없는 임의 속성명(`data-*`, `aria-*` 등)은
+  **컴포넌트 상수풀**로 빠진다.
+- **속성값은 항상 컴포넌트 상수풀.** `"card"` 같은 값은 컴포넌트마다 달라 전역에 못 넣는다.
+- 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(§4). `ELEM_OPEN`/`ELEM_END`의 operand는
+  내장 태그 ID, `ATTR_G`의 name은 전역 상수풀 ID, `ATTR_L`의 name과 모든 value·`TEXT`는
+  컴포넌트 상수풀 인덱스.
 
 ### 내장 태그 테이블 (프로토타입 시작 집합)
 
 코드에 하드코딩. 워킹 확인 후 확장.
 
 ```
-0:div  1:span  2:p  3:h1  4:h2  5:h3  6:a  7:ul  8:li  9:button
+0:div  1:span  2:p  3:h1  4:h2  5:h3  6:a  7:ul  8:li  9:button  10:article  11:img
 ```
 
-(예약 ID는 안정적이어야 하므로 **추가만, 재배치 금지**.)
+### 전역 상수풀 — 속성명 (프로토타입 시작 집합)
+
+코드에 하드코딩. 흔한 속성명만. 어떤 속성명을 전역에 넣을지는 나중에 **컴파일타임 usage 추적**으로
+데이터를 보고 정한다.
+
+```
+0:class  1:id  2:src  3:alt  4:href  5:type  6:name  7:value  8:title  9:style  10:placeholder
+```
+
+(프로토타입이라 ID 호환성은 신경 쓰지 않는다 — 필요하면 재배치.)
 
 ---
 
@@ -72,7 +84,7 @@ component Hello {
 [ 헤더 ]
   magic      : "QBL\0"   (4 bytes)
   version    : u16        (= 0)
-[ 상수풀 (user) ]
+[ 컴포넌트 상수풀 ]
   count      : u16
   entries    : count × ( len:u16, bytes:[u8;len] )
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
@@ -84,7 +96,8 @@ component Hello {
   code       : [u8; len]   // 모든 정의의 코드가 이어짐. 테이블의 off/len으로 구획.
 ```
 
-- 내장 풀은 파일에 없다 — 헤더의 version이 내장 테이블 버전을 함께 결정한다고 본다.
+- 내장 태그 테이블·전역 상수풀은 파일에 없다 — 헤더의 version이 이 테이블들의 버전을 함께
+  결정한다고 본다.
 - **컴포넌트명은 상수풀에 둔다**(`name_idx`로 참조).
 - **컴포넌트 ID = 테이블 배열 인덱스.** `RENDER`/합성은 이 ID로 정의를 직접 인덱싱한다.
 - 진입점(엔트리포인트) 정보는 파일에 없다 — `RENDER comp_id` 호출이 지정.
@@ -98,12 +111,13 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | opcode | 값 | operand | 풀 | 동작 |
 |---|---|---|---|---|
 | `HALT`            | 0x00 | — | — | 실행 종료. |
-| `ELEM_OPEN`       | 0x01 | tag: u16 | 내장 | `<TAG` 출력, "여는 태그 진행 중". |
-| `ATTR`            | 0x02 | name: u16, value: u16 | 사용자 | ` name="value"` 출력 (ELEM_OPEN 직후). |
+| `ELEM_OPEN`       | 0x01 | tag: u16 | 내장 태그 | `<TAG` 출력, "여는 태그 진행 중". |
+| `ATTR_G`          | 0x02 | name: u16, value: u16 | name=전역, value=컴포넌트 | ` name="value"` 출력. name은 전역 상수풀 ID. |
 | `ELEM_CLOSE_OPEN` | 0x03 | — | — | `>` 출력. 여는 태그 종료, 자식 시작. |
-| `TEXT`            | 0x04 | text: u16 | 사용자 | 텍스트 출력 (HTML 이스케이프). |
-| `ELEM_END`        | 0x05 | tag: u16 | 내장 | `</TAG>` 출력. |
+| `TEXT`            | 0x04 | text: u16 | 컴포넌트 | 텍스트 출력 (HTML 이스케이프). |
+| `ELEM_END`        | 0x05 | tag: u16 | 내장 태그 | `</TAG>` 출력. |
 | `RENDER`          | 0x06 | comp_id: u16 | — | 컴포넌트 ID로 정의를 찾아 렌더(호출). |
+| `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트 | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
 
 설계 메모:
 - `ELEM_OPEN`/`ELEM_END`가 tag ID를 각각 들고 있어 VM이 태그 스택을 유지하지 않아도 된다
@@ -120,7 +134,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | 위치 | 이스케이프 대상 |
 |---|---|
 | `TEXT` (텍스트 노드) | `&`→`&amp;`, `<`→`&lt;`, `>`→`&gt;` |
-| `ATTR` 의 value (속성값) | 텍스트 규칙 + `"`→`&quot;` |
+| `ATTR_G`/`ATTR_L` 의 value (속성값) | 텍스트 규칙 + `"`→`&quot;` |
 
 태그명·속성명은 신뢰된 식별자라 이스케이프하지 않는다.
 
@@ -129,27 +143,28 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 ## 6. 위 예시의 컴파일 결과 (개념)
 
 내장 태그: `div=0, h1=3, p=2`
-사용자 상수풀:
+전역 상수풀(속성명): `class=0`
+컴포넌트 상수풀:
 ```
-0:"class" 1:"greeting" 2:"Hello" 3:"sub" 4:"world"
+0:"greeting" 1:"Hello" 2:"sub" 3:"world"
 ```
 
-컴포넌트 테이블: `[ id 0: name_idx=2("Hello"), code_off=0, code_len=… ]`
+컴포넌트 테이블: `[ id 0: name_idx=1("Hello"), code_off=0, code_len=… ]`
 진입: VM이 `RENDER 0` 으로 시작.
 
 코드 (들여쓰기는 가독성용, 실제는 평탄):
 ```
-ELEM_OPEN 0            ; <div         (내장 0)
-ATTR 0 1               ;  class="greeting"   (사용자 0,1)
+ELEM_OPEN 0            ; <div                (내장 0)
+ATTR_G 0 0             ;  class="greeting"   (전역 0, 컴포넌트 0)
 ELEM_CLOSE_OPEN        ; >
-  ELEM_OPEN 3          ; <h1          (내장 3)
+  ELEM_OPEN 3          ; <h1                 (내장 3)
   ELEM_CLOSE_OPEN      ; >
-  TEXT 2               ; Hello        (사용자 2)
+  TEXT 1               ; Hello               (컴포넌트 1)
   ELEM_END 3           ; </h1>
-  ELEM_OPEN 2          ; <p           (내장 2)
-  ATTR 0 3             ;  class="sub" (사용자 0,3)
+  ELEM_OPEN 2          ; <p                  (내장 2)
+  ATTR_G 0 2           ;  class="sub"        (전역 0, 컴포넌트 2)
   ELEM_CLOSE_OPEN      ; >
-  TEXT 4               ; world        (사용자 4)
+  TEXT 3               ; world               (컴포넌트 3)
   ELEM_END 2           ; </p>
 ELEM_END 0             ; </div>
 HALT
@@ -163,7 +178,7 @@ HALT
 proto/
   Cargo.toml            # workspace
   crates/
-    bytecode/   # opcode, 내장 태그 테이블, 사용자 상수풀, 직렬화/역직렬화 (컴파일러·VM 공용)
+    bytecode/   # opcode, 내장 태그 테이블, 전역 상수풀(속성명), 컴포넌트 상수풀, 직렬화/역직렬화 (컴파일러·VM 공용)
     compiler/   # .qubc 소스 → bytecode. 프론트엔드(lexer/parse→ast) + 백엔드(codegen)
     vm/         # bytecode → HTML 문자열
   examples/hello.qubc

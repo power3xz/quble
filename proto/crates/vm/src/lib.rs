@@ -17,6 +17,8 @@ pub enum VmError {
     BadConst(u16),
     /// 범위 밖 내장 태그 ID.
     BadTag(u16),
+    /// 범위 밖 전역 속성명 ID.
+    BadAttr(u16),
 }
 
 impl From<DecodeError> for VmError {
@@ -52,14 +54,16 @@ fn exec(module: &Module, comp_id: u16, out: &mut String) -> Result<(), VmError> 
                 out.push('<');
                 out.push_str(name);
             }
-            Op::Attr => {
+            Op::AttrG => {
                 let name = read_u16(code, &mut pc)?;
                 let value = read_u16(code, &mut pc)?;
-                out.push(' ');
-                out.push_str(get_const(module, name)?);
-                out.push_str("=\"");
-                escape_attr(get_const(module, value)?, out);
-                out.push('"');
+                let name = bytecode::attrs::attr_name(name).ok_or(VmError::BadAttr(name))?;
+                emit_attr(name, get_const(module, value)?, out);
+            }
+            Op::AttrL => {
+                let name = read_u16(code, &mut pc)?;
+                let value = read_u16(code, &mut pc)?;
+                emit_attr(get_const(module, name)?, get_const(module, value)?, out);
             }
             Op::ElemCloseOpen => out.push('>'),
             Op::Text => {
@@ -86,6 +90,15 @@ fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, VmError> {
     let b = code.get(*pc..*pc + 2).ok_or(VmError::UnexpectedEof)?;
     *pc += 2;
     Ok(u16::from_le_bytes([b[0], b[1]]))
+}
+
+/// ` name="value"` (값 이스케이프 포함) 출력.
+fn emit_attr(name: &str, value: &str, out: &mut String) {
+    out.push(' ');
+    out.push_str(name);
+    out.push_str("=\"");
+    escape_attr(value, out);
+    out.push('"');
 }
 
 fn get_const(module: &Module, idx: u16) -> Result<&str, VmError> {
@@ -136,7 +149,7 @@ mod tests {
             self
         }
         fn attr(&mut self, n: u16, v: u16) -> &mut Self {
-            self.code.push(Op::Attr as u8);
+            self.code.push(Op::AttrL as u8);
             self.code.extend_from_slice(&n.to_le_bytes());
             self.code.extend_from_slice(&v.to_le_bytes());
             self

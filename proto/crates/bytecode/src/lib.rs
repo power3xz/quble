@@ -1,6 +1,7 @@
 //! Quble 프로토타입 바이트코드: 포맷의 단일 정의처(파서·VM 공용).
 //! 상세는 proto/BYTECODE.md 참고.
 
+pub mod attrs;
 pub mod module;
 pub mod opcode;
 pub mod pool;
@@ -66,7 +67,7 @@ mod tests {
         code.extend_from_slice(&tag.to_le_bytes());
     }
     fn emit_attr(code: &mut Vec<u8>, name: u16, value: u16) {
-        code.push(Op::Attr as u8);
+        code.push(Op::AttrL as u8);
         code.extend_from_slice(&name.to_le_bytes());
         code.extend_from_slice(&value.to_le_bytes());
     }

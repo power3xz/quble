@@ -44,10 +44,19 @@ fn emit_node(node: &Node, pool: &mut ConstPool, code: &mut Vec<u8>) -> Result<()
             code.extend_from_slice(&tag_id.to_le_bytes());
 
             for (name, value) in attrs {
-                let n = pool.intern(name);
                 let v = pool.intern(value);
-                code.push(Op::Attr as u8);
-                code.extend_from_slice(&n.to_le_bytes());
+                // 전역 속성명 테이블에 있으면 AttrG, 없으면 컴포넌트 상수풀로 AttrL.
+                match bytecode::attrs::attr_id(name) {
+                    Some(gid) => {
+                        code.push(Op::AttrG as u8);
+                        code.extend_from_slice(&gid.to_le_bytes());
+                    }
+                    None => {
+                        let n = pool.intern(name);
+                        code.push(Op::AttrL as u8);
+                        code.extend_from_slice(&n.to_le_bytes());
+                    }
+                }
                 code.extend_from_slice(&v.to_le_bytes());
             }
 
