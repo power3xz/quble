@@ -1,7 +1,7 @@
 # Quble 바이트코드 — 프로토타입 v0
 
-프로토타입 스코프: **단일 컴포넌트, 문자열 속성값만, 표현식 없음.** 출력은 HTML 문자열(SSR).
-이 문서는 컴파일러(생성)와 렌더러·런타임(소비)의 계약이다. 합의 후 Rust 구현으로 간다.
+프로토타입 스코프: **단일 컴포넌트, 문자열 속성값, `props` 문자열 변수 보간.** 출력은 HTML
+문자열(SSR). 이 문서는 컴파일러(생성)와 렌더러·런타임(소비)의 계약이다.
 
 ---
 
@@ -20,7 +20,21 @@ component Hello {
 
 기대 출력: `<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>`
 
-이 단계에서 없는 것: 합성/별칭, 슬롯, `@if/@for/@with`, `{expr}`, contexts, events, props.
+**props 보간 (1단계):** `props { name }`로 선언한 변수를 `{name}`으로 텍스트 자리에서 참조.
+선언 순서가 scope 인덱스이고, 렌더 시 `render(qubb, comp_id, scope)`로 값 배열을 넘긴다.
+
+```
+component Greeting {
+  props { name }
+  template { h1() { "Hello, " {name} "!" } }
+}
+```
+
+scope `["world"]` → `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
+`{expr}` 전체 표현식은 아직 아니다.)
+
+이 단계에서 없는 것: 합성/별칭, 슬롯, `@if/@for/@with`, 전체 `{expr}`, contexts, events,
+props 객체·반응성.
 
 ---
 

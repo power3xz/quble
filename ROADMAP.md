@@ -20,7 +20,10 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 
 ## 데이터
 
-- [ ] 데이터 흐름 — `render(qubb, data)`의 data 구조, provided/props (DESIGN §5.1). 다른 피처의 전제.
+- [ ] 데이터 흐름 — provided/props, 반응성 (DESIGN §5.1, §5.2). 다른 피처의 전제.
+  - [x] props 문자열 변수 1개 보간 (`{name}` → `TEXT_VAR`, `render(qubb, comp_id, scope)`)
+  - [ ] props 객체 (여러 필드)
+  - [ ] 반응성 (값 변경 시 DOM 갱신)
 
 ## 합성 / 이벤트
 
