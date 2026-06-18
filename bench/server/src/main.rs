@@ -68,6 +68,9 @@ fn main() {
             } else {
                 not_found(req);
             }
+        } else if let Some(name) = path.strip_prefix("/react-csr/") {
+            let name = name.to_string();
+            respond(req, react_csr_page(&name, query).into_bytes(), "text/html; charset=utf-8");
         } else if path.starts_with("/react/") {
             serve_react_asset(req, &path);
         } else if path.starts_with("/img/") {
@@ -175,18 +178,58 @@ fn page() -> String {
     html.replace("{{REACT_ENTRY}}", &react_entry_path())
 }
 
-/// React 빌드의 해시된 엔트리 파일명을 찾아 /react/ 경로로. 없으면 about:blank.
+/// React 빌드의 기본 엔트리(index-*.js) 경로.
 fn react_entry_path() -> String {
+    react_asset_path("index-")
+}
+
+/// 해시된 빌드 산출물 중 prefix로 시작하는 .js 엔트리를 찾아 /react/ 경로로. 없으면 about:blank.
+fn react_asset_path(prefix: &str) -> String {
     let dir = format!("{REACT_DIST}/assets");
     let entry = fs::read_dir(&dir).ok().and_then(|rd| {
         rd.filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .find(|n| n.starts_with("index-") && n.ends_with(".js"))
+            .find(|n| n.starts_with(prefix) && n.ends_with(".js"))
     });
     match entry {
         Some(name) => format!("/react/assets/{name}"),
         None => "about:blank".to_string(),
     }
+}
+
+/// React CSR 페이지: 키=값 query를 props 객체로 주입하고 react-csr 번들을 로드해 클라 렌더.
+fn react_csr_page(component: &str, query: &str) -> String {
+    let props_js = props_json_from_query(query);
+    let entry = react_asset_path("react-csr-");
+    let body = format!(
+        r#"  <div id="root">로딩 중…</div>
+  <script>window.__CSR__ = {{ component: "{component}", props: {props_js} }};</script>
+  <script type="module" src="{entry}"></script>"#
+    );
+    page_shell(&format!("React CSR {component}"), &body)
+}
+
+/// 키=값 query를 JSON 객체 문자열로. (`scope`는 우리 전용 키라 제외 안 함 — react-csr는 이름 props만 씀)
+fn props_json_from_query(query: &str) -> String {
+    let pairs: Vec<String> = query
+        .split('&')
+        .filter(|kv| !kv.is_empty())
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| {
+            let key = percent_decode(k);
+            let val = percent_decode(v);
+            format!(
+                "\"{}\":\"{}\"",
+                json_escape(&key),
+                json_escape(&val)
+            )
+        })
+        .collect();
+    format!("{{{}}}", pairs.join(","))
+}
+
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// React 빌드 산출물을 /react/ 아래로 서빙. 비교용.
