@@ -49,7 +49,7 @@ fn main() {
             }
         } else if let Some(name) = url.strip_prefix("/ssr/") {
             match components.get(name) {
-                Some(bytes) => match renderer::render_to_string(bytes, 0, &[]) {
+                Some(bytes) => match renderer::render_to_string(bytes, 0, &demo_scope(name)) {
                     Ok(html) => respond(req, html.into_bytes(), "text/html; charset=utf-8"),
                     Err(e) => server_error(req, format!("렌더 실패: {e:?}")),
                 },
@@ -83,6 +83,15 @@ fn build_components() -> HashMap<String, Vec<u8>> {
         map.insert(name, bytes);
     }
     map
+}
+
+/// 기능 확인용 고정 scope. 데이터 전달 프로토콜은 아직 미결이라, 데모로 컴포넌트별 값을 박는다.
+/// (SSR·클라가 같은 값을 써야 일치 확인이 되므로 클라 쪽 page 스크립트도 동일 값을 쓴다.)
+fn demo_scope(name: &str) -> Vec<String> {
+    match name {
+        "greeting" => vec!["방문자".to_string()],
+        _ => vec![],
+    }
 }
 
 /// index.html을 읽어 React 빌드 엔트리 경로만 치환해 반환.

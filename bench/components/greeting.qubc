@@ -1,0 +1,9 @@
+component Greeting {
+  props { name }
+  template {
+    div(class="card") {
+      h3(class="name") { "안녕하세요, " {name} "님" }
+      p() { "props로 받은 이름이 보간됩니다." }
+    }
+  }
+}
