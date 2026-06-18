@@ -32,14 +32,18 @@ fn main() {
 
     for req in server.incoming_requests() {
         let url = req.url().to_string();
-        if url == "/" {
+        // path와 query를 분리. scope는 query의 `scope=` 반복 키(순서=인덱스).
+        let (path, query) = url.split_once('?').unwrap_or((&url, ""));
+        let path = path.to_string();
+
+        if path == "/" {
             respond(req, page().into_bytes(), "text/html; charset=utf-8");
-        } else if url == "/runtime.js" {
+        } else if path == "/runtime.js" {
             match fs::read(RUNTIME_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }
-        } else if let Some(name) = url
+        } else if let Some(name) = path
             .strip_prefix("/components/")
             .and_then(|n| n.strip_suffix(".qubb"))
         {
@@ -47,20 +51,29 @@ fn main() {
                 Some(bytes) => respond(req, bytes.clone(), "application/octet-stream"),
                 None => not_found(req),
             }
-        } else if let Some(name) = url.strip_prefix("/ssr/") {
+        } else if let Some(name) = path.strip_prefix("/ssr/") {
             match components.get(name) {
-                Some(bytes) => match renderer::render_to_string(bytes, 0, &demo_scope(name)) {
-                    Ok(html) => respond(req, html.into_bytes(), "text/html; charset=utf-8"),
+                Some(bytes) => match renderer::render_to_string(bytes, 0, &scope_from_query(query)) {
+                    Ok(html) => {
+                        let page = page_shell(&format!("SSR {name}"), &html);
+                        respond(req, page.into_bytes(), "text/html; charset=utf-8");
+                    }
                     Err(e) => server_error(req, format!("렌더 실패: {e:?}")),
                 },
                 None => not_found(req),
             }
-        } else if url.starts_with("/react/") {
-            serve_react_asset(req, &url);
-        } else if url.starts_with("/img/") {
+        } else if let Some(name) = path.strip_prefix("/csr/") {
+            if components.contains_key(name) {
+                respond(req, csr_page(name, query).into_bytes(), "text/html; charset=utf-8");
+            } else {
+                not_found(req);
+            }
+        } else if path.starts_with("/react/") {
+            serve_react_asset(req, &path);
+        } else if path.starts_with("/img/") {
             // 예제 상품 이미지는 전부 플레이스홀더 한 장으로.
             serve_public(req, "placeholder.svg");
-        } else if let Some(rel) = url.strip_prefix("/public/") {
+        } else if let Some(rel) = path.strip_prefix("/public/") {
             serve_public(req, rel);
         } else {
             not_found(req);
@@ -85,13 +98,75 @@ fn build_components() -> HashMap<String, Vec<u8>> {
     map
 }
 
-/// 기능 확인용 고정 scope. 데이터 전달 프로토콜은 아직 미결이라, 데모로 컴포넌트별 값을 박는다.
-/// (SSR·클라가 같은 값을 써야 일치 확인이 되므로 클라 쪽 page 스크립트도 동일 값을 쓴다.)
-fn demo_scope(name: &str) -> Vec<String> {
-    match name {
-        "greeting" => vec!["방문자".to_string()],
-        _ => vec![],
+/// query의 `scope=` 반복 키를 순서대로 scope 배열로. (퍼센트 디코딩 포함)
+fn scope_from_query(query: &str) -> Vec<String> {
+    query
+        .split('&')
+        .filter_map(|kv| kv.strip_prefix("scope="))
+        .map(percent_decode)
+        .collect()
+}
+
+/// 최소 퍼센트 디코딩(`%XX`, `+`→공백). 쿼리 값 한글·공백 처리용.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                    out.push(b);
+                    i += 3;
+                    continue;
+                }
+                out.push(bytes[i]);
+                i += 1;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
     }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// SSR·CSR 공통 페이지 셸. body만 다르고 골격(html+style)은 동일 — 외형을 맞춰 비교 가능.
+fn page_shell(title: &str, body: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><title>{title}</title>
+<link rel="stylesheet" href="/public/style.css"></head>
+<body>
+{body}
+</body></html>"#
+    )
+}
+
+/// CSR 부트스트랩 페이지: runtime.js로 컴포넌트를 클라이언트 렌더. scope는 query에서 받아 주입.
+fn csr_page(name: &str, query: &str) -> String {
+    let scope = scope_from_query(query);
+    // scope를 JS 배열 리터럴로. (간단한 JSON 직렬화 — 따옴표·역슬래시만 이스케이프)
+    let scope_js = scope
+        .iter()
+        .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(",");
+    let body = format!(
+        r#"  <div id="root">로딩 중…</div>
+  <script type="module">
+    import {{ renderComponent }} from "/runtime.js";
+    const res = await fetch("/components/{name}.qubb");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    document.getElementById("root").replaceChildren(renderComponent(bytes, 0, [{scope_js}]));
+  </script>"#
+    );
+    page_shell(&format!("CSR {name}"), &body)
 }
 
 /// index.html을 읽어 React 빌드 엔트리 경로만 치환해 반환.
