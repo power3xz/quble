@@ -1,4 +1,4 @@
-//! AST → 바이트코드 Module. 단일 컴포넌트, 문자열 속성. 1단계: props 문자열 보간.
+//! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{AttrValue, Component, Node};
 use bytecode::{encode, tags, CompDef, ConstPool, Module, Op};
@@ -9,25 +9,56 @@ pub enum CodegenError {
     UnknownTag(String),
     /// props에 선언되지 않은 변수 참조.
     UnknownProp(String),
+    /// 호출했지만 파일에 정의가 없는 컴포넌트.
+    UnknownComponent(String),
+    /// 자식 prop명이 자식 props 선언에 없음 (use-site 바인딩 오류).
+    UnknownArg { comp: String, prop: String },
 }
 
-/// AST를 직렬화된 바이트코드로. 바이트코드의 정체는 `[u8]`이므로 Box<[u8]>로 반환한다
-/// (컴파일 후 불변·고정 크기). Module은 빌드 도구로만 내부에서 쓴다.
-pub fn generate(comp: &Component) -> Result<Box<[u8]>, CodegenError> {
-    let mut pool = ConstPool::new();
-    let name_idx = pool.intern(&comp.name);
+/// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
+/// 찾고, PUSH_ARG를 자식 props 순서로 정렬하려고 props 선언도 같이 돌려준다. 컴포넌트 ID = 정의 순서.
+struct CompLookup<'a> {
+    by_name: std::collections::HashMap<&'a str, (u16, &'a [String])>,
+}
 
-    let mut code = Vec::new();
-    for node in &comp.template {
-        emit_node(node, &comp.props, &mut pool, &mut code)?;
+impl<'a> CompLookup<'a> {
+    fn build(comps: &'a [Component]) -> Self {
+        let by_name = comps
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.name.as_str(), (i as u16, c.props.as_slice())))
+            .collect();
+        CompLookup { by_name }
     }
-    code.push(Op::Halt as u8);
 
-    let defs = vec![CompDef {
-        name_idx,
-        code_off: 0,
-        code_len: code.len() as u32,
-    }];
+    /// 이름으로 (컴포넌트 ID, 자식 props 선언)을 찾는다.
+    fn get(&self, name: &str) -> Option<(u16, &'a [String])> {
+        self.by_name.get(name).copied()
+    }
+}
+
+/// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
+pub fn generate(comps: &[Component]) -> Result<Box<[u8]>, CodegenError> {
+    let comp_lookup = CompLookup::build(comps);
+    let mut pool = ConstPool::new();
+    let mut code = Vec::new();
+    let mut defs = Vec::new();
+
+    // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
+    for comp in comps {
+        let name_idx = pool.intern(&comp.name);
+        let code_off = code.len() as u32;
+        for node in &comp.template {
+            emit_node(node, &comp.props, &comp_lookup, &mut pool, &mut code)?;
+        }
+        code.push(Op::Halt as u8);
+        defs.push(CompDef {
+            name_idx,
+            code_off,
+            code_len: code.len() as u32 - code_off,
+        });
+    }
+
     let module = Module::new(pool, defs, code);
     Ok(encode(&module).into_boxed_slice())
 }
@@ -44,6 +75,7 @@ fn prop_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
 fn emit_node(
     node: &Node,
     props: &[String],
+    comp_lookup: &CompLookup,
     pool: &mut ConstPool,
     code: &mut Vec<u8>,
 ) -> Result<(), CodegenError> {
@@ -85,11 +117,36 @@ fn emit_node(
             code.push(Op::ElemCloseOpen as u8);
 
             for child in children {
-                emit_node(child, props, pool, code)?;
+                emit_node(child, props, comp_lookup, pool, code)?;
             }
 
             // END는 operand 없음 — 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
             code.push(Op::ElemEnd as u8);
+        }
+        Node::Component { name, args } => {
+            // 자식 ID와 props 선언을 찾는다.
+            let (child_id, child_props) = comp_lookup
+                .get(name)
+                .ok_or_else(|| CodegenError::UnknownComponent(name.clone()))?;
+
+            // 자식 props 선언 순서대로 PUSH_ARG를 낸다. 각 자식 prop에 바인딩된 부모 변수를
+            // 부모 scope offset으로 풀어 싣는다. (지금은 전부 바인딩 가정 — 순서만으로 매핑.)
+            for child_prop in child_props {
+                let parent_var = args
+                    .iter()
+                    .find(|(p, _)| p == child_prop)
+                    .map(|(_, v)| v)
+                    .ok_or_else(|| CodegenError::UnknownArg {
+                        comp: name.clone(),
+                        prop: child_prop.clone(),
+                    })?;
+                let offset = prop_index(parent_var, props)?;
+                code.push(Op::PushArg as u8);
+                code.extend_from_slice(&offset.to_le_bytes());
+            }
+
+            code.push(Op::Render as u8);
+            code.extend_from_slice(&child_id.to_le_bytes());
         }
     }
     Ok(())

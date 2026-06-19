@@ -16,11 +16,14 @@ pub enum ParseError {
     Expected { want: String, got: String },
 }
 
-pub fn parse(tokens: &[Token]) -> Result<Component, ParseError> {
+/// 한 파일의 컴포넌트 정의들을 순서대로 파싱. 정의 순서 = 컴포넌트 ID.
+pub fn parse(tokens: &[Token]) -> Result<Vec<Component>, ParseError> {
     let mut p = Parser { tokens, pos: 0 };
-    let c = p.component()?;
-    p.expect_end()?;
-    Ok(c)
+    let mut comps = Vec::new();
+    while p.peek().is_some() {
+        comps.push(p.component()?);
+    }
+    Ok(comps)
 }
 
 struct Parser<'a> {
@@ -74,15 +77,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_end(&self) -> Result<(), ParseError> {
-        match self.peek() {
-            None => Ok(()),
-            Some(t) => Err(ParseError::Expected {
-                want: "end of input".into(),
-                got: format!("{t:?}"),
-            }),
-        }
-    }
 
     // component IDENT { [props { ... }] template { NODE* } }
     fn component(&mut self) -> Result<Component, ParseError> {
@@ -142,6 +136,8 @@ impl<'a> Parser<'a> {
                 }
                 // `{ IDENT }` 보간. (자식 자리의 `{`는 블록이 아니라 보간만 온다.)
                 Some(Token::LBrace) => nodes.push(self.var()?),
+                // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
+                Some(Token::Ident(s)) if starts_upper(s) => nodes.push(self.component_call()?),
                 Some(Token::Ident(_)) => nodes.push(self.element()?),
                 Some(t) => {
                     return Err(ParseError::Expected {
@@ -160,6 +156,51 @@ impl<'a> Parser<'a> {
         let name = self.ident()?;
         self.expect(&Token::RBrace)?;
         Ok(Node::Var(name))
+    }
+
+    // COMP ( ARG* ) { }   — 대문자 컴포넌트 호출. ARG = prop = { var }.
+    // 슬롯(자식 노드)은 아직 미지원 — 블록은 비어야 한다.
+    fn component_call(&mut self) -> Result<Node, ParseError> {
+        let name = self.ident()?;
+        self.expect(&Token::LParen)?;
+        let args = self.component_args()?;
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::LBrace)?;
+        let children = self.nodes()?;
+        if !children.is_empty() {
+            return Err(ParseError::Expected {
+                want: "empty component body (슬롯 미지원)".into(),
+                got: format!("{} child node(s)", children.len()),
+            });
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(Node::Component { name, args })
+    }
+
+    // RParen 전까지 `prop = { var }` 인자를 모은다. 공백 구분(콤마 없음).
+    fn component_args(&mut self) -> Result<Vec<(String, String)>, ParseError> {
+        let mut args = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::RParen) | None => break,
+                Some(Token::Ident(_)) => {
+                    let prop = self.ident()?;
+                    self.expect(&Token::Eq)?;
+                    // use-site 바인딩 값은 `{var}`(부모 변수)만. 정적 문자열은 아직 미지원.
+                    self.expect(&Token::LBrace)?;
+                    let var = self.ident()?;
+                    self.expect(&Token::RBrace)?;
+                    args.push((prop, var));
+                }
+                Some(t) => {
+                    return Err(ParseError::Expected {
+                        want: "component arg (prop={var}) or )".into(),
+                        got: format!("{t:?}"),
+                    })
+                }
+            }
+        }
+        Ok(args)
     }
 
     // IDENT ( ATTR* ) { NODE* }
@@ -217,4 +258,9 @@ impl<'a> Parser<'a> {
         }
         Ok(attrs)
     }
+}
+
+/// 식별자가 대문자로 시작하나 — 컴포넌트 호출(true) vs HTML 태그(false) 구분.
+fn starts_upper(s: &str) -> bool {
+    s.chars().next().is_some_and(|c| c.is_uppercase())
 }

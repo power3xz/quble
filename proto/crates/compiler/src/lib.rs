@@ -14,11 +14,11 @@ pub enum CompileError {
     Codegen(codegen::CodegenError),
 }
 
-/// 소스 문자열을 직렬화된 바이트코드로 컴파일.
+/// 소스 문자열을 직렬화된 바이트코드로 컴파일. 한 파일에 여러 컴포넌트 정의를 담을 수 있다.
 pub fn compile(src: &str) -> Result<Box<[u8]>, CompileError> {
     let tokens = lexer::lex(src).map_err(CompileError::Lex)?;
-    let comp = parse::parse(&tokens).map_err(CompileError::Parse)?;
-    codegen::generate(&comp).map_err(CompileError::Codegen)
+    let comps = parse::parse(&tokens).map_err(CompileError::Parse)?;
+    codegen::generate(&comps).map_err(CompileError::Codegen)
 }
 
 #[cfg(test)]
@@ -40,7 +40,9 @@ mod tests {
     #[test]
     fn lex_then_parse_hello() {
         let toks = lexer::lex(HELLO).unwrap();
-        let comp = parse::parse(&toks).unwrap();
+        let comps = parse::parse(&toks).unwrap();
+        assert_eq!(comps.len(), 1);
+        let comp = &comps[0];
         assert_eq!(comp.name, "Hello");
         assert_eq!(comp.template.len(), 1);
         match &comp.template[0] {
