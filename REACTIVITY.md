@@ -138,8 +138,9 @@ handler { "PrivateData.TOGGLE": (data) => privateData.visible = !data.isOn }
 
 ## 구현 현황
 
-- [x] 1단계: props 문자열 보간 (`TEXT_VAR idx`, `render(qubb, comp_id, scope)`) — 정적 렌더만.
-- [ ] 스칼라 반응성: runtime에 `subscribers[idx]` + `set(idx, v)`. TEXT_VAR 렌더 시 구독 등록.
-- [ ] leafIndex 할당기 (렌더 시 base 배정·회수, 충돌 방지, 자유 목록).
-- [ ] 바인딩 해석 (로컬 offset → store 리프 정규화 = 공유 처리).
-- [ ] 객체(여러 리프), `@for`(length 토픽·동적 인덱스), 핸들러/이벤트.
+- [x] props 변수 보간 — 텍스트(`TEXT_VAR`)·속성(`ATTR_*_VAR`). 같은 scope offset 공간.
+- [x] 스칼라 반응성 — `subscribers[leafIndex]`(구독자=함수) + `set(leafIndex, v)`. 렌더 시 구독 등록.
+- [x] 바인딩 해석 / 공유 — `resolve(store, path)`로 path -> leafIndex lazy 발급·캐시. 같은 path는 같은 leaf로 귀결(공유). 검증 완료.
+- [x] 합성 시 자식 paths 주입 — `PUSH_ARG`(부모 offset)+`RENDER`로 부모가 자식 paths를 채운다. 부모·자식이 같은 store 리프를 가리키면 공유. 검증 완료.
+- [ ] leafIndex 할당기 / free list (지금은 `leaves.length`로 증가만 — `@for` 회수 시 필요).
+- [ ] 객체(여러 리프 일괄), `@for`(length 토픽·동적 인덱스), 핸들러/이벤트.
