@@ -6,28 +6,32 @@
   <link rel="stylesheet" href="/public/style.css">
 </head>
 <body>
-  <p>같은 컴포넌트 2개. c1→store.a, c2→store.b. 버튼으로 한쪽만 갱신되는지 확인.</p>
+  <p>c1·c3는 같은 path(store.a) → 같은 leaf0. c2는 store.b → leaf1.
+     set(0)이 c1·c3를 함께, set(1)이 c2만 갱신하는지 확인.</p>
   <div id="c1"></div>
   <div id="c2"></div>
+  <div id="c3"></div>
   <p>
-    <button id="s0">set(0, '1')</button>
-    <button id="s1">set(1, '2')</button>
+    <button id="s0">set(0, +1)</button>
+    <button id="s1">set(1, +1)</button>
   </p>
   <script type="module">
-    // 같은 컴포넌트(greeting)를 path 'a'/'b'로 두 번 인스턴스화. 같은 offset0이
-    // c1은 store.a(leaf0), c2는 store.b(leaf1)로 resolve된다 — set이 한쪽만 갱신.
+    // 같은 컴포넌트(greeting)를 여러 번 인스턴스화. c1·c3는 같은 path 'a'를 바인딩 →
+    // resolve가 캐시로 같은 leafIndex(0)를 돌려준다(공유, REACTIVITY §3). c2는 'b' → leaf1.
     import { createComponent, set } from "/reactive.js";
 
     const res = await fetch("/components/greeting.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
 
-    const store = { a: '0', b: '0' };
+    const store = { a: 0, b: 0 };
     const render = createComponent(bytes, 0);
-    document.getElementById("c1").replaceChildren(render(store, ['a'])); // offset0 → store.a → leaf0
-    document.getElementById("c2").replaceChildren(render(store, ['b'])); // offset0 → store.b → leaf1
+    document.getElementById("c1").replaceChildren(render(store, ['a'])); // leaf0
+    document.getElementById("c2").replaceChildren(render(store, ['b'])); // leaf1
+    document.getElementById("c3").replaceChildren(render(store, ['a'])); // leaf0 (c1과 공유)
 
-    document.getElementById("s0").onclick = () => set(0, '1');
-    document.getElementById("s1").onclick = () => set(1, '2');
+    const counts = [0, 0]; // leafIndex별 현재값 추적 → +1
+    document.getElementById("s0").onclick = () => set(0, ++counts[0]); // c1·c3
+    document.getElementById("s1").onclick = () => set(1, ++counts[1]); // c2
     window.set = set; // 콘솔에서 직접 호출
   </script>
 </body>
