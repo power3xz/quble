@@ -18,21 +18,22 @@
   <script type="module">
     // 같은 컴포넌트(greeting)를 여러 번 인스턴스화. c1·c3는 같은 path 'a'를 바인딩 →
     // resolve가 캐시로 같은 leafIndex(0)를 돌려준다(공유, REACTIVITY §3). c2는 'b' → leaf1.
-    import { createComponent, set } from "/reactive.js";
+    import { createComponent, createStore } from "/reactive.js";
 
     const res = await fetch("/components/greeting.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
 
-    const store = { a: 0, b: 0 };
+    // 한 ctx를 세 인스턴스가 공유 → c1·c3가 같은 path 'a'로 같은 leaf0에 귀결(공유 검증).
+    const ctx = createStore({ a: 0, b: 0 });
     const render = createComponent(bytes, 0);
-    document.getElementById("c1").replaceChildren(render(store, ['a'])); // leaf0
-    document.getElementById("c2").replaceChildren(render(store, ['b'])); // leaf1
-    document.getElementById("c3").replaceChildren(render(store, ['a'])); // leaf0 (c1과 공유)
+    document.getElementById("c1").replaceChildren(render(ctx, ['a'])); // leaf0
+    document.getElementById("c2").replaceChildren(render(ctx, ['b'])); // leaf1
+    document.getElementById("c3").replaceChildren(render(ctx, ['a'])); // leaf0 (c1과 공유)
 
     const counts = [0, 0]; // leafIndex별 현재값 추적 → +1
-    document.getElementById("s0").onclick = () => set(0, ++counts[0]); // c1·c3
-    document.getElementById("s1").onclick = () => set(1, ++counts[1]); // c2
-    window.set = set; // 콘솔에서 직접 호출
+    document.getElementById("s0").onclick = () => ctx.set(0, ++counts[0]); // c1·c3
+    document.getElementById("s1").onclick = () => ctx.set(1, ++counts[1]); // c2
+    window.set = ctx.set; // 콘솔에서 직접 호출
   </script>
 </body>
 </html>

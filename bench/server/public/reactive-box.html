@@ -17,19 +17,19 @@
     // box: props { tone, label } → div(class={tone}) { "상태: " {label} }
     // store={tone:'ok', label:'정상'}. offset0=tone→leaf0(class), offset1=label→leaf1(텍스트).
     // set(0,'warn')은 div의 class를, set(1,..)은 텍스트를 바꾼다 — 속성·텍스트가 같은 모델로 반응.
-    import { createComponent, set } from "/reactive.js";
+    import { createComponent, createStore } from "/reactive.js";
 
     const res = await fetch("/components/box.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
 
-    const store = { tone: 'ok', label: '정상' };
+    const ctx = createStore({ tone: 'ok', label: '정상' });
     const render = createComponent(bytes, 0);
-    document.getElementById("c1").replaceChildren(render(store, ['tone', 'label']));
+    document.getElementById("c1").replaceChildren(render(ctx, ['tone', 'label']));
 
-    document.getElementById("t-warn").onclick = () => set(0, 'warn');
-    document.getElementById("t-ok").onclick = () => set(0, 'ok');
-    document.getElementById("l").onclick = () => set(1, '변경됨');
-    window.set = set; // 콘솔에서 직접 호출
+    document.getElementById("t-warn").onclick = () => ctx.set(0, 'warn');
+    document.getElementById("t-ok").onclick = () => ctx.set(0, 'ok');
+    document.getElementById("l").onclick = () => ctx.set(1, '변경됨');
+    window.set = ctx.set; // 콘솔에서 직접 호출
   </script>
 </body>
 </html>

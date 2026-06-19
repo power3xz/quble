@@ -8,8 +8,12 @@
 // 세 인덱스 (REACTIVITY.md §1~§3):
 //   offset    — 컴포넌트 로컬 (qubb의 TEXT_VAR idx). paths의 배열 인덱스.
 //   path      — store 내 경로 ('a', 'list.0.name'). use-site가 render에 넘긴다.
-//   leafIndex — 평탄 전역 (set이 쓰는 것). resolve가 path에 lazy 발급.
+//   leafIndex — 평탄 (set이 쓰는 것). resolve가 path에 lazy 발급.
 // offset→path는 render 인자(paths), path→leafIndex는 resolve(lazy·캐시·공유)가 잇는다.
+//
+// 상태는 store별로 독립이다(ctx). 같은 컴포넌트를 다른 defaultValue로 여러 번 렌더해도
+// leaves/subscribers/pathCache가 섞이지 않는다. createStore(defaultValue)가 컨텍스트를
+// 만들고, render(ctx, paths)가 그 위에 인스턴스를 올리고, ctx.set이 그 인스턴스만 갱신한다.
 //
 // 포맷/opcode는 runtime.js와 동일한 qubb 계약. 기존 코드 불변 — 여기 독립 구현.
 
@@ -31,41 +35,48 @@ const OP = {
   PUSH_ARG: 0x0b,
 };
 
-// ── pub/sub ───────────────────────────────────────────────────────────
-// leaves[leafIndex] = 평탄 원시값. subscribers[leafIndex] = 갱신 함수들((v)=>...).
-// pathCache[path] = leafIndex. 같은 path는 한 leafIndex로 귀결(공유).
+// ── store 컨텍스트 (pub/sub) ──────────────────────────────────────────
+// store 하나당 독립 상태. defaultValue에서 초기값을 읽고, 이후 진실값은 leaves가 보유한다.
+//   leaves[leafIndex]      — 평탄 원시값(진실값).
+//   subscribers[leafIndex] — 갱신 함수들((v)=>...).
+//   pathCache[path]        — leafIndex. 같은 path는 한 leafIndex로 귀결(공유).
+// 이 셋이 ctx에 갇혀 있으므로 다른 store의 같은 path끼리는 섞이지 않는다.
 
-const leaves = [];
-const subscribers = []; // leafIndex → [(v)=>void, ...]
-const pathCache = new Map(); // path → leafIndex
+export function createStore(defaultValue) {
+  const leaves = [];
+  const subscribers = []; // leafIndex → [(v)=>void, ...]
+  const pathCache = new Map(); // path → leafIndex
 
-// publish: 리프값을 갱신하고 구독 함수를 모두 호출. (diff 없음 — 구독자만 직접 실행)
-export function set(leafIndex, value) {
-  leaves[leafIndex] = value;
-  const subs = subscribers[leafIndex];
-  if (subs) {
-    for (const fn of subs) fn(value);
-  }
+  // publish: 리프값을 갱신하고 구독 함수를 모두 호출. (diff 없음 — 구독자만 직접 실행)
+  const set = (leafIndex, value) => {
+    leaves[leafIndex] = value;
+    const subs = subscribers[leafIndex];
+    if (subs) {
+      for (const fn of subs) fn(value);
+    }
+  };
+
+  const subscribe = (leafIndex, fn) => {
+    (subscribers[leafIndex] ??= []).push(fn);
+  };
+
+  // path를 leafIndex로 해석(lazy). 처음 보는 path면 새 leafIndex를 발급하고 defaultValue에서
+  // 값을 적재한다. 이미 본 path면 그 leafIndex를 재사용 → 같은 path 바인딩은 같은 리프(공유).
+  const resolve = (path) => {
+    let leafIndex = pathCache.get(path);
+    if (leafIndex !== undefined) return leafIndex;
+    leafIndex = leaves.length;
+    leaves[leafIndex] = readPath(defaultValue, path);
+    pathCache.set(path, leafIndex);
+    return leafIndex;
+  };
+
+  return { leaves, set, subscribe, resolve };
 }
 
-function subscribe(leafIndex, fn) {
-  (subscribers[leafIndex] ??= []).push(fn);
-}
-
-// path를 leafIndex로 해석(lazy). 처음 보는 path면 새 leafIndex를 발급하고 store에서 값을 적재한다.
-// 이미 본 path면 그 leafIndex를 재사용 → 다른 컴포넌트가 같은 path를 바인딩하면 같은 리프(공유).
-function resolve(store, path) {
-  let leafIndex = pathCache.get(path);
-  if (leafIndex !== undefined) return leafIndex;
-  leafIndex = leaves.length;
-  leaves[leafIndex] = readPath(store, path);
-  pathCache.set(path, leafIndex);
-  return leafIndex;
-}
-
-// 'a.b.0' 같은 점-경로로 store를 따라 내려가 원시값을 읽는다.
-function readPath(store, path) {
-  let cur = store;
+// 'a.b.0' 같은 점-경로로 defaultValue를 따라 내려가 원시값을 읽는다.
+function readPath(defaultValue, path) {
+  let cur = defaultValue;
   for (const key of path.split(".")) cur = cur[key];
   return cur;
 }
@@ -123,9 +134,9 @@ function decode(bytes) {
 
 // ── 인스턴스화 ────────────────────────────────────────────────────────
 // build: 한 정의를 실행해 살아있는 DOM을 만든다. TEXT_VAR 자리는 path를 resolve해 구독한다.
-//   store: 원본 데이터 객체.  paths: offset → store path 매핑(배열, 인덱스=offset).
+//   ctx: store 컨텍스트(leaves·set·subscribe·resolve).  paths: offset → path 매핑.
 
-function build(module, compId, store, paths) {
+function build(module, compId, ctx, paths) {
   const def = module.defs[compId];
   if (!def) throw new Error("bad component " + compId);
   const code = module.code.subarray(def.codeOff, def.codeOff + def.codeLen);
@@ -149,9 +160,9 @@ function build(module, compId, store, paths) {
   const bindVar = (offset, update) => {
     const path = paths[offset];
     if (path === undefined) throw new Error("no path for offset " + offset);
-    const leafIndex = resolve(store, path);
-    const initial = leaves[leafIndex] ?? "";
-    subscribe(leafIndex, update);
+    const leafIndex = ctx.resolve(path);
+    const initial = ctx.leaves[leafIndex] ?? "";
+    ctx.subscribe(leafIndex, update);
     return initial;
   };
 
@@ -220,11 +231,11 @@ function build(module, compId, store, paths) {
       }
       case OP.RENDER: {
         const childCompId = u16at();
-        // 쌓인 인자(부모 path들)를 자식 paths로 넘겨 인스턴스화. store는 같은 루트를 공유하므로
+        // 쌓인 인자(부모 path들)를 자식 paths로 넘겨 인스턴스화. ctx는 같은 컨텍스트를 공유하므로
         // 같은 path는 자식에서도 같은 leafIndex로 resolve된다(공유 성립). 인자 버퍼는 비운다.
         const childPaths = args;
         args = [];
-        top().appendChild(build(module, childCompId, store, childPaths));
+        top().appendChild(build(module, childCompId, ctx, childPaths));
         break;
       }
       default:
@@ -235,8 +246,9 @@ function build(module, compId, store, paths) {
 }
 
 // 공개: qubb 바이트·진입 컴포넌트 ID로 정의를 준비하고 render 함수를 돌려준다.
-// render(store, paths) — store는 원본 데이터, paths[offset]는 그 offset이 가리키는 store 경로.
+// render(ctx, paths) — ctx는 createStore(defaultValue)가 만든 컨텍스트, paths[offset]는
+// 그 offset이 가리키는 store 경로. 같은 render를 다른 ctx로 호출하면 서로 독립된 인스턴스다.
 export function createComponent(bytes, compId) {
   const module = decode(bytes);
-  return (store, paths) => build(module, compId, store, paths);
+  return (ctx, paths) => build(module, compId, ctx, paths);
 }

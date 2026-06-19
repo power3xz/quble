@@ -17,19 +17,19 @@
     // ProductCard(comp_id 0): props { name, price } → name=path 'name', price=path 'price'.
     // 내부 PUSH_ARG가 'price'를 PriceTag·BuyButton 둘에 넘긴다 → 둘 다 같은 leafIndex로 resolve(공유).
     // set으로 그 leaf를 갱신하면 배지·버튼이 함께 바뀐다.
-    import { createComponent, set } from "/reactive.js";
+    import { createComponent, createStore } from "/reactive.js";
 
     const res = await fetch("/components/product.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
 
-    const store = { name: '연필', price: 500 };
+    const ctx = createStore({ name: '연필', price: 500 });
     const render = createComponent(bytes, 0);
-    document.getElementById("root").replaceChildren(render(store, ['name', 'price'])); // name=leaf0, price=leaf1
+    document.getElementById("root").replaceChildren(render(ctx, ['name', 'price'])); // name=leaf0, price=leaf1
 
     let price = 500, n = 0;
-    document.getElementById("bump-price").onclick = () => set(1, (price += 100)); // PriceTag·BuyButton 공유
-    document.getElementById("rename").onclick = () => set(0, ['지우개', '자', '풀'][n++ % 3]); // 제목만
-    window.set = set;
+    document.getElementById("bump-price").onclick = () => ctx.set(1, (price += 100)); // PriceTag·BuyButton 공유
+    document.getElementById("rename").onclick = () => ctx.set(0, ['지우개', '자', '풀'][n++ % 3]); // 제목만
+    window.set = ctx.set;
   </script>
 </body>
 </html>
