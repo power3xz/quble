@@ -23,6 +23,7 @@ const COMPONENTS_DIR: &str = "../components";
 const RUNTIME_JS: &str = "../../proto/web/runtime.js";
 const REACTIVE_JS: &str = "../../proto/web/reactive.js";
 const REACT_DIST: &str = "../react/dist";
+const SVELTE_DIST: &str = "../svelte/dist";
 
 fn main() {
     let components = build_components();
@@ -91,6 +92,26 @@ fn main() {
                 }
                 Err(_) => not_found(req),
             }
+        } else if path == "/public/react-perf.html" {
+            // React 갱신 퍼포먼스 페이지 — perf 엔트리(해시명)를 주입해 서빙.
+            match fs::read_to_string("public/react-perf.html") {
+                Ok(html) => {
+                    let html = html.replace("{{REACT_ENTRY}}", &react_asset_path("perf-"));
+                    respond(req, html.into_bytes(), "text/html; charset=utf-8");
+                }
+                Err(_) => not_found(req),
+            }
+        } else if path == "/public/svelte-perf.html" {
+            // Svelte 갱신 퍼포먼스 페이지 — perf 엔트리(해시명)를 주입해 서빙.
+            match fs::read_to_string("public/svelte-perf.html") {
+                Ok(html) => {
+                    let html = html.replace("{{SVELTE_ENTRY}}", &svelte_asset_path("perf-"));
+                    respond(req, html.into_bytes(), "text/html; charset=utf-8");
+                }
+                Err(_) => not_found(req),
+            }
+        } else if path.starts_with("/svelte/") {
+            serve_svelte_asset(req, &path);
         } else if let Some(rel) = path.strip_prefix("/public/") {
             serve_public(req, rel);
         } else {
@@ -212,6 +233,20 @@ fn react_asset_path(prefix: &str) -> String {
     }
 }
 
+/// 해시된 Svelte 빌드 산출물 중 prefix로 시작하는 .js 엔트리를 /svelte/ 경로로. 없으면 about:blank.
+fn svelte_asset_path(prefix: &str) -> String {
+    let dir = format!("{SVELTE_DIST}/assets");
+    let entry = fs::read_dir(&dir).ok().and_then(|rd| {
+        rd.filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .find(|n| n.starts_with(prefix) && n.ends_with(".js"))
+    });
+    match entry {
+        Some(name) => format!("/svelte/assets/{name}"),
+        None => "about:blank".to_string(),
+    }
+}
+
 /// React CSR 페이지: 키=값 query를 props 객체로 주입하고 react-csr 번들을 로드해 클라 렌더.
 fn react_csr_page(component: &str, query: &str) -> String {
     let props_js = props_json_from_query(query);
@@ -267,6 +302,27 @@ fn serve_react_asset(req: Request, url: &str) {
             respond(req, bytes, ct);
         }
         Err(_) => server_error_status(req, "react asset not found (빌드했나요?)", 404),
+    }
+}
+
+/// Svelte 빌드 산출물을 /svelte/ 아래로 서빙. 비교용.
+fn serve_svelte_asset(req: Request, url: &str) {
+    let rel = url.trim_start_matches("/svelte/");
+    if rel.contains("..") {
+        let _ = req.respond(Response::from_string("bad path").with_status_code(400));
+        return;
+    }
+    let path = format!("{SVELTE_DIST}/{rel}");
+    match fs::read(&path) {
+        Ok(bytes) => {
+            let ct = if rel.ends_with(".js") {
+                "text/javascript; charset=utf-8"
+            } else {
+                "application/octet-stream"
+            };
+            respond(req, bytes, ct);
+        }
+        Err(_) => server_error_status(req, "svelte asset not found (빌드했나요?)", 404),
     }
 }
 

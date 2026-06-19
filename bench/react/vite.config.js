@@ -11,6 +11,7 @@ export default {
       input: {
         main: resolve(__dirname, "index.html"),
         "react-csr": resolve(__dirname, "src/react-csr.jsx"),
+        perf: resolve(__dirname, "src/perf.jsx"),
       },
     },
   },

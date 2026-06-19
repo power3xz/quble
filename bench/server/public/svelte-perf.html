@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Svelte 5 perf — 단일 갱신, 1만 개 (절반 구독)</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    body { font-family: system-ui, sans-serif; }
+    #log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #0f172a; color: #fdba74; padding: 12px; border-radius: 8px; }
+    #cards > div { display: inline-block; font-size: 10px; padding: 1px 4px; margin: 1px; background: #e2e8f0; border-radius: 3px; }
+    button { padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <pre id="rendertime" style="white-space:pre-wrap;font-family:ui-monospace,monospace;background:#0f172a;color:#fdba74;padding:8px 12px;border-radius:8px;"></pre>
+  <div id="root"></div>
+  <script type="module" src="{{SVELTE_ENTRY}}"></script>
+</body>
+</html>

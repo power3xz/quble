@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>React perf — 단일 setState, 1만 개 (절반 구독)</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    body { font-family: system-ui, sans-serif; }
+    #log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #0f172a; color: #fca5a5; padding: 12px; border-radius: 8px; }
+    #cards > div { display: inline-block; font-size: 10px; padding: 1px 4px; margin: 1px; background: #e2e8f0; border-radius: 3px; }
+    button { padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <h3>단일 setState 퍼포먼스 — Box 1만 개</h3>
+  <p>5000개는 부모 state(shared)를 props로 구독, 나머지 5000개는 상수 props(React.memo로 skip).
+     setState 1회 → 5000개 리렌더(VDOM diff + DOM 쓰기). flushSync로 동기 렌더 후 측정.</p>
+  <div id="root"></div>
+  <script type="module" src="{{REACT_ENTRY}}"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Reactive perf — 단일 set, 1만 개 (절반 공유)</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    body { font-family: system-ui, sans-serif; }
+    #log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #0f172a; color: #a5f3fc; padding: 12px; border-radius: 8px; }
+    #cards > div { display: inline-block; font-size: 10px; padding: 1px 4px; margin: 1px; background: #e2e8f0; border-radius: 3px; }
+    button { margin-right: 8px; padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <h3>단일 set 퍼포먼스 — Box 1만 개, 한 ctx</h3>
+  <p>1만 개 중 절반(5000)은 <code>label</code> path를 <code>'shared'</code>로 바인딩 → 같은 leaf(구독자 5000).
+     나머지 절반은 각자 고유 leaf(구독자 1). <code>set(sharedLeaf)</code> 1회 = 5000개 동시 갱신,
+     <code>set(uniqueLeaf)</code> 1회 = 1개 갱신. 두 비용을 잰다(반복 평균).</p>
+  <p>
+    <button id="shared">set(shared) ×100</button>
+    <button id="unique">set(unique) ×100</button>
+  </p>
+  <div id="log">렌더 중…</div>
+  <div id="cards"></div>
+
+  <script type="module">
+    import { createComponent, createStore } from "/reactive.js";
+
+    const N = 10000, HALF = N / 2;
+    const log = (s) => (document.getElementById("log").textContent += "\n" + s);
+
+    const res = await fetch("/components/box.qubb");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const render = createComponent(bytes, 0); // Box = comp_id 0
+
+    // defaultValue: tone 공통, shared label, 그리고 고유 label u0..u(HALF-1).
+    const dv = { tone: "ok", shared: "공유0" };
+    for (let i = 0; i < HALF; i++) dv["u" + i] = "고유" + i;
+
+    const ctx = createStore(dv);
+
+    // 렌더: i<HALF면 label=shared(공유), 아니면 label=u(i-HALF)(고유). tone은 전부 'tone' 아닌 'tone'? → 'tone' 키 없음.
+    // tone path는 공통 'tone' 대신 defaultValue에 있는 'tone' 키를 쓰려면 path도 'tone'. dv에 tone 있음.
+    const cards = document.getElementById("cards");
+    const frag = document.createDocumentFragment();
+    const t0 = performance.now();
+    for (let i = 0; i < N; i++) {
+      const labelPath = i < HALF ? "shared" : "u" + (i - HALF);
+      frag.appendChild(render(ctx, ["tone", labelPath])); // paths: [tone, label]
+    }
+    cards.appendChild(frag);
+    const t1 = performance.now();
+    log(`렌더 ${N}개: ${(t1 - t0).toFixed(1)}ms`);
+
+    // 측정 대상 leafIndex를 path로 정확히 얻는다(ctx.resolve는 캐시된 같은 leaf를 돌려줌).
+    const SHARED_LEAF = ctx.resolve("shared"); // 구독자 5000
+    const UNIQUE_LEAF = ctx.resolve("u0");     // 구독자 1
+
+    function bench(leafIndex, label) {
+      const runs = 100;
+      let v = 0;
+      // 워밍업
+      for (let i = 0; i < 10; i++) ctx.set(leafIndex, "w" + v++);
+      const start = performance.now();
+      for (let i = 0; i < runs; i++) ctx.set(leafIndex, "x" + v++);
+      const end = performance.now();
+      const per = (end - start) / runs;
+      log(`${label}: ${runs}회 평균 ${per.toFixed(4)}ms/set (총 ${(end - start).toFixed(1)}ms)`);
+    }
+
+    document.getElementById("shared").onclick = () => bench(SHARED_LEAF, "set(shared, 구독자 5000)");
+    document.getElementById("unique").onclick = () => bench(UNIQUE_LEAF, "set(unique, 구독자 1)");
+    log("준비됨 — 버튼을 눌러 측정.");
+  </script>
+</body>
+</html>
