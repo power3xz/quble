@@ -19,6 +19,8 @@ const OP = {
   RENDER: 0x06,
   ATTR_L: 0x07,
   TEXT_VAR: 0x08,
+  ATTR_G_VAR: 0x09,
+  ATTR_L_VAR: 0x0a,
 };
 
 // 바이트 리더 (리틀엔디안).
@@ -112,6 +114,20 @@ function exec(module, compId, scope) {
         const name = module.pool[u16at()];
         const value = module.pool[u16at()];
         pending.setAttribute(name, value);
+        break;
+      }
+      case OP.ATTR_G_VAR: {
+        const name = ATTRS[u16at()];
+        const idx = u16at();
+        if (scope[idx] === undefined) throw new Error("bad scope index " + idx);
+        pending.setAttribute(name, scope[idx]);
+        break;
+      }
+      case OP.ATTR_L_VAR: {
+        const name = module.pool[u16at()];
+        const idx = u16at();
+        if (scope[idx] === undefined) throw new Error("bad scope index " + idx);
+        pending.setAttribute(name, scope[idx]);
         break;
       }
       case OP.ELEM_CLOSE_OPEN: {

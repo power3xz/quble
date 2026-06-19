@@ -7,7 +7,7 @@
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
-use crate::ast::{Component, Node};
+use crate::ast::{AttrValue, Component, Node};
 use crate::lexer::Token;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -175,7 +175,7 @@ impl<'a> Parser<'a> {
     }
 
     // RParen 전까지 ATTR을 모은다. 콤마는 선택적 구분자.
-    fn attrs(&mut self) -> Result<Vec<(String, String)>, ParseError> {
+    fn attrs(&mut self) -> Result<Vec<(String, AttrValue)>, ParseError> {
         let mut attrs = Vec::new();
         loop {
             match self.peek() {
@@ -186,11 +186,21 @@ impl<'a> Parser<'a> {
                 Some(Token::Ident(_)) => {
                     let name = self.ident()?;
                     self.expect(&Token::Eq)?;
-                    let value = match self.next()? {
-                        Token::Str(s) => s.clone(),
+                    // 값은 정적 문자열(`="card"`) 또는 변수(`={x}`).
+                    let value = match self.peek() {
+                        Some(Token::Str(_)) => match self.next()? {
+                            Token::Str(s) => AttrValue::Static(s.clone()),
+                            _ => unreachable!(),
+                        },
+                        Some(Token::LBrace) => {
+                            self.next()?; // {
+                            let var = self.ident()?;
+                            self.expect(&Token::RBrace)?;
+                            AttrValue::Var(var)
+                        }
                         got => {
                             return Err(ParseError::Expected {
-                                want: "string attribute value".into(),
+                                want: "attribute value (string or {var})".into(),
                                 got: format!("{got:?}"),
                             })
                         }

@@ -1,6 +1,6 @@
 //! AST → 바이트코드 Module. 단일 컴포넌트, 문자열 속성. 1단계: props 문자열 보간.
 
-use crate::ast::{Component, Node};
+use crate::ast::{AttrValue, Component, Node};
 use bytecode::{encode, tags, CompDef, ConstPool, Module, Op};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,6 +32,15 @@ pub fn generate(comp: &Component) -> Result<Box<[u8]>, CodegenError> {
     Ok(encode(&module).into_boxed_slice())
 }
 
+/// 변수명을 scope 인덱스로. 선언 순서 = scope 인덱스. 미선언이면 에러.
+fn prop_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
+    props
+        .iter()
+        .position(|p| p == name)
+        .map(|i| i as u16)
+        .ok_or_else(|| CodegenError::UnknownProp(name.to_string()))
+}
+
 fn emit_node(
     node: &Node,
     props: &[String],
@@ -45,11 +54,7 @@ fn emit_node(
             code.extend_from_slice(&idx.to_le_bytes());
         }
         Node::Var(name) => {
-            // 선언 순서 = scope 인덱스. 미선언이면 에러.
-            let idx = props
-                .iter()
-                .position(|p| p == name)
-                .ok_or_else(|| CodegenError::UnknownProp(name.clone()))? as u16;
+            let idx = prop_index(name, props)?;
             code.push(Op::TextVar as u8);
             code.extend_from_slice(&idx.to_le_bytes());
         }
@@ -60,20 +65,21 @@ fn emit_node(
             code.extend_from_slice(&tag_id.to_le_bytes());
 
             for (name, value) in attrs {
-                let v = pool.intern(value);
-                // 전역 속성명 테이블에 있으면 AttrG, 없으면 컴포넌트 상수풀로 AttrL.
-                match bytecode::attrs::attr_id(name) {
-                    Some(gid) => {
-                        code.push(Op::AttrG as u8);
-                        code.extend_from_slice(&gid.to_le_bytes());
-                    }
-                    None => {
-                        let n = pool.intern(name);
-                        code.push(Op::AttrL as u8);
-                        code.extend_from_slice(&n.to_le_bytes());
-                    }
-                }
-                code.extend_from_slice(&v.to_le_bytes());
+                // 두 축이 opcode를 가른다.
+                //   name : 전역 속성명 테이블에 있으면 G(전역 ID), 없으면 L(상수풀 인덱스)
+                //   value: 정적이면 상수풀 인덱스, 변수면 scope offset
+                let is_var = matches!(value, AttrValue::Var(_));
+                let (op, name_operand) = match bytecode::attrs::attr_id(name) {
+                    Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
+                    None => (if is_var { Op::AttrLVar } else { Op::AttrL }, pool.intern(name)),
+                };
+                let value_operand = match value {
+                    AttrValue::Static(s) => pool.intern(s),
+                    AttrValue::Var(v) => prop_index(v, props)?,
+                };
+                code.push(op as u8);
+                code.extend_from_slice(&name_operand.to_le_bytes());
+                code.extend_from_slice(&value_operand.to_le_bytes());
             }
 
             code.push(Op::ElemCloseOpen as u8);

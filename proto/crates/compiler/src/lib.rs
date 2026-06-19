@@ -24,7 +24,7 @@ pub fn compile(src: &str) -> Result<Box<[u8]>, CompileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Node;
+    use crate::ast::{AttrValue, Node};
 
     const HELLO: &str = r#"
         component Hello {
@@ -50,7 +50,10 @@ mod tests {
                 children,
             } => {
                 assert_eq!(tag, "div");
-                assert_eq!(attrs, &[("class".to_string(), "greeting".to_string())]);
+                assert_eq!(
+                    attrs,
+                    &[("class".to_string(), AttrValue::Static("greeting".to_string()))]
+                );
                 assert_eq!(children.len(), 2);
             }
             _ => panic!("expected element"),
@@ -113,6 +116,46 @@ mod tests {
 
         let got = compile(HELLO).unwrap();
         assert_eq!(&got[..], encode(&expected).as_slice());
+    }
+
+    /// `class={c}`는 전역 name + 변수값 → AttrGVar(name=전역 ID, value=scope offset),
+    /// `data-x={d}`는 로컬 name + 변수값 → AttrLVar(name=상수풀 인덱스, value=scope offset).
+    #[test]
+    fn compiles_attr_var_opcodes() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { c, d }
+              template { div(class={c} data-x={d}) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // ELEM_OPEN div | ATTR_G_VAR class 0 | ATTR_L_VAR <data-x> 1 | CLOSE_OPEN | END | HALT
+        let class_g = bytecode::attrs::attr_id("class").unwrap();
+        // data-x 상수풀 인덱스를 선형 탐색으로 찾는다(테스트 전용).
+        let data_x = (0..u16::MAX)
+            .find(|&i| module.pool.get(i) == Some("data-x"))
+            .unwrap();
+        let mut want = Vec::new();
+        let push16 = |c: &mut Vec<u8>, v: u16| c.extend_from_slice(&v.to_le_bytes());
+        want.push(Op::ElemOpen as u8);
+        push16(&mut want, bytecode::tags::tag_id("div").unwrap());
+        want.push(Op::AttrGVar as u8);
+        push16(&mut want, class_g);
+        push16(&mut want, 0); // c = scope offset 0
+        want.push(Op::AttrLVar as u8);
+        push16(&mut want, data_x);
+        push16(&mut want, 1); // d = scope offset 1
+        want.push(Op::ElemCloseOpen as u8);
+        want.push(Op::ElemEnd as u8);
+        want.push(Op::Halt as u8);
+
+        assert_eq!(code, want.as_slice());
     }
 
     #[test]

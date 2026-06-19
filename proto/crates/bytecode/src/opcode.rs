@@ -16,6 +16,10 @@ pub enum Op {
     AttrL = 0x07,
     /// 텍스트 자리에 scope[idx] 값을 출력 (런타임 주입 값, HTML 이스케이프).
     TextVar = 0x08,
+    /// 전역 속성명 테이블 ID + scope offset. 속성값이 변수(`class={x}`). value는 TextVar와 같은 offset 공간.
+    AttrGVar = 0x09,
+    /// 컴포넌트 상수풀 속성명 인덱스 + scope offset. 속성값이 변수(`data-id={x}`).
+    AttrLVar = 0x0a,
 }
 
 impl Op {
@@ -31,6 +35,8 @@ impl Op {
             0x06 => Op::Render,
             0x07 => Op::AttrL,
             0x08 => Op::TextVar,
+            0x09 => Op::AttrGVar,
+            0x0a => Op::AttrLVar,
             _ => return None,
         })
     }

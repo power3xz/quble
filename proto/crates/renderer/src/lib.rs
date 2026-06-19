@@ -73,6 +73,19 @@ fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Re
                 let value = read_u16(code, &mut pc)?;
                 emit_attr(get_const(module, name)?, get_const(module, value)?, out);
             }
+            Op::AttrGVar => {
+                let name = read_u16(code, &mut pc)?;
+                let idx = read_u16(code, &mut pc)?;
+                let name = bytecode::attrs::attr_name(name).ok_or(RenderError::BadAttr(name))?;
+                let val = scope.get(idx as usize).ok_or(RenderError::BadScope(idx))?;
+                emit_attr(name, val, out);
+            }
+            Op::AttrLVar => {
+                let name = read_u16(code, &mut pc)?;
+                let idx = read_u16(code, &mut pc)?;
+                let val = scope.get(idx as usize).ok_or(RenderError::BadScope(idx))?;
+                emit_attr(get_const(module, name)?, val, out);
+            }
             Op::ElemCloseOpen => out.push('>'),
             Op::Text => {
                 let text = read_u16(code, &mut pc)?;
@@ -177,6 +190,20 @@ mod tests {
         }
         fn text_var(&mut self, idx: u16) -> &mut Self {
             self.code.push(Op::TextVar as u8);
+            self.code.extend_from_slice(&idx.to_le_bytes());
+            self
+        }
+        /// 전역 속성명 ID + scope offset.
+        fn attr_g_var(&mut self, name: u16, idx: u16) -> &mut Self {
+            self.code.push(Op::AttrGVar as u8);
+            self.code.extend_from_slice(&name.to_le_bytes());
+            self.code.extend_from_slice(&idx.to_le_bytes());
+            self
+        }
+        /// 컴포넌트 상수풀 속성명 인덱스 + scope offset.
+        fn attr_l_var(&mut self, name: u16, idx: u16) -> &mut Self {
+            self.code.push(Op::AttrLVar as u8);
+            self.code.extend_from_slice(&name.to_le_bytes());
             self.code.extend_from_slice(&idx.to_le_bytes());
             self
         }
@@ -311,6 +338,48 @@ mod tests {
             render_to_string(&bytes, 0, &scope).unwrap(),
             "<h1>세계 &lt;b&gt;</h1>"
         );
+    }
+
+    /// 속성값 변수: 전역 name(class)·로컬 name(data-x) 둘 다 scope에서 채우고 속성 이스케이프를 적용.
+    #[test]
+    fn renders_attr_var_global_and_local() {
+        let mut pool = ConstPool::new();
+        let name = pool.intern("C");
+        let data_x = pool.intern("data-x"); // 전역 테이블에 없는 속성명 → 로컬
+        let class_g = bytecode::attrs::attr_id("class").unwrap();
+
+        let mut a = Asm::new();
+        a.open(t("div"))
+            .attr_g_var(class_g, 0)
+            .attr_l_var(data_x, 1)
+            .close_open()
+            .end()
+            .halt();
+
+        let code = a.code;
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        let scope = vec!["card".to_string(), r#"a"b"#.to_string()];
+        assert_eq!(
+            render_to_string(&bytes, 0, &scope).unwrap(),
+            r#"<div class="card" data-x="a&quot;b"></div>"#
+        );
+    }
+
+    /// 속성값 변수도 scope 범위를 벗어나면 BadScope.
+    #[test]
+    fn attr_var_out_of_scope() {
+        let mut pool = ConstPool::new();
+        let name = pool.intern("C");
+        let class_g = bytecode::attrs::attr_id("class").unwrap();
+        let mut a = Asm::new();
+        a.open(t("div")).attr_g_var(class_g, 0).close_open().end().halt();
+        let code = a.code;
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        assert_eq!(render_to_string(&bytes, 0, &[]), Err(RenderError::BadScope(0)));
     }
 
     /// scope에 값이 없으면 BadScope.

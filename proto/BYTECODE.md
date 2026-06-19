@@ -133,6 +133,8 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `RENDER`          | 0x06 | comp_id: u16          | —                         | 컴포넌트 ID로 정의를 찾아 렌더(호출).                                    |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
 | `TEXT_VAR`        | 0x08 | idx: u16              | scope                     | `scope[idx]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).          |
+| `ATTR_G_VAR`      | 0x09 | name: u16, idx: u16   | name=전역, idx=scope      | ` name="scope[idx]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
+| `ATTR_L_VAR`      | 0x0a | name: u16, idx: u16   | name=컴포넌트, idx=scope  | ` name="scope[idx]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수.        |
 
 설계 메모:
 
@@ -148,6 +150,9 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   (값 배열)를 넘기고, `TEXT_VAR idx`가 `scope[idx]`를 출력한다. 심볼 이름은 바이트코드에 없다
   — 컴파일타임에 **scope 인덱스로 확정**되므로(정적 분석), 런타임은 배열 인덱스로 O(1) 접근한다.
   (1단계: 값은 문자열. 객체·반응성은 이후 단계.)
+- 속성은 **두 축**으로 갈린다 — name(전역 `G` / 컴포넌트 `L`) × value(정적 / 변수 `_VAR`).
+  네 조합이 `ATTR_G`·`ATTR_L`·`ATTR_G_VAR`·`ATTR_L_VAR`. 변수 속성값의 idx는 **`TEXT_VAR`와
+  같은 scope offset 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 값 배열).
 - 분기/반복(`@if`/`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다.
 
 ### 이스케이프 규칙

@@ -11,10 +11,18 @@ pub struct Component {
 pub enum Node {
     Element {
         tag: String,
-        attrs: Vec<(String, String)>, // (name, value) — value는 문자열만
+        attrs: Vec<(String, AttrValue)>,
         children: Vec<Node>,
     },
     Text(String),
     /// `{name}` 보간 — props 이름 참조. codegen이 scope 인덱스로 해석.
+    Var(String),
+}
+
+/// 속성값: 정적 문자열(`class="card"`) 또는 변수 참조(`class={x}`).
+/// 변수는 텍스트 보간(`Node::Var`)과 같은 scope offset 공간을 쓴다.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AttrValue {
+    Static(String),
     Var(String),
 }

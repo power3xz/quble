@@ -26,6 +26,8 @@ const OP = {
   RENDER: 0x06,
   ATTR_L: 0x07,
   TEXT_VAR: 0x08,
+  ATTR_G_VAR: 0x09,
+  ATTR_L_VAR: 0x0a,
 };
 
 // ── pub/sub ───────────────────────────────────────────────────────────
@@ -139,6 +141,17 @@ function build(module, compId, store, paths) {
   };
   const top = () => stack[stack.length - 1];
 
+  // 변수 바인딩 공통부: offset → leafIndex로 해석하고 초기값을 돌려준다. update는 호출처가 준다
+  // (텍스트면 textContent, 속성이면 setAttribute) — 그 함수를 그 리프에 구독시킨다.
+  const bindVar = (offset, update) => {
+    const path = paths[offset];
+    if (path === undefined) throw new Error("no path for offset " + offset);
+    const leafIndex = resolve(store, path);
+    const initial = leaves[leafIndex] ?? "";
+    subscribe(leafIndex, update);
+    return initial;
+  };
+
   while (pc < code.length) {
     const op = code[pc++];
     switch (op) {
@@ -159,6 +172,20 @@ function build(module, compId, store, paths) {
         pending.setAttribute(name, module.pool[u16at()]);
         break;
       }
+      case OP.ATTR_G_VAR: {
+        const name = ATTRS[u16at()];
+        const el = pending;
+        const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
+        el.setAttribute(name, v);
+        break;
+      }
+      case OP.ATTR_L_VAR: {
+        const name = module.pool[u16at()];
+        const el = pending;
+        const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
+        el.setAttribute(name, v);
+        break;
+      }
       case OP.ELEM_CLOSE_OPEN: {
         top().appendChild(pending);
         stack.push(pending);
@@ -170,13 +197,9 @@ function build(module, compId, store, paths) {
         break;
       }
       case OP.TEXT_VAR: {
-        const offset = u16at();
-        const path = paths[offset];
-        if (path === undefined) throw new Error("no path for offset " + offset);
-        const leafIndex = resolve(store, path);
-        const node = document.createTextNode(leaves[leafIndex] ?? "");
+        const node = document.createTextNode("");
         // 구독자 = 이 노드를 갱신하는 함수. set(leafIndex, v)가 이걸 호출한다.
-        subscribe(leafIndex, (v) => (node.textContent = v));
+        node.textContent = bindVar(u16at(), (v) => (node.textContent = v));
         top().appendChild(node);
         break;
       }
