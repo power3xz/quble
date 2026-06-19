@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>ProfileCard ×5 — Quble vs React</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    body { background: #0f172a; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    .split { display: flex; gap: 24px; align-items: flex-start; }
+    .pane { flex: 1; min-width: 0; }
+    .pane > h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; color: #94a3b8; }
+    .cards { display: flex; flex-wrap: wrap; gap: 16px; }
+
+    article {
+      width: 230px; border-radius: 16px; padding: 20px; color: #fff;
+      background: linear-gradient(160deg, var(--c1), var(--c2));
+      box-shadow: 0 10px 30px rgba(0,0,0,.35); position: relative; overflow: hidden;
+    }
+    article::after {
+      content: ""; position: absolute; inset: 0; border-radius: 16px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.25); pointer-events: none;
+    }
+    .header { display: flex; gap: 12px; align-items: center; }
+    .avatar {
+      width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+      border: 2px solid rgba(255,255,255,.6); background: rgba(255,255,255,.2);
+    }
+    .ident { min-width: 0; }
+    .name { margin: 0 0 4px; font-size: 17px; }
+    .ident span {
+      display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px;
+      border-radius: 99px; background: rgba(0,0,0,.25); text-transform: uppercase; letter-spacing: .04em;
+    }
+    .bio { font-size: 13px; line-height: 1.5; opacity: .92; margin: 14px 0; }
+
+    .stats { display: flex; gap: 6px; margin: 14px 0; }
+    .stat {
+      flex: 1; text-align: center; padding: 8px 0; border-radius: 10px;
+      background: rgba(255,255,255,.12);
+    }
+    .stat .value { display: block; font-size: 16px; font-weight: 700; }
+    .stat .label { display: block; font-size: 10px; opacity: .8; margin-top: 2px; }
+
+    .meta { margin: 14px 0; }
+    .metarow { display: flex; gap: 8px; align-items: center; margin: 4px 0; font-size: 12px; opacity: .9; }
+    .metarow .icon { width: 18px; text-align: center; }
+
+    .activity { margin: 14px 0; padding: 12px; border-radius: 10px; background: rgba(0,0,0,.16); }
+    .act { display: flex; gap: 8px; align-items: center; font-size: 12px; margin: 6px 0; }
+    .act .icon { width: 18px; text-align: center; }
+    .act .text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .act .time { font-size: 10px; opacity: .7; white-space: nowrap; }
+
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+    .tags span {
+      font-size: 11px; padding: 3px 9px; border-radius: 99px;
+      background: rgba(255,255,255,.16); font-weight: 600;
+    }
+
+    .links { display: flex; gap: 6px; margin: 14px 0; }
+    .links a {
+      flex: 1; text-align: center; font-size: 11px; padding: 6px 0; border-radius: 8px;
+      background: rgba(255,255,255,.16); color: #fff; text-decoration: none;
+    }
+    .links a:hover { background: rgba(255,255,255,.28); }
+    .profile {
+      display: block; text-align: center; margin-top: 6px; font-size: 12px; font-weight: 600;
+      padding: 9px 0; border-radius: 10px; background: rgba(0,0,0,.22); color: #fff; text-decoration: none;
+    }
+    .profile:hover { background: rgba(0,0,0,.34); }
+
+    .blue   { --c1: #3b82f6; --c2: #1d4ed8; }
+    .green  { --c1: #10b981; --c2: #047857; }
+    .rose   { --c1: #fb7185; --c2: #be123c; }
+    .amber  { --c1: #fbbf24; --c2: #b45309; }
+    .violet { --c1: #a78bfa; --c2: #6d28d9; }
+  </style>
+</head>
+<body>
+  <p>같은 <code>ProfileCard</code>를 데이터만 다르게 5장. 좌(Quble qubb)·우(React 청크)를 같이 띄운다 —
+     네트워크 탭에서 컴포넌트 전송량을 비교한다. Thumbnail·Badge·Stat·MetaRow·LinkButton 합성 + 동적 class(theme).</p>
+  <div class="split">
+    <div class="pane">
+      <h2>Quble — /components/profilecard.qubb + /reactive.js</h2>
+      <div class="cards" id="quble-root"></div>
+    </div>
+    <div class="pane">
+      <h2>React — {{REACT_ENTRY}} (+ ProfileCard 청크)</h2>
+      <div id="root"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createComponent, createStore } from "/reactive.js";
+
+    const res = await fetch("/components/profilecard.qubb");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const render = createComponent(bytes, 0); // ProfileCard = comp_id 0
+
+    // ProfileCard props 선언 순서 = paths 순서.
+    const paths = [
+      'name', 'role', 'bio', 'avatar', 'link', 'theme',
+      'followersLabel', 'followers', 'followingLabel', 'following', 'postsLabel', 'posts',
+      'locationIcon', 'location', 'companyIcon', 'company',
+      'site', 'github', 'twitter',
+      'act1Icon', 'act1Text', 'act1Time', 'act2Icon', 'act2Text', 'act2Time', 'act3Icon', 'act3Text', 'act3Time',
+      'tag1', 'tag2', 'tag3', 'tag4',
+    ];
+
+    // label·icon은 카드마다 동일하지만 컴포넌트 인자는 변수만 받으므로 데이터에 둔다.
+    const common = {
+      followersLabel: '팔로워', followingLabel: '팔로잉', postsLabel: '게시물',
+      locationIcon: '📍', companyIcon: '🏢',
+      act1Icon: '✅', act1Time: '2시간 전', act2Icon: '⭐', act2Time: '어제', act3Icon: '💬', act3Time: '3일 전',
+    };
+    const people = [
+      { name: '김에이', role: '엔지니어', bio: '백엔드와 컴파일러를 좋아합니다. 작게 만들고 빠르게 검증합니다.', avatar: '/img/a', link: '/u/a', theme: 'blue',   followers: '1.2k', following: '180', posts: '342', location: '서울', company: 'Quble Inc.', site: '/s/a', github: '/gh/a', twitter: '/tw/a', act1Text: '바이트코드 풀 최적화 머지', act2Text: '컴파일러 PR 리뷰', act3Text: '반응성 모델 논의', tag1: 'rust', tag2: 'compiler', tag3: 'wasm', tag4: 'ssr' },
+      { name: '이비',   role: '디자이너', bio: '타이포그래피와 여백에 진심입니다. 손에 잡히는 디테일을 좋아합니다.', avatar: '/img/b', link: '/u/b', theme: 'green',  followers: '3.4k', following: '210', posts: '128', location: '부산', company: 'Studio B', site: '/s/b', github: '/gh/b', twitter: '/tw/b', act1Text: '디자인 시스템 v2 공개', act2Text: '아이콘 세트 업데이트', act3Text: '컬러 토큰 정리', tag1: 'figma', tag2: 'type', tag3: 'system', tag4: 'a11y' },
+      { name: '박시',   role: 'PM',       bio: '문제를 잘게 쪼개고 우선순위를 세웁니다. 측정 없이는 결정하지 않습니다.', avatar: '/img/c', link: '/u/c', theme: 'rose',   followers: '870',  following: '450', posts: '96',  location: '대전', company: 'Flow', site: '/s/c', github: '/gh/c', twitter: '/tw/c', act1Text: '분기 로드맵 확정', act2Text: '지표 대시보드 개편', act3Text: '사용자 인터뷰 10건', tag1: 'roadmap', tag2: 'metrics', tag3: 'growth', tag4: 'ops' },
+      { name: '최디',   role: '리서처',   bio: '읽고 쓰고 측정합니다. 모르는 것을 모른다고 적는 일을 합니다.', avatar: '/img/d', link: '/u/d', theme: 'amber',  followers: '2.1k', following: '320', posts: '510', location: '제주', company: 'Lab', site: '/s/d', github: '/gh/d', twitter: '/tw/d', act1Text: '벤치 결과 리포트 발행', act2Text: '논문 세미나 발표', act3Text: '실험 재현 스크립트 공개', tag1: 'research', tag2: 'bench', tag3: 'paper', tag4: 'data' },
+      { name: '정이',   role: '프론트',   bio: '반응성 모델에 관심이 많습니다. 런타임을 작게 유지하려 애씁니다.', avatar: '/img/e', link: '/u/e', theme: 'violet', followers: '5.6k', following: '90',  posts: '233', location: '서울', company: 'Quble Inc.', site: '/s/e', github: '/gh/e', twitter: '/tw/e', act1Text: '런타임 4kb 달성', act2Text: '합성 바인딩 구현', act3Text: 'DOM 갱신 경로 단순화', tag1: 'frontend', tag2: 'reactive', tag3: 'dom', tag4: 'perf' },
+    ];
+
+    const root = document.getElementById("quble-root");
+    for (const p of people) {
+      const ctx = createStore({ ...common, ...p }); // 카드마다 독립 ctx
+      root.appendChild(render(ctx, paths));
+    }
+  </script>
+
+  <!-- React: 빌드된 main 엔트리가 lazy로 ProfileCard 청크를 당겨 #root에 렌더. -->
+  <script type="module" src="{{REACT_ENTRY}}"></script>
+</body>
+</html>

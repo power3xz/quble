@@ -82,6 +82,15 @@ fn main() {
         } else if path.starts_with("/img/") {
             // 예제 상품 이미지는 전부 플레이스홀더 한 장으로.
             serve_public(req, "placeholder.svg");
+        } else if path == "/public/reactive-profilecard.html" {
+            // 좌우 비교 페이지 — React 엔트리(해시명)를 주입해 서빙.
+            match fs::read_to_string("public/reactive-profilecard.html") {
+                Ok(html) => {
+                    let html = html.replace("{{REACT_ENTRY}}", &react_entry_path());
+                    respond(req, html.into_bytes(), "text/html; charset=utf-8");
+                }
+                Err(_) => not_found(req),
+            }
         } else if let Some(rel) = path.strip_prefix("/public/") {
             serve_public(req, rel);
         } else {
@@ -184,9 +193,9 @@ fn page() -> String {
     html.replace("{{REACT_ENTRY}}", &react_entry_path())
 }
 
-/// React 빌드의 기본 엔트리(index-*.js) 경로.
+/// React 빌드의 기본 엔트리(main-*.js) 경로.
 fn react_entry_path() -> String {
-    react_asset_path("index-")
+    react_asset_path("main-")
 }
 
 /// 해시된 빌드 산출물 중 prefix로 시작하는 .js 엔트리를 찾아 /react/ 경로로. 없으면 about:blank.

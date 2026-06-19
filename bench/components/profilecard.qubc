@@ -1,0 +1,107 @@
+component ProfileCard {
+  props {
+    name, role, bio, avatar, link, theme,
+    followersLabel, followers, followingLabel, following, postsLabel, posts,
+    locationIcon, location, companyIcon, company,
+    site, github, twitter,
+    act1Icon, act1Text, act1Time, act2Icon, act2Text, act2Time, act3Icon, act3Text, act3Time,
+    tag1, tag2, tag3, tag4
+  }
+  template {
+    article(class={theme}) {
+      div(class="header") {
+        Thumbnail(avatar={avatar} name={name}) {}
+        div(class="ident") {
+          h3(class="name") { {name} }
+          Badge(role={role} theme={theme}) {}
+        }
+      }
+      p(class="bio") { {bio} }
+      div(class="stats") {
+        Stat(label={followersLabel} value={followers}) {}
+        Stat(label={followingLabel} value={following}) {}
+        Stat(label={postsLabel} value={posts}) {}
+      }
+      div(class="meta") {
+        MetaRow(icon={locationIcon} text={location}) {}
+        MetaRow(icon={companyIcon} text={company}) {}
+      }
+      div(class="activity") {
+        Activity(icon={act1Icon} text={act1Text} time={act1Time}) {}
+        Activity(icon={act2Icon} text={act2Text} time={act2Time}) {}
+        Activity(icon={act3Icon} text={act3Text} time={act3Time}) {}
+      }
+      div(class="tags") {
+        Tag(text={tag1} theme={theme}) {}
+        Tag(text={tag2} theme={theme}) {}
+        Tag(text={tag3} theme={theme}) {}
+        Tag(text={tag4} theme={theme}) {}
+      }
+      div(class="links") {
+        LinkButton(link={site} theme={theme}) {}
+        LinkButton(link={github} theme={theme}) {}
+        LinkButton(link={twitter} theme={theme}) {}
+      }
+      a(class="profile" href={link}) { "전체 프로필 보기" }
+    }
+  }
+}
+
+component Thumbnail {
+  props { avatar, name }
+  template {
+    img(class="avatar" src={avatar} alt={name}) {}
+  }
+}
+
+component Badge {
+  props { role, theme }
+  template {
+    span(class={theme}) { {role} }
+  }
+}
+
+component Stat {
+  props { label, value }
+  template {
+    div(class="stat") {
+      span(class="value") { {value} }
+      span(class="label") { {label} }
+    }
+  }
+}
+
+component MetaRow {
+  props { icon, text }
+  template {
+    p(class="metarow") {
+      span(class="icon") { {icon} }
+      span(class="text") { {text} }
+    }
+  }
+}
+
+component Activity {
+  props { icon, text, time }
+  template {
+    div(class="act") {
+      span(class="icon") { {icon} }
+      span(class="text") { {text} }
+      span(class="time") { {time} }
+    }
+  }
+}
+
+component Tag {
+  props { text, theme }
+  template {
+    span(class={theme}) { "#" {text} }
+  }
+}
+
+component LinkButton {
+  props { link, theme }
+  template {
+    a(class={theme} href={link}) { "프로필 보기" }
+  }
+}
