@@ -12,3 +12,6 @@ body { font-family: system-ui, sans-serif; max-width: 1400px; margin: 1.5rem aut
 .price { color: #c00; font-weight: bold; }
 .buy { margin-top: .4rem; width: 100%; padding: .35rem; cursor: pointer; font-size: .75rem; }
 .post { line-height: 1.7; } .post .meta { color: #888; }
+/* reactive 검증용 — class 변화가 눈에 보이도록 */
+.ok { background: #e6f7ee; color: #0a7; padding: .6rem; border-radius: 6px; }
+.warn { background: #fdeaea; color: #c00; padding: .6rem; border-radius: 6px; }

@@ -1,0 +1,8 @@
+component Box {
+  props { tone, label }
+  template {
+    div(class={tone}) {
+      "상태: " {label}
+    }
+  }
+}

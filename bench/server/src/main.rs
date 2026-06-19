@@ -310,6 +310,8 @@ fn serve_public(req: Request, rel: &str) {
                 "text/css; charset=utf-8"
             } else if rel.ends_with(".svg") {
                 "image/svg+xml"
+            } else if rel.ends_with(".html") {
+                "text/html; charset=utf-8"
             } else {
                 "application/octet-stream"
             };
