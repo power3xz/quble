@@ -130,11 +130,12 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ELEM_CLOSE_OPEN` | 0x03 | —                     | —                         | `>` 출력. 여는 태그 종료, 자식 시작.                                     |
 | `TEXT`            | 0x04 | text: u16             | 컴포넌트                  | 텍스트 출력 (HTML 이스케이프).                                           |
 | `ELEM_END`        | 0x05 | —                     | —                         | 가장 최근에 연 태그를 닫는다(`</TAG>`). 닫을 태그는 스택 top으로 안다.   |
-| `RENDER`          | 0x06 | comp_id: u16          | —                         | 컴포넌트 ID로 정의를 찾아 렌더(호출).                                    |
+| `RENDER`          | 0x06 | comp_id: u16          | —                         | 쌓인 인자를 자식 scope로 넘겨 comp_id 정의를 렌더(호출). 인자 버퍼를 비운다. |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
 | `TEXT_VAR`        | 0x08 | idx: u16              | scope                     | `scope[idx]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).          |
 | `ATTR_G_VAR`      | 0x09 | name: u16, idx: u16   | name=전역, idx=scope      | ` name="scope[idx]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
 | `ATTR_L_VAR`      | 0x0a | name: u16, idx: u16   | name=컴포넌트, idx=scope  | ` name="scope[idx]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수.        |
+| `PUSH_ARG`        | 0x0b | offset: u16           | scope                     | 부모 `scope[offset]`을 자식 인자 버퍼에 push. 뒤따르는 `RENDER`가 소비.     |
 
 설계 메모:
 
@@ -144,8 +145,18 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   복귀만 하면 돼 **DOM 노드 스택**을 유지한다. (이전엔 END가 tag ID를 들었으나 잉여라 제거.
   요소당 2B 절감 — grid raw −8.7% 실측.)
 - 빈 요소 `h1() {}`도 OPEN → CLOSE_OPEN → END (`<h1></h1>`). void element 최적화는 나중.
-- `RENDER`는 합성·진입점 호출용. 프로토타입은 합성이 없어 **정의 코드 안엔 등장하지 않고**,
-  런타임이 외부에서 `RENDER comp_id`로 진입할 때만 쓰인다.
+- **합성 — `PUSH_ARG` + `RENDER`.** 부모가 자식을 호출할 때, use-site 바인딩
+  (`Comp(name={b})` — `b`는 부모 offset)을 `PUSH_ARG offset`으로 **자식 offset 순서대로** 쌓고
+  `RENDER comp_id`가 그 인자 버퍼를 **자식 scope**로 넘긴다(그리고 비운다). `ATTR`이 `ELEM` 앞에
+  쌓이고 `CLOSE_OPEN`이 닫는 것과 같은 패턴 — 인자가 `RENDER` 앞에 쌓이고 `RENDER`가 흡수한다.
+  - `PUSH_ARG`가 싣는 건 **값이 아니라 부모 offset**이다. 부모 `scope[offset]`(SSR) /
+    `paths[offset]`(클라 반응성)을 **한 단계 풀어** 자식에게 준다. 그래서 leafIndex 같은 전역
+    인덱스를 넘기지 않는다 — 같은 컴포넌트가 use-site마다 다른 값을 받을 수 있기 때문(§ 정의 vs 사용).
+  - 인자는 **자식 offset 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부** 바인딩한다고
+    보고 순서만으로 매핑한다. 일부 생략을 허용할 때 `PUSH_ARG`에 offset을 명시하거나 빈 자리용 opcode를
+    더한다(미정).
+  - 진입점(최상위)은 외부에서 `render(qubb, comp_id, scope)`로 scope를 직접 준다. 인자 버퍼는
+    `RENDER`로 합성할 때만 쓰인다.
 - `TEXT_VAR`는 런타임 주입 값을 가리킨다. 렌더 시 `render(qubb, comp_id, scope)`로 **scope**
   (값 배열)를 넘기고, `TEXT_VAR idx`가 `scope[idx]`를 출력한다. 심볼 이름은 바이트코드에 없다
   — 컴파일타임에 **scope 인덱스로 확정**되므로(정적 분석), 런타임은 배열 인덱스로 O(1) 접근한다.

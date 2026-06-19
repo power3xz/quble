@@ -21,6 +21,7 @@ const OP = {
   TEXT_VAR: 0x08,
   ATTR_G_VAR: 0x09,
   ATTR_L_VAR: 0x0a,
+  PUSH_ARG: 0x0b,
 };
 
 // 바이트 리더 (리틀엔디안).
@@ -84,6 +85,8 @@ function exec(module, compId, scope) {
   const fragment = document.createDocumentFragment();
   const stack = [fragment]; // 현재 부모 스택
   let pending = null; // 아직 자식 영역에 안 들어간(여는 태그 진행 중) 요소
+  // 자식에게 넘길 인자 버퍼. PUSH_ARG가 부모 scope[offset] 값을 쌓고, RENDER가 소비.
+  let args = [];
   let pc = 0;
 
   const u16at = () => {
@@ -154,9 +157,19 @@ function exec(module, compId, scope) {
         stack.pop();
         break;
       }
+      case OP.PUSH_ARG: {
+        // 부모 scope[offset] 값을 자식 인자로 쌓는다.
+        const parentOffset = u16at();
+        if (scope[parentOffset] === undefined) throw new Error("bad scope index " + parentOffset);
+        args.push(scope[parentOffset]);
+        break;
+      }
       case OP.RENDER: {
-        const child = u16at();
-        top().appendChild(exec(module, child, scope));
+        const childCompId = u16at();
+        // 쌓인 인자(부모 값들)를 자식 scope로 넘기고 버퍼를 비운다.
+        const childScope = args;
+        args = [];
+        top().appendChild(exec(module, childCompId, childScope));
         break;
       }
       default:

@@ -49,6 +49,8 @@ fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Re
 
     // 연 태그를 쌓아둔다. END는 operand 없이 top을 닫는다(중첩 보장).
     let mut tag_stack: Vec<&str> = Vec::new();
+    // 자식에게 넘길 인자 버퍼. PUSH_ARG가 부모 scope[offset] 값을 쌓고, RENDER가 소비.
+    let mut args: Vec<String> = Vec::new();
     let mut pc = 0usize;
     while pc < code.len() {
         let op = Op::from_u8(code[pc]).ok_or(RenderError::BadOpcode(code[pc]))?;
@@ -102,9 +104,16 @@ fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Re
                 out.push_str(name);
                 out.push('>');
             }
+            Op::PushArg => {
+                let offset = read_u16(code, &mut pc)?;
+                let val = scope.get(offset as usize).ok_or(RenderError::BadScope(offset))?;
+                args.push(val.clone());
+            }
             Op::Render => {
-                let child = read_u16(code, &mut pc)?;
-                exec(module, child, scope, out)?;
+                let child_comp_id = read_u16(code, &mut pc)?;
+                // 쌓인 인자(부모 값들)를 자식 scope로 넘기고 버퍼를 비운다.
+                let child_scope = std::mem::take(&mut args);
+                exec(module, child_comp_id, &child_scope, out)?;
             }
         }
     }
@@ -216,6 +225,12 @@ mod tests {
             self.code.extend_from_slice(&id.to_le_bytes());
             self
         }
+        /// 부모 offset을 자식 인자로 push.
+        fn push_arg(&mut self, offset: u16) -> &mut Self {
+            self.code.push(Op::PushArg as u8);
+            self.code.extend_from_slice(&offset.to_le_bytes());
+            self
+        }
         fn halt(&mut self) -> &mut Self {
             self.code.push(Op::Halt as u8);
             self
@@ -318,6 +333,45 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[]).unwrap(), "<div><span>hi</span></div>");
+    }
+
+    /// 합성 + PUSH_ARG: 부모가 자기 scope의 일부를 자식에게 넘긴다.
+    /// 부모 div() { {a} Comp(name={b}) } — 부모 scope=["A","B"], 자식은 b만 받아 출력.
+    #[test]
+    fn render_passes_args_to_child() {
+        let mut pool = ConstPool::new();
+        let parent = pool.intern("Parent");
+        let child = pool.intern("Child");
+
+        // 자식: span() { {0} }  — 받은 scope[0]을 출력.
+        let mut c = Asm::new();
+        c.open(t("span")).close_open().text_var(0).end().halt();
+        // 부모: div() { {0} PUSH_ARG 1; RENDER child }  — 자기 scope[0] 출력 + 자식엔 scope[1] 전달.
+        let mut p = Asm::new();
+        p.open(t("div"))
+            .close_open()
+            .text_var(0)
+            .push_arg(1)
+            .render(1)
+            .end()
+            .halt();
+
+        let child_len = c.code.len() as u32;
+        let parent_len = p.code.len() as u32;
+        let mut code = c.code;
+        code.extend_from_slice(&p.code);
+
+        let defs = vec![
+            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len },
+            CompDef { name_idx: child, code_off: 0, code_len: child_len },
+        ];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        let scope = vec!["A".to_string(), "B".to_string()];
+        assert_eq!(
+            render_to_string(&bytes, 0, &scope).unwrap(),
+            "<div>A<span>B</span></div>"
+        );
     }
 
     /// TEXT_VAR가 scope[idx] 값을 출력하고, 텍스트 이스케이프를 적용한다.

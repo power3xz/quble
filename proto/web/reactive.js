@@ -28,6 +28,7 @@ const OP = {
   TEXT_VAR: 0x08,
   ATTR_G_VAR: 0x09,
   ATTR_L_VAR: 0x0a,
+  PUSH_ARG: 0x0b,
 };
 
 // ── pub/sub ───────────────────────────────────────────────────────────
@@ -132,6 +133,8 @@ function build(module, compId, store, paths) {
   const fragment = document.createDocumentFragment();
   const stack = [fragment];
   let pending = null;
+  // 자식에게 넘길 인자 버퍼. PUSH_ARG가 부모 paths[offset]을 쌓고, RENDER가 소비.
+  let args = [];
   let pc = 0;
 
   const u16at = () => {
@@ -207,11 +210,22 @@ function build(module, compId, store, paths) {
         stack.pop();
         break;
       }
+      case OP.PUSH_ARG: {
+        // 부모 offset → 부모 paths[offset](path 문자열)을 자식 인자로 쌓는다.
+        const parentOffset = u16at();
+        const path = paths[parentOffset];
+        if (path === undefined) throw new Error("no path for offset " + parentOffset);
+        args.push(path);
+        break;
+      }
       case OP.RENDER: {
-        // 미구현. 합성(자식 컴포넌트 호출)은 자식의 바인딩(use-site가 주는 paths)이 있어야
-        // 하는데, 그 바인딩 해석이 아직 없다. 부모 paths를 그대로 물려주면 offset이 안 맞아
-        // 틀린다(§3). 단일 컴포넌트 검증 단계라 qubb에 RENDER가 안 나오므로 여기 도달하면 버그.
-        throw new Error("RENDER 미구현 — 합성·바인딩 단계에서 구현");
+        const childCompId = u16at();
+        // 쌓인 인자(부모 path들)를 자식 paths로 넘겨 인스턴스화. store는 같은 루트를 공유하므로
+        // 같은 path는 자식에서도 같은 leafIndex로 resolve된다(공유 성립). 인자 버퍼는 비운다.
+        const childPaths = args;
+        args = [];
+        top().appendChild(build(module, childCompId, store, childPaths));
+        break;
       }
       default:
         throw new Error("bad opcode 0x" + op.toString(16));
