@@ -1,0 +1,24 @@
+component ProductCard {
+  props { name, price }
+  template {
+    div(class="card") {
+      h3(class="name") { {name} }
+      PriceTag(price={price}) {}
+      BuyButton(price={price}) {}
+    }
+  }
+}
+
+component PriceTag {
+  props { price }
+  template {
+    span(class="badge") { {price} "원" }
+  }
+}
+
+component BuyButton {
+  props { price }
+  template {
+    button(class="buy") { {price} "원 담기" }
+  }
+}
