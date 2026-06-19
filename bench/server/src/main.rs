@@ -21,6 +21,7 @@ use tiny_http::{Header, Request, Response, Server};
 const ADDR: &str = "127.0.0.1:7878";
 const COMPONENTS_DIR: &str = "../components";
 const RUNTIME_JS: &str = "../../proto/web/runtime.js";
+const REACTIVE_JS: &str = "../../proto/web/reactive.js";
 const REACT_DIST: &str = "../react/dist";
 
 fn main() {
@@ -40,6 +41,11 @@ fn main() {
             respond(req, page().into_bytes(), "text/html; charset=utf-8");
         } else if path == "/runtime.js" {
             match fs::read(RUNTIME_JS) {
+                Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
+                Err(_) => not_found(req),
+            }
+        } else if path == "/reactive.js" {
+            match fs::read(REACTIVE_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }
@@ -65,6 +71,12 @@ fn main() {
         } else if let Some(name) = path.strip_prefix("/csr/") {
             if components.contains_key(name) {
                 respond(req, csr_page(name, query).into_bytes(), "text/html; charset=utf-8");
+            } else {
+                not_found(req);
+            }
+        } else if let Some(name) = path.strip_prefix("/reactive/") {
+            if components.contains_key(name) {
+                respond(req, reactive_page(name).into_bytes(), "text/html; charset=utf-8");
             } else {
                 not_found(req);
             }
@@ -170,6 +182,36 @@ fn csr_page(name: &str, query: &str) -> String {
   </script>"#
     );
     page_shell(&format!("CSR {name}"), &body)
+}
+
+/// 반응성 검증 페이지: 같은 컴포넌트를 path 'a'/'b'로 두 번 인스턴스화한다.
+/// 같은 offset0이 c1은 store.a(leaf0), c2는 store.b(leaf1)로 resolve된다.
+/// 버튼으로 set(0,..)/set(1,..)을 호출해 각각만 갱신되는지 눈으로 본다.
+fn reactive_page(name: &str) -> String {
+    let body = format!(
+        r#"  <p>같은 컴포넌트 2개. c1→store.a, c2→store.b. 버튼으로 한쪽만 갱신되는지 확인.</p>
+  <div id="c1"></div>
+  <div id="c2"></div>
+  <p>
+    <button id="s0">set(0, '1')</button>
+    <button id="s1">set(1, '2')</button>
+  </p>
+  <script type="module">
+    import {{ createComponent, set }} from "/reactive.js";
+    const res = await fetch("/components/{name}.qubb");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    const store = {{ a: '0', b: '0' }};
+    const render = createComponent(bytes, 0);   // 정의 준비
+    document.getElementById("c1").replaceChildren(render(store, ['a']));  // offset0 → store.a → leaf0
+    document.getElementById("c2").replaceChildren(render(store, ['b']));  // offset0 → store.b → leaf1
+
+    document.getElementById("s0").onclick = () => set(0, '1');
+    document.getElementById("s1").onclick = () => set(1, '2');
+    window.set = set; // 콘솔에서 직접 호출 가능
+  </script>"#
+    );
+    page_shell(&format!("Reactive {name}"), &body)
 }
 
 /// index.html을 읽어 React 빌드 엔트리 경로만 치환해 반환.
