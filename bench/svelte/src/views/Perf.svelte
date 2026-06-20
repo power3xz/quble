@@ -1,11 +1,12 @@
 <script>
   // Svelte 5 갱신 퍼포먼스 — Box 1만 개 중 5000개가 shared($state)를 구독.
   // shared 변경 → signal 구독자(5000개)만 직접 갱신(VDOM 없음). 나머지 5000개는 상수.
-  // reactive-perf.html(Quble)·react-perf.html(React)과 동일 시나리오.
+  // /quble/perf·/react/Perf와 동일 시나리오. _boot가 mount로 이 컴포넌트를 띄운다.
   import { flushSync } from "svelte";
   import Box from "./Box.svelte";
 
-  const N = 10000, HALF = N / 2;
+  const N = 10000;
+  const HALF = N / 2;
   let shared = $state("공유0");
   let log = $state("준비됨 — 버튼을 눌러 측정.");
 

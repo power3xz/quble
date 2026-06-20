@@ -78,40 +78,19 @@ fn main() {
         } else if let Some(name) = path.strip_prefix("/react-csr/") {
             let name = name.to_string();
             respond(req, react_csr_page(&name, query).into_bytes(), "text/html; charset=utf-8");
-        } else if path.starts_with("/react/") {
+        } else if path.starts_with("/react/assets/") {
             serve_react_asset(req, &path);
+        } else if let Some(name) = path.strip_prefix("/react/") {
+            // /react/<Name> → 부트 HTML. _boot.js가 views/<Name>.jsx를 동적 import 해 렌더.
+            respond(req, boot_page("/react/assets/_boot.js", name).into_bytes(), "text/html; charset=utf-8");
+        } else if path.starts_with("/svelte/assets/") {
+            serve_svelte_asset(req, &path);
+        } else if let Some(name) = path.strip_prefix("/svelte/") {
+            // /svelte/<Name> → 부트 HTML. _boot.js가 views/<Name>.svelte를 동적 import 해 mount.
+            respond(req, boot_page("/svelte/assets/_boot.js", name).into_bytes(), "text/html; charset=utf-8");
         } else if path.starts_with("/img/") {
             // 예제 상품 이미지는 전부 플레이스홀더 한 장으로.
             serve_public(req, "placeholder.svg");
-        } else if path == "/public/reactive-profilecard.html" {
-            // 좌우 비교 페이지 — React 엔트리(해시명)를 주입해 서빙.
-            match fs::read_to_string("public/reactive-profilecard.html") {
-                Ok(html) => {
-                    let html = html.replace("{{REACT_ENTRY}}", &react_entry_path());
-                    respond(req, html.into_bytes(), "text/html; charset=utf-8");
-                }
-                Err(_) => not_found(req),
-            }
-        } else if path == "/public/react-perf.html" {
-            // React 갱신 퍼포먼스 페이지 — perf 엔트리(해시명)를 주입해 서빙.
-            match fs::read_to_string("public/react-perf.html") {
-                Ok(html) => {
-                    let html = html.replace("{{REACT_ENTRY}}", &react_asset_path("perf-"));
-                    respond(req, html.into_bytes(), "text/html; charset=utf-8");
-                }
-                Err(_) => not_found(req),
-            }
-        } else if path == "/public/svelte-perf.html" {
-            // Svelte 갱신 퍼포먼스 페이지 — perf 엔트리(해시명)를 주입해 서빙.
-            match fs::read_to_string("public/svelte-perf.html") {
-                Ok(html) => {
-                    let html = html.replace("{{SVELTE_ENTRY}}", &svelte_asset_path("perf-"));
-                    respond(req, html.into_bytes(), "text/html; charset=utf-8");
-                }
-                Err(_) => not_found(req),
-            }
-        } else if path.starts_with("/svelte/") {
-            serve_svelte_asset(req, &path);
         } else if let Some(rel) = path.strip_prefix("/public/") {
             serve_public(req, rel);
         } else {
@@ -175,6 +154,25 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// 범용 부트 페이지: 빈 #root + 부트 스크립트. 부트가 URL의 <Name>으로 뷰를 동적 import 해 렌더한다.
+/// 뷰가 자체적으로 #log·#cards를 만들므로 공통 스타일만 둔다(perf 등 외형 일치).
+fn boot_page(boot_src: &str, name: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><title>{name}</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; }}
+  #log {{ white-space: pre-wrap; font-family: ui-monospace, monospace; background: #0f172a; color: #a5f3fc; padding: 12px; border-radius: 8px; }}
+  #cards > div {{ display: inline-block; font-size: 10px; padding: 1px 4px; margin: 1px; background: #e2e8f0; border-radius: 3px; }}
+  button {{ padding: 6px 12px; }}
+</style></head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="{boot_src}"></script>
+</body></html>"#
+    )
+}
+
 /// SSR·CSR 공통 페이지 셸. body만 다르고 골격(html+style)은 동일 — 외형을 맞춰 비교 가능.
 fn page_shell(title: &str, body: &str) -> String {
     format!(
@@ -208,49 +206,16 @@ fn csr_page(name: &str, query: &str) -> String {
     page_shell(&format!("CSR {name}"), &body)
 }
 
-/// index.html을 읽어 React 빌드 엔트리 경로만 치환해 반환.
+/// index.html을 읽어 React 빌드 엔트리 경로를 치환해 반환. (해시 없는 고정 파일명)
 fn page() -> String {
     let html = fs::read_to_string("index.html").expect("index.html 읽기 실패");
-    html.replace("{{REACT_ENTRY}}", &react_entry_path())
-}
-
-/// React 빌드의 기본 엔트리(main-*.js) 경로.
-fn react_entry_path() -> String {
-    react_asset_path("main-")
-}
-
-/// 해시된 빌드 산출물 중 prefix로 시작하는 .js 엔트리를 찾아 /react/ 경로로. 없으면 about:blank.
-fn react_asset_path(prefix: &str) -> String {
-    let dir = format!("{REACT_DIST}/assets");
-    let entry = fs::read_dir(&dir).ok().and_then(|rd| {
-        rd.filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .find(|n| n.starts_with(prefix) && n.ends_with(".js"))
-    });
-    match entry {
-        Some(name) => format!("/react/assets/{name}"),
-        None => "about:blank".to_string(),
-    }
-}
-
-/// 해시된 Svelte 빌드 산출물 중 prefix로 시작하는 .js 엔트리를 /svelte/ 경로로. 없으면 about:blank.
-fn svelte_asset_path(prefix: &str) -> String {
-    let dir = format!("{SVELTE_DIST}/assets");
-    let entry = fs::read_dir(&dir).ok().and_then(|rd| {
-        rd.filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .find(|n| n.starts_with(prefix) && n.ends_with(".js"))
-    });
-    match entry {
-        Some(name) => format!("/svelte/assets/{name}"),
-        None => "about:blank".to_string(),
-    }
+    html.replace("{{REACT_ENTRY}}", "/react/assets/main.js")
 }
 
 /// React CSR 페이지: 키=값 query를 props 객체로 주입하고 react-csr 번들을 로드해 클라 렌더.
 fn react_csr_page(component: &str, query: &str) -> String {
     let props_js = props_json_from_query(query);
-    let entry = react_asset_path("react-csr-");
+    let entry = "/react/assets/react-csr.js";
     let body = format!(
         r#"  <div id="root">로딩 중…</div>
   <script>window.__CSR__ = {{ component: "{component}", props: {props_js} }};</script>
