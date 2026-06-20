@@ -53,7 +53,7 @@ These are the load-bearing invariants any implementation must preserve:
   distinguished only through `provided`, never through handler names (§3.3).
 - **Handlers are a single entry point** for state change (`get`/`set`) and navigation
   (`goTo`) — not plain callbacks. `data` and `provided` types are compiler-generated from
-  the `events` schema bound to the fullname (§2.4).
+  the `events` schema bound to the fullname (§2.5).
 
 ## Language Surface
 
