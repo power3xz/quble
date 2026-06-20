@@ -6,25 +6,76 @@ mod ast;
 mod codegen;
 mod lexer;
 mod parse;
+mod resolve;
+
+pub use resolve::{ResolveError, Resolver};
+
+use std::path::Path;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
-    Lex(lexer::LexError),
-    Parse(parse::ParseError),
+    Resolve(resolve::ResolveError),
     Codegen(codegen::CodegenError),
 }
 
-/// 소스 문자열을 직렬화된 바이트코드로 컴파일. 한 파일에 여러 컴포넌트 정의를 담을 수 있다.
-pub fn compile(src: &str) -> Result<Box<[u8]>, CompileError> {
-    let tokens = lexer::lex(src).map_err(CompileError::Lex)?;
-    let comps = parse::parse(&tokens).map_err(CompileError::Parse)?;
+/// 엔트리 소스를 직렬화된 바이트코드로 컴파일. use 그래프를 resolver로 따라가
+/// 모든 컴포넌트를 한 모듈로 평탄화한다. entry_path는 엔트리 소스 자신의 정규화 경로로,
+/// 첫 use의 base가 된다(엔트리 컴포넌트가 ID 0).
+pub fn compile_src(
+    entry_path: &str,
+    src: &str,
+    resolver: &impl Resolver,
+) -> Result<Box<[u8]>, CompileError> {
+    let comps = resolve::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
     codegen::generate(&comps).map_err(CompileError::Codegen)
+}
+
+/// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
+/// 정규화한 절대경로로 해소한다(파일시스템 resolver).
+pub fn compile_file(path: &str) -> Result<Box<[u8]>, CompileError> {
+    let not_found = || {
+        CompileError::Resolve(ResolveError::NotFound {
+            base: String::new(),
+            target: path.to_string(),
+        })
+    };
+    let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
+    let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
+    compile_src(&entry.to_string_lossy(), &src, &fs_resolver)
+}
+
+/// 파일시스템 resolver: base 파일의 디렉터리 기준으로 target을 풀어 정규화한 절대경로와 소스를 반환.
+fn fs_resolver(base_canonical_path: &str, target_path: &str) -> Option<(String, String)> {
+    let dir = Path::new(base_canonical_path).parent()?;
+    let abs = std::fs::canonicalize(dir.join(target_path)).ok()?;
+    let src = std::fs::read_to_string(&abs).ok()?;
+    Some((abs.to_string_lossy().into_owned(), src))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::{AttrValue, Node};
+
+    /// use 없는 단일 소스를 컴파일(테스트용). resolver는 호출되지 않으므로 항상 None.
+    fn compile(src: &str) -> Result<Box<[u8]>, CompileError> {
+        compile_src("entry", src, &(|_: &str, _: &str| None))
+    }
+
+    /// 경로->소스 메모리맵으로 컴파일(테스트용). 경로 정규화 없이 문자열 그대로 키.
+    fn compile_map(entry_src: &str, files: &[(&str, &str)]) -> Result<Box<[u8]>, CompileError> {
+        let files: Vec<(String, String)> = files
+            .iter()
+            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .collect();
+        let resolver = |_base: &str, target: &str| {
+            files
+                .iter()
+                .find(|(p, _)| p == target)
+                .map(|(p, s)| (p.clone(), s.clone()))
+        };
+        compile_src("entry", entry_src, &resolver)
+    }
 
     const HELLO: &str = r#"
         component Hello {
@@ -40,9 +91,10 @@ mod tests {
     #[test]
     fn lex_then_parse_hello() {
         let toks = lexer::lex(HELLO).unwrap();
-        let comps = parse::parse(&toks).unwrap();
-        assert_eq!(comps.len(), 1);
-        let comp = &comps[0];
+        let source = parse::parse(&toks).unwrap();
+        assert!(source.uses.is_empty());
+        assert_eq!(source.comps.len(), 1);
+        let comp = &source.comps[0];
         assert_eq!(comp.name, "Hello");
         assert_eq!(comp.template.len(), 1);
         match &comp.template[0] {
@@ -54,7 +106,10 @@ mod tests {
                 assert_eq!(tag, "div");
                 assert_eq!(
                     attrs,
-                    &[("class".to_string(), AttrValue::Static("greeting".to_string()))]
+                    &[(
+                        "class".to_string(),
+                        AttrValue::Static("greeting".to_string())
+                    )]
                 );
                 assert_eq!(children.len(), 2);
             }
@@ -172,6 +227,112 @@ mod tests {
     #[test]
     fn missing_brace_errors() {
         let src = r#"component C { template { div() { } "#;
-        assert!(matches!(compile(src), Err(CompileError::Parse(_))));
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// 한 .qubc에서 여러 컴포넌트를 use. 셋 다 한 모듈로 평탄화돼야 한다 —
+    /// decode해서 def 개수(3)와 이름(Card/Thumb/Badge), 엔트리 Card가 ID 0인지 확인.
+    #[test]
+    fn use_multiple_from_one_source() {
+        use bytecode::decode;
+
+        let entry = r#"
+            use Thumb, Badge from "./parts.qubc"
+            component Card {
+              props { img, role }
+              template { div() { Thumb(src={img}) {} Badge(text={role}) {} } }
+            }
+        "#;
+        let parts = r#"
+            component Thumb {
+              props { src }
+              template { img(src={src}) {} }
+            }
+            component Badge {
+              props { text }
+              template { span() { {text} } }
+            }
+        "#;
+        let bytes = compile_map(entry, &[("./parts.qubc", parts)]).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        // def(0..)를 순서대로 읽어 이름을 모은다 — None이 나오면 끝.
+        let mut names = Vec::new();
+        let mut id = 0;
+        while let Some(def) = module.def(id) {
+            names.push(module.pool.get(def.name_idx).unwrap().to_string());
+            id += 1;
+        }
+        assert_eq!(names.len(), 3, "Card+Thumb+Badge 셋 다 들어가야 함");
+        assert_eq!(names[0], "Card", "엔트리가 ID 0");
+        assert!(names.contains(&"Thumb".to_string()));
+        assert!(names.contains(&"Badge".to_string()));
+    }
+
+    /// resolver가 경로를 못 찾으면 NotFound.
+    #[test]
+    fn use_unresolved_path_errors() {
+        let entry = r#"
+            use Label from "./missing.qubc"
+            component Card { template { Label() {} } }
+        "#;
+        assert!(matches!(
+            compile_map(entry, &[]),
+            Err(CompileError::Resolve(ResolveError::NotFound { .. }))
+        ));
+    }
+
+    /// use 한 이름이 대상 소스에 없으면 MissingExport.
+    #[test]
+    fn use_missing_export_errors() {
+        let entry = r#"
+            use Nope from "./parts.qubc"
+            component Card { template { div() {} } }
+        "#;
+        let parts = r#"component Label { template { span() {} } }"#;
+        assert!(matches!(
+            compile_map(entry, &[("./parts.qubc", parts)]),
+            Err(CompileError::Resolve(ResolveError::MissingExport { .. }))
+        ));
+    }
+
+    /// 서로 다른 소스에 같은 이름의 컴포넌트가 있으면 DuplicateComponent.
+    #[test]
+    fn use_duplicate_component_errors() {
+        let entry = r#"
+            use Card from "./other.qubc"
+            component Card { template { div() {} } }
+        "#;
+        let other = r#"component Card { template { span() {} } }"#;
+        assert!(matches!(
+            compile_map(entry, &[("./other.qubc", other)]),
+            Err(CompileError::Resolve(ResolveError::DuplicateComponent(_)))
+        ));
+    }
+
+    /// use 그래프에 순환이 있으면 Cycle. entry -> a -> entry.
+    #[test]
+    fn use_cycle_errors() {
+        let entry = r#"
+            use A from "./a.qubc"
+            component Entry { template { A() {} } }
+        "#;
+        // a가 다시 entry를 use. resolver는 "entry"(엔트리 path)도 매핑한다.
+        let a = r#"
+            use Entry from "./entry.qubc"
+            component A { template { Entry() {} } }
+        "#;
+        let resolver = move |_base: &str, target: &str| match target {
+            "./a.qubc" => Some(("./a.qubc".to_string(), a.to_string())),
+            "./entry.qubc" => Some(("entry".to_string(), String::new())),
+            _ => None,
+        };
+        assert!(matches!(
+            compile_src("entry", entry, &resolver),
+            Err(CompileError::Resolve(ResolveError::Cycle(_)))
+        ));
     }
 }

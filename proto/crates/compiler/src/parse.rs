@@ -7,7 +7,7 @@
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
-use crate::ast::{AttrValue, Component, Node};
+use crate::ast::{AttrValue, Component, Node, Source, Use};
 use crate::lexer::Token;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -16,14 +16,32 @@ pub enum ParseError {
     Expected { want: String, got: String },
 }
 
-/// 한 파일의 컴포넌트 정의들을 순서대로 파싱. 정의 순서 = 컴포넌트 ID.
-pub fn parse(tokens: &[Token]) -> Result<Vec<Component>, ParseError> {
+/// 한 소스를 파싱. 최상위 use 문(있으면 component 앞)과 컴포넌트 정의들을 모은다.
+/// 컴포넌트 정의 순서는 codegen에서 의미를 갖지 않는다(CompLookup이 forward 참조 허용).
+pub fn parse(tokens: &[Token]) -> Result<Source, ParseError> {
     let mut p = Parser { tokens, pos: 0 };
+    let mut uses = Vec::new();
     let mut comps = Vec::new();
-    while p.peek().is_some() {
-        comps.push(p.component()?);
+    while let Some(Token::Ident(s)) = p.peek() {
+        match s.as_str() {
+            "use" => uses.push(p.use_decl()?),
+            "component" => comps.push(p.component()?),
+            other => {
+                return Err(ParseError::Expected {
+                    want: "use or component".into(),
+                    got: other.to_string(),
+                })
+            }
+        }
     }
-    Ok(comps)
+    // 토큰이 남았는데 Ident가 아니면 최상위에 올 수 없는 토큰.
+    if let Some(t) = p.peek() {
+        return Err(ParseError::Expected {
+            want: "use or component".into(),
+            got: format!("{t:?}"),
+        });
+    }
+    Ok(Source { uses, comps })
 }
 
 struct Parser<'a> {
@@ -77,6 +95,28 @@ impl<'a> Parser<'a> {
         }
     }
 
+
+    // use IDENT (, IDENT)* from STRING
+    fn use_decl(&mut self) -> Result<Use, ParseError> {
+        self.keyword("use")?;
+        let mut names = Vec::new();
+        names.push(self.ident()?);
+        while matches!(self.peek(), Some(Token::Comma)) {
+            self.next()?;
+            names.push(self.ident()?);
+        }
+        self.keyword("from")?;
+        let path = match self.next()? {
+            Token::Str(s) => s.clone(),
+            got => {
+                return Err(ParseError::Expected {
+                    want: "string path".into(),
+                    got: format!("{got:?}"),
+                })
+            }
+        };
+        Ok(Use { names, path })
+    }
 
     // component IDENT { [props { ... }] template { NODE* } }
     fn component(&mut self) -> Result<Component, ParseError> {

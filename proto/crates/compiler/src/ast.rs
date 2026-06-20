@@ -1,5 +1,19 @@
 //! AST. 한 파일에 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간(텍스트·속성).
 
+/// 한 소스(.qubc 한 파일)의 파싱 결과: 최상위 use 문들 + 컴포넌트 정의들.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Source {
+    pub uses: Vec<Use>,
+    pub comps: Vec<Component>,
+}
+
+/// `use A, B from "path"` — path 소스에서 이름 A·B를 현재 스코프로 가져온다.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Use {
+    pub names: Vec<String>,
+    pub path: String,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Component {
     pub name: String,

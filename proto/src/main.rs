@@ -10,15 +10,8 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let src = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("파일 읽기 실패 {path}: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let bytes = match compiler::compile(&src) {
+    // compile_file이 엔트리 파일을 읽고, use는 importer 기준 상대경로로 해소한다.
+    let bytes = match compiler::compile_file(&path) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("컴파일 실패: {e:?}");
