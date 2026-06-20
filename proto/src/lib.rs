@@ -111,4 +111,47 @@ mod tests {
             r#"<div class="card"><h2>제목</h2><span class="label">본문</span></div>"#
         );
     }
+
+    /// 한 외부 소스에서 여러 컴포넌트를 use 해 둘 다 합성. compile -> 바이트코드 -> render 전 과정.
+    /// Thumb·Badge 둘 다 출력에 나타나야 한다.
+    #[test]
+    fn use_multiple_components_render() {
+        let entry = r#"
+            use Thumb, Badge from "./parts.qubc"
+            component Card {
+              props { img, role }
+              template {
+                div(class="card") {
+                  Thumb(src={img}) {}
+                  Badge(text={role}) {}
+                }
+              }
+            }
+        "#;
+        let parts = r#"
+            component Thumb {
+              props { src }
+              template { img(src={src}) {} }
+            }
+            component Badge {
+              props { text }
+              template { span(class="badge") { {text} } }
+            }
+        "#;
+        let resolve = |_base: &str, target: &str| {
+            (target == "./parts.qubc").then(|| (target.to_string(), parts.to_string()))
+        };
+        let html = render_with(
+            "entry",
+            entry,
+            &resolve,
+            0,
+            &["/img/a".to_string(), "엔지니어".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            html,
+            r#"<div class="card"><img src="/img/a"></img><span class="badge">엔지니어</span></div>"#
+        );
+    }
 }
