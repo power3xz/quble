@@ -3,7 +3,9 @@
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-const name = location.pathname.split("/").filter(Boolean).pop();
+// 보통은 /react/<Name> 경로 끝에서 뷰명을 읽지만, 다른 페이지(좌우 비교 html 등)에
+// 직접 임베드할 땐 window.__VIEW__ 로 뷰명을 지정한다.
+const name = window.__VIEW__ ?? location.pathname.split("/").filter(Boolean).pop();
 
 import(`./views/${name}.jsx`).then((mod) => {
   const t0 = performance.now();

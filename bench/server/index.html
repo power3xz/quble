@@ -31,8 +31,6 @@
     await mount("article", "q-article");
   </script>
 
-  <!-- React 비교: 빌드 엔트리는 서버가 {{REACT_ENTRY}}로 치환 -->
-  <script type="module" src="{{REACT_ENTRY}}"></script>
   <script>
     function sumBy(re) {
       const es = performance.getEntriesByType("resource").filter(e => re.test(e.name));

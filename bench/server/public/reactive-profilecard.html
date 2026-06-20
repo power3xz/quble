@@ -85,7 +85,7 @@
       <div class="cards" id="quble-root"></div>
     </div>
     <div class="pane">
-      <h2>React — /react/assets/main.js (+ ProfileCard 청크)</h2>
+      <h2>React — /react/assets/_boot.js (ProfileCards 뷰 + ProfileCard 청크)</h2>
       <div id="root"></div>
     </div>
   </div>
@@ -128,7 +128,8 @@
     }
   </script>
 
-  <!-- React: 빌드된 main 엔트리가 lazy로 ProfileCard 청크를 당겨 #root에 렌더. -->
-  <script type="module" src="/react/assets/main.js"></script>
+  <!-- React: 범용 부트(_boot)가 views/ProfileCards를 동적 import 해 #root에 렌더. -->
+  <script>window.__VIEW__ = "ProfileCards";</script>
+  <script type="module" src="/react/assets/_boot.js"></script>
 </body>
 </html>

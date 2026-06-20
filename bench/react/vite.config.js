@@ -7,10 +7,9 @@ export default {
   build: {
     minify: "esbuild",
     rollupOptions: {
-      // 기본 진입점(index.html, 상품그리드) + CSR(react-csr) + 범용 부트(_boot).
+      // CSR(react-csr) + 범용 부트(_boot).
       // _boot가 views/<Name>.jsx를 동적 import → /react/<Name>로 라우팅.
       input: {
-        main: resolve(__dirname, "index.html"),
         "react-csr": resolve(__dirname, "src/react-csr.jsx"),
         _boot: resolve(__dirname, "src/_boot.jsx"),
       },

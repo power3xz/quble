@@ -206,10 +206,9 @@ fn csr_page(name: &str, query: &str) -> String {
     page_shell(&format!("CSR {name}"), &body)
 }
 
-/// index.html을 읽어 React 빌드 엔트리 경로를 치환해 반환. (해시 없는 고정 파일명)
+/// 루트 인덱스 페이지(index.html)를 그대로 반환.
 fn page() -> String {
-    let html = fs::read_to_string("index.html").expect("index.html 읽기 실패");
-    html.replace("{{REACT_ENTRY}}", "/react/assets/main.js")
+    fs::read_to_string("index.html").expect("index.html 읽기 실패")
 }
 
 /// React CSR 페이지: 키=값 query를 props 객체로 주입하고 react-csr 번들을 로드해 클라 렌더.

@@ -1,12 +1,7 @@
-import { lazy, Suspense } from "react";
-import { createRoot } from "react-dom/client";
+import ProfileCard from "../ProfileCard.jsx";
 
-// 각 컴포넌트를 별도 청크로 분리 → 비동기 로드되는 chunk 크기를 측정.
-const ProductGrid = lazy(() => import("./ProductGrid.jsx"));
-const Article = lazy(() => import("./Article.jsx"));
-const ProfileCard = lazy(() => import("./ProfileCard.jsx"));
-
-// 렌더 시점에 데이터 주입 — 같은 ProfileCard를 5장. (reactive-profilecard.html과 동일 데이터)
+// 자기완결 뷰 — 같은 ProfileCard를 데이터만 다르게 5장. (reactive-profilecard.html의 Quble 쪽과 동일 데이터)
+// 데이터는 이 뷰가 들고, props 받는 ProfileCard를 import 한다.
 const common = {
   followersLabel: "팔로워", followingLabel: "팔로잉", postsLabel: "게시물",
   locationIcon: "📍", companyIcon: "🏢",
@@ -20,12 +15,12 @@ const people = [
   { name: "정이",   role: "프론트",   bio: "반응성 모델에 관심이 많습니다. 런타임을 작게 유지하려 애씁니다.", avatar: "/img/e", link: "/u/e", theme: "violet", followers: "5.6k", following: "90",  posts: "233", location: "서울", company: "Quble Inc.", site: "/s/e", github: "/gh/e", twitter: "/tw/e", act1Text: "런타임 4kb 달성", act2Text: "합성 바인딩 구현", act3Text: "DOM 갱신 경로 단순화", tag1: "frontend", tag2: "reactive", tag3: "dom", tag4: "perf" },
 ];
 
-createRoot(document.getElementById("root")).render(
-  <Suspense fallback={null}>
+export default function ProfileCards() {
+  return (
     <div className="cards">
       {people.map((p, i) => (
         <ProfileCard key={i} {...common} {...p} />
       ))}
     </div>
-  </Suspense>,
-);
+  );
+}
