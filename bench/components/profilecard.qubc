@@ -1,3 +1,11 @@
+use Thumbnail from "./thumbnail.qubc"
+use Badge from "./badge.qubc"
+use Stat from "./stat.qubc"
+use MetaRow from "./metarow.qubc"
+use Activity from "./activity.qubc"
+use Tag from "./tag.qubc"
+use LinkButton from "./linkbutton.qubc"
+
 component ProfileCard {
   props {
     name, role, bio, avatar, link, theme,
@@ -44,64 +52,5 @@ component ProfileCard {
       }
       a(class="profile" href={link}) { "전체 프로필 보기" }
     }
-  }
-}
-
-component Thumbnail {
-  props { avatar, name }
-  template {
-    img(class="avatar" src={avatar} alt={name}) {}
-  }
-}
-
-component Badge {
-  props { role, theme }
-  template {
-    span(class={theme}) { {role} }
-  }
-}
-
-component Stat {
-  props { label, value }
-  template {
-    div(class="stat") {
-      span(class="value") { {value} }
-      span(class="label") { {label} }
-    }
-  }
-}
-
-component MetaRow {
-  props { icon, text }
-  template {
-    p(class="metarow") {
-      span(class="icon") { {icon} }
-      span(class="text") { {text} }
-    }
-  }
-}
-
-component Activity {
-  props { icon, text, time }
-  template {
-    div(class="act") {
-      span(class="icon") { {icon} }
-      span(class="text") { {text} }
-      span(class="time") { {time} }
-    }
-  }
-}
-
-component Tag {
-  props { text, theme }
-  template {
-    span(class={theme}) { "#" {text} }
-  }
-}
-
-component LinkButton {
-  props { link, theme }
-  template {
-    a(class={theme} href={link}) { "프로필 보기" }
   }
 }

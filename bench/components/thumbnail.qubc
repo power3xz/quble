@@ -1,0 +1,6 @@
+component Thumbnail {
+  props { avatar, name }
+  template {
+    img(class="avatar" src={avatar} alt={name}) {}
+  }
+}

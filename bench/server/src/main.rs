@@ -109,8 +109,10 @@ fn build_components() -> HashMap<String, Vec<u8>> {
             continue;
         }
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap().to_string();
-        let src = fs::read_to_string(&path).expect("qubc 읽기 실패");
-        let bytes = compiler::compile(&src).expect("컴파일 실패").into_vec();
+        // compile_file이 엔트리를 읽고 use는 importer 기준 상대경로로 해소한다.
+        let bytes = compiler::compile_file(path.to_str().unwrap())
+            .expect("컴파일 실패")
+            .into_vec();
         map.insert(name, bytes);
     }
     map

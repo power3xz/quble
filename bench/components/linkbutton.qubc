@@ -1,0 +1,6 @@
+component LinkButton {
+  props { link, theme }
+  template {
+    a(class={theme} href={link}) { "프로필 보기" }
+  }
+}

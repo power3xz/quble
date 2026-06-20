@@ -1,0 +1,9 @@
+component MetaRow {
+  props { icon, text }
+  template {
+    p(class="metarow") {
+      span(class="icon") { {icon} }
+      span(class="text") { {text} }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+component Tag {
+  props { text, theme }
+  template {
+    span(class={theme}) { "#" {text} }
+  }
+}

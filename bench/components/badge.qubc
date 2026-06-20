@@ -1,0 +1,6 @@
+component Badge {
+  props { role, theme }
+  template {
+    span(class={theme}) { {role} }
+  }
+}

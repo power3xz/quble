@@ -1,0 +1,10 @@
+component Activity {
+  props { icon, text, time }
+  template {
+    div(class="act") {
+      span(class="icon") { {icon} }
+      span(class="text") { {text} }
+      span(class="time") { {time} }
+    }
+  }
+}

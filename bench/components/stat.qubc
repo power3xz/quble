@@ -1,0 +1,9 @@
+component Stat {
+  props { label, value }
+  template {
+    div(class="stat") {
+      span(class="value") { {value} }
+      span(class="label") { {label} }
+    }
+  }
+}
