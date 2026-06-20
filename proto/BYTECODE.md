@@ -137,6 +137,9 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ATTR_G_VAR`      | 0x09 | name: u16, idx: u16   | name=전역, idx=scope      | ` name="scope[idx]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
 | `ATTR_L_VAR`      | 0x0a | name: u16, idx: u16   | name=컴포넌트, idx=scope  | ` name="scope[idx]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수.        |
 | `PUSH_ARG`        | 0x0b | offset: u16           | scope                     | 부모 `scope[offset]`을 자식 인자 버퍼에 push. 뒤따르는 `RENDER`가 소비.     |
+| `IF`              | 0x0c | cond: u16             | scope                     | `scope[cond]`(불리언)으로 분기 시작. then 가지 코드가 이어진다.            |
+| `ELSE`            | 0x0d | —                     | —                         | then 가지 끝, else 가지 시작. (else 있을 때만)                            |
+| `IF_END`          | 0x0e | —                     | —                         | if 블록 끝.                                                              |
 
 설계 메모:
 
@@ -165,7 +168,35 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 - 속성은 **두 축**으로 갈린다 — name(전역 `G` / 컴포넌트 `L`) × value(정적 / 변수 `_VAR`).
   네 조합이 `ATTR_G`·`ATTR_L`·`ATTR_G_VAR`·`ATTR_L_VAR`. 변수 속성값의 idx는 **`TEXT_VAR`와
   같은 scope offset 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 값 배열).
-- 분기/반복(`@if`/`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다.
+- **분기 — `IF`/`ELSE`/`IF_END` (마커).** `@if`/`@else`를 세 마커로 감싼다. 형태와 "왜 점프가
+  없어야 하는가"는 §5.1에서 따로 설명한다.
+- 반복(`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다. 방향만 — 점프 없이 **해석단이
+  본문 구간을 N회 반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계 표기·leafIndex 회수
+  (REACTIVITY.md §3)가 엮여 별도 작업.
+
+## 5.1 분기 — `IF`/`ELSE`/`IF_END`
+
+```
+if-only :  IF cond  [then]            IF_END
+if-else :  IF cond  [then]  ELSE  [else]  IF_END
+```
+
+`cond`는 불리언 scope offset 하나(truthy면 then, falsy면 else). 표현식 조건은 `{expr}`에서 확장.
+
+양쪽 가지를 다 해석해 두 청사진을 모두 들고 있되, **활성 가지만 build**(DOM·구독 생성)한다.
+비활성 가지는 청사진으로만 보관 — 구독이 없어 `set`이 와도 갱신 대상이 아니다. `cond`가 바뀌면
+현재 가지를 버리고 반대 청사진을 build 한다.
+
+### 왜 점프가 없어야 하는가
+
+해석기는 pc를 어디로도 점프시키지 않고 모든 바이트를 순차 해석한다. 마커는 가지 경계만 표시한다.
+점프를 두지 않는 건 단순함이 아니라 원칙이다:
+
+- **트리는 항상 올바르게 중첩되어야 한다.** `ELEM_END`가 operand 없이 "스택 top을 닫는다"로
+  성립하는 건 *연 만큼 닫는다*는 전제 덕이다. 점프는 그 짝을 깬다 — 열고 안 닫거나, 안 열고 닫게
+  된다. 분기도 중첩 블록이라 통째로 들어가거나 안 들어가거나 둘 뿐, 블록 중간으로 뛰어들 일이 없다.
+- **선언이지 명령이 아니다.** 템플릿은 "이 트리를 그려라"는 선언이다. 블록 경계를 무시하고 임의
+  위치로 가는 흐름(break·goto류)은 이 모델에 속하지 않는다. 점프는 우리가 갖지 않기로 한 의미다.
 
 ### 이스케이프 규칙
 
