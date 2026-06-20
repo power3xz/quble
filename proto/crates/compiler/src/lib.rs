@@ -335,4 +335,70 @@ mod tests {
             Err(CompileError::Resolve(ResolveError::Cycle(_)))
         ));
     }
+
+    /// 모듈의 컴포넌트 이름들을 정의 순서대로 뽑는다(테스트용).
+    fn component_names(bytes: &[u8]) -> Vec<String> {
+        let module = bytecode::decode(bytes).unwrap();
+        let mut names = Vec::new();
+        let mut id = 0;
+        while let Some(def) = module.def(id) {
+            names.push(module.pool.get(def.name_idx).unwrap().to_string());
+            id += 1;
+        }
+        names
+    }
+
+    /// 트리셰이킹: use에 나열 안 한 컴포넌트는 병합에서 빠진다.
+    /// parts에 Used·Unused 둘 다 있지만 Used만 use → 산출물에 Used만.
+    #[test]
+    fn use_excludes_unlisted_components() {
+        let entry = r#"
+            use Used from "./parts.qubc"
+            component Card { template { Used() {} } }
+        "#;
+        let parts = r#"
+            component Used { template { span() {} } }
+            component Unused { template { div() {} } }
+        "#;
+        let bytes = compile_map(entry, &[("./parts.qubc", parts)]).unwrap();
+        let names = component_names(&bytes);
+        assert_eq!(names, vec!["Card", "Used"], "Unused는 제외돼야 함");
+    }
+
+    /// 같은 파일을 두 곳에서 서로 다른 이름으로 use(다이아몬드) → 둘 다 들어간다(합집합).
+    #[test]
+    fn use_diamond_unions_wanted_names() {
+        let entry = r#"
+            use Left from "./left.qubc"
+            use Right from "./right.qubc"
+            component Card { template { Left() {} Right() {} } }
+        "#;
+        // Left·Right는 같은 parts에서 각각 X·Y를 use한다.
+        let left = r#"
+            use X from "./parts.qubc"
+            component Left { template { X() {} } }
+        "#;
+        let right = r#"
+            use Y from "./parts.qubc"
+            component Right { template { Y() {} } }
+        "#;
+        let parts = r#"
+            component X { template { span() {} } }
+            component Y { template { div() {} } }
+            component Z { template { p() {} } }
+        "#;
+        let bytes = compile_map(
+            entry,
+            &[
+                ("./left.qubc", left),
+                ("./right.qubc", right),
+                ("./parts.qubc", parts),
+            ],
+        )
+        .unwrap();
+        let names = component_names(&bytes);
+        assert!(names.contains(&"X".to_string()), "Left가 use한 X");
+        assert!(names.contains(&"Y".to_string()), "Right가 use한 Y");
+        assert!(!names.contains(&"Z".to_string()), "아무도 use 안 한 Z는 제외");
+    }
 }

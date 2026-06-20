@@ -39,44 +39,82 @@ pub enum ResolveError {
     Cycle(String),
 }
 
-/// 엔트리 소스를 파싱하고 use 그래프를 따라가 모든 컴포넌트를 평탄화한다.
-/// 각 소스의 컴포넌트를 먼저 acc에 넣고 의존성을 뒤에 붙인다(전위 순회) — 엔트리가 ID 0.
-/// child_id 해소는 codegen의 CompLookup이 전체를 먼저 보므로 순서와 무관하다.
+/// 엔트리 소스를 파싱하고 use 그래프를 따라가 컴포넌트를 평탄화한다.
+/// 엔트리는 모든 컴포넌트를 가져가고(ID 0부터), use 대상 파일은 나열된 이름만 가져온다.
+/// 안 쓰는 컴포넌트는 병합에서 제외된다 — 쓰려면 codegen이 CompLookup에서 막는다.
 pub fn flatten(
     entry_path: &str,
     entry_src: &str,
     resolver: &impl Resolver,
 ) -> Result<Vec<Component>, ResolveError> {
-    let mut acc = Vec::new();
-    let mut visited = Vec::new(); // 수집 끝난 정규화 경로 (다이아몬드 skip)
-    let mut visiting = Vec::new(); // 현재 DFS 경로의 정규화 경로 (순환 감지)
-    collect(entry_path, entry_src, resolver, &mut acc, &mut visited, &mut visiting)?;
-    Ok(acc)
+    let mut ctx = Ctx {
+        acc: Vec::new(),
+        origin: Vec::new(),
+        recursed: Vec::new(),
+        visiting: Vec::new(),
+    };
+    // 엔트리는 want=None — 자기 파일 컴포넌트 전부.
+    collect(entry_path, entry_src, None, resolver, &mut ctx)?;
+    Ok(ctx.acc)
 }
 
-/// 한 소스의 의존성을 먼저 재귀로 끌어오고, 그 소스의 컴포넌트를 acc에 더한다.
-/// path = 이 소스 자신의 정규화 경로 (자식 use의 base이자 중복/순환 키).
+struct Ctx {
+    acc: Vec<Component>,        // 평탄화 결과 (엔트리 ID 0, 순서 유지)
+    origin: Vec<(String, String)>, // (컴포넌트명, 출처 정규화 경로) — 동명 충돌 판정용
+    recursed: Vec<String>,     // 의존성 재귀를 끝낸 경로 (한 파일의 use 그래프는 한 번만 탐)
+    visiting: Vec<String>,     // 현재 DFS 경로 (순환 감지)
+}
+
+/// 한 파일에서 want에 해당하는 컴포넌트를 acc에 보장하고(멱등), 그 파일의 의존성을 재귀한다.
+/// want=None이면 그 파일의 모든 컴포넌트(엔트리). want=Some이면 나열된 이름만.
+/// path = 이 소스의 정규화 경로 (자식 use의 base이자 재귀/순환 키).
 fn collect(
     path: &str,
     src: &str,
+    want: Option<&[String]>,
     resolver: &impl Resolver,
-    acc: &mut Vec<Component>,
-    visited: &mut Vec<String>,
-    visiting: &mut Vec<String>,
+    ctx: &mut Ctx,
 ) -> Result<(), ResolveError> {
     let tokens = lexer::lex(src).map_err(ResolveError::Lex)?;
     let source = parse::parse(&tokens).map_err(ResolveError::Parse)?;
 
-    // 이 소스의 컴포넌트를 먼저 넣는다(엔트리가 맨 앞 = ID 0). 그 다음 의존성을 뒤에 붙인다.
-    for comp in source.comps {
-        if acc.iter().any(|c| c.name == comp.name) {
-            return Err(ResolveError::DuplicateComponent(comp.name.clone()));
-        }
-        acc.push(comp);
-    }
-    visited.push(path.to_string());
+    // want로 가져올 컴포넌트를 고른다. None이면 전부.
+    let take = |name: &str| want.map_or(true, |ns| ns.iter().any(|n| n == name));
 
-    visiting.push(path.to_string());
+    // 나열한 이름이 이 파일에 실제로 있는지(오타 방지).
+    if let Some(names) = want {
+        for name in names {
+            if !source.comps.iter().any(|c| &c.name == name) {
+                return Err(ResolveError::MissingExport {
+                    path: path.to_string(),
+                    name: name.clone(),
+                });
+            }
+        }
+    }
+
+    // 가져올 컴포넌트를 acc에 넣는다. 같은 이름이 다른 파일에서 왔으면 충돌, 같은 파일이면 다이아몬드(skip).
+    for comp in source.comps {
+        if !take(&comp.name) {
+            continue;
+        }
+        if let Some((_, origin)) = ctx.origin.iter().find(|(n, _)| n == &comp.name) {
+            if origin != path {
+                return Err(ResolveError::DuplicateComponent(comp.name.clone()));
+            }
+            continue; // 같은 파일 같은 컴포넌트 — 이미 들어감.
+        }
+        ctx.origin.push((comp.name.clone(), path.to_string()));
+        ctx.acc.push(comp);
+    }
+
+    // 이 파일의 의존성 재귀는 한 번만 (다이아몬드여도 use 그래프는 한 번 탐).
+    if ctx.recursed.iter().any(|p| p == path) {
+        return Ok(());
+    }
+    ctx.recursed.push(path.to_string());
+
+    ctx.visiting.push(path.to_string());
     for u in &source.uses {
         let (target_path, target_src) =
             resolver
@@ -86,33 +124,12 @@ fn collect(
                     target: u.path.clone(),
                 })?;
 
-        if visiting.iter().any(|v| v == &target_path) {
+        if ctx.visiting.iter().any(|v| v == &target_path) {
             return Err(ResolveError::Cycle(target_path));
         }
-
-        // 이미 수집한 소스라도, use 한 이름이 거기 실제로 있는지는 확인한다(오타 방지).
-        verify_exports(&target_path, &target_src, &u.names)?;
-
-        if visited.iter().any(|v| v == &target_path) {
-            continue; // 다이아몬드 — 한 번만 수집.
-        }
-        collect(&target_path, &target_src, resolver, acc, visited, visiting)?;
+        // use 대상은 나열된 이름만 가져온다.
+        collect(&target_path, &target_src, Some(&u.names), resolver, ctx)?;
     }
-    visiting.pop();
-    Ok(())
-}
-
-/// use 한 이름들이 대상 소스에 정의돼 있는지 검사.
-fn verify_exports(path: &str, src: &str, names: &[String]) -> Result<(), ResolveError> {
-    let tokens = lexer::lex(src).map_err(ResolveError::Lex)?;
-    let source = parse::parse(&tokens).map_err(ResolveError::Parse)?;
-    for name in names {
-        if !source.comps.iter().any(|c| &c.name == name) {
-            return Err(ResolveError::MissingExport {
-                path: path.to_string(),
-                name: name.clone(),
-            });
-        }
-    }
+    ctx.visiting.pop();
     Ok(())
 }
