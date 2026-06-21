@@ -7,10 +7,21 @@
 // Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
 // 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 — 단순한 "호출 시 훑기"를 택했다.)
 //
-// Instance = { nodes }  — 루트 노드들(부착·추적용). destroy(구독 해제)는 if/for 단계에서.
+// Instance = { nodes, regions }  — nodes는 루트 노드들(부착·추적용). regions는 이 인스턴스의
+// 모든 Region(@if swap 경계). 구독은 가지(Branch)에 모이고 activateBranch가 켤 때 건다 — 그래서
+// 안 보이는 가지는 구독 0이다. region 구조·동작은 region.js 참고. (1단계: 단일 컴포넌트 안의 if만.
+// RENDER 자식 컴포넌트의 region 병합은 다음 단계.)
 //
 // 인덱스 세 축은 reactive.js와 동일 (REACTIVITY.md §1~§3):
 //   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.resolve가 lazy 발급).
+
+import {
+  THEN_INDEX,
+  ELSE_INDEX,
+  createRegion,
+  createBranch,
+  activateBranch,
+} from "./region.js";
 
 const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
 const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
@@ -28,26 +39,34 @@ const OP = {
   ATTR_G_VAR: 0x09,
   ATTR_L_VAR: 0x0a,
   PUSH_ARG: 0x0b,
+  IF: 0x0c,
+  ELSE: 0x0d,
+  IF_END: 0x0e,
 };
 
-// ── store 컨텍스트 (reactive.js와 동일 pub/sub) ───────────────────────
+// ── store 컨텍스트 (pub/sub) ──────────────────────────────────────────
 export const createStore = (defaultValue) => {
   const leaves = [];
-  const subscribers = []; // leafIndex → [(v)=>void, ...]
+  const subscribers = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
   const pathCache = new Map(); // path → leafIndex
 
   const set = (leafIndex, value) => {
     leaves[leafIndex] = value;
     const subs = subscribers[leafIndex];
     if (subs) {
-      for (const fn of subs) {
+      // 스냅샷 순회 — 콜백(cond)이 activateBranch로 구독을 해제할 수 있어 원본 순회는 깨진다.
+      for (const fn of [...subs]) {
         fn(value);
       }
     }
   };
 
   const subscribe = (leafIndex, fn) => {
-    (subscribers[leafIndex] ??= []).push(fn);
+    (subscribers[leafIndex] ??= new Set()).add(fn);
+  };
+
+  const unsubscribe = (leafIndex, fn) => {
+    subscribers[leafIndex]?.delete(fn);
   };
 
   const resolve = (path) => {
@@ -61,7 +80,7 @@ export const createStore = (defaultValue) => {
     return leafIndex;
   };
 
-  return { leaves, set, subscribe, resolve };
+  return { leaves, set, subscribe, unsubscribe, resolve };
 };
 
 const readPath = (defaultValue, path) => {
@@ -158,19 +177,29 @@ const compileDef = (module, compId, blueprintOf) => {
 
   return (ctx, paths) => {
     const fragment = document.createDocumentFragment();
-    const stack = [fragment];
+    const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
     let pending = null;
     let args = [];
     let pc = 0;
+
+    // region 스택 — 구독 소속 가지 추적(노드 스택과 직교). region-build 실험에서 확정.
+    const rootRegion = createRegion(-1, null); // 루트 = swap 없는 껍데기
+    rootRegion.branches[THEN_INDEX] = createBranch();
+    const regions = [rootRegion];
+    const regionStack = [0]; // top = 현재 Region 인덱스
+    let currentBranchIndex = THEN_INDEX; // 빌드타임 임시. IF=then, ELSE=else.
+    const branchStack = []; // IF_END에서 currentBranchIndex 복원용
 
     const u16at = () => {
       const v = code[pc] | (code[pc + 1] << 8);
       pc += 2;
       return v;
     };
-    const top = () => stack[stack.length - 1];
+    const nodeTop = () => nodeStack[nodeStack.length - 1];
+    const currentBranch = () => regions[regionStack[regionStack.length - 1]].branches[currentBranchIndex];
 
-    // offset → leafIndex로 해석(지연)하고 초기값을 돌려준다. update를 그 리프에 구독.
+    // offset → leafIndex로 해석(지연)하고 초기값을 돌려준다. 구독은 즉시 걸지 않고 현재 가지에
+    // 모은다 — activateBranch가 그 가지를 켤 때 건다(안 보이는 가지는 구독 0).
     const bindVar = (offset, update) => {
       const path = paths[offset];
       if (path === undefined) {
@@ -178,7 +207,9 @@ const compileDef = (module, compId, blueprintOf) => {
       }
       const leafIndex = ctx.resolve(path);
       const initial = ctx.leaves[leafIndex] ?? "";
-      ctx.subscribe(leafIndex, update);
+      const branch = currentBranch();
+      branch.leafIndices.push(leafIndex);
+      branch.updateFns.push(update);
       return initial;
     };
 
@@ -218,23 +249,23 @@ const compileDef = (module, compId, blueprintOf) => {
           break;
         }
         case OP.ELEM_CLOSE_OPEN: {
-          top().appendChild(pending);
-          stack.push(pending);
+          nodeTop().appendChild(pending);
+          nodeStack.push(pending);
           pending = null;
           break;
         }
         case OP.TEXT: {
-          top().appendChild(document.createTextNode(module.pool[u16at()]));
+          nodeTop().appendChild(document.createTextNode(module.pool[u16at()]));
           break;
         }
         case OP.TEXT_VAR: {
           const node = document.createTextNode("");
           node.textContent = bindVar(u16at(), (v) => (node.textContent = v));
-          top().appendChild(node);
+          nodeTop().appendChild(node);
           break;
         }
         case OP.ELEM_END: {
-          stack.pop();
+          nodeStack.pop();
           break;
         }
         case OP.PUSH_ARG: {
@@ -253,8 +284,49 @@ const compileDef = (module, compId, blueprintOf) => {
           // 자식 청사진을 registry에서 꺼내(없으면 등록) 인스턴스화. 같은 ctx 공유 → path 공유 성립.
           const childInstance = blueprintOf(childCompId)(ctx, childPaths);
           for (const n of childInstance.nodes) {
-            top().appendChild(n);
+            nodeTop().appendChild(n);
           }
+          break;
+        }
+        case OP.IF: {
+          const condOffset = u16at();
+          const condLeafIndex = ctx.resolve(paths[condOffset]);
+          const region = createRegion(condLeafIndex, null);
+          const regionIndex = regions.length;
+          regions.push(region);
+          currentBranch().childRegionIndices.push(regionIndex); // 부모 가지에 자식 등록
+          region.branches[THEN_INDEX] = createBranch();
+          region.branches[ELSE_INDEX] = createBranch();
+          // anchor: if 자리 고정용 주석 노드. 활성 가지 노드는 이 뒤에 붙는다.
+          region.anchor = document.createComment("qb:region#" + regionIndex);
+          nodeTop().appendChild(region.anchor);
+          regionStack.push(regionIndex);
+          branchStack.push(currentBranchIndex);
+          currentBranchIndex = THEN_INDEX;
+          // 가지 노드를 격리할 fragment를 노드 스택에 — 나중에 Branch.nodes로 거둔다.
+          nodeStack.push(document.createDocumentFragment());
+          break;
+        }
+        case OP.ELSE: {
+          // then 가지 노드를 거두고, else용 fragment로 교체.
+          currentBranch().nodes = Array.from(nodeStack.pop().childNodes);
+          currentBranchIndex = ELSE_INDEX;
+          nodeStack.push(document.createDocumentFragment());
+          break;
+        }
+        case OP.IF_END: {
+          currentBranch().nodes = Array.from(nodeStack.pop().childNodes);
+          const regionIndex = regionStack[regionStack.length - 1];
+          const region = regions[regionIndex];
+          // cond 변경 시 해당 가지를 활성화(swap).
+          ctx.subscribe(region.condLeafIndex, (condValue) => {
+            activateBranch(ctx, regions, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+          });
+          // 초기 활성 가지 켜기 — 활성 가지 노드가 anchor 뒤(제자리)에 붙는다.
+          const initialBranchIndex = ctx.leaves[region.condLeafIndex] ? THEN_INDEX : ELSE_INDEX;
+          activateBranch(ctx, regions, regionIndex, initialBranchIndex);
+          regionStack.pop();
+          currentBranchIndex = branchStack.pop();
           break;
         }
         default: {
@@ -265,7 +337,7 @@ const compileDef = (module, compId, blueprintOf) => {
 
     // fragment의 자식들이 이 인스턴스의 루트 노드들. fragment는 append 시 비워지므로 미리 배열로.
     const nodes = Array.from(fragment.childNodes);
-    return { nodes };
+    return { nodes, regions };
   };
 };
 
