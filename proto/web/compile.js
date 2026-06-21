@@ -1,11 +1,11 @@
 // Quble 클라이언트 컴파일/인스턴스화 (실험). reactive.js를 대체할 후보.
 //
 // reactive.js는 build(즉시 DOM 생성)였다. 여기서는 두 단계로 나눈다:
-//   compile(bytes)        → get(compId) => Blueprint   — def를 청사진으로. registry 캐시(lazy).
-//   Blueprint(ctx, paths) → Instance                   — 청사진 호출 = 인스턴스화. 그때 DOM·구독 생성.
+//   compile(bytes)        → blueprintOf(compId) => Blueprint  — def를 청사진으로. registry 캐시(lazy).
+//   Blueprint(ctx, paths) → Instance                          — 청사진 호출 = 인스턴스화. DOM·구독 생성.
 //
-// 1단계(여기): 구조만 분리. Blueprint 내부는 아직 호출 시 바이트코드를 훑는다(방식 2).
-// 안정되면 미리-파싱(방식 1)으로 내부를 바꾼다.
+// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
+// 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 — 단순한 "호출 시 훑기"를 택했다.)
 //
 // Instance = { nodes }  — 루트 노드들(부착·추적용). destroy(구독 해제)는 if/for 단계에서.
 //
@@ -133,23 +133,24 @@ function decode(bytes) {
 // 청사진으로 컴파일해 캐시한다(재사용).
 function makeRegistry(module) {
   const cache = new Map(); // compId → Blueprint
-  const get = (compId) => {
-    let bp = cache.get(compId);
-    if (bp) {
-      return bp;
+  const blueprintOf = (compId) => {
+    let blueprint = cache.get(compId);
+    if (blueprint) {
+      return blueprint;
     }
-    bp = compileDef(module, compId, get); // get을 넘겨 RENDER가 자식 청사진을 lazy 조회
-    cache.set(compId, bp);
-    return bp;
+    // blueprintOf를 넘겨 RENDER가 자식 청사진을 lazy 조회한다.
+    blueprint = compileDef(module, compId, blueprintOf);
+    cache.set(compId, blueprint);
+    return blueprint;
   };
-  return get;
+  return blueprintOf;
 }
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
 // 1단계: Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다(방식 2). reactive.js build와
-// 같은 로직이되, 자식 RENDER는 registry(get)에서 청사진을 꺼내 호출한다.
+// 같은 로직이되, 자식 RENDER는 registry(blueprintOf)에서 청사진을 꺼내 호출한다.
 // Blueprint(ctx, paths) → Instance { nodes }
-function compileDef(module, compId, get) {
+function compileDef(module, compId, blueprintOf) {
   const def = module.defs[compId];
   if (!def) {
     throw new Error("bad component " + compId);
@@ -251,7 +252,7 @@ function compileDef(module, compId, get) {
           const childPaths = args;
           args = [];
           // 자식 청사진을 registry에서 꺼내(없으면 등록) 인스턴스화. 같은 ctx 공유 → path 공유 성립.
-          const childInstance = get(childCompId)(ctx, childPaths);
+          const childInstance = blueprintOf(childCompId)(ctx, childPaths);
           for (const n of childInstance.nodes) {
             top().appendChild(n);
           }
@@ -270,8 +271,8 @@ function compileDef(module, compId, get) {
 }
 
 // ── 공개 API ─────────────────────────────────────────────────────────
-// compile(bytes) → get(compId) => Blueprint. compId의 청사진을 lazy로 돌려준다.
-// 사용: const get = compile(bytes); const inst = get(0)(ctx, paths); root.append(...inst.nodes);
+// compile(bytes) → blueprintOf(compId) => Blueprint. compId의 청사진을 lazy로 돌려준다.
+// 사용: const blueprintOf = compile(bytes); const inst = blueprintOf(0)(ctx, paths); root.append(...inst.nodes);
 export function compile(bytes) {
   const module = decode(bytes);
   return makeRegistry(module);
