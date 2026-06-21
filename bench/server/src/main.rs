@@ -22,6 +22,7 @@ const ADDR: &str = "127.0.0.1:7878";
 const COMPONENTS_DIR: &str = "../components";
 const RUNTIME_JS: &str = "../../proto/web/runtime.js";
 const REACTIVE_JS: &str = "../../proto/web/reactive.js";
+const COMPILE_JS: &str = "../../proto/web/compile.js";
 const REACT_DIST: &str = "../react/dist";
 const SVELTE_DIST: &str = "../svelte/dist";
 
@@ -47,6 +48,11 @@ fn main() {
             }
         } else if path == "/reactive.js" {
             match fs::read(REACTIVE_JS) {
+                Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
+                Err(_) => not_found(req),
+            }
+        } else if path == "/compile.js" {
+            match fs::read(COMPILE_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }
