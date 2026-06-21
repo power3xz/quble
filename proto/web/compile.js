@@ -83,6 +83,59 @@ export const createStore = (defaultValue) => {
   return { leaves, set, subscribe, unsubscribe, resolve };
 };
 
+// opcode의 operand 바이트 수. skipBranch가 op 경계를 짚어 마커(IF/ELSE/IF_END)를 operand
+// 값과 혼동하지 않게 한다. (SSR renderer operand_len과 동일.)
+const operandLen = (op) => {
+  switch (op) {
+    case OP.HALT:
+    case OP.ELEM_CLOSE_OPEN:
+    case OP.ELEM_END:
+    case OP.ELSE:
+    case OP.IF_END:
+      return 0;
+    case OP.ELEM_OPEN:
+    case OP.TEXT:
+    case OP.TEXT_VAR:
+    case OP.RENDER:
+    case OP.PUSH_ARG:
+    case OP.IF:
+      return 2;
+    case OP.ATTR_G:
+    case OP.ATTR_L:
+    case OP.ATTR_G_VAR:
+    case OP.ATTR_L_VAR:
+      return 4;
+    default:
+      throw new Error("bad opcode 0x" + op.toString(16));
+  }
+};
+
+// 현재 가지를 통 스킵한다. op 경계를 따라 전진하며 중첩 깊이를 세고, 같은 깊이(depth 0)에서
+// 만난 ELSE 또는 IF_END 마커의 pc를 돌려준다(그 마커는 호출자가 소비). build 안 하는 비활성
+// 가지를 건너뛰며 경계 위치만 얻을 때 쓴다. (SSR skip_branch의 JS 포팅 — 여기선 pc 반환.)
+export const skipBranch = (code, startPc) => {
+  let pc = startPc;
+  let depth = 0;
+  while (pc < code.length) {
+    const markerPc = pc;
+    const op = code[pc++];
+    if (op === OP.IF) {
+      depth += 1;
+      pc += operandLen(OP.IF);
+    } else if (op === OP.IF_END) {
+      if (depth === 0) {
+        return markerPc;
+      }
+      depth -= 1;
+    } else if (op === OP.ELSE && depth === 0) {
+      return markerPc;
+    } else {
+      pc += operandLen(op);
+    }
+  }
+  throw new Error("unbalanced branch — no matching ELSE/IF_END");
+};
+
 const readPath = (defaultValue, path) => {
   let cur = defaultValue;
   for (const key of path.split(".")) {
@@ -176,166 +229,186 @@ const compileDef = (module, compId, blueprintOf) => {
   const code = module.code.subarray(def.codeOff, def.codeOff + def.codeLen);
 
   return (ctx, paths) => {
-    const fragment = document.createDocumentFragment();
-    const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
-    let pending = null;
-    let args = [];
-    let pc = 0;
-
-    // region 스택 — 구독 소속 가지 추적(노드 스택과 직교). region-build 실험에서 확정.
+    // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
     const rootRegion = createRegion(-1, null); // 루트 = swap 없는 껍데기
     rootRegion.branches[THEN_INDEX] = createBranch();
-    const regions = [rootRegion];
-    const regionStack = [0]; // top = 현재 Region 인덱스
-    let currentBranchIndex = THEN_INDEX; // 빌드타임 임시. IF=then, ELSE=else.
-    const branchStack = []; // IF_END에서 currentBranchIndex 복원용
+    rootRegion.branches[THEN_INDEX].built = true;
+    const regions = [rootRegion]; // append만, 인덱스 영구 안정. lazy build가 새 region을 더한다.
 
-    const u16at = () => {
-      const v = code[pc] | (code[pc + 1] << 8);
-      pc += 2;
-      return v;
-    };
-    const nodeTop = () => nodeStack[nodeStack.length - 1];
-    const currentBranch = () => regions[regionStack[regionStack.length - 1]].branches[currentBranchIndex];
+    // 한 가지(startPc~endPc, IF_END 직전까지)를 build한다. 재진입 가능 — 최초 인스턴스화는
+    // 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만 이 함수로 해석한다.
+    // 노드는 fragment에 모아 반환하고, 구독은 (regionIndex, branchIndex)가 가리키는 가지에 쌓는다.
+    // 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
+    const interpret = (startPc, endPc, startRegionIndex, startBranchIndex) => {
+      const fragment = document.createDocumentFragment();
+      const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
+      let pending = null;
+      let args = [];
+      let pc = startPc;
 
-    // offset → leafIndex로 해석(지연)하고 초기값을 돌려준다. 구독은 즉시 걸지 않고 현재 가지에
-    // 모은다 — activateBranch가 그 가지를 켤 때 건다(안 보이는 가지는 구독 0).
-    const bindVar = (offset, update) => {
-      const path = paths[offset];
-      if (path === undefined) {
-        throw new Error("no path for offset " + offset);
-      }
-      const leafIndex = ctx.resolve(path);
-      const initial = ctx.leaves[leafIndex] ?? "";
-      const branch = currentBranch();
-      branch.leafIndices.push(leafIndex);
-      branch.updateFns.push(update);
-      return initial;
-    };
+      // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
+      // 새 컨텍스트로 받는다 — JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
+      const branch = regions[startRegionIndex].branches[startBranchIndex];
 
-    while (pc < code.length) {
-      const op = code[pc++];
-      switch (op) {
-        case OP.HALT: {
-          pc = code.length;
-          break;
+      const u16at = () => {
+        const v = code[pc] | (code[pc + 1] << 8);
+        pc += 2;
+        return v;
+      };
+      const nodeTop = () => nodeStack[nodeStack.length - 1];
+
+      // offset → leafIndex로 해석(지연)하고 초기값을 돌려준다. 구독은 즉시 걸지 않고 현재 가지에
+      // 모은다 — activateBranch가 그 가지를 켤 때 건다(안 보이는 가지는 구독 0).
+      const bindVar = (offset, update) => {
+        const path = paths[offset];
+        if (path === undefined) {
+          throw new Error("no path for offset " + offset);
         }
-        case OP.ELEM_OPEN: {
-          pending = document.createElement(TAGS[u16at()]);
-          break;
-        }
-        case OP.ATTR_G: {
-          const name = ATTRS[u16at()];
-          pending.setAttribute(name, module.pool[u16at()]);
-          break;
-        }
-        case OP.ATTR_L: {
-          const name = module.pool[u16at()];
-          pending.setAttribute(name, module.pool[u16at()]);
-          break;
-        }
-        case OP.ATTR_G_VAR: {
-          const name = ATTRS[u16at()];
-          const el = pending;
-          const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
-          el.setAttribute(name, v);
-          break;
-        }
-        case OP.ATTR_L_VAR: {
-          const name = module.pool[u16at()];
-          const el = pending;
-          const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
-          el.setAttribute(name, v);
-          break;
-        }
-        case OP.ELEM_CLOSE_OPEN: {
-          nodeTop().appendChild(pending);
-          nodeStack.push(pending);
-          pending = null;
-          break;
-        }
-        case OP.TEXT: {
-          nodeTop().appendChild(document.createTextNode(module.pool[u16at()]));
-          break;
-        }
-        case OP.TEXT_VAR: {
-          const node = document.createTextNode("");
-          node.textContent = bindVar(u16at(), (v) => (node.textContent = v));
-          nodeTop().appendChild(node);
-          break;
-        }
-        case OP.ELEM_END: {
-          nodeStack.pop();
-          break;
-        }
-        case OP.PUSH_ARG: {
-          const parentOffset = u16at();
-          const path = paths[parentOffset];
-          if (path === undefined) {
-            throw new Error("no path for offset " + parentOffset);
+        const leafIndex = ctx.resolve(path);
+        const initial = ctx.leaves[leafIndex] ?? "";
+        branch.leafIndices.push(leafIndex);
+        branch.updateFns.push(update);
+        return initial;
+      };
+
+      while (pc < endPc) {
+        const op = code[pc++];
+        switch (op) {
+          case OP.HALT: {
+            pc = endPc;
+            break;
           }
-          args.push(path);
-          break;
-        }
-        case OP.RENDER: {
-          const childCompId = u16at();
-          const childPaths = args;
-          args = [];
-          // 자식 청사진을 registry에서 꺼내(없으면 등록) 인스턴스화. 같은 ctx 공유 → path 공유 성립.
-          const childInstance = blueprintOf(childCompId)(ctx, childPaths);
-          for (const n of childInstance.nodes) {
-            nodeTop().appendChild(n);
+          case OP.ELEM_OPEN: {
+            pending = document.createElement(TAGS[u16at()]);
+            break;
           }
-          break;
-        }
-        case OP.IF: {
-          const condOffset = u16at();
-          const condLeafIndex = ctx.resolve(paths[condOffset]);
-          const region = createRegion(condLeafIndex, null);
-          const regionIndex = regions.length;
-          regions.push(region);
-          currentBranch().childRegionIndices.push(regionIndex); // 부모 가지에 자식 등록
-          region.branches[THEN_INDEX] = createBranch();
-          region.branches[ELSE_INDEX] = createBranch();
-          // anchor: if 자리 고정용 주석 노드. 활성 가지 노드는 이 뒤에 붙는다.
-          region.anchor = document.createComment("qb:region#" + regionIndex);
-          nodeTop().appendChild(region.anchor);
-          regionStack.push(regionIndex);
-          branchStack.push(currentBranchIndex);
-          currentBranchIndex = THEN_INDEX;
-          // 가지 노드를 격리할 fragment를 노드 스택에 — 나중에 Branch.nodes로 거둔다.
-          nodeStack.push(document.createDocumentFragment());
-          break;
-        }
-        case OP.ELSE: {
-          // then 가지 노드를 거두고, else용 fragment로 교체.
-          currentBranch().nodes = Array.from(nodeStack.pop().childNodes);
-          currentBranchIndex = ELSE_INDEX;
-          nodeStack.push(document.createDocumentFragment());
-          break;
-        }
-        case OP.IF_END: {
-          currentBranch().nodes = Array.from(nodeStack.pop().childNodes);
-          const regionIndex = regionStack[regionStack.length - 1];
-          const region = regions[regionIndex];
-          // cond 변경 시 해당 가지를 활성화(swap).
-          ctx.subscribe(region.condLeafIndex, (condValue) => {
-            activateBranch(ctx, regions, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
-          });
-          // 초기 활성 가지 켜기 — 활성 가지 노드가 anchor 뒤(제자리)에 붙는다.
-          const initialBranchIndex = ctx.leaves[region.condLeafIndex] ? THEN_INDEX : ELSE_INDEX;
-          activateBranch(ctx, regions, regionIndex, initialBranchIndex);
-          regionStack.pop();
-          currentBranchIndex = branchStack.pop();
-          break;
-        }
-        default: {
-          throw new Error("bad opcode 0x" + op.toString(16));
+          case OP.ATTR_G: {
+            const name = ATTRS[u16at()];
+            pending.setAttribute(name, module.pool[u16at()]);
+            break;
+          }
+          case OP.ATTR_L: {
+            const name = module.pool[u16at()];
+            pending.setAttribute(name, module.pool[u16at()]);
+            break;
+          }
+          case OP.ATTR_G_VAR: {
+            const name = ATTRS[u16at()];
+            const el = pending;
+            const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
+            el.setAttribute(name, v);
+            break;
+          }
+          case OP.ATTR_L_VAR: {
+            const name = module.pool[u16at()];
+            const el = pending;
+            const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
+            el.setAttribute(name, v);
+            break;
+          }
+          case OP.ELEM_CLOSE_OPEN: {
+            nodeTop().appendChild(pending);
+            nodeStack.push(pending);
+            pending = null;
+            break;
+          }
+          case OP.TEXT: {
+            nodeTop().appendChild(document.createTextNode(module.pool[u16at()]));
+            break;
+          }
+          case OP.TEXT_VAR: {
+            const node = document.createTextNode("");
+            node.textContent = bindVar(u16at(), (v) => (node.textContent = v));
+            nodeTop().appendChild(node);
+            break;
+          }
+          case OP.ELEM_END: {
+            nodeStack.pop();
+            break;
+          }
+          case OP.PUSH_ARG: {
+            const parentOffset = u16at();
+            const path = paths[parentOffset];
+            if (path === undefined) {
+              throw new Error("no path for offset " + parentOffset);
+            }
+            args.push(path);
+            break;
+          }
+          case OP.RENDER: {
+            const childCompId = u16at();
+            const childPaths = args;
+            args = [];
+            // 자식 청사진을 registry에서 꺼내(없으면 등록) 인스턴스화. 같은 ctx 공유 → path 공유 성립.
+            const childInstance = blueprintOf(childCompId)(ctx, childPaths);
+            for (const n of childInstance.nodes) {
+              nodeTop().appendChild(n);
+            }
+            break;
+          }
+          case OP.IF: {
+            const condOffset = u16at();
+            const condLeafIndex = ctx.resolve(paths[condOffset]);
+            const regionIndex = regions.length;
+            const region = createRegion(condLeafIndex, null);
+            regions.push(region);
+            branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
+            const thenBranch = createBranch();
+            const elseBranch = createBranch();
+            region.branches[THEN_INDEX] = thenBranch;
+            region.branches[ELSE_INDEX] = elseBranch;
+            // anchor: if 자리 고정용 주석 노드. 활성 가지 노드는 이 뒤에 붙는다.
+            region.anchor = document.createComment("qb:region#" + regionIndex);
+            nodeTop().appendChild(region.anchor);
+
+            // 코드 범위: then = IF다음~ELSE, else = ELSE다음~IF_END. skipBranch로 마커 위치만 얻는다.
+            const thenStart = pc;
+            const elseMarkerPc = skipBranch(code, thenStart); // ELSE 또는 IF_END
+            let elseStart = -1;
+            let ifEndPc;
+            if (code[elseMarkerPc] === OP.ELSE) {
+              elseStart = elseMarkerPc + 1;
+              ifEndPc = skipBranch(code, elseStart); // else 가지 끝 = IF_END
+            } else {
+              ifEndPc = elseMarkerPc; // else 없는 if — IF_END 바로
+            }
+
+            // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
+            const buildThen = () => {
+              const f = interpret(thenStart, elseMarkerPc, regionIndex, THEN_INDEX);
+              thenBranch.nodes = Array.from(f.childNodes);
+            };
+            const buildElse = () => {
+              const f = elseStart === -1
+                ? document.createDocumentFragment() // else 없는 if — 빈 가지
+                : interpret(elseStart, ifEndPc, regionIndex, ELSE_INDEX);
+              elseBranch.nodes = Array.from(f.childNodes);
+            };
+            thenBranch.lazyBuild = buildThen;
+            elseBranch.lazyBuild = buildElse;
+
+            // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateBranch가 lazyBuild 호출.
+            ctx.subscribe(condLeafIndex, (condValue) => {
+              activateBranch(ctx, regions, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+            });
+            // 초기 활성 가지 켜기 — activateBranch가 lazyBuild(첫 build)·구독·anchor 뒤 부착을
+            // 일괄 처리한다(swap과 동일 경로). 비활성 가지는 lazyBuild만 심긴 채 노드 0·구독 0.
+            const initialBranchIndex = ctx.leaves[condLeafIndex] ? THEN_INDEX : ELSE_INDEX;
+            activateBranch(ctx, regions, regionIndex, initialBranchIndex);
+
+            pc = ifEndPc + 1; // IF_END 마커 소비 — if 블록 다음으로.
+            break;
+          }
+          default: {
+            throw new Error("bad opcode 0x" + op.toString(16));
+          }
         }
       }
-    }
+      return fragment;
+    };
 
-    // fragment의 자식들이 이 인스턴스의 루트 노드들. fragment는 append 시 비워지므로 미리 배열로.
+    // 루트 전체를 build. fragment 자식들이 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
+    const fragment = interpret(0, code.length, 0, THEN_INDEX);
     const nodes = Array.from(fragment.childNodes);
     return { nodes, regions };
   };
