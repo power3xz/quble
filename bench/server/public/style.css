@@ -15,3 +15,16 @@ body { font-family: system-ui, sans-serif; max-width: 1400px; margin: 1.5rem aut
 /* reactive 검증용 — class 변화가 눈에 보이도록 */
 .ok { background: #e6f7ee; color: #0a7; padding: .6rem; border-radius: 6px; }
 .warn { background: #fdeaea; color: #c00; padding: .6rem; border-radius: 6px; }
+/* heavyif swap 벤치 — 세 구현(Quble/React/Svelte) 공통 행 스타일. 가지별 배경색으로 swap 가시화 */
+.heavy { font-size: 10px; max-height: 240px; overflow: auto; }
+.heavy .row { display: flex; gap: 6px; padding: 0 4px; }
+.heavy .row.a { background: #e6ffed; }
+.heavy .row.b { background: #ffeef0; }
+.heavy .idx { color: #0969da; }
+.heavy .row.a .tag { color: #1a7f37; font-weight: 600; }
+.heavy .row.b .tag { color: #cf222e; font-weight: 600; }
+.heavy .label { font-weight: 600; }
+/* 벤치 공통 셸 — boot_page(React/Svelte)·Quble 데모가 함께 쓴다. body는 위(line 1)에 이미 있음 */
+#log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #0f172a; color: #a5f3fc; padding: 12px; border-radius: 8px; }
+#cards > div { display: inline-block; font-size: 10px; padding: 1px 4px; margin: 1px; background: #e2e8f0; border-radius: 3px; }
+button { padding: 6px 12px; }

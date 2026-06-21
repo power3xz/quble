@@ -174,12 +174,7 @@ fn boot_page(boot_src: &str, name: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><title>{name}</title>
-<style>
-  body {{ font-family: system-ui, sans-serif; }}
-  #log {{ white-space: pre-wrap; font-family: ui-monospace, monospace; background: #0f172a; color: #a5f3fc; padding: 12px; border-radius: 8px; }}
-  #cards > div {{ display: inline-block; font-size: 10px; padding: 1px 4px; margin: 1px; background: #e2e8f0; border-radius: 3px; }}
-  button {{ padding: 6px 12px; }}
-</style></head>
+<link rel="stylesheet" href="/public/style.css"></head>
 <body>
   <div id="root"></div>
   <script type="module" src="{boot_src}"></script>
