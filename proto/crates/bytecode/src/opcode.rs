@@ -24,6 +24,12 @@ pub enum Op {
     /// 부모의 paths/scope[offset]을 자식에게 그대로 넘긴다(한 단계 풀기). 순서 = 자식 offset 0,1,2….
     /// use-site 바인딩(`Comp(name={b})` — b는 부모 offset)의 인코딩.
     PushArg = 0x0b,
+    /// 분기 시작. scope offset 하나(불리언)로 then/else를 가른다. then 가지 코드가 이어진다.
+    If = 0x0c,
+    /// then 가지 끝, else 가지 시작. (else 있을 때만)
+    Else = 0x0d,
+    /// if 블록 끝.
+    IfEnd = 0x0e,
 }
 
 impl Op {
@@ -42,6 +48,9 @@ impl Op {
             0x09 => Op::AttrGVar,
             0x0a => Op::AttrLVar,
             0x0b => Op::PushArg,
+            0x0c => Op::If,
+            0x0d => Op::Else,
+            0x0e => Op::IfEnd,
             _ => return None,
         })
     }

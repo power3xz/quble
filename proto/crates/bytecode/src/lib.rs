@@ -102,6 +102,9 @@ mod tests {
     #[test]
     fn opcode_from_u8() {
         assert_eq!(Op::from_u8(0x06), Some(Op::Render));
+        assert_eq!(Op::from_u8(0x0c), Some(Op::If));
+        assert_eq!(Op::from_u8(0x0d), Some(Op::Else));
+        assert_eq!(Op::from_u8(0x0e), Some(Op::IfEnd));
         assert_eq!(Op::from_u8(0xff), None);
     }
 
