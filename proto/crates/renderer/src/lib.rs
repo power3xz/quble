@@ -115,6 +115,20 @@ fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Re
                 let child_scope = std::mem::take(&mut args);
                 exec(module, child_comp_id, &child_scope, out)?;
             }
+            Op::If => {
+                let cond = read_u16(code, &mut pc)?;
+                let val = scope.get(cond as usize).ok_or(RenderError::BadScope(cond))?;
+                if !truthy(val) {
+                    // then을 통 스킵. pc는 매칭 ELSE 다음(else 본문 시작)이나 IF_END 다음에 선다.
+                    skip_branch(code, &mut pc)?;
+                }
+                // truthy면 다음 op부터 then을 정상 해석한다.
+            }
+            // truthy로 then을 해석하고 ELSE에 도달한 경우. else 가지를 통 스킵 → IF_END 다음에 선다
+            // (else 본문엔 매칭 ELSE가 없어 IF_END에서 멈춘다).
+            Op::Else => skip_branch(code, &mut pc)?,
+            // 정상 종료 마커. 할 일 없음.
+            Op::IfEnd => {}
         }
     }
     Ok(())
@@ -124,6 +138,45 @@ fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, RenderError> {
     let b = code.get(*pc..*pc + 2).ok_or(RenderError::UnexpectedEof)?;
     *pc += 2;
     Ok(u16::from_le_bytes([b[0], b[1]]))
+}
+
+/// 불리언 scope 값의 truthy 판정. 빈 문자열·"false"·"0"은 falsy, 그 외 truthy.
+/// (cond는 불리언 scope offset 하나 — BYTECODE.md §5.1)
+fn truthy(val: &str) -> bool {
+    !(val.is_empty() || val == "false" || val == "0")
+}
+
+/// opcode의 operand 바이트 수. 스킵 시 op 경계를 짚어 마커(IF/ELSE/IF_END)를 operand 값과
+/// 혼동하지 않게 한다.
+fn operand_len(op: Op) -> usize {
+    match op {
+        Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd => 0,
+        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::If => 2,
+        Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar => 4,
+    }
+}
+
+/// 현재 가지를 통 스킵한다. op 경계를 따라 전진하며 중첩 깊이를 세고, 같은 깊이(depth 0)에서
+/// 만난 ELSE 또는 IF_END **다음**에 pc를 둔다. ELSE에서 멈추면 호출자는 else 본문을, IF_END에서
+/// 멈추면 if 블록 다음을 이어 해석한다.
+fn skip_branch(code: &[u8], pc: &mut usize) -> Result<(), RenderError> {
+    let mut depth = 0u32;
+    while *pc < code.len() {
+        let op = Op::from_u8(code[*pc]).ok_or(RenderError::BadOpcode(code[*pc]))?;
+        *pc += 1;
+        match op {
+            Op::If => {
+                depth += 1;
+                *pc += operand_len(Op::If); // cond operand 건너뛰기
+            }
+            Op::IfEnd if depth == 0 => return Ok(()),
+            Op::IfEnd => depth -= 1,
+            Op::Else if depth == 0 => return Ok(()),
+            _ => *pc += operand_len(op),
+        }
+    }
+    // 매칭 마커 없이 코드 끝 — 손상된 바이트코드.
+    Err(RenderError::UnbalancedEnd)
 }
 
 /// ` name="value"` (값 이스케이프 포함) 출력.
@@ -233,6 +286,19 @@ mod tests {
         }
         fn halt(&mut self) -> &mut Self {
             self.code.push(Op::Halt as u8);
+            self
+        }
+        fn if_(&mut self, cond: u16) -> &mut Self {
+            self.code.push(Op::If as u8);
+            self.code.extend_from_slice(&cond.to_le_bytes());
+            self
+        }
+        fn else_(&mut self) -> &mut Self {
+            self.code.push(Op::Else as u8);
+            self
+        }
+        fn if_end(&mut self) -> &mut Self {
+            self.code.push(Op::IfEnd as u8);
             self
         }
     }
@@ -448,6 +514,78 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[]), Err(RenderError::BadScope(0)));
+    }
+
+    /// 한 컴포넌트 정의를 인코딩해 렌더 (단일 def, scope 주입). if 테스트 공용.
+    fn render_one(pool: ConstPool, code: Vec<u8>, scope: &[String]) -> String {
+        let defs = vec![CompDef { name_idx: 0, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+        render_to_string(&bytes, 0, scope).unwrap()
+    }
+
+    /// if true → then 가지를, false → else 가지를 출력. div() { @if c { "T" } @else { "F" } }
+    #[test]
+    fn if_else_picks_branch() {
+        let make = || {
+            let mut pool = ConstPool::new();
+            let tt = pool.intern("T");
+            let ff = pool.intern("F");
+            let mut a = Asm::new();
+            a.open(t("div")).close_open()
+                .if_(0).text(tt).else_().text(ff).if_end()
+                .end().halt();
+            (pool, a.code)
+        };
+        let (pool, code) = make();
+        assert_eq!(render_one(pool, code, &["true".into()]), "<div>T</div>");
+        let (pool, code) = make();
+        assert_eq!(render_one(pool, code, &["false".into()]), "<div>F</div>");
+    }
+
+    /// else 없는 if. false면 then을 통째로 건너뛰고 아무것도 안 남긴다.
+    #[test]
+    fn if_only_skips_when_false() {
+        let make = || {
+            let mut pool = ConstPool::new();
+            let hi = pool.intern("hi");
+            let mut a = Asm::new();
+            a.open(t("div")).close_open()
+                .if_(0).open(t("span")).close_open().text(hi).end().if_end()
+                .end().halt();
+            (pool, a.code)
+        };
+        let (pool, code) = make();
+        assert_eq!(render_one(pool, code, &["true".into()]), "<div><span>hi</span></div>");
+        let (pool, code) = make();
+        assert_eq!(render_one(pool, code, &["false".into()]), "<div></div>");
+    }
+
+    /// 중첩 if — 바깥 then 안의 안쪽 if/else가 바깥 ELSE를 침범하지 않는지(depth 카운팅).
+    /// @if a { @if b { "AB" } @else { "Ab" } } @else { "x" }
+    #[test]
+    fn nested_if_depth() {
+        let make = || {
+            let mut pool = ConstPool::new();
+            let ab = pool.intern("AB");
+            let ab2 = pool.intern("Ab");
+            let x = pool.intern("x");
+            let mut a = Asm::new();
+            a.if_(0) // a
+                .if_(1).text(ab).else_().text(ab2).if_end() // 안쪽 b
+                .else_().text(x) // 바깥 else
+                .if_end()
+                .halt();
+            (pool, a.code)
+        };
+        // a=true, b=true → AB
+        let (pool, code) = make();
+        assert_eq!(render_one(pool, code, &["true".into(), "true".into()]), "AB");
+        // a=true, b=false → Ab
+        let (pool, code) = make();
+        assert_eq!(render_one(pool, code, &["true".into(), "false".into()]), "Ab");
+        // a=false → x (안쪽은 통째로 스킵, 바깥 ELSE를 정확히 찾아야 함)
+        let (pool, code) = make();
+        assert_eq!(render_one(pool, code, &["false".into(), "true".into()]), "x");
     }
 
     #[test]
