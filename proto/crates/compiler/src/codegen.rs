@@ -148,6 +148,25 @@ fn emit_node(
             code.push(Op::Render as u8);
             code.extend_from_slice(&child_id.to_le_bytes());
         }
+        Node::If { cond, then, else_ } => {
+            // cond는 불리언 prop — scope offset 하나. (표현식은 이후 단계)
+            let offset = prop_index(cond, props)?;
+            code.push(Op::If as u8);
+            code.extend_from_slice(&offset.to_le_bytes());
+
+            for node in then {
+                emit_node(node, props, comp_lookup, pool, code)?;
+            }
+
+            if !else_.is_empty() {
+                code.push(Op::Else as u8);
+                for node in else_ {
+                    emit_node(node, props, comp_lookup, pool, code)?;
+                }
+            }
+
+            code.push(Op::IfEnd as u8);
+        }
     }
     Ok(())
 }

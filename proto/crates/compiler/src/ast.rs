@@ -37,6 +37,13 @@ pub enum Node {
         name: String,
         args: Vec<(String, String)>,
     },
+    /// `@if (cond) { then } @else { else_ }` — 조건 분기. cond는 불리언 prop명 하나
+    /// (표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
+    If {
+        cond: String,
+        then: Vec<Node>,
+        else_: Vec<Node>,
+    },
 }
 
 /// 속성값: 정적 문자열(`class="card"`) 또는 변수 참조(`class={x}`).

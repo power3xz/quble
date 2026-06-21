@@ -8,7 +8,7 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{AttrValue, Component, Node, Source, Use};
-use crate::lexer::Token;
+use crate::lexer::{Keyword, Token};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseError {
@@ -176,6 +176,8 @@ impl<'a> Parser<'a> {
                 }
                 // `{ IDENT }` 보간. (자식 자리의 `{`는 블록이 아니라 보간만 온다.)
                 Some(Token::LBrace) => nodes.push(self.var()?),
+                // @if 분기.
+                Some(Token::At(Keyword::If)) => nodes.push(self.if_node()?),
                 // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
                 Some(Token::Ident(s)) if starts_upper(s) => nodes.push(self.component_call()?),
                 Some(Token::Ident(_)) => nodes.push(self.element()?),
@@ -188,6 +190,31 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(nodes)
+    }
+
+    // @if ( IDENT ) { NODE* } [ @else { NODE* } ]
+    // cond는 불리언 prop명 하나(표현식은 이후 단계).
+    fn if_node(&mut self) -> Result<Node, ParseError> {
+        self.expect(&Token::At(Keyword::If))?;
+        self.expect(&Token::LParen)?;
+        let cond = self.ident()?;
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::LBrace)?;
+        let then = self.nodes()?;
+        self.expect(&Token::RBrace)?;
+
+        // @else는 선택적.
+        let else_ = if matches!(self.peek(), Some(Token::At(Keyword::Else))) {
+            self.next()?; // @else
+            self.expect(&Token::LBrace)?;
+            let nodes = self.nodes()?;
+            self.expect(&Token::RBrace)?;
+            nodes
+        } else {
+            Vec::new()
+        };
+
+        Ok(Node::If { cond, then, else_ })
     }
 
     // { IDENT }

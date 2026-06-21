@@ -67,3 +67,48 @@ fn undeclared_prop_is_error() {
     "#;
     assert!(render_source(src, 0, &[]).is_err());
 }
+
+#[test]
+fn if_else_renders_active_branch() {
+    let src = r#"
+        component C {
+          props { ok }
+          template {
+            div() {
+              @if (ok) { p() { "yes" } }
+              @else { p() { "no" } }
+            }
+          }
+        }
+    "#;
+    assert_eq!(
+        render_source(src, 0, &["true".to_string()]).unwrap(),
+        "<div><p>yes</p></div>"
+    );
+    assert_eq!(
+        render_source(src, 0, &["false".to_string()]).unwrap(),
+        "<div><p>no</p></div>"
+    );
+}
+
+#[test]
+fn if_only_skips_when_false() {
+    let src = r#"
+        component C {
+          props { show }
+          template {
+            div() {
+              @if (show) { span() { "x" } }
+            }
+          }
+        }
+    "#;
+    assert_eq!(
+        render_source(src, 0, &["true".to_string()]).unwrap(),
+        "<div><span>x</span></div>"
+    );
+    assert_eq!(
+        render_source(src, 0, &["false".to_string()]).unwrap(),
+        "<div></div>"
+    );
+}

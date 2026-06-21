@@ -10,12 +10,23 @@ pub enum Token {
     RParen, // )
     Eq,     // =
     Comma,  // ,
+    /// `@` 뒤에 오는 예약어. `@if` → `At(Keyword::If)`.
+    At(Keyword),
+}
+
+/// `@` 디렉티브 키워드. 지금은 분기만(`@if`/`@else`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Keyword {
+    If,
+    Else,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LexError {
     UnterminatedString,
     UnexpectedChar(char),
+    /// `@` 뒤에 알 수 없는 디렉티브 키워드.
+    UnknownDirective(String),
 }
 
 pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
@@ -50,6 +61,24 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             ',' => {
                 chars.next();
                 toks.push(Token::Comma);
+            }
+            '@' => {
+                chars.next(); // @
+                let mut s = String::new();
+                while let Some(&ch) = chars.peek() {
+                    if is_ident_part(ch) {
+                        s.push(ch);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let kw = match s.as_str() {
+                    "if" => Keyword::If,
+                    "else" => Keyword::Else,
+                    _ => return Err(LexError::UnknownDirective(s)),
+                };
+                toks.push(Token::At(kw));
             }
             '"' => {
                 chars.next(); // 여는 따옴표
