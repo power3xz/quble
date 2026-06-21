@@ -1,0 +1,14 @@
+component IfTest {
+  props { loggedIn, name }
+  template {
+    div(class="if-demo") {
+      h2() { "분기 데모" }
+      @if (loggedIn) {
+        p(class="hi") { "환영합니다, " {name} "님" }
+      }
+      @else {
+        p(class="bye") { "로그인이 필요합니다" }
+      }
+    }
+  }
+}
