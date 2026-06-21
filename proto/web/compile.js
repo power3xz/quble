@@ -31,7 +31,7 @@ const OP = {
 };
 
 // ── store 컨텍스트 (reactive.js와 동일 pub/sub) ───────────────────────
-export function createStore(defaultValue) {
+export const createStore = (defaultValue) => {
   const leaves = [];
   const subscribers = []; // leafIndex → [(v)=>void, ...]
   const pathCache = new Map(); // path → leafIndex
@@ -62,15 +62,15 @@ export function createStore(defaultValue) {
   };
 
   return { leaves, set, subscribe, resolve };
-}
+};
 
-function readPath(defaultValue, path) {
+const readPath = (defaultValue, path) => {
   let cur = defaultValue;
   for (const key of path.split(".")) {
     cur = cur[key];
   }
   return cur;
-}
+};
 
 // ── 디코드 (reactive.js와 동일 포맷) ──────────────────────────────────
 class Reader {
@@ -100,7 +100,7 @@ class Reader {
   }
 }
 
-function decode(bytes) {
+const decode = (bytes) => {
   const r = new Reader(bytes);
   const magic = r.take(4);
   if (!(magic[0] === 0x51 && magic[1] === 0x42 && magic[2] === 0x4c && magic[3] === 0x00)) {
@@ -126,12 +126,12 @@ function decode(bytes) {
   const codeLen = r.u32();
   const code = r.take(codeLen);
   return { pool, defs, code };
-}
+};
 
 // ── Registry: compId → Blueprint (lazy) ──────────────────────────────
 // build(compId)가 실제로 쓰는 컴포넌트만 등록된다. 모듈을 한 번 디코드하고, 도달하는 def만
 // 청사진으로 컴파일해 캐시한다(재사용).
-function makeRegistry(module) {
+const makeRegistry = (module) => {
   const cache = new Map(); // compId → Blueprint
   const blueprintOf = (compId) => {
     let blueprint = cache.get(compId);
@@ -144,13 +144,12 @@ function makeRegistry(module) {
     return blueprint;
   };
   return blueprintOf;
-}
+};
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
-// 1단계: Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다(방식 2). reactive.js build와
-// 같은 로직이되, 자식 RENDER는 registry(blueprintOf)에서 청사진을 꺼내 호출한다.
-// Blueprint(ctx, paths) → Instance { nodes }
-function compileDef(module, compId, blueprintOf) {
+// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. 자식 RENDER는 registry(blueprintOf)에서
+// 청사진을 꺼내 호출한다. Blueprint(ctx, paths) → Instance { nodes }
+const compileDef = (module, compId, blueprintOf) => {
   const def = module.defs[compId];
   if (!def) {
     throw new Error("bad component " + compId);
@@ -268,12 +267,12 @@ function compileDef(module, compId, blueprintOf) {
     const nodes = Array.from(fragment.childNodes);
     return { nodes };
   };
-}
+};
 
 // ── 공개 API ─────────────────────────────────────────────────────────
 // compile(bytes) → blueprintOf(compId) => Blueprint. compId의 청사진을 lazy로 돌려준다.
 // 사용: const blueprintOf = compile(bytes); const inst = blueprintOf(0)(ctx, paths); root.append(...inst.nodes);
-export function compile(bytes) {
+export const compile = (bytes) => {
   const module = decode(bytes);
   return makeRegistry(module);
-}
+};
