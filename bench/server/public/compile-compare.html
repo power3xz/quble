@@ -55,6 +55,23 @@
       ctxR.set(0, name);
       ctxC.set(0, name);
     };
+
+    // 콘솔에서 호출: measure() 또는 measure(100000). compile.js 단독 인스턴스화 µs/instance 측정.
+    // store는 공유(resolve 캐시 후 동일), 노드는 detached. 워밍업 후 성능 측정.
+    window.measure = (N = 50000, warmup = 2000) => {
+      const ctx = storeC({ ...initial });
+      for (let i = 0; i < warmup; i++) {
+        blueprintOf(0)(ctx, paths);
+      }
+      const t0 = performance.now();
+      for (let i = 0; i < N; i++) {
+        blueprintOf(0)(ctx, paths);
+      }
+      const ms = performance.now() - t0;
+      console.log(`N=${N.toLocaleString()}: ${ms.toFixed(1)} ms  (${(ms * 1000 / N).toFixed(3)} µs/instance)`);
+      return ms * 1000 / N;
+    };
+    console.log("measure(N) 준비됨 — 콘솔에서 measure() 또는 measure(100000) 호출");
   </script>
 </body>
 </html>
