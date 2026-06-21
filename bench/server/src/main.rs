@@ -23,6 +23,7 @@ const COMPONENTS_DIR: &str = "../components";
 const RUNTIME_JS: &str = "../../proto/web/runtime.js";
 const REACTIVE_JS: &str = "../../proto/web/reactive.js";
 const COMPILE_JS: &str = "../../proto/web/compile.js";
+const REGION_JS: &str = "../../proto/web/region.js";
 const REACT_DIST: &str = "../react/dist";
 const SVELTE_DIST: &str = "../svelte/dist";
 
@@ -53,6 +54,11 @@ fn main() {
             }
         } else if path == "/compile.js" {
             match fs::read(COMPILE_JS) {
+                Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
+                Err(_) => not_found(req),
+            }
+        } else if path == "/region.js" {
+            match fs::read(REGION_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }

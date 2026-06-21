@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>compile.js @if swap 데모 (iftest)</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .hi { color: #1a7f37; }
+    .bye { color: #cf222e; }
+  </style>
+</head>
+<body>
+  <p>iftest.qubb를 <b>compile.js</b>로 렌더. <b>loggedIn 토글</b>로 then/else가 swap되는지,
+     안 보이는 가지의 구독이 0인지(이름 변경이 비활성 가지엔 안 닿는지) 확인.</p>
+  <div id="root"></div>
+  <p>
+    <button id="toggle">loggedIn 토글 (then/else swap)</button>
+    <button id="rename">이름 변경 (then 가지의 {name})</button>
+  </p>
+  <p>DOM에서 <code>&lt;!--qb:region#N--&gt;</code> 주석이 if 자리(anchor)다.</p>
+
+  <script type="module">
+    import { compile, createStore } from "/compile.js";
+
+    const res = await fetch("/components/iftest.qubb");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    // props 순서 = paths 순서: loggedIn(cond), name
+    const paths = ["loggedIn", "name"];
+    const ctx = createStore({ loggedIn: true, name: "철수" });
+
+    const blueprintOf = compile(bytes);
+    const inst = blueprintOf(0)(ctx, paths);
+    document.getElementById("root").replaceChildren(...inst.nodes);
+
+    let loggedIn = true;
+    document.getElementById("toggle").onclick = () => {
+      loggedIn = !loggedIn;
+      ctx.set(ctx.resolve("loggedIn"), loggedIn);
+    };
+    let n = 0;
+    document.getElementById("rename").onclick = () => {
+      const name = ["영희", "민수", "지영"][n++ % 3];
+      ctx.set(ctx.resolve("name"), name);
+    };
+
+    // 디버깅: 인스턴스의 region 트리를 콘솔에 노출
+    window.inst = inst;
+    console.log("inst.regions:", inst.regions);
+  </script>
+</body>
+</html>
