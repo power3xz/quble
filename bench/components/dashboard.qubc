@@ -1,0 +1,39 @@
+component Dashboard {
+  props { loggedIn, isPremium, hasNotifications, name, plan, notifCount }
+  template {
+    div(class="dashboard") {
+      h2() { "계정 대시보드" }
+      @if (loggedIn) {
+        div(class="account") {
+          p(class="welcome") { "안녕하세요, " {name} "님" }
+          @if (isPremium) {
+            div(class="premium") {
+              p(class="badge") { "프리미엄 회원 · " {plan} }
+              @if (hasNotifications) {
+                div(class="notif on") {
+                  span(class="dot") { "●" }
+                  span() { "새 알림 " {notifCount} "건" }
+                }
+              }
+              @else {
+                p(class="notif off") { "새 알림이 없습니다" }
+              }
+            }
+          }
+          @else {
+            div(class="free") {
+              p() { "무료 플랜을 사용 중입니다" }
+              button(class="upgrade") { "프리미엄으로 업그레이드" }
+            }
+          }
+        }
+      }
+      @else {
+        div(class="guest") {
+          p() { "로그인이 필요합니다" }
+          button(class="login") { "로그인" }
+        }
+      }
+    }
+  }
+}
