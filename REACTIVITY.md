@@ -136,11 +136,59 @@ handler { "PrivateData.TOGGLE": (data) => privateData.visible = !data.isOn }
   브라우저가 보는 건 페이지 컴포넌트이고 거기서 로직이 처리된다.
 - 데이터 변경은 `set(leafIndex, v)`, 식별은 fullname + leafIndex.
 
+## 8. `@if` = Region + 재진입 `interpret` + lazy build
+
+클라 런타임에서 `@if`는 한 자리(**Region**)에서 두 가지(then/else) 중 하나만 보인다. @if의 본질은
+"분기에 따라 어떤 컴포넌트가 보이고 안 보이는 것 = 미래 가능성의 인코딩(양쪽 가지를 다 안다)".
+그래서 두 불변을 지킨다: **해석 ≠ build**(양쪽 청사진은 알되 활성 가지만 노드·구독을 만든다),
+**안 보이는 가지는 구독 0**(set에 반응하지 않는다).
+
+### 핵심 결정 — 인스턴스화 루프를 재진입 가능하게
+
+`interpret(startPc, endPc, regionIndex, branchIndex)` 하나가 "**한 가지를 build하는 단위**"다.
+최초 인스턴스화·lazy swap build·중첩 if가 전부 이 함수 하나로 통일된다.
+
+- **IF를 만날 때마다 Region을 1개 생성**하고, 자식 가지는 **재귀 `interpret` 호출**로 들어간다.
+  활성 가지는 즉시 재귀 build, 비활성 가지는 `lazyBuild` 클로저만 심어 둔다(노드 0·구독 0).
+- 한 `interpret` 호출 = 한 가지라, 그 안에서 region/branch는 **불변**이다. IF는 자기 region을
+  안 바꾸고 자식 region을 재귀에 넘긴 뒤 `pc`를 IF_END 다음으로 점프할 뿐. 그래서 **중첩 if의
+  컨텍스트 추적을 수동 스택이 아니라 JS 호출 스택(재귀)이 대신**한다.
+- 코드 범위는 마커로 이미 표시돼 있다 — then = IF다음~ELSE, else = ELSE다음~IF_END. 추가 마커
+  불필요(점프/길이 operand는 §거부). IF 진입 시점엔 ELSE·IF_END 위치를 모르므로 `skipBranch`
+  (depth 카운팅, SSR `skip_branch`와 동일 패턴)로 경계를 찾아 lazyBuild 클로저에 묶는다.
+
+### lazy build — 비활성 가지는 첫 swap 때 build
+
+각 가지는 **생애 첫 활성화 때 딱 한 번** build(`branch.built`)되고, 이후엔 detach/attach만 한다.
+초기 활성화도 swap과 동일 경로(`activateBranch`)를 탄다 — `activateBranch`가 첫 활성화면
+`lazyBuild()` 호출·구독 복원·anchor 뒤 부착을 일괄한다. "런타임 생성 + 제거 없음, append만"과 일관.
+
+- **비활성 가지 안의 중첩 if는 skip돼 Region이 안 생긴다** → 그 가지를 swap으로 처음 build할 때
+  비로소 생성된다. 그래서 `regions` 수 = 실제로 build된 가지들이 품은 IF 수.
+- swap 시 노드는 가지 루트에서만 detach/attach(자손 DOM은 따라온다), 구독은 자식 Region까지
+  **재귀로** 끊고/복원한다(`shownIndex`로 활성 자식만). off/on 비대칭은 region.js 참고.
+
+### 거부한 대안
+
+- **양쪽 가지 eager build** — 단순하나 안 보이는 가지의 build 비용을 항상 치른다(벤치 build 약점).
+  lazy build로 "보이는 한 가지만 build"가 되어 최초 build가 React/Svelte와 동급이 된다.
+- **수동 region/branch 스택 유지** — 한 루프로 IF→ELSE→IF_END를 순차 처리하며 스택 push/pop.
+  재귀 `interpret`이 같은 일을 JS 호출 스택으로 해내므로 제거했다(스택 3개 → `branch` 상수 1개).
+- **점프/길이 operand** — 가지 경계를 바이트코드에 박지 않는다. `skipBranch`의 depth 카운팅으로
+  런타임에 찾는다(마커만으로 충분, 인코딩을 키우지 않는다).
+
+### 전제 — `@for` 도입 시 재검토
+
+"IF 위치 1개 → Region 1개"는 지금 `@for`가 없어 성립한다. for의 각 항목이 같은 IF를 품으면
+"IF × 반복 횟수"만큼 Region이 생겨 이 1:1 전제가 깨진다. `@for` 설계 때 함께 다룬다.
+
 ## 구현 현황
 
 - [x] props 변수 보간 — 텍스트(`TEXT_VAR`)·속성(`ATTR_*_VAR`). 같은 scope offset 공간.
 - [x] 스칼라 반응성 — `subscribers[leafIndex]`(구독자=함수) + `set(leafIndex, v)`. 렌더 시 구독 등록.
 - [x] 바인딩 해석 / 공유 — `resolve(store, path)`로 path -> leafIndex lazy 발급·캐시. 같은 path는 같은 leaf로 귀결(공유). 검증 완료.
 - [x] 합성 시 자식 paths 주입 — `PUSH_ARG`(부모 offset)+`RENDER`로 부모가 자식 paths를 채운다. 부모·자식이 같은 store 리프를 가리키면 공유. 검증 완료.
+- [x] `@if` Region + 재진입 `interpret` + lazy build(§8) — 활성 가지만 build·구독, 비활성은 첫 swap 때 build. 단일 컴포넌트 내 단일·중첩 if. (`proto/web/compile.js`, `region.js`, `region-build.test.js`)
+- [ ] `@if` Region 병합 — RENDER 자식 컴포넌트 안의 if region을 부모 가지에 엮기(지금은 단일 컴포넌트 내부만).
 - [ ] leafIndex 할당기 / free list (지금은 `leaves.length`로 증가만 — `@for` 회수 시 필요).
 - [ ] 객체(여러 리프 일괄), `@for`(length 토픽·동적 인덱스), 핸들러/이벤트.

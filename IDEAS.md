@@ -1,9 +1,12 @@
 # IDEAS
 
-지금 구현하지 않지만 나중에 적용해볼 만한 아이디어 모음. 확정 설계는 DESIGN.md,
-바이트코드 명세는 proto/BYTECODE.md 참고.
+검토한 아이디어 모음. **미적용**은 아직 안 갔거나 보류·거부한 길(측정 근거·거부 이유 포함),
+**구현됨**은 적용 완료해 확정 설계로 승격됐으나 거부 대안·근거는 기록으로 남겨둔 것이다.
+확정 설계는 DESIGN.md·REACTIVITY.md, 바이트코드 명세는 proto/BYTECODE.md 참고.
 
-## 런타임 트리셰이킹 (필요한 opcode 핸들러만 구성)
+## 미적용 아이디어
+
+### 런타임 트리셰이킹 (필요한 opcode 핸들러만 구성)
 
 지금 runtime.js는 작지만(~5KB), `@for`·`@if`·이벤트·반응성이 들어오면 계속 커져 React 런타임
 (46KB gzip)을 향해 간다. "런타임이 작다"는 강점이 희석된다. 해결: **페이지가 실제로 쓰는
@@ -21,7 +24,7 @@ TEXT_VAR만 쓰고 @for·이벤트가 없는 페이지면 그 핸들러만 보�
 2단 구조로. opcode 핸들러 하나는 작아서(수십~수백B), 큰 절감은 무거운 기능(반응성 엔진,
 이벤트 위임)을 안 쓸 때 난다.
 
-## 컴파일타임 속성명 usage 추적
+### 컴파일타임 속성명 usage 추적
 
 전역 상수풀(속성명)에 **어떤 속성명을 넣을지**를 손으로 정하지 않고, 컴파일타임 정적분석으로
 **각 속성명이 몇 개 컴포넌트에서 쓰이는지** 추적한다. 그 데이터를 보고 전역 테이블에 추가할지
@@ -32,7 +35,7 @@ TEXT_VAR만 쓰고 @for·이벤트가 없는 페이지면 그 핸들러만 보�
 - usage 추적이 있으면 실제 코드베이스 기준으로 전역 편입 여부를 데이터로 판단 가능.
 - 값(속성값)은 대상 아님 — '흔한 값'의 기준이 없어 값은 항상 컴포넌트 상수풀에 둔다.
 
-## 후위(post-order) 바이트코드 인코딩
+### 후위(post-order) 바이트코드 인코딩
 
 요소를 **여는 순서(전위)**가 아니라 **속성·자식을 먼저 내고 OPEN을 나중에**(post-order) 인코딩하는
 방안. OPEN이 그 시점까지 쌓인 자식/속성을 흡수해 조립한다. `ELEM_END`·`ELEM_CLOSE_OPEN`이
@@ -48,7 +51,7 @@ push), 역순 디버깅. **이득(void 정합성)에 비해 비용이 크다.**
 - 인코딩을 본격 재설계할 때(데이터 흐름·`@for` 확정 이후) 다시 판단할 것. void는 그때 더 작은
   수단(자식 유무 플래그 1비트 등)도 함께 검토.
 
-## 닫고-열기 opcode (`END_OPEN`)
+### 닫고-열기 opcode (`END_OPEN`)
 
 형제 요소 사이의 `END + OPEN`을 한 opcode(`END_OPEN tag`)로 합쳐 닫기 1B를 흡수하는 방안.
 전위 인코딩을 유지하면서 바이트코드 양을 줄이는 최적화.
@@ -61,36 +64,7 @@ push), 역순 디버깅. **이득(void 정합성)에 비해 비용이 크다.**
 
 - 인코딩 재설계 시 후위 표기와 함께 다시 검토.
 
-## @if swap 시 비활성 가지 lazy build (클라 region)
-
-클라 런타임에서 `@if`는 한 자리(Region)에서 두 가지 중 하나만 보인다. 비활성 가지는 "안 보이는
-노드 0 비용"을 위해 build(노드·구독)를 미뤄야 한다(skip). 그러면 나중에 cond가 바뀌어 swap할 때
-그 가지를 처음 build해야 하는데 — **최초 인스턴스화 루프는 끝나 스택 문맥이 사라진 상태**다.
-
-**핵심:** swap build에는 전체 스택 복원이 필요 없다. 그 가지부터 아래로만 새로 자라므로,
-**시작 Branch + 코드 범위(startPc~endPc)** 두 가지만 있으면 된다. 인스턴스화 루프를 재사용
-가능하게 만든다:
-
-```
-interpret(code, startPc, endPc, ctx, paths, startBranch)
-  // startBranch를 스택 top으로 시작, start~end 해석
-  // 최초 인스턴스화: interpret(0, len, ..., rootBranch)
-  // swap build:     interpret(가지start, 가지end, ..., 그 가지 Branch)
-```
-
-**코드 범위는 마커로 이미 표시돼 있다** — then = IF다음~ELSE, else = ELSE다음~IF_END. 추가 마커
-불필요(점프/길이 operand는 우리가 거부한 것). 단 IF 진입 시점엔 ELSE·IF_END 위치를 아직 모르므로,
-비활성 가지를 **skip_branch(depth 카운팅, SSR renderer와 같은 패턴)로 건너뛰면서 경계 위치를
-region에 기록**한다(`{thenStart, elseStart, end}`).
-
-비활성 가지 안의 **중첩 if**는 skip돼 region이 안 생긴다 → 그 가지를 swap으로 처음 build할 때
-비로소 생성된다("런타임 생성 + 제거 없음, append만"과 일관).
-
-검증 순서: ① 스킵 없는 버전(양쪽 다 build, IF_END에서 비활성 구독 해제)으로 뼈대 확인 →
-② cond 변경 swap 동작 확인 → ③ skip + lazy build 도입. 현재 ①·② 단계
-(`proto/web/region-build.test.js`, `region.js`).
-
-## `ELEM_CLOSE_OPEN` 추론 제거
+### `ELEM_CLOSE_OPEN` 추론 제거
 
 `ELEM_CLOSE_OPEN`(`>`, 속성 끝·자식 시작 경계)을 명시 opcode 없이 **추론**하는 방안. 여는 태그
 진행 중 올 수 있는 건 속성(`ATTR_*`)뿐이므로, **속성이 아닌 op**(`ELEM_OPEN`·`TEXT`·`ELEM_END`·
@@ -105,3 +79,39 @@ op마다 "태그 여는 중인데 속성 아니면 먼저 `>` 닫기"를 검사�
 
 - 효과는 요소당 1B로 `ELEM_END`와 동급이라 **grid류로 실측해 −% 데이터를 보고 결정**할 것.
   데이터 흐름·`@for` 확정 후 인코딩 재설계 시 후위 표기·`END_OPEN`과 함께 검토.
+
+## 구현됨 (기록 보존)
+
+적용 완료해 확정 설계로 승격된 아이디어. 본문은 거부한 대안·근거를 남기기 위한 기록이다.
+
+### @if swap 시 비활성 가지 lazy build (클라 region)
+
+→ **구현 완료. 확정 설계는 REACTIVITY.md §8.** 아래는 도입 당시 설계 메모(기록 보존).
+
+클라 런타임에서 `@if`는 한 자리(Region)에서 두 가지 중 하나만 보인다. 비활성 가지는 "안 보이는
+노드 0 비용"을 위해 build(노드·구독)를 미뤄야 한다(skip). 그러면 나중에 cond가 바뀌어 swap할 때
+그 가지를 처음 build해야 하는데 — **최초 인스턴스화 루프는 끝나 스택 문맥이 사라진 상태**다.
+
+**핵심:** swap build에는 전체 스택 복원이 필요 없다. 그 가지부터 아래로만 새로 자라므로,
+**시작 Branch + 코드 범위(startPc~endPc)** 두 가지만 있으면 된다. 인스턴스화 루프를 재사용
+가능하게 만든다:
+
+```
+interpret(startPc, endPc, regionIndex, branchIndex)
+  // 시작 가지를 받아 start~end 해석. 한 호출 = 한 가지.
+  // 최초 인스턴스화: interpret(0, len, 0, THEN_INDEX)
+  // swap build:     interpret(가지start, 가지end, regionIndex, branchIndex)
+  // 중첩 if는 재귀 호출 — JS 호출 스택이 수동 region/branch 스택을 대신한다.
+```
+
+**코드 범위는 마커로 이미 표시돼 있다** — then = IF다음~ELSE, else = ELSE다음~IF_END. 추가 마커
+불필요(점프/길이 operand는 우리가 거부한 것). 단 IF 진입 시점엔 ELSE·IF_END 위치를 아직 모르므로,
+비활성 가지를 **skip_branch(depth 카운팅, SSR renderer와 같은 패턴)로 건너뛰면서 경계 위치를
+구한다**.
+
+비활성 가지 안의 **중첩 if**는 skip돼 region이 안 생긴다 → 그 가지를 swap으로 처음 build할 때
+비로소 생성된다("런타임 생성 + 제거 없음, append만"과 일관).
+
+검증 순서: ① 스킵 없는 버전(양쪽 다 build, IF_END에서 비활성 구독 해제)으로 뼈대 확인 →
+② cond 변경 swap 동작 확인 → ③ skip + lazy build 도입. **①·②·③ 모두 완료**
+(`proto/web/compile.js`, `region.js`, `region-build.test.js` 8 테스트).
