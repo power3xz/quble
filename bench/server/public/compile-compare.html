@@ -38,8 +38,8 @@
 
     // compile.js: compile → get(0) → blueprint(ctx, paths) → { nodes }
     const ctxC = storeC({ ...initial });
-    const get = compile(bytes);
-    const inst = get(0)(ctxC, paths);
+    const blueprintOf = compile(bytes);
+    const inst = blueprintOf(0)(ctxC, paths);
     document.getElementById("root-compile").replaceChildren(...inst.nodes);
 
     // 두 store를 같은 버튼으로 동시에 갱신 → 양쪽이 동일하게 바뀌어야 한다.
