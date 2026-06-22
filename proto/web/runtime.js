@@ -1,14 +1,15 @@
-// Quble 클라이언트 런타임 본체. .qubb를 두 단계로 인스턴스화한다:
-//   compile(bytes)        → blueprintOf(compId) => Blueprint  — def를 청사진으로.
-//   Blueprint(ctx, paths) → Instance                          — 청사진 호출 = 인스턴스화. DOM·구독 생성.
+// Quble 클라이언트 런타임 본체 — .qubb를 두 단계로 인스턴스화한다.
+//
+//   compile(bytes)        → blueprintOf(compId) => Blueprint  (def를 청사진으로)
+//   Blueprint(ctx, paths) → Instance                          (청사진 호출 = 인스턴스화. DOM·구독 생성)
 //
 // Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
 // 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 — 단순한 "호출 시 훑기"를 택했다.)
 //
-// Instance = { nodes, regions }  — nodes는 루트 노드들(부착·추적용). regions는 이 인스턴스의
-// 모든 Region(@if swap 경계). 구독은 가지(Branch)에 모이고 activateBranch가 켤 때 건다 — 그래서
-// 안 보이는 가지는 구독 0이다. region 구조·동작은 region.js 참고. RENDER는 자식 def를 같은
-// interpret으로 인라인 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
+// Instance = { nodes, regions }. nodes는 루트 노드들(부착·추적용), regions는 이 인스턴스의 모든
+// Region(@if swap 경계). 구독은 가지(Branch)에 모이고 activateBranch가 켤 때 건다 — 안 보이는
+// 가지는 구독 0이다(region 구조·동작은 region.js). RENDER는 자식 def를 같은 interpret으로 인라인
+// 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
 //
 // 인덱스 세 축 (REACTIVITY.md §1~§3):
 //   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.resolve가 lazy 발급).
@@ -43,6 +44,13 @@ const OP = {
 };
 
 // ── store 컨텍스트 (pub/sub) ──────────────────────────────────────────
+// 반응 상태 저장소를 만든다 — leafIndex로 값을 읽고/쓰고/구독한다.
+//
+// 값은 leaves(평탄 배열)에 leafIndex로 담기고, set은 그 leaf의 구독자에게 새 값을 통지한다.
+// path는 resolve가 leafIndex로 lazy 발급(pathCache)한다.
+//
+// @param defaultValue 경로 해석의 뿌리 객체(resolve가 path를 이 객체에서 읽어 초기값 발급)
+// @returns            { leaves, set, subscribe, unsubscribe, resolve }
 export const createStore = (defaultValue) => {
   const leaves = [];
   const subscribers = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
@@ -81,8 +89,13 @@ export const createStore = (defaultValue) => {
   return { leaves, set, subscribe, unsubscribe, resolve };
 };
 
-// opcode의 operand 바이트 수. skipBranch가 op 경계를 짚어 마커(IF/ELSE/IF_END)를 operand
-// 값과 혼동하지 않게 한다. (SSR renderer operand_len과 동일.)
+// opcode의 operand 바이트 수를 돌려준다.
+//
+// skipBranch가 op 경계를 짚어 마커(IF/ELSE/IF_END)를 operand 값과 혼동하지 않게 한다.
+// (SSR renderer operand_len과 동일.)
+//
+// @param op opcode 바이트
+// @returns  operand 바이트 수(0·2·4)
 const operandLen = (op) => {
   switch (op) {
     case OP.HALT:
@@ -108,9 +121,14 @@ const operandLen = (op) => {
   }
 };
 
-// 현재 가지를 통 스킵한다. op 경계를 따라 전진하며 중첩 깊이를 세고, 같은 깊이(depth 0)에서
-// 만난 ELSE 또는 IF_END 마커의 pc를 돌려준다(그 마커는 호출자가 소비). build 안 하는 비활성
-// 가지를 건너뛰며 경계 위치만 얻을 때 쓴다. (SSR skip_branch의 JS 포팅 — 여기선 pc 반환.)
+// 현재 가지를 통째로 스킵하고 끝 마커(ELSE/IF_END)의 pc를 돌려준다.
+//
+// op 경계를 따라 전진하며 중첩 if 깊이를 센다. 같은 깊이(0)에서 만난 ELSE/IF_END가 이 가지의
+// 끝이다. build 안 하는 비활성 가지의 경계 위치만 얻을 때 쓴다. (SSR skip_branch의 JS 포팅.)
+//
+// @param code    def 바이트코드
+// @param startPc 스킵 시작 위치(가지 첫 op)
+// @returns       끝 마커(ELSE/IF_END)의 pc — 호출자가 그 마커를 소비
 const skipBranch = (code, startPc) => {
   let pc = startPc;
   let depth = 0;
@@ -134,9 +152,14 @@ const skipBranch = (code, startPc) => {
   throw new Error("unbalanced branch — no matching ELSE/IF_END");
 };
 
-// IF 블록의 then/else 코드 경계를 구한다(순수 — code와 then 시작 pc만 본다). thenStart는 IF
-// operand 직후. then = thenStart~thenEnd, else = elseStart~ifEndPc. else 없으면 elseStart = -1
-// (그땐 thenEnd === ifEndPc === IF_END 위치). 마커는 skipBranch로 찾고 호출자가 소비한다.
+// IF 블록의 then/else 코드 경계를 구한다(순수 — code와 then 시작 pc만 본다).
+//
+// then = thenStart~thenEnd, else = elseStart~ifEndPc. else 없으면 elseStart = -1이고
+// thenEnd === ifEndPc === IF_END 위치. 마커는 skipBranch로 찾고 호출자가 소비한다.
+//
+// @param code      def 바이트코드
+// @param thenStart then 가지 시작 pc(IF operand 직후)
+// @returns         { thenEnd, elseStart, ifEndPc }
 const ifBranchRanges = (code, thenStart) => {
   const thenEnd = skipBranch(code, thenStart); // ELSE 또는 IF_END
   if (code[thenEnd] === OP.ELSE) {
@@ -146,6 +169,11 @@ const ifBranchRanges = (code, thenStart) => {
   return { thenEnd, elseStart: -1, ifEndPc: thenEnd }; // else 없는 if
 };
 
+// 점 표기 경로로 객체를 파고들어 값을 읽는다("a.b.c" → obj.a.b.c).
+//
+// @param defaultValue 뿌리 객체
+// @param path         점으로 구분된 경로 문자열
+// @returns            경로가 가리키는 값
 const readPath = (defaultValue, path) => {
   let cur = defaultValue;
   for (const key of path.split(".")) {
@@ -182,6 +210,10 @@ class Reader {
   }
 }
 
+// qubb 바이트를 모듈로 디코드한다(상수풀·def 테이블·코드).
+//
+// @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
+// @returns     { pool, defs, code }
 const decode = (bytes) => {
   const r = new Reader(bytes);
   const magic = r.take(4);
@@ -211,8 +243,14 @@ const decode = (bytes) => {
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
+// 한 컴포넌트 def를 Blueprint(인스턴스화 함수)로 만든다.
+//
 // Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. 자식 RENDER는 interpret을 자식 def
-// 구간으로 재진입해 인라인 합성한다(별도 청사진 호출 없음). Blueprint(ctx, paths) → Instance { nodes }
+// 구간으로 재진입해 인라인 합성한다(별도 청사진 호출 없음).
+//
+// @param module 디코드된 모듈
+// @param compId 컴포넌트 def 인덱스
+// @returns      Blueprint: (ctx, rootPaths) => Instance { nodes, regions }
 const compileDef = (module, compId) => {
   const def = module.defs[compId];
   if (!def) {
@@ -229,12 +267,19 @@ const compileDef = (module, compId) => {
     rootRegion.branches[THEN_INDEX].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
 
-    // 한 가지(startPc~endPc, IF_END 직전까지)를 build한다. 재진입 가능 — 최초 인스턴스화는
-    // 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만 이 함수로 해석한다.
-    // 노드는 fragment에 모아 반환하고, 구독은 (regionIndex, branchIndex)가 가리키는 가지에 쌓는다.
-    // 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
-    // code/paths를 인자로 받는다: RENDER는 자식 def의 code 구간과 자식 paths로 같은 interpret을
-    // 재진입한다(인라인 합성). 자식은 별도 인스턴스/루트 region 없이 부모 가지 안에 합류한다.
+    // 한 가지(startPc~endPc)를 build한다 — 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
+    //
+    // 재진입 가능: 최초 인스턴스화는 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만
+    // 해석한다. 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
+    // RENDER는 자식 def 구간을 자식 paths로 이 함수에 재진입해 인라인 합성한다(별도 인스턴스/
+    // 루트 region 없이 부모 가지 안에 합류).
+    //
+    // @param code             해석할 바이트코드(자식은 자식 def 구간)
+    // @param paths            offset → store 경로 매핑(자식은 자식 paths)
+    // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
+    // @param startRegionIndex 구독을 쌓을 region
+    // @param startBranchIndex 구독을 쌓을 가지(THEN/ELSE)
+    // @returns                직속 노드를 담은 DocumentFragment
     const interpret = (code, paths, startPc, endPc, startRegionIndex, startBranchIndex) => {
       const fragment = document.createDocumentFragment();
       const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
@@ -253,8 +298,14 @@ const compileDef = (module, compId) => {
       };
       const nodeTop = () => nodeStack[nodeStack.length - 1];
 
-      // offset → leafIndex로 해석(지연)하고 초기값을 돌려준다. 구독은 즉시 걸지 않고 현재 가지에
-      // 모은다 — activateBranch가 그 가지를 켤 때 건다(안 보이는 가지는 구독 0).
+      // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
+      //
+      // 구독은 즉시 걸지 않고 현재 가지에 모은다 — activateBranch가 그 가지를 켤 때 건다
+      // (안 보이는 가지는 구독 0).
+      //
+      // @param offset 컴포넌트 로컬 offset(paths로 store 경로 해석)
+      // @param update 값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
+      // @returns      현재 leaf 값(없으면 "")
       const bindVar = (offset, update) => {
         const path = paths[offset];
         if (path === undefined) {
@@ -422,8 +473,14 @@ const compileDef = (module, compId) => {
 };
 
 // ── 공개 API ─────────────────────────────────────────────────────────
-// compile(bytes) → (compId) => Blueprint. compId의 청사진(인스턴스화 함수)을 돌려준다.
-// 사용: const blueprintOf = compile(bytes); const inst = blueprintOf(0)(ctx, paths); root.append(...inst.nodes);
+// qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
+//
+// 사용: const blueprintOf = compile(bytes);
+//       const inst = blueprintOf(0)(ctx, paths);
+//       root.append(...inst.nodes);
+//
+// @param bytes qubb 바이트
+// @returns     blueprintOf: (compId) => Blueprint
 export const compile = (bytes) => {
   const module = decode(bytes);
   return (compId) => compileDef(module, compId);
