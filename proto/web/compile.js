@@ -137,6 +137,18 @@ const skipBranch = (code, startPc) => {
   throw new Error("unbalanced branch — no matching ELSE/IF_END");
 };
 
+// IF 블록의 then/else 코드 경계를 구한다(순수 — code와 then 시작 pc만 본다). thenStart는 IF
+// operand 직후. then = thenStart~thenEnd, else = elseStart~ifEndPc. else 없으면 elseStart = -1
+// (그땐 thenEnd === ifEndPc === IF_END 위치). 마커는 skipBranch로 찾고 호출자가 소비한다.
+const ifBranchRanges = (code, thenStart) => {
+  const thenEnd = skipBranch(code, thenStart); // ELSE 또는 IF_END
+  if (code[thenEnd] === OP.ELSE) {
+    const elseStart = thenEnd + 1;
+    return { thenEnd, elseStart, ifEndPc: skipBranch(code, elseStart) };
+  }
+  return { thenEnd, elseStart: -1, ifEndPc: thenEnd }; // else 없는 if
+};
+
 const readPath = (defaultValue, path) => {
   let cur = defaultValue;
   for (const key of path.split(".")) {
@@ -361,21 +373,13 @@ const compileDef = (module, compId) => {
             region.anchor = document.createComment("qb:region#" + regionIndex);
             nodeTop().appendChild(region.anchor);
 
-            // 코드 범위: then = IF다음~ELSE, else = ELSE다음~IF_END. skipBranch로 마커 위치만 얻는다.
+            // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
             const thenStart = pc;
-            const elseMarkerPc = skipBranch(code, thenStart); // ELSE 또는 IF_END
-            let elseStart = -1;
-            let ifEndPc;
-            if (code[elseMarkerPc] === OP.ELSE) {
-              elseStart = elseMarkerPc + 1;
-              ifEndPc = skipBranch(code, elseStart); // else 가지 끝 = IF_END
-            } else {
-              ifEndPc = elseMarkerPc; // else 없는 if — IF_END 바로
-            }
+            const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(code, thenStart);
 
             // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
             const buildThen = () => {
-              const f = interpret(code, paths, thenStart, elseMarkerPc, regionIndex, THEN_INDEX);
+              const f = interpret(code, paths, thenStart, thenEnd, regionIndex, THEN_INDEX);
               thenBranch.nodes = Array.from(f.childNodes);
             };
             const buildElse = () => {
