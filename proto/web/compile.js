@@ -1,6 +1,4 @@
-// Quble 클라이언트 컴파일/인스턴스화 (실험). reactive.js를 대체할 후보.
-//
-// reactive.js는 build(즉시 DOM 생성)였다. 여기서는 두 단계로 나눈다:
+// Quble 클라이언트 런타임 본체. .qubb를 두 단계로 인스턴스화한다:
 //   compile(bytes)        → blueprintOf(compId) => Blueprint  — def를 청사진으로.
 //   Blueprint(ctx, paths) → Instance                          — 청사진 호출 = 인스턴스화. DOM·구독 생성.
 //
@@ -12,7 +10,7 @@
 // 안 보이는 가지는 구독 0이다. region 구조·동작은 region.js 참고. RENDER는 자식 def를 같은
 // interpret으로 인라인 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
 //
-// 인덱스 세 축은 reactive.js와 동일 (REACTIVITY.md §1~§3):
+// 인덱스 세 축 (REACTIVITY.md §1~§3):
 //   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.resolve가 lazy 발급).
 
 import {
@@ -156,7 +154,7 @@ const readPath = (defaultValue, path) => {
   return cur;
 };
 
-// ── 디코드 (reactive.js와 동일 포맷) ──────────────────────────────────
+// ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
 class Reader {
   constructor(bytes) {
     this.b = bytes;

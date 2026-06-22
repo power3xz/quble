@@ -2,10 +2,9 @@
 //! 경로에 맞게 제공한다. qubb vs React lazy chunk 네트워크 비용 비교가 목적이고,
 //! SSR·클라 렌더는 기능 확인용이다.
 //!
-//!  - GET /                  : 좌우 비교 페이지(index.html, React 엔트리만 치환).
 //!  - GET /components/<name> : <name>.qubc를 컴파일한 qubb 바이트.
 //!  - GET /ssr/<name>        : renderer로 렌더한 HTML(기능 확인).
-//!  - GET /runtime.js        : 클라이언트 런타임.
+//!  - GET /compile.js, /region.js : 클라이언트 런타임.
 //!  - GET /react/*           : React 빌드 산출물(bench/react/dist).
 //!
 //! 실행: bench/server에서 `cargo run`  → http://localhost:7878
@@ -20,8 +19,6 @@ use tiny_http::{Header, Request, Response, Server};
 
 const ADDR: &str = "127.0.0.1:7878";
 const COMPONENTS_DIR: &str = "../components";
-const RUNTIME_JS: &str = "../../proto/web/runtime.js";
-const REACTIVE_JS: &str = "../../proto/web/reactive.js";
 const COMPILE_JS: &str = "../../proto/web/compile.js";
 const REGION_JS: &str = "../../proto/web/region.js";
 const REACT_DIST: &str = "../react/dist";
@@ -40,19 +37,7 @@ fn main() {
         let (path, query) = url.split_once('?').unwrap_or((&url, ""));
         let path = path.to_string();
 
-        if path == "/" {
-            respond(req, page().into_bytes(), "text/html; charset=utf-8");
-        } else if path == "/runtime.js" {
-            match fs::read(RUNTIME_JS) {
-                Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
-                Err(_) => not_found(req),
-            }
-        } else if path == "/reactive.js" {
-            match fs::read(REACTIVE_JS) {
-                Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
-                Err(_) => not_found(req),
-            }
-        } else if path == "/compile.js" {
+        if path == "/compile.js" {
             match fs::read(COMPILE_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
@@ -80,12 +65,6 @@ fn main() {
                     Err(e) => server_error(req, format!("렌더 실패: {e:?}")),
                 },
                 None => not_found(req),
-            }
-        } else if let Some(name) = path.strip_prefix("/csr/") {
-            if components.contains_key(name) {
-                respond(req, csr_page(name, query).into_bytes(), "text/html; charset=utf-8");
-            } else {
-                not_found(req);
             }
         } else if let Some(name) = path.strip_prefix("/react-csr/") {
             let name = name.to_string();
@@ -192,32 +171,6 @@ fn page_shell(title: &str, body: &str) -> String {
 {body}
 </body></html>"#
     )
-}
-
-/// CSR 부트스트랩 페이지: runtime.js로 컴포넌트를 클라이언트 렌더. scope는 query에서 받아 주입.
-fn csr_page(name: &str, query: &str) -> String {
-    let scope = scope_from_query(query);
-    // scope를 JS 배열 리터럴로. (간단한 JSON 직렬화 — 따옴표·역슬래시만 이스케이프)
-    let scope_js = scope
-        .iter()
-        .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
-        .collect::<Vec<_>>()
-        .join(",");
-    let body = format!(
-        r#"  <div id="root">로딩 중…</div>
-  <script type="module">
-    import {{ renderComponent }} from "/runtime.js";
-    const res = await fetch("/components/{name}.qubb");
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    document.getElementById("root").replaceChildren(renderComponent(bytes, 0, [{scope_js}]));
-  </script>"#
-    );
-    page_shell(&format!("CSR {name}"), &body)
-}
-
-/// 루트 인덱스 페이지(index.html)를 그대로 반환.
-fn page() -> String {
-    fs::read_to_string("index.html").expect("index.html 읽기 실패")
 }
 
 /// React CSR 페이지: 키=값 query를 props 객체로 주입하고 react-csr 번들을 로드해 클라 렌더.
