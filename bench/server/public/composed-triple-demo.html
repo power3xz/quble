@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>composed_triple — 컴포넌트 합성 @if detach 확인</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    #root { border: 1px solid #d0d7de; border-radius: 10px; padding: 16px; max-width: 420px; font-size: 18px; }
+    #root p { margin: 4px 0; padding: 6px 10px; border-radius: 6px; background: #eef2ff; }
+    .controls { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .state { font-family: ui-monospace, monospace; font-size: 13px; color: #555; margin: 8px 0; }
+    .seen { font-family: ui-monospace, monospace; font-size: 14px; background: #0f172a; color: #a5f3fc; padding: 8px 12px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h3>composed_triple — 부모 + 자식(InnerPair) 합성</h3>
+  <p>triple_if를 <b>부모(바깥 c1)</b>와 <b>자식 컴포넌트 InnerPair(c2/c3)</b>로 쪼개 <code>use</code>로 합성.
+     단일 컴포넌트 triple_if와 동일하게 동작해야 한다.</p>
+  <p><b>확인 순서:</b> ① <code>c3</code> 끄기(자식 안쪽 swap) → ② <code>c1</code> 끄기(부모 최상단).
+     정상이면 <b>[d]</b>만. 자식 if가 부모 트리에 안 엮이면 자식 <b>b</b>가 잔류해 <b>[d, b]</b>.</p>
+  <div id="root"></div>
+  <div class="state" id="state"></div>
+  <div class="seen" id="seen"></div>
+  <div class="controls">
+    <button id="t-c1">c1 토글</button>
+    <button id="t-c2">c2 토글</button>
+    <button id="t-c3">c3 토글</button>
+  </div>
+  <p>DOM의 <code>&lt;!--qb:region#N--&gt;</code>가 각 if 자리(anchor). 콘솔에 <code>window.inst</code>.</p>
+
+  <script type="module">
+    import { compile, createStore } from "/compile.js";
+
+    const res = await fetch("/components/composed_triple.qubb");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    const paths = ["c1", "c2", "c3", "a", "b", "c", "d"];
+    const state = { c1: true, c2: true, c3: true, a: "a", b: "b", c: "c", d: "d" };
+    const ctx = createStore(state);
+
+    const inst = compile(bytes)(0)(ctx, paths);
+    const root = document.getElementById("root");
+    root.replaceChildren(...inst.nodes);
+
+    const refresh = () => {
+      document.getElementById("state").textContent =
+        `c1=${state.c1} c2=${state.c2} c3=${state.c3}`;
+      const seen = [...root.querySelectorAll("p")].map((p) => p.textContent);
+      const el = document.getElementById("seen");
+      el.textContent = `보이는 p: [${seen.join(", ")}]`;
+      if (!state.c1 && seen.length > 1) {
+        el.style.background = "#7f1d1d";
+        el.textContent += "  ← 버그! 자식 노드 잔류";
+      } else {
+        el.style.background = "#0f172a";
+      }
+    };
+
+    const toggle = (key) => () => {
+      state[key] = !state[key];
+      ctx.set(ctx.resolve(key), state[key]);
+      refresh();
+    };
+    document.getElementById("t-c1").onclick = toggle("c1");
+    document.getElementById("t-c2").onclick = toggle("c2");
+    document.getElementById("t-c3").onclick = toggle("c3");
+
+    window.inst = inst;
+    refresh();
+  </script>
+</body>
+</html>
