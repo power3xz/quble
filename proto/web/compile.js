@@ -21,6 +21,7 @@ import {
   createRegion,
   createBranch,
   activateBranch,
+  attachRegionTree,
 } from "./region.js";
 
 const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
@@ -113,7 +114,7 @@ const operandLen = (op) => {
 // 현재 가지를 통 스킵한다. op 경계를 따라 전진하며 중첩 깊이를 세고, 같은 깊이(depth 0)에서
 // 만난 ELSE 또는 IF_END 마커의 pc를 돌려준다(그 마커는 호출자가 소비). build 안 하는 비활성
 // 가지를 건너뛰며 경계 위치만 얻을 때 쓴다. (SSR skip_branch의 JS 포팅 — 여기선 pc 반환.)
-export const skipBranch = (code, startPc) => {
+const skipBranch = (code, startPc) => {
   let pc = startPc;
   let depth = 0;
   while (pc < code.length) {
@@ -230,9 +231,12 @@ const compileDef = (module, compId, blueprintOf) => {
 
   return (ctx, paths) => {
     // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
-    const rootRegion = createRegion(-1, null); // 루트 = swap 없는 껍데기
+    // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
+    // attachRegionTree가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
+    const rootRegion = createRegion(-1, document.createComment("qb:region#0"));
     rootRegion.branches[THEN_INDEX] = createBranch();
     rootRegion.branches[THEN_INDEX].built = true;
+    rootRegion.shownIndex = THEN_INDEX;
     const regions = [rootRegion]; // append만, 인덱스 영구 안정. lazy build가 새 region을 더한다.
 
     // 한 가지(startPc~endPc, IF_END 직전까지)를 build한다. 재진입 가능 — 최초 인스턴스화는
@@ -391,10 +395,15 @@ const compileDef = (module, compId, blueprintOf) => {
             ctx.subscribe(condLeafIndex, (condValue) => {
               activateBranch(ctx, regions, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
             });
-            // 초기 활성 가지 켜기 — activateBranch가 lazyBuild(첫 build)·구독·anchor 뒤 부착을
-            // 일괄 처리한다(swap과 동일 경로). 비활성 가지는 lazyBuild만 심긴 채 노드 0·구독 0.
+            // build는 "생성만" 한다 — 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
+            // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachRegionTree가 일괄).
+            // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
+            // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
             const initialBranchIndex = ctx.leaves[condLeafIndex] ? THEN_INDEX : ELSE_INDEX;
-            activateBranch(ctx, regions, regionIndex, initialBranchIndex);
+            const initialBranch = region.branches[initialBranchIndex];
+            initialBranch.lazyBuild();
+            initialBranch.built = true;
+            region.shownIndex = initialBranchIndex;
 
             pc = ifEndPc + 1; // IF_END 마커 소비 — if 블록 다음으로.
             break;
@@ -407,8 +416,14 @@ const compileDef = (module, compId, blueprintOf) => {
       return fragment;
     };
 
-    // 루트 전체를 build. fragment 자식들이 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
+    // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
+    // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 — 부모 nodes 오염 방지). 그 뒤
+    // attachRegionTree가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
     const fragment = interpret(0, code.length, 0, THEN_INDEX);
+    rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
+    fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 — attach가 anchor.after로 채운다
+    attachRegionTree(ctx, regions, rootRegion);
+    // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     return { nodes, regions };
   };

@@ -16,10 +16,14 @@
 //     leafIndices[i] <-> updateFns[i] (병렬). childRegionIndices = regions 배열 인덱스.
 //     built = 이 가지를 build한 적 있는가(처음 활성화 때 1회 build). lazyBuild = build 클로저.
 //
-// off/on의 비대칭:
-//   노드 — 가지 루트에서만 detach/attach 한 번. 자손 DOM은 같이 따라간다.
-//   구독 — 자식 Region까지 재귀로 끊어야 0이 된다(regions 매개변수는 인덱스->객체 풀이용).
-//          일반 노드/자식 컴포넌트는 swap 단위가 아니므로 건너뛰고 Region끼리만 재귀한다.
+// off/on은 노드·구독 모두 자식 Region까지 재귀로 처리한다(detachRegionTree/attachRegionTree).
+//   anchor는 주석 노드라 자식을 못 가져 DOM 트리가 평평하다 — 자식 Region이 swap되면 그 노드는
+//   부모 가지 노드가 아니라 자식 anchor의 형제로 붙는다. 그래서 부모 가지의 nodes만 떼면 자식
+//   swap 노드가 잔류한다(평평한 형제는 부모를 따라 안 떨어진다). 노드도 구독처럼 자식 Region까지
+//   재귀로 떼고/붙인다. 트리 순회는 detach/attachRegionTree가 맡고, 한 가지의 직속 구독 처리는
+//   teardown/restoreBranchSubs가 잎(leaf) 작업으로 맡는다(자식 재귀는 트리 함수가 전담).
+//   (regions 매개변수는 childRegionIndices(인덱스)->객체 풀이용. 일반 노드/자식 컴포넌트는 swap
+//   단위가 아니라 건너뛰고 Region끼리만 재귀한다.)
 
 export const THEN_INDEX = 0;
 export const ELSE_INDEX = 1;
@@ -40,53 +44,66 @@ export const createBranch = () => ({
   lazyBuild: null, // compile.js가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
 });
 
-// 한 가지의 직접 구독을 끊고, 켜져 있던 자식 Region의 구독까지 재귀로 끊는다. 노드는 안 건드림.
-const teardownBranchSubs = (ctx, regions, branch) => {
+// 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detachRegionTree가 전담.
+const teardownBranchSubs = (ctx, branch) => {
   const { leafIndices, updateFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
     ctx.unsubscribe(leafIndices[i], updateFns[i]);
   }
-  for (const childRegionIndex of branch.childRegionIndices) {
-    const childRegion = regions[childRegionIndex];
-    teardownBranchSubs(ctx, regions, childRegion.branches[childRegion.shownIndex]);
-  }
 };
 
-// 한 가지의 직접 구독을 복원(현재값 갱신 + 재구독)하고, 켜져 있던 자식까지 재귀. 노드는 안 건드림.
-const restoreBranchSubs = (ctx, regions, branch) => {
+// 한 가지의 직속 구독만 복원(현재값 갱신 + 재구독)한다(잎 작업). 자식 재귀는 attachRegionTree 전담.
+const restoreBranchSubs = (ctx, branch) => {
   const { leafIndices, updateFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
     updateFns[i](ctx.leaves[leafIndices[i]]); // 비활성 동안 놓친 값 따라잡기
     ctx.subscribe(leafIndices[i], updateFns[i]);
   }
+};
+
+// region의 활성(shownIndex) 가지를 끈다 — 노드 detach + 직속 구독 해제 + 활성 자식 Region 재귀.
+// anchor가 평평한 형제라 자식 swap 노드가 잔류하므로 자식까지 따라 내려가 떼야 한다.
+const detachRegionTree = (ctx, regions, region) => {
+  const branch = region.branches[region.shownIndex];
+  for (const node of branch.nodes) {
+    node.remove();
+  }
+  teardownBranchSubs(ctx, branch);
   for (const childRegionIndex of branch.childRegionIndices) {
-    const childRegion = regions[childRegionIndex];
-    restoreBranchSubs(ctx, regions, childRegion.branches[childRegion.shownIndex]);
+    detachRegionTree(ctx, regions, regions[childRegionIndex]);
   }
 };
 
-// region에서 branchIndex 가지를 활성화한다. 현재 가지는 끄고(노드 detach + 구독 재귀 해제),
-// 다음 가지를 켠다(구독 재귀 복원 + 노드 attach). 이미 그 가지면 무동작.
+// region의 활성(shownIndex) 가지를 켠다 — 노드 attach + 직속 구독 복원 + 활성 자식 Region 재귀.
+// 부모 노드를 먼저 anchor 뒤에 붙여야(자식 anchor가 그 안에 들어가) 자식 노드가 위치를 가진다.
+// 최초 인스턴스화의 부착도 이 함수로 한다(compile.js가 build로 트리만 만든 뒤 루트 Region부터
+// 호출). 루트도 anchor를 가져 자식과 균일 처리된다(분기 없음).
+export const attachRegionTree = (ctx, regions, region) => {
+  const branch = region.branches[region.shownIndex];
+  region.anchor.after(...branch.nodes);
+  restoreBranchSubs(ctx, branch);
+  for (const childRegionIndex of branch.childRegionIndices) {
+    attachRegionTree(ctx, regions, regions[childRegionIndex]);
+  }
+};
+
+// region에서 branchIndex 가지를 활성화한다. 현재 가지는 끄고(노드·구독 자식까지 재귀 detach),
+// 다음 가지를 켠다(노드·구독 자식까지 재귀 attach). 이미 그 가지면 무동작.
 export const activateBranch = (ctx, regions, regionIndex, branchIndex) => {
   const region = regions[regionIndex];
   if (branchIndex === region.shownIndex) {
     return;
   }
   if (region.shownIndex !== -1) {
-    const currentBranch = region.branches[region.shownIndex];
-    for (const node of currentBranch.nodes) {
-      node.remove(); // 가지 루트만 — 자손 DOM도 같이 떨어진다.
-    }
-    teardownBranchSubs(ctx, regions, currentBranch);
+    detachRegionTree(ctx, regions, region); // 이전 shownIndex 기준으로 끈다
   }
   const nextBranch = region.branches[branchIndex];
   if (!nextBranch.built) {
     // 생애 첫 활성화 — 지금(런타임) 처음 build해 nodes·구독을 채운다. 이후엔 detach/attach만.
     nextBranch.lazyBuild();
     nextBranch.built = true;
-    // 방금 build하며 구독은 현재 가지에 모인 채다(즉시 구독 안 함, restore가 켠다).
+    // 방금 build하며 구독은 현재 가지에 모인 채다(즉시 구독 안 함, attachRegionTree가 켠다).
   }
-  restoreBranchSubs(ctx, regions, nextBranch);
-  region.anchor.after(...nextBranch.nodes); // 가지 루트만 — 자손은 따라온다.
-  region.shownIndex = branchIndex;
+  region.shownIndex = branchIndex; // attach가 shownIndex로 가지를 찾으므로 먼저 갱신
+  attachRegionTree(ctx, regions, region);
 };
