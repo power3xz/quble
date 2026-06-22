@@ -24,6 +24,34 @@ TEXT_VAR만 쓰고 @for·이벤트가 없는 페이지면 그 핸들러만 보�
 2단 구조로. opcode 핸들러 하나는 작아서(수십~수백B), 큰 절감은 무거운 기능(반응성 엔진,
 이벤트 위임)을 안 쓸 때 난다.
 
+### 비동기 컴포넌트 로드 (코드 분할, `LAZY_RENDER` opcode)
+
+RENDER를 interpret 인라인 재진입으로 바꾸니(REACTIVITY.md 합성), lazy build 구조가
+React.lazy/Suspense와 맞아떨어진다는 관찰에서 출발.
+
+**핵심 통찰 — 현재 lazy build와 비동기 로드의 차이는 "code가 있냐"뿐.** 현재 lazy는 code가
+메모리에 있고 *해석*만 미룬다(동기 lazyBuild 클로저). 비동기 lazy는 code 자체가 나중에
+네트워크로 도착한다 — **lazyBuild가 동기에서 async로 바뀌는 게 본질**이다.
+
+**구현 골격 (새 opcode `LAZY_RENDER <chunkRef> <args…>`):** RENDER와 거의 같되 chunkRef가
+컴포넌트 id가 아니라 별도 청크 식별자(URL/해시/청크 인덱스). 핸들러는 ① region·anchor를 깔아
+자리를 확보하고(동기 — 컴포넌트 도착 전에도 DOM 자리·swap 경계가 필요. Suspense fallback 자리)
+② branch는 built=false, `lazyBuild = async () => { const chunk = await loadChunk(chunkRef);
+interpret(chunk.code, paths, …) }` ③ 활성화 트리거를 건다. activateBranch/lazyBuild가 async가 된다.
+
+**조건부 로드는 `@if` 조합으로 공짜.** `LAZY_RENDER`가 비활성 가지에 있으면 그 가지가 켜질
+때까지 lazyBuild(=fetch)가 안 불린다. opcode는 "즉시 트리거"만 구현해도 `@if`와 조합하면
+"안 보이는 청크는 네트워크도 0"인 진짜 코드 분할이 된다.
+
+**먼저 정할 미결 (코드 전에 설계 합의 — 안 그러면 포맷이 두 번 바뀐다):**
+- 청크 경계를 누가 정하나 — 소스 명시 권장(`@lazy Component(…)` 류). use/RENDER는 컴파일타임
+  평탄화인데 lazy는 "평탄화 안 하고 경계를 남김"이라 반대 결정 → 의도적 명시가 맞다. 자동 분할은 나중.
+- 트리거 모델 — 즉시 로드(단순) vs 조건부(`@if` 조합). 즉시만 구현 + `@if` 조합 권장.
+
+범위: 새 opcode + chunkRef + 자식을 별도 .qubb 청크로 빼는 컴파일러 변경 + 클라 loadChunk.
+바이트코드 포맷 변경이라 크다 — 런타임 트리셰이킹(기능 청크 분할)과 같은 "필요할 때만 로드"
+계열이니 함께 검토.
+
 ### 컴파일타임 속성명 usage 추적
 
 전역 상수풀(속성명)에 **어떤 속성명을 넣을지**를 손으로 정하지 않고, 컴파일타임 정적분석으로
