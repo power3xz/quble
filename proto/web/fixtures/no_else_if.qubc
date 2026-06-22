@@ -1,0 +1,10 @@
+component NoElseIf {
+  props { cond, a }
+  template {
+    div() {
+      @if (cond) {
+        p() { {a} }
+      }
+    }
+  }
+}

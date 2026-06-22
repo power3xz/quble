@@ -1,0 +1,23 @@
+component TripleIf {
+  props { c1, c2, c3, a, b, c, d }
+  template {
+    div() {
+      @if (c1) {
+        @if (c2) {
+          @if (c3) {
+            p() { {a} }
+          }
+          @else {
+            p() { {b} }
+          }
+        }
+        @else {
+          p() { {c} }
+        }
+      }
+      @else {
+        p() { {d} }
+      }
+    }
+  }
+}

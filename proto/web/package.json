@@ -1,0 +1,12 @@
+{
+  "name": "quble-web",
+  "private": true,
+  "type": "module",
+  "description": "Quble 클라이언트 런타임(실험) — compile.js/region.js. 테스트는 node --test + jsdom.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

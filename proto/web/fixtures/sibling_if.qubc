@@ -1,0 +1,19 @@
+component SiblingIf {
+  props { c1, c2, a, b, c, d }
+  template {
+    div() {
+      @if (c1) {
+        p() { {a} }
+      }
+      @else {
+        p() { {b} }
+      }
+      @if (c2) {
+        p() { {c} }
+      }
+      @else {
+        p() { {d} }
+      }
+    }
+  }
+}

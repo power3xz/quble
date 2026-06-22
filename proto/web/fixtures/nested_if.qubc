@@ -1,0 +1,19 @@
+component NestedIf {
+  props { outer, inner, a, b, c }
+  template {
+    div() {
+      @if (outer) {
+        p() { {a} }
+        @if (inner) {
+          p() { {b} }
+        }
+        @else {
+          p() { {c} }
+        }
+      }
+      @else {
+        p() { {a} }
+      }
+    }
+  }
+}
