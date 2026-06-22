@@ -1,7 +1,7 @@
 // Quble 클라이언트 컴파일/인스턴스화 (실험). reactive.js를 대체할 후보.
 //
 // reactive.js는 build(즉시 DOM 생성)였다. 여기서는 두 단계로 나눈다:
-//   compile(bytes)        → blueprintOf(compId) => Blueprint  — def를 청사진으로. registry 캐시(lazy).
+//   compile(bytes)        → blueprintOf(compId) => Blueprint  — def를 청사진으로.
 //   Blueprint(ctx, paths) → Instance                          — 청사진 호출 = 인스턴스화. DOM·구독 생성.
 //
 // Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
@@ -9,8 +9,8 @@
 //
 // Instance = { nodes, regions }  — nodes는 루트 노드들(부착·추적용). regions는 이 인스턴스의
 // 모든 Region(@if swap 경계). 구독은 가지(Branch)에 모이고 activateBranch가 켤 때 건다 — 그래서
-// 안 보이는 가지는 구독 0이다. region 구조·동작은 region.js 참고. (1단계: 단일 컴포넌트 안의 if만.
-// RENDER 자식 컴포넌트의 region 병합은 다음 단계.)
+// 안 보이는 가지는 구독 0이다. region 구조·동작은 region.js 참고. RENDER는 자식 def를 같은
+// interpret으로 인라인 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
 //
 // 인덱스 세 축은 reactive.js와 동일 (REACTIVITY.md §1~§3):
 //   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.resolve가 lazy 발급).
@@ -199,23 +199,6 @@ const decode = (bytes) => {
   const codeLen = r.u32();
   const code = r.take(codeLen);
   return { pool, defs, code };
-};
-
-// ── Registry: compId → Blueprint (lazy) ──────────────────────────────
-// build(compId)가 실제로 쓰는 컴포넌트만 등록된다. 모듈을 한 번 디코드하고, 도달하는 def만
-// 청사진으로 컴파일해 캐시한다(재사용).
-const makeRegistry = (module) => {
-  const cache = new Map(); // compId → Blueprint
-  const blueprintOf = (compId) => {
-    let blueprint = cache.get(compId);
-    if (blueprint) {
-      return blueprint;
-    }
-    blueprint = compileDef(module, compId);
-    cache.set(compId, blueprint);
-    return blueprint;
-  };
-  return blueprintOf;
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -443,9 +426,9 @@ const compileDef = (module, compId) => {
 };
 
 // ── 공개 API ─────────────────────────────────────────────────────────
-// compile(bytes) → blueprintOf(compId) => Blueprint. compId의 청사진을 lazy로 돌려준다.
+// compile(bytes) → (compId) => Blueprint. compId의 청사진(인스턴스화 함수)을 돌려준다.
 // 사용: const blueprintOf = compile(bytes); const inst = blueprintOf(0)(ctx, paths); root.append(...inst.nodes);
 export const compile = (bytes) => {
   const module = decode(bytes);
-  return makeRegistry(module);
+  return (compId) => compileDef(module, compId);
 };
