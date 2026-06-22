@@ -21,7 +21,7 @@ import {
   createRegion,
   createBranch,
   activateBranch,
-  attachRegionTree,
+  attachBranch,
 } from "./region.js";
 
 const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
@@ -232,7 +232,7 @@ const compileDef = (module, compId, blueprintOf) => {
   return (ctx, paths) => {
     // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
-    // attachRegionTree가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
+    // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
     const rootRegion = createRegion(-1, document.createComment("qb:region#0"));
     rootRegion.branches[THEN_INDEX] = createBranch();
     rootRegion.branches[THEN_INDEX].built = true;
@@ -396,7 +396,7 @@ const compileDef = (module, compId, blueprintOf) => {
               activateBranch(ctx, regions, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
             });
             // build는 "생성만" 한다 — 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
-            // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachRegionTree가 일괄).
+            // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachBranch가 일괄).
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
             const initialBranchIndex = ctx.leaves[condLeafIndex] ? THEN_INDEX : ELSE_INDEX;
@@ -418,11 +418,11 @@ const compileDef = (module, compId, blueprintOf) => {
 
     // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 — 부모 nodes 오염 방지). 그 뒤
-    // attachRegionTree가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
+    // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
     const fragment = interpret(0, code.length, 0, THEN_INDEX);
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 — attach가 anchor.after로 채운다
-    attachRegionTree(ctx, regions, rootRegion);
+    attachBranch(ctx, regions, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     return { nodes, regions };
