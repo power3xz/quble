@@ -16,7 +16,7 @@ const { compile, createStore } = await import("./compile.js");
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb = {};
 before(() => {
-  for (const name of ["single_if", "nested_if", "no_else_if", "sibling_if", "triple_if"]) {
+  for (const name of ["single_if", "nested_if", "no_else_if", "sibling_if", "triple_if", "composed_triple"]) {
     qubb[name] = buildFixture(name);
   }
 });
@@ -153,4 +153,22 @@ test("3단 중첩: 최하단까지 렌더, 최상단 swap이 전부 detach", () 
   assert.deepEqual(texts(host), ["D"], "최상단 else(d) — 2·3단 통째 사라짐");
   set("c1", true);
   assert.deepEqual(texts(host), ["B"], "복귀 시 안쪽 상태(c3=false) 유지 → b");
+});
+
+// ── 컴포넌트 합성 ─────────────────────────────────────────────────────
+// triple_if를 부모(바깥 c1) + 자식 InnerPair(c2/c3)로 쪼개 RENDER로 합성. 같은 ctx·path를 쓰므로
+// triple_if와 동일한 set/texts 시퀀스가 그대로 통과해야 한다(합성이 단일 컴포넌트와 동등).
+test("합성 3단: triple_if를 부모+자식으로 쪼개도 동일 동작", () => {
+  const { host, set } = instantiate(
+    "composed_triple",
+    ["c1", "c2", "c3", "a", "b", "c", "d"],
+    { c1: true, c2: true, c3: true, a: "A", b: "B", c: "C", d: "D" },
+  );
+  assert.deepEqual(texts(host), ["A"], "3단 then까지 내려가 a");
+  set("c3", false);
+  assert.deepEqual(texts(host), ["B"], "최하단만 else(b)");
+  set("c1", false);
+  assert.deepEqual(texts(host), ["D"], "최상단 else(d) — 자식(2·3단) 통째 사라짐");
+  set("c1", true);
+  assert.deepEqual(texts(host), ["B"], "복귀 시 자식 안쪽 상태(c3=false) 유지 → b");
 });

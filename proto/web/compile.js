@@ -211,8 +211,7 @@ const makeRegistry = (module) => {
     if (blueprint) {
       return blueprint;
     }
-    // blueprintOf를 넘겨 RENDER가 자식 청사진을 lazy 조회한다.
-    blueprint = compileDef(module, compId, blueprintOf);
+    blueprint = compileDef(module, compId);
     cache.set(compId, blueprint);
     return blueprint;
   };
@@ -220,16 +219,16 @@ const makeRegistry = (module) => {
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
-// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. 자식 RENDER는 registry(blueprintOf)에서
-// 청사진을 꺼내 호출한다. Blueprint(ctx, paths) → Instance { nodes }
-const compileDef = (module, compId, blueprintOf) => {
+// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. 자식 RENDER는 interpret을 자식 def
+// 구간으로 재진입해 인라인 합성한다(별도 청사진 호출 없음). Blueprint(ctx, paths) → Instance { nodes }
+const compileDef = (module, compId) => {
   const def = module.defs[compId];
   if (!def) {
     throw new Error("bad component " + compId);
   }
   const code = module.code.subarray(def.codeOff, def.codeOff + def.codeLen);
 
-  return (ctx, paths) => {
+  return (ctx, rootPaths) => {
     // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
     // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
@@ -243,7 +242,9 @@ const compileDef = (module, compId, blueprintOf) => {
     // 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만 이 함수로 해석한다.
     // 노드는 fragment에 모아 반환하고, 구독은 (regionIndex, branchIndex)가 가리키는 가지에 쌓는다.
     // 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
-    const interpret = (startPc, endPc, startRegionIndex, startBranchIndex) => {
+    // code/paths를 인자로 받는다: RENDER는 자식 def의 code 구간과 자식 paths로 같은 interpret을
+    // 재진입한다(인라인 합성). 자식은 별도 인스턴스/루트 region 없이 부모 가지 안에 합류한다.
+    const interpret = (code, paths, startPc, endPc, startRegionIndex, startBranchIndex) => {
       const fragment = document.createDocumentFragment();
       const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
       let pending = null;
@@ -343,10 +344,22 @@ const compileDef = (module, compId, blueprintOf) => {
             const childCompId = u16at();
             const childPaths = args;
             args = [];
-            // 자식 청사진을 registry에서 꺼내(없으면 등록) 인스턴스화. 같은 ctx 공유 → path 공유 성립.
-            const childInstance = blueprintOf(childCompId)(ctx, childPaths);
-            for (const n of childInstance.nodes) {
-              nodeTop().appendChild(n);
+            // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 paths로 같은 interpret에 돌린다.
+            // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) → 자식 IF는 이 가지의
+            // childRegionIndices에 합류하고 같은 regions 배열에 append된다(인덱스 전역 유일).
+            // 자식 루트 region 없음 — 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
+            const childDef = module.defs[childCompId];
+            const childCode = module.code.subarray(childDef.codeOff, childDef.codeOff + childDef.codeLen);
+            const childFragment = interpret(
+              childCode,
+              childPaths,
+              0,
+              childCode.length,
+              startRegionIndex,
+              startBranchIndex,
+            );
+            for (const node of childFragment.childNodes) {
+              nodeTop().appendChild(node);
             }
             break;
           }
@@ -379,13 +392,13 @@ const compileDef = (module, compId, blueprintOf) => {
 
             // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
             const buildThen = () => {
-              const f = interpret(thenStart, elseMarkerPc, regionIndex, THEN_INDEX);
+              const f = interpret(code, paths, thenStart, elseMarkerPc, regionIndex, THEN_INDEX);
               thenBranch.nodes = Array.from(f.childNodes);
             };
             const buildElse = () => {
               const f = elseStart === -1
                 ? document.createDocumentFragment() // else 없는 if — 빈 가지
-                : interpret(elseStart, ifEndPc, regionIndex, ELSE_INDEX);
+                : interpret(code, paths, elseStart, ifEndPc, regionIndex, ELSE_INDEX);
               elseBranch.nodes = Array.from(f.childNodes);
             };
             thenBranch.lazyBuild = buildThen;
@@ -419,7 +432,7 @@ const compileDef = (module, compId, blueprintOf) => {
     // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 — 부모 nodes 오염 방지). 그 뒤
     // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-    const fragment = interpret(0, code.length, 0, THEN_INDEX);
+    const fragment = interpret(code, rootPaths, 0, code.length, 0, THEN_INDEX);
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 — attach가 anchor.after로 채운다
     attachBranch(ctx, regions, rootRegion);
