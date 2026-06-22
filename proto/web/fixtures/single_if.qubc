@@ -1,0 +1,13 @@
+component SingleIf {
+  props { cond, a, b }
+  template {
+    div() {
+      @if (cond) {
+        p() { {a} }
+      }
+      @else {
+        p() { {b} }
+      }
+    }
+  }
+}

@@ -10,12 +10,16 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 
 - [x] 바이트코드 + VM 파이프라인 (compile -> qubb -> render)
 - [x] SSR 렌더러 / 클라이언트 런타임 (같은 qubb 계약을 Rust·JS가 각각 해석)
+- [ ] 실행 재개 (resume, ≈hydration) — 클라가 SSR이 만든 HTML을 새로 만들지 않고, 기존
+  노드에 구독·핸들러만 붙여 SSR이 멈춘 실행을 이어받는다. region anchor 주석(`<!--qb:region#N-->`)이
+  결합 지점 단서일 수 있다(방법 미정).
 - [x] 전역 상수풀 (흔한 속성명을 스펙 상수로 분리)
 
 ## 템플릿 / 렌더링
 
 - [ ] `@for` — 반복. 지금 컴포넌트가 펼쳐지는 근본 원인 제거.
-- [ ] `@if` / `@else` — 조건 분기.
+- [x] `@if` / `@else` — 조건 분기. 클라 region/branch swap + 비활성 가지 lazy build(REACTIVITY.md §8).
+  중첩·형제·else 없는 if, 합성 경계를 넘는 if(RENDER 인라인 재진입으로 자식 if가 부모 region 트리에 합류)까지. (SSR은 분기 평가 후 활성 가지만 렌더.)
 - [ ] `{expr}` — 표현식 (JS 위임 여부 포함). 지금은 단순 변수 참조만.
 
 ## 데이터

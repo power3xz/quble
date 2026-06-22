@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>runtime.js 중첩 @if 데모 (dashboard)</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .dashboard { border: 1px solid #d0d7de; border-radius: 10px; padding: 16px; max-width: 420px; }
+    .account, .premium, .free, .guest, .notif { margin: 8px 0; padding: 10px; border-radius: 8px; }
+    .account { background: #f6f8fa; }
+    .premium { background: #fff8e1; }
+    .free { background: #eef2ff; }
+    .guest { background: #ffebee; }
+    .badge { font-weight: 600; color: #9a6700; }
+    .notif.on { background: #e6ffed; }
+    .notif.off { color: #888; }
+    .dot { color: #cf222e; margin-right: 4px; }
+    button { margin: 2px; }
+    .controls { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 4px; }
+  </style>
+</head>
+<body>
+  <p>dashboard.qubb(3단 중첩 @if)를 <b>runtime.js</b>로 렌더. 각 cond를 토글하며 중첩 swap을 확인.
+     안 보이는 가지의 값(이름·플랜·알림수)을 바꿔도 그 가지가 다시 켜질 때 최신값으로 따라잡는지 본다.</p>
+  <div id="root"></div>
+  <div class="controls">
+    <button id="t-logged">loggedIn</button>
+    <button id="t-premium">isPremium</button>
+    <button id="t-notif">hasNotifications</button>
+    <button id="c-name">이름 변경</button>
+    <button id="c-plan">플랜 변경</button>
+    <button id="c-count">알림수 +1</button>
+  </div>
+  <p>DOM에서 <code>&lt;!--qb:region#N--&gt;</code> 주석이 각 if 자리(anchor). 콘솔에 <code>inst.regions</code>.</p>
+
+  <script type="module">
+    import { compile, createStore } from "/runtime.js";
+
+    const res = await fetch("/components/dashboard.qubb");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    // props 순서 = paths 순서
+    const paths = ["loggedIn", "isPremium", "hasNotifications", "name", "plan", "notifCount"];
+    const state = {
+      loggedIn: true,
+      isPremium: true,
+      hasNotifications: true,
+      name: "철수",
+      plan: "Pro",
+      notifCount: 3,
+    };
+    const ctx = createStore(state);
+
+    const blueprintOf = compile(bytes);
+    const inst = blueprintOf(0)(ctx, paths);
+    document.getElementById("root").replaceChildren(...inst.nodes);
+
+    const toggle = (key) => () => {
+      state[key] = !state[key];
+      ctx.set(ctx.resolve(key), state[key]);
+    };
+    document.getElementById("t-logged").onclick = toggle("loggedIn");
+    document.getElementById("t-premium").onclick = toggle("isPremium");
+    document.getElementById("t-notif").onclick = toggle("hasNotifications");
+
+    let nameIndex = 0;
+    document.getElementById("c-name").onclick = () => {
+      state.name = ["영희", "민수", "지영"][nameIndex++ % 3];
+      ctx.set(ctx.resolve("name"), state.name);
+    };
+    let planIndex = 0;
+    document.getElementById("c-plan").onclick = () => {
+      state.plan = ["Pro", "Team", "Enterprise"][planIndex++ % 3];
+      ctx.set(ctx.resolve("plan"), state.plan);
+    };
+    document.getElementById("c-count").onclick = () => {
+      state.notifCount += 1;
+      ctx.set(ctx.resolve("notifCount"), state.notifCount);
+    };
+
+    window.inst = inst;
+    console.log("inst.regions:", inst.regions);
+  </script>
+</body>
+</html>

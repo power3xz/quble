@@ -1,14 +1,29 @@
-// Quble 클라이언트 런타임 (JS). Rust renderer 크레이트와 같은 qubb 포맷을 읽어 실제 DOM을 만든다.
-// SSR(renderer)과 달리 살아있는 DOM을 만들고(이후 이벤트가 붙는 런타임), 같은 [u8] 계약을 해석.
-// 포맷/opcode는 proto/BYTECODE.md, Rust 구현은 crates/bytecode·crates/renderer 참고.
+// Quble 클라이언트 런타임 본체. .qubb를 두 단계로 인스턴스화한다:
+//   compile(bytes)        → blueprintOf(compId) => Blueprint  — def를 청사진으로.
+//   Blueprint(ctx, paths) → Instance                          — 청사진 호출 = 인스턴스화. DOM·구독 생성.
+//
+// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
+// 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 — 단순한 "호출 시 훑기"를 택했다.)
+//
+// Instance = { nodes, regions }  — nodes는 루트 노드들(부착·추적용). regions는 이 인스턴스의
+// 모든 Region(@if swap 경계). 구독은 가지(Branch)에 모이고 activateBranch가 켤 때 건다 — 그래서
+// 안 보이는 가지는 구독 0이다. region 구조·동작은 region.js 참고. RENDER는 자식 def를 같은
+// interpret으로 인라인 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
+//
+// 인덱스 세 축 (REACTIVITY.md §1~§3):
+//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.resolve가 lazy 발급).
 
-// 내장 태그 테이블 (crates/bytecode/src/tags.rs와 동일 순서·고정).
+import {
+  THEN_INDEX,
+  ELSE_INDEX,
+  appendRegion,
+  activateBranch,
+  attachBranch,
+} from "./region.js";
+
 const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
-
-// 전역 속성명 테이블 (crates/bytecode/src/attrs.rs와 동일 순서·고정).
 const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
 
-// opcode (crates/bytecode/src/opcode.rs와 동일).
 const OP = {
   HALT: 0x00,
   ELEM_OPEN: 0x01,
@@ -22,9 +37,124 @@ const OP = {
   ATTR_G_VAR: 0x09,
   ATTR_L_VAR: 0x0a,
   PUSH_ARG: 0x0b,
+  IF: 0x0c,
+  ELSE: 0x0d,
+  IF_END: 0x0e,
 };
 
-// 바이트 리더 (리틀엔디안).
+// ── store 컨텍스트 (pub/sub) ──────────────────────────────────────────
+export const createStore = (defaultValue) => {
+  const leaves = [];
+  const subscribers = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
+  const pathCache = new Map(); // path → leafIndex
+
+  const set = (leafIndex, value) => {
+    leaves[leafIndex] = value;
+    const subs = subscribers[leafIndex];
+    if (subs) {
+      // 스냅샷 순회 — 콜백(cond)이 activateBranch로 구독을 해제할 수 있어 원본 순회는 깨진다.
+      for (const fn of [...subs]) {
+        fn(value);
+      }
+    }
+  };
+
+  const subscribe = (leafIndex, fn) => {
+    (subscribers[leafIndex] ??= new Set()).add(fn);
+  };
+
+  const unsubscribe = (leafIndex, fn) => {
+    subscribers[leafIndex]?.delete(fn);
+  };
+
+  const resolve = (path) => {
+    let leafIndex = pathCache.get(path);
+    if (leafIndex !== undefined) {
+      return leafIndex;
+    }
+    leafIndex = leaves.length;
+    leaves[leafIndex] = readPath(defaultValue, path);
+    pathCache.set(path, leafIndex);
+    return leafIndex;
+  };
+
+  return { leaves, set, subscribe, unsubscribe, resolve };
+};
+
+// opcode의 operand 바이트 수. skipBranch가 op 경계를 짚어 마커(IF/ELSE/IF_END)를 operand
+// 값과 혼동하지 않게 한다. (SSR renderer operand_len과 동일.)
+const operandLen = (op) => {
+  switch (op) {
+    case OP.HALT:
+    case OP.ELEM_CLOSE_OPEN:
+    case OP.ELEM_END:
+    case OP.ELSE:
+    case OP.IF_END:
+      return 0;
+    case OP.ELEM_OPEN:
+    case OP.TEXT:
+    case OP.TEXT_VAR:
+    case OP.RENDER:
+    case OP.PUSH_ARG:
+    case OP.IF:
+      return 2;
+    case OP.ATTR_G:
+    case OP.ATTR_L:
+    case OP.ATTR_G_VAR:
+    case OP.ATTR_L_VAR:
+      return 4;
+    default:
+      throw new Error("bad opcode 0x" + op.toString(16));
+  }
+};
+
+// 현재 가지를 통 스킵한다. op 경계를 따라 전진하며 중첩 깊이를 세고, 같은 깊이(depth 0)에서
+// 만난 ELSE 또는 IF_END 마커의 pc를 돌려준다(그 마커는 호출자가 소비). build 안 하는 비활성
+// 가지를 건너뛰며 경계 위치만 얻을 때 쓴다. (SSR skip_branch의 JS 포팅 — 여기선 pc 반환.)
+const skipBranch = (code, startPc) => {
+  let pc = startPc;
+  let depth = 0;
+  while (pc < code.length) {
+    const markerPc = pc;
+    const op = code[pc++];
+    if (op === OP.IF) {
+      depth += 1;
+      pc += operandLen(OP.IF);
+    } else if (op === OP.IF_END) {
+      if (depth === 0) {
+        return markerPc;
+      }
+      depth -= 1;
+    } else if (op === OP.ELSE && depth === 0) {
+      return markerPc;
+    } else {
+      pc += operandLen(op);
+    }
+  }
+  throw new Error("unbalanced branch — no matching ELSE/IF_END");
+};
+
+// IF 블록의 then/else 코드 경계를 구한다(순수 — code와 then 시작 pc만 본다). thenStart는 IF
+// operand 직후. then = thenStart~thenEnd, else = elseStart~ifEndPc. else 없으면 elseStart = -1
+// (그땐 thenEnd === ifEndPc === IF_END 위치). 마커는 skipBranch로 찾고 호출자가 소비한다.
+const ifBranchRanges = (code, thenStart) => {
+  const thenEnd = skipBranch(code, thenStart); // ELSE 또는 IF_END
+  if (code[thenEnd] === OP.ELSE) {
+    const elseStart = thenEnd + 1;
+    return { thenEnd, elseStart, ifEndPc: skipBranch(code, elseStart) };
+  }
+  return { thenEnd, elseStart: -1, ifEndPc: thenEnd }; // else 없는 if
+};
+
+const readPath = (defaultValue, path) => {
+  let cur = defaultValue;
+  for (const key of path.split(".")) {
+    cur = cur[key];
+  }
+  return cur;
+};
+
+// ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
 class Reader {
   constructor(bytes) {
     this.b = bytes;
@@ -32,7 +162,9 @@ class Reader {
   }
   take(n) {
     const s = this.b.subarray(this.pos, this.pos + n);
-    if (s.length !== n) throw new Error("unexpected eof");
+    if (s.length !== n) {
+      throw new Error("unexpected eof");
+    }
     this.pos += n;
     return s;
   }
@@ -50,19 +182,22 @@ class Reader {
   }
 }
 
-// qubb 바이트 → 모듈 객체 { pool, defs, code }. (Rust bytecode::decode와 대응)
-function decode(bytes) {
+const decode = (bytes) => {
   const r = new Reader(bytes);
   const magic = r.take(4);
   if (!(magic[0] === 0x51 && magic[1] === 0x42 && magic[2] === 0x4c && magic[3] === 0x00)) {
     throw new Error("bad magic"); // "QBL\0"
   }
   const version = r.u16();
-  if (version !== 0) throw new Error("bad version " + version);
+  if (version !== 0) {
+    throw new Error("bad version " + version);
+  }
 
   const poolCount = r.u16();
   const pool = [];
-  for (let i = 0; i < poolCount; i++) pool.push(r.str());
+  for (let i = 0; i < poolCount; i++) {
+    pool.push(r.str());
+  }
 
   const defCount = r.u16();
   const defs = [];
@@ -73,115 +208,223 @@ function decode(bytes) {
   const codeLen = r.u32();
   const code = r.take(codeLen);
   return { pool, defs, code };
-}
+};
 
-// 한 컴포넌트 정의를 실행해 DOM 노드(또는 fragment)를 만든다. (Rust renderer::exec와 대응)
-// scope: 런타임 주입 값 배열 — TEXT_VAR idx가 scope[idx]를 참조.
-function exec(module, compId, scope) {
+// ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
+// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. 자식 RENDER는 interpret을 자식 def
+// 구간으로 재진입해 인라인 합성한다(별도 청사진 호출 없음). Blueprint(ctx, paths) → Instance { nodes }
+const compileDef = (module, compId) => {
   const def = module.defs[compId];
-  if (!def) throw new Error("bad component " + compId);
+  if (!def) {
+    throw new Error("bad component " + compId);
+  }
   const code = module.code.subarray(def.codeOff, def.codeOff + def.codeLen);
 
-  const fragment = document.createDocumentFragment();
-  const stack = [fragment]; // 현재 부모 스택
-  let pending = null; // 아직 자식 영역에 안 들어간(여는 태그 진행 중) 요소
-  // 자식에게 넘길 인자 버퍼. PUSH_ARG가 부모 scope[offset] 값을 쌓고, RENDER가 소비.
-  let args = [];
-  let pc = 0;
+  return (ctx, rootPaths) => {
+    // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
+    // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
+    // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
+    const regions = []; // append만, 인덱스 영구 안정. appendRegion이 새 region을 더한다.
+    const rootRegion = regions[appendRegion(regions, -1)]; // 루트도 region(인덱스 0)
+    rootRegion.branches[THEN_INDEX].built = true; // 루트 then은 즉시 build됨(아래 interpret)
+    rootRegion.shownIndex = THEN_INDEX;
 
-  const u16at = () => {
-    const v = code[pc] | (code[pc + 1] << 8);
-    pc += 2;
-    return v;
+    // 한 가지(startPc~endPc, IF_END 직전까지)를 build한다. 재진입 가능 — 최초 인스턴스화는
+    // 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만 이 함수로 해석한다.
+    // 노드는 fragment에 모아 반환하고, 구독은 (regionIndex, branchIndex)가 가리키는 가지에 쌓는다.
+    // 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
+    // code/paths를 인자로 받는다: RENDER는 자식 def의 code 구간과 자식 paths로 같은 interpret을
+    // 재진입한다(인라인 합성). 자식은 별도 인스턴스/루트 region 없이 부모 가지 안에 합류한다.
+    const interpret = (code, paths, startPc, endPc, startRegionIndex, startBranchIndex) => {
+      const fragment = document.createDocumentFragment();
+      const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
+      let pending = null;
+      let args = [];
+      let pc = startPc;
+
+      // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
+      // 새 컨텍스트로 받는다 — JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
+      const branch = regions[startRegionIndex].branches[startBranchIndex];
+
+      const u16at = () => {
+        const v = code[pc] | (code[pc + 1] << 8);
+        pc += 2;
+        return v;
+      };
+      const nodeTop = () => nodeStack[nodeStack.length - 1];
+
+      // offset → leafIndex로 해석(지연)하고 초기값을 돌려준다. 구독은 즉시 걸지 않고 현재 가지에
+      // 모은다 — activateBranch가 그 가지를 켤 때 건다(안 보이는 가지는 구독 0).
+      const bindVar = (offset, update) => {
+        const path = paths[offset];
+        if (path === undefined) {
+          throw new Error("no path for offset " + offset);
+        }
+        const leafIndex = ctx.resolve(path);
+        const initial = ctx.leaves[leafIndex] ?? "";
+        branch.leafIndices.push(leafIndex);
+        branch.updateFns.push(update);
+        return initial;
+      };
+
+      while (pc < endPc) {
+        const op = code[pc++];
+        switch (op) {
+          case OP.HALT: {
+            pc = endPc;
+            break;
+          }
+          case OP.ELEM_OPEN: {
+            pending = document.createElement(TAGS[u16at()]);
+            break;
+          }
+          case OP.ATTR_G: {
+            const name = ATTRS[u16at()];
+            pending.setAttribute(name, module.pool[u16at()]);
+            break;
+          }
+          case OP.ATTR_L: {
+            const name = module.pool[u16at()];
+            pending.setAttribute(name, module.pool[u16at()]);
+            break;
+          }
+          case OP.ATTR_G_VAR: {
+            const name = ATTRS[u16at()];
+            const el = pending;
+            const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
+            el.setAttribute(name, v);
+            break;
+          }
+          case OP.ATTR_L_VAR: {
+            const name = module.pool[u16at()];
+            const el = pending;
+            const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
+            el.setAttribute(name, v);
+            break;
+          }
+          case OP.ELEM_CLOSE_OPEN: {
+            nodeTop().appendChild(pending);
+            nodeStack.push(pending);
+            pending = null;
+            break;
+          }
+          case OP.TEXT: {
+            nodeTop().appendChild(document.createTextNode(module.pool[u16at()]));
+            break;
+          }
+          case OP.TEXT_VAR: {
+            const node = document.createTextNode("");
+            node.textContent = bindVar(u16at(), (v) => (node.textContent = v));
+            nodeTop().appendChild(node);
+            break;
+          }
+          case OP.ELEM_END: {
+            nodeStack.pop();
+            break;
+          }
+          case OP.PUSH_ARG: {
+            const parentOffset = u16at();
+            const path = paths[parentOffset];
+            if (path === undefined) {
+              throw new Error("no path for offset " + parentOffset);
+            }
+            args.push(path);
+            break;
+          }
+          case OP.RENDER: {
+            const childCompId = u16at();
+            const childPaths = args;
+            args = [];
+            // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 paths로 같은 interpret에 돌린다.
+            // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) → 자식 IF는 이 가지의
+            // childRegionIndices에 합류하고 같은 regions 배열에 append된다(인덱스 전역 유일).
+            // 자식 루트 region 없음 — 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
+            const childDef = module.defs[childCompId];
+            const childCode = module.code.subarray(childDef.codeOff, childDef.codeOff + childDef.codeLen);
+            const childFragment = interpret(
+              childCode,
+              childPaths,
+              0,
+              childCode.length,
+              startRegionIndex,
+              startBranchIndex,
+            );
+            for (const node of childFragment.childNodes) {
+              nodeTop().appendChild(node);
+            }
+            break;
+          }
+          case OP.IF: {
+            const condOffset = u16at();
+            const condLeafIndex = ctx.resolve(paths[condOffset]);
+            const regionIndex = appendRegion(regions, condLeafIndex);
+            const region = regions[regionIndex];
+            branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
+            const thenBranch = region.branches[THEN_INDEX];
+            const elseBranch = region.branches[ELSE_INDEX];
+            // anchor(if 자리 고정용 주석)는 appendRegion이 만들었다. 여기서 DOM 트리에 붙인다.
+            nodeTop().appendChild(region.anchor);
+
+            // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
+            const thenStart = pc;
+            const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(code, thenStart);
+
+            // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
+            const buildThen = () => {
+              const f = interpret(code, paths, thenStart, thenEnd, regionIndex, THEN_INDEX);
+              thenBranch.nodes = Array.from(f.childNodes);
+            };
+            const buildElse = () => {
+              const f = elseStart === -1
+                ? document.createDocumentFragment() // else 없는 if — 빈 가지
+                : interpret(code, paths, elseStart, ifEndPc, regionIndex, ELSE_INDEX);
+              elseBranch.nodes = Array.from(f.childNodes);
+            };
+            thenBranch.lazyBuild = buildThen;
+            elseBranch.lazyBuild = buildElse;
+
+            // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateBranch가 lazyBuild 호출.
+            ctx.subscribe(condLeafIndex, (condValue) => {
+              activateBranch(ctx, regions, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+            });
+            // build는 "생성만" 한다 — 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
+            // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachBranch가 일괄).
+            // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
+            // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
+            const initialBranchIndex = ctx.leaves[condLeafIndex] ? THEN_INDEX : ELSE_INDEX;
+            const initialBranch = region.branches[initialBranchIndex];
+            initialBranch.lazyBuild();
+            initialBranch.built = true;
+            region.shownIndex = initialBranchIndex;
+
+            pc = ifEndPc + 1; // IF_END 마커 소비 — if 블록 다음으로.
+            break;
+          }
+          default: {
+            throw new Error("bad opcode 0x" + op.toString(16));
+          }
+        }
+      }
+      return fragment;
+    };
+
+    // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
+    // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 — 부모 nodes 오염 방지). 그 뒤
+    // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
+    const fragment = interpret(code, rootPaths, 0, code.length, 0, THEN_INDEX);
+    rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
+    fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 — attach가 anchor.after로 채운다
+    attachBranch(ctx, regions, rootRegion);
+    // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
+    const nodes = Array.from(fragment.childNodes);
+    return { nodes, regions };
   };
-  const top = () => stack[stack.length - 1];
+};
 
-  while (pc < code.length) {
-    const op = code[pc++];
-    switch (op) {
-      case OP.HALT:
-        pc = code.length;
-        break;
-      case OP.ELEM_OPEN: {
-        const tag = TAGS[u16at()];
-        pending = document.createElement(tag);
-        break;
-      }
-      case OP.ATTR_G: {
-        const name = ATTRS[u16at()];
-        const value = module.pool[u16at()];
-        pending.setAttribute(name, value);
-        break;
-      }
-      case OP.ATTR_L: {
-        const name = module.pool[u16at()];
-        const value = module.pool[u16at()];
-        pending.setAttribute(name, value);
-        break;
-      }
-      case OP.ATTR_G_VAR: {
-        const name = ATTRS[u16at()];
-        const idx = u16at();
-        if (scope[idx] === undefined) throw new Error("bad scope index " + idx);
-        pending.setAttribute(name, scope[idx]);
-        break;
-      }
-      case OP.ATTR_L_VAR: {
-        const name = module.pool[u16at()];
-        const idx = u16at();
-        if (scope[idx] === undefined) throw new Error("bad scope index " + idx);
-        pending.setAttribute(name, scope[idx]);
-        break;
-      }
-      case OP.ELEM_CLOSE_OPEN: {
-        top().appendChild(pending);
-        stack.push(pending);
-        pending = null;
-        break;
-      }
-      case OP.TEXT: {
-        const text = module.pool[u16at()];
-        top().appendChild(document.createTextNode(text));
-        break;
-      }
-      case OP.TEXT_VAR: {
-        const idx = u16at();
-        const val = scope[idx];
-        if (val === undefined) throw new Error("bad scope index " + idx);
-        // createTextNode가 이스케이프를 자동 처리(DOM이므로).
-        top().appendChild(document.createTextNode(val));
-        break;
-      }
-      case OP.ELEM_END: {
-        // operand 없음 — 스택 top을 닫는다(부모로 복귀).
-        stack.pop();
-        break;
-      }
-      case OP.PUSH_ARG: {
-        // 부모 scope[offset] 값을 자식 인자로 쌓는다.
-        const parentOffset = u16at();
-        if (scope[parentOffset] === undefined) throw new Error("bad scope index " + parentOffset);
-        args.push(scope[parentOffset]);
-        break;
-      }
-      case OP.RENDER: {
-        const childCompId = u16at();
-        // 쌓인 인자(부모 값들)를 자식 scope로 넘기고 버퍼를 비운다.
-        const childScope = args;
-        args = [];
-        top().appendChild(exec(module, childCompId, childScope));
-        break;
-      }
-      default:
-        throw new Error("bad opcode 0x" + op.toString(16));
-    }
-  }
-  return fragment;
-}
-
-// 공개: qubb 바이트와 진입 컴포넌트 ID로 DOM 노드를 만든다.
-// scope: 런타임 주입 값 배열(생략 시 빈 배열) — TEXT_VAR가 참조.
-export function renderComponent(bytes, compId, scope = []) {
+// ── 공개 API ─────────────────────────────────────────────────────────
+// compile(bytes) → (compId) => Blueprint. compId의 청사진(인스턴스화 함수)을 돌려준다.
+// 사용: const blueprintOf = compile(bytes); const inst = blueprintOf(0)(ctx, paths); root.append(...inst.nodes);
+export const compile = (bytes) => {
   const module = decode(bytes);
-  return exec(module, compId, scope);
-}
+  return (compId) => compileDef(module, compId);
+};
