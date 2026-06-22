@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>compile.js 중첩 @if 데모 (dashboard)</title>
+  <title>runtime.js 중첩 @if 데모 (dashboard)</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
     .dashboard { border: 1px solid #d0d7de; border-radius: 10px; padding: 16px; max-width: 420px; }
@@ -20,7 +20,7 @@
   </style>
 </head>
 <body>
-  <p>dashboard.qubb(3단 중첩 @if)를 <b>compile.js</b>로 렌더. 각 cond를 토글하며 중첩 swap을 확인.
+  <p>dashboard.qubb(3단 중첩 @if)를 <b>runtime.js</b>로 렌더. 각 cond를 토글하며 중첩 swap을 확인.
      안 보이는 가지의 값(이름·플랜·알림수)을 바꿔도 그 가지가 다시 켜질 때 최신값으로 따라잡는지 본다.</p>
   <div id="root"></div>
   <div class="controls">
@@ -34,7 +34,7 @@
   <p>DOM에서 <code>&lt;!--qb:region#N--&gt;</code> 주석이 각 if 자리(anchor). 콘솔에 <code>inst.regions</code>.</p>
 
   <script type="module">
-    import { compile, createStore } from "/compile.js";
+    import { compile, createStore } from "/runtime.js";
 
     const res = await fetch("/components/dashboard.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());

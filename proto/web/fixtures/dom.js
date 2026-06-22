@@ -1,4 +1,4 @@
-// 통합 테스트용 jsdom 셋업. compile.js/region.js는 전역 document에 의존하므로
+// 통합 테스트용 jsdom 셋업. runtime.js/region.js는 전역 document에 의존하므로
 // 모듈 import 전에 globalThis.document를 주입해야 한다.
 import { JSDOM } from "jsdom";
 

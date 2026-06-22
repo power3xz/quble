@@ -1,4 +1,4 @@
-// @if 통합 테스트 — 실제 컴파일러(.qubc → .qubb)와 실제 compile.js를 jsdom 위에서 돌린다.
+// @if 통합 테스트 — 실제 컴파일러(.qubc → .qubb)와 실제 runtime.js를 jsdom 위에서 돌린다.
 // 가짜 interpret 복제본이 아니라 진짜 경로를 검증한다: 바이트코드 해석 → region 트리 → lazy
 // build → swap → 재귀 구독. 검증은 사용자가 보는 결과(HTML)와 region 상태로 한다.
 //
@@ -10,8 +10,8 @@ import assert from "node:assert/strict";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 import { buildFixture } from "./fixtures/build.js";
 
-// dom.js가 document를 깐 뒤에 compile.js를 불러야 한다(top-level await import).
-const { compile, createStore } = await import("./compile.js");
+// dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
+const { compile, createStore } = await import("./runtime.js");
 
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb = {};

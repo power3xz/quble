@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>compile.js @if swap 데모 (iftest)</title>
+  <title>runtime.js @if swap 데모 (iftest)</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
     .hi { color: #1a7f37; }
@@ -10,7 +10,7 @@
   </style>
 </head>
 <body>
-  <p>iftest.qubb를 <b>compile.js</b>로 렌더. <b>loggedIn 토글</b>로 then/else가 swap되는지,
+  <p>iftest.qubb를 <b>runtime.js</b>로 렌더. <b>loggedIn 토글</b>로 then/else가 swap되는지,
      안 보이는 가지의 구독이 0인지(이름 변경이 비활성 가지엔 안 닿는지) 확인.</p>
   <div id="root"></div>
   <p>
@@ -20,7 +20,7 @@
   <p>DOM에서 <code>&lt;!--qb:region#N--&gt;</code> 주석이 if 자리(anchor)다.</p>
 
   <script type="module">
-    import { compile, createStore } from "/compile.js";
+    import { compile, createStore } from "/runtime.js";
 
     const res = await fetch("/components/iftest.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());

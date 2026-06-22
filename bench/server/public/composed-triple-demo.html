@@ -29,7 +29,7 @@
   <p>DOM의 <code>&lt;!--qb:region#N--&gt;</code>가 각 if 자리(anchor). 콘솔에 <code>window.inst</code>.</p>
 
   <script type="module">
-    import { compile, createStore } from "/compile.js";
+    import { compile, createStore } from "/runtime.js";
 
     const res = await fetch("/components/composed_triple.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());

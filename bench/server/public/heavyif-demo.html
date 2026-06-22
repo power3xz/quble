@@ -6,8 +6,8 @@
   <link rel="stylesheet" href="/public/style.css">
 </head>
 <body>
-  <h3>Quble @if swap — 무거운 가지 1000행 (compile.js)</h3>
-  <p>heavyif.qubb를 compile.js로 렌더. then=sharedA(초록), else=sharedB(빨강). swap하면 색·숫자가 바뀐다.
+  <h3>Quble @if swap — 무거운 가지 1000행 (runtime.js)</h3>
+  <p>heavyif.qubb를 runtime.js로 렌더. then=sharedA(초록), else=sharedB(빨강). swap하면 색·숫자가 바뀐다.
      세 벤치: swap(show 토글) / set(보이는 가지 값++) / build(인스턴스화).</p>
   <p>
     <button id="bench-swap">swap(show) ×100</button>
@@ -19,7 +19,7 @@
   <div id="root"></div>
 
   <script type="module">
-    import { compile, createStore } from "/compile.js";
+    import { compile, createStore } from "/runtime.js";
 
     const res = await fetch("/components/heavyif.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());

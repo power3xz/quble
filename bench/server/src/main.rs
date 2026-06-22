@@ -4,7 +4,7 @@
 //!
 //!  - GET /components/<name> : <name>.qubc를 컴파일한 qubb 바이트.
 //!  - GET /ssr/<name>        : renderer로 렌더한 HTML(기능 확인).
-//!  - GET /compile.js, /region.js : 클라이언트 런타임.
+//!  - GET /runtime.js, /region.js : 클라이언트 런타임.
 //!  - GET /react/*           : React 빌드 산출물(bench/react/dist).
 //!
 //! 실행: bench/server에서 `cargo run`  → http://localhost:7878
@@ -19,7 +19,7 @@ use tiny_http::{Header, Request, Response, Server};
 
 const ADDR: &str = "127.0.0.1:7878";
 const COMPONENTS_DIR: &str = "../components";
-const COMPILE_JS: &str = "../../proto/web/compile.js";
+const RUNTIME_JS: &str = "../../proto/web/runtime.js";
 const REGION_JS: &str = "../../proto/web/region.js";
 const REACT_DIST: &str = "../react/dist";
 const SVELTE_DIST: &str = "../svelte/dist";
@@ -37,8 +37,8 @@ fn main() {
         let (path, query) = url.split_once('?').unwrap_or((&url, ""));
         let path = path.to_string();
 
-        if path == "/compile.js" {
-            match fs::read(COMPILE_JS) {
+        if path == "/runtime.js" {
+            match fs::read(RUNTIME_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }

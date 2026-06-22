@@ -4,7 +4,7 @@
 // set에 반응하지 않는다). lazy build: 비활성 가지는 최초 인스턴스화 때 build하지 않고
 // (노드 0·구독 0), 그 가지가 처음 활성화될 때(런타임 swap) 비로소 build한다. 각 가지는 생애
 // 첫 활성화 때 딱 한 번 build되고(branch.built), 이후엔 detach/attach만 한다.
-// build 자체는 compile.js의 interpret을 캡처한 branch.lazyBuild 클로저가 한다 — region.js는
+// build 자체는 runtime.js의 interpret을 캡처한 branch.lazyBuild 클로저가 한다 — region.js는
 // 바이트코드/경계를 모른 채 "가지 토글"만 책임진다.
 //
 // 데이터 모양 (모든 관계는 인덱스 기반):
@@ -43,7 +43,7 @@ const createBranch = () => ({
   updateFns: [],
   childRegionIndices: [],
   built: false,
-  lazyBuild: null, // compile.js가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
+  lazyBuild: null, // runtime.js가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
 });
 
 // regions에 새 Region을 스폰한다 — anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 push하고
@@ -93,7 +93,7 @@ const detachBranch = (ctx, regions, region) => {
 // region을 받아 그 활성(shownIndex) 가지를 켠다 — 노드 attach + 직속 구독 복원 + 활성 자식 Region 재귀.
 // (인자는 region, 타겟은 그 region의 보이는 branch + 그 아래 트리.)
 // 부모 노드를 먼저 anchor 뒤에 붙여야(자식 anchor가 그 안에 들어가) 자식 노드가 위치를 가진다.
-// 최초 인스턴스화의 부착도 이 함수로 한다(compile.js가 build로 트리만 만든 뒤 루트 Region부터
+// 최초 인스턴스화의 부착도 이 함수로 한다(runtime.js가 build로 트리만 만든 뒤 루트 Region부터
 // 호출). 루트도 anchor를 가져 자식과 균일 처리된다(분기 없음).
 export const attachBranch = (ctx, regions, region) => {
   const branch = region.branches[region.shownIndex];
