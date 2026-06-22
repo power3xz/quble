@@ -28,14 +28,14 @@
 export const THEN_INDEX = 0;
 export const ELSE_INDEX = 1;
 
-export const createRegion = (condLeafIndex, anchor) => ({
+const createRegion = (condLeafIndex, anchor) => ({
   branches: [],
   condLeafIndex,
   anchor,
   shownIndex: -1,
 });
 
-export const createBranch = () => ({
+const createBranch = () => ({
   nodes: [],
   leafIndices: [],
   updateFns: [],
@@ -43,6 +43,19 @@ export const createBranch = () => ({
   built: false,
   lazyBuild: null, // compile.js가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
 });
+
+// regions에 새 Region을 스폰한다 — anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 push하고
+// 그 인덱스를 돌려준다. anchor를 DOM 트리 어디에 붙일지는 호출자 몫(IF는 nodeTop, 루트는 fragment).
+// 인덱스는 append-only라 영구 안정. createRegion/createBranch는 이 함수의 내부 빌딩블록이다.
+export const appendRegion = (regions, condLeafIndex) => {
+  const regionIndex = regions.length;
+  const anchor = document.createComment("qb:region#" + regionIndex);
+  const region = createRegion(condLeafIndex, anchor);
+  region.branches[THEN_INDEX] = createBranch();
+  region.branches[ELSE_INDEX] = createBranch();
+  regions.push(region);
+  return regionIndex;
+};
 
 // 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detachBranch가 전담.
 const teardownBranchSubs = (ctx, branch) => {

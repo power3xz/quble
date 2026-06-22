@@ -18,8 +18,7 @@
 import {
   THEN_INDEX,
   ELSE_INDEX,
-  createRegion,
-  createBranch,
+  appendRegion,
   activateBranch,
   attachBranch,
 } from "./region.js";
@@ -227,11 +226,10 @@ const compileDef = (module, compId) => {
     // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
     // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
-    const rootRegion = createRegion(-1, document.createComment("qb:region#0"));
-    rootRegion.branches[THEN_INDEX] = createBranch();
-    rootRegion.branches[THEN_INDEX].built = true;
+    const regions = []; // append만, 인덱스 영구 안정. appendRegion이 새 region을 더한다.
+    const rootRegion = regions[appendRegion(regions, -1)]; // 루트도 region(인덱스 0)
+    rootRegion.branches[THEN_INDEX].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
-    const regions = [rootRegion]; // append만, 인덱스 영구 안정. lazy build가 새 region을 더한다.
 
     // 한 가지(startPc~endPc, IF_END 직전까지)를 build한다. 재진입 가능 — 최초 인스턴스화는
     // 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만 이 함수로 해석한다.
@@ -361,16 +359,12 @@ const compileDef = (module, compId) => {
           case OP.IF: {
             const condOffset = u16at();
             const condLeafIndex = ctx.resolve(paths[condOffset]);
-            const regionIndex = regions.length;
-            const region = createRegion(condLeafIndex, null);
-            regions.push(region);
+            const regionIndex = appendRegion(regions, condLeafIndex);
+            const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
-            const thenBranch = createBranch();
-            const elseBranch = createBranch();
-            region.branches[THEN_INDEX] = thenBranch;
-            region.branches[ELSE_INDEX] = elseBranch;
-            // anchor: if 자리 고정용 주석 노드. 활성 가지 노드는 이 뒤에 붙는다.
-            region.anchor = document.createComment("qb:region#" + regionIndex);
+            const thenBranch = region.branches[THEN_INDEX];
+            const elseBranch = region.branches[ELSE_INDEX];
+            // anchor(if 자리 고정용 주석)는 appendRegion이 만들었다. 여기서 DOM 트리에 붙인다.
             nodeTop().appendChild(region.anchor);
 
             // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
