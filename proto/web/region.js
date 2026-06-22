@@ -7,11 +7,13 @@
 // build 자체는 compile.js의 interpret을 캡처한 branch.lazyBuild 클로저가 한다 — region.js는
 // 바이트코드/경계를 모른 채 "가지 토글"만 책임진다.
 //
-// 데이터 모양 (region-build 실험에서 확정. 모든 관계는 인덱스 기반):
+// 데이터 모양 (모든 관계는 인덱스 기반):
 //   regions: Region[]            — 한 인스턴스의 모든 Region. append만, 인덱스 영구 안정.
 //   Region { branches:[], condLeafIndex, anchor, shownIndex }
-//     branches[THEN_INDEX]=then, branches[ELSE_INDEX]=else. 가지는 build 시점에 채워진다.
-//     shownIndex = 현재 보이는 가지(-1 = 아직 없음). 루트 Region은 condLeafIndex/anchor 없는 껍데기.
+//     branches[THEN_INDEX]=then, branches[ELSE_INDEX]=else. 빈 Branch는 appendRegion이 생성
+//     시점에 채우고, 각 가지의 nodes는 build 시점에 채워진다.
+//     shownIndex = 현재 보이는 가지(-1 = 아직 없음). 루트 Region은 swap 없는 단일 가지지만
+//     anchor·branches를 자식과 똑같이 갖춰(condLeafIndex=-1) attachBranch가 균일 처리한다.
 //   Branch { nodes, leafIndices, updateFns, childRegionIndices, built, lazyBuild }
 //     leafIndices[i] <-> updateFns[i] (병렬). childRegionIndices = regions 배열 인덱스.
 //     built = 이 가지를 build한 적 있는가(처음 활성화 때 1회 build). lazyBuild = build 클로저.
