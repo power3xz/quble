@@ -258,7 +258,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
   if (!def) {
     throw new Error("bad component " + compId);
   }
-  const code = module.code.subarray(def.codeOff, def.codeOff + def.codeLen);
+  // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 — def·자식 구간마다
+  // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
   return (ctx, rootPaths) => {
     // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
@@ -408,12 +409,11 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // childRegionIndices에 합류하고 같은 regions 배열에 append된다(인덱스 전역 유일).
             // 자식 루트 region 없음 — 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
             const childDef = module.defs[childCompId];
-            const childCode = module.code.subarray(childDef.codeOff, childDef.codeOff + childDef.codeLen);
             const childFragment = interpret(
-              childCode,
+              module.code,
               childPaths,
-              0,
-              childCode.length,
+              childDef.codeOff,
+              childDef.codeOff + childDef.codeLen,
               startRegionIndex,
               startBranchIndex,
             );
@@ -479,7 +479,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 — 부모 nodes 오염 방지). 그 뒤
     // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-    const fragment = interpret(code, rootPaths, 0, code.length, 0, THEN_INDEX);
+    const fragment = interpret(module.code, rootPaths, def.codeOff, def.codeOff + def.codeLen, 0, THEN_INDEX);
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 — attach가 anchor.after로 채운다
     attachBranch(ctx, regions, rootRegion);
