@@ -1,5 +1,15 @@
 // profilecard.qubc와 동일 마크업으로 맞춘다 (공정 비교).
 // Quble의 Thumbnail·Badge·Stat·MetaRow·LinkButton 합성에 대응해 컴포넌트도 분리한다.
+// CSS도 컴포넌트별 파일로 분리해 import — Vite가 이 청크의 스타일로 묶는다(관용 방식).
+import "./styles/profilecard.css";
+import "./styles/thumbnail.css";
+import "./styles/badge.css";
+import "./styles/stat.css";
+import "./styles/metarow.css";
+import "./styles/activity.css";
+import "./styles/tag.css";
+import "./styles/linkbutton.css";
+
 function Thumbnail({ avatar, name }) {
   return <img className="avatar" src={avatar} alt={name} />;
 }

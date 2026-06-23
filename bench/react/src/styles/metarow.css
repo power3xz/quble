@@ -1,0 +1,13 @@
+.metarow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 13px;
+  color: #5a5f68;
+}
+
+.metarow .icon {
+  width: 16px;
+  text-align: center;
+}
