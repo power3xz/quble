@@ -4,7 +4,7 @@
 
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
+import "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import). 심볼은 안 쓰고 부수효과만 필요.
 import { buildFixture, buildFixtureWithResmap } from "./fixtures/build.js";
 
 const { compile, createStore } = await import("./runtime.js");
