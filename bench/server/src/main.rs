@@ -21,6 +21,7 @@ const ADDR: &str = "127.0.0.1:7878";
 const COMPONENTS_DIR: &str = "../components";
 const RUNTIME_JS: &str = "../../proto/web/runtime.js";
 const REGION_JS: &str = "../../proto/web/region.js";
+const DISASM_JS: &str = "../../proto/web/disasm.js";
 const REACT_DIST: &str = "../react/dist";
 const SVELTE_DIST: &str = "../svelte/dist";
 
@@ -44,6 +45,11 @@ fn main() {
             }
         } else if path == "/region.js" {
             match fs::read(REGION_JS) {
+                Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
+                Err(_) => not_found(req),
+            }
+        } else if path == "/disasm.js" {
+            match fs::read(DISASM_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }
