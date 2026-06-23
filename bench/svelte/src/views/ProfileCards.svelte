@@ -14,10 +14,19 @@
     { name: "최디",   role: "리서처",   bio: "읽고 쓰고 측정합니다. 모르는 것을 모른다고 적는 일을 합니다.", avatar: "/img/d", link: "/u/d", theme: "dark",  followers: "2.1k", following: "320", posts: "510", location: "제주", company: "Lab", site: "/s/d", github: "/gh/d", twitter: "/tw/d", act1Text: "벤치 결과 리포트 발행", act2Text: "논문 세미나 발표", act3Text: "실험 재현 스크립트 공개", tag1: "research", tag2: "bench", tag3: "paper", tag4: "data" },
     { name: "정이",   role: "프론트",   bio: "반응성 모델에 관심이 많습니다. 런타임을 작게 유지하려 애씁니다.", avatar: "/img/e", link: "/u/e", theme: "light", followers: "5.6k", following: "90",  posts: "233", location: "서울", company: "Quble Inc.", site: "/s/e", github: "/gh/e", twitter: "/tw/e", act1Text: "런타임 4kb 달성", act2Text: "합성 바인딩 구현", act3Text: "DOM 갱신 경로 단순화", tag1: "frontend", tag2: "reactive", tag3: "dom", tag4: "perf" },
   ];
+
+  // 초기 렌더 성능 — 같은 5명을 200번 반복해 1000장을 그린다.
+  const REPEAT = 200;
+  const all = [];
+  for (let r = 0; r < REPEAT; r++) {
+    for (const p of people) {
+      all.push(p);
+    }
+  }
 </script>
 
 <div class="cards">
-  {#each people as p (p.name)}
+  {#each all as p, i (i)}
     <ProfileCard {...common} {...p} />
   {/each}
 </div>

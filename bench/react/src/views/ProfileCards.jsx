@@ -15,10 +15,19 @@ const people = [
   { name: "정이",   role: "프론트",   bio: "반응성 모델에 관심이 많습니다. 런타임을 작게 유지하려 애씁니다.", avatar: "/img/e", link: "/u/e", theme: "light", followers: "5.6k", following: "90",  posts: "233", location: "서울", company: "Quble Inc.", site: "/s/e", github: "/gh/e", twitter: "/tw/e", act1Text: "런타임 4kb 달성", act2Text: "합성 바인딩 구현", act3Text: "DOM 갱신 경로 단순화", tag1: "frontend", tag2: "reactive", tag3: "dom", tag4: "perf" },
 ];
 
+// 초기 렌더 성능 — 같은 5명을 200번 반복해 1000장을 그린다.
+const REPEAT = 200;
+const all = [];
+for (let r = 0; r < REPEAT; r++) {
+  for (const p of people) {
+    all.push(p);
+  }
+}
+
 export default function ProfileCards() {
   return (
     <div className="cards">
-      {people.map((p, i) => (
+      {all.map((p, i) => (
         <ProfileCard key={i} {...common} {...p} />
       ))}
     </div>

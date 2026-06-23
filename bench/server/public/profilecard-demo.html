@@ -185,15 +185,25 @@
         },
       ];
 
+      // 초기 렌더 성능 — 같은 5명을 200번 반복해 1000장을 그린다. (/react/Perf·/svelte/Perf와 동일 축)
+      const REPEAT = 200;
       const root = document.getElementById("root");
-      for (const person of people) {
-        const merged = { ...common, ...person };
-        // 값은 store가 들고, blueprint엔 paths(키 이름)를 넘긴다 — runtime이 scope offset을
-        // paths[offset]로 풀어 ctx에서 resolve한다(dashboard-demo와 동일).
-        const ctx = createStore(merged);
-        const inst = blueprintOf(0)(ctx, paths);
-        root.append(...inst.nodes);
+      const start = performance.now();
+      for (let r = 0; r < REPEAT; r++) {
+        for (const person of people) {
+          const merged = { ...common, ...person };
+          // 값은 store가 들고, blueprint엔 paths(키 이름)를 넘긴다 — runtime이 scope offset을
+          // paths[offset]로 풀어 ctx에서 resolve한다(dashboard-demo와 동일).
+          const ctx = createStore(merged);
+          const inst = blueprintOf(0)(ctx, paths);
+          root.append(...inst.nodes);
+        }
       }
+      const elapsed = performance.now() - start;
+      const log = document.createElement("pre");
+      log.id = "log";
+      log.textContent = `quble: ${people.length * REPEAT}장 초기 렌더 ${elapsed.toFixed(1)}ms`;
+      document.body.prepend(log);
     </script>
   </body>
 </html>
