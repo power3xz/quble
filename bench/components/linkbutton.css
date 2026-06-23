@@ -1,0 +1,19 @@
+/* LinkButton 루트는 class={theme}(a 태그). Badge·Tag와 색 값을 공유(같은 값이라 무해). */
+a.light,
+a.dark {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+a.light {
+  background: #e7eef7;
+  color: #34537a;
+}
+
+a.dark {
+  background: #2f3b4d;
+  color: #b9c9de;
+}

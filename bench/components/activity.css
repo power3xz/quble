@@ -1,0 +1,22 @@
+.act {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 13px;
+}
+
+.act .icon {
+  width: 16px;
+  text-align: center;
+}
+
+.act .text {
+  flex: 1;
+}
+
+.act .time {
+  font-size: 11px;
+  color: #a0a4ac;
+}

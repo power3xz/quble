@@ -1,0 +1,81 @@
+/* ProfileCard 루트는 article(class={theme}). theme 색은 자식들(Badge·Tag·LinkButton)과 같은 값. */
+article.light,
+article.dark {
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 20px;
+  border-radius: 12px;
+  font: 14px/1.5 -apple-system, system-ui, sans-serif;
+}
+
+article.light {
+  background: #f5f8fc;
+  color: #2a3240;
+  border: 1px solid #dde6f0;
+}
+
+article.dark {
+  background: #1f2632;
+  color: #cbd3df;
+  border: 1px solid #2f3b4d;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ident {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.bio {
+  margin: 14px 0;
+  font-size: 13px;
+  color: #6b727d;
+}
+
+.stats {
+  display: flex;
+  padding: 12px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.18);
+  border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+}
+
+.meta,
+.activity {
+  margin: 14px 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0;
+}
+
+.links {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.profile {
+  display: block;
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  background: #4a90d9;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}

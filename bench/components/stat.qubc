@@ -1,3 +1,5 @@
+use "./stat.css"
+
 component Stat {
   props { label, value }
   template {

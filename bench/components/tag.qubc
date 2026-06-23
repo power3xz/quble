@@ -1,3 +1,5 @@
+use "./tag.css"
+
 component Tag {
   props { text, theme }
   template {

@@ -1,3 +1,5 @@
+use "./badge.css"
+
 component Badge {
   props { role, theme }
   template {

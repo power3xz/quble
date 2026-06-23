@@ -1,3 +1,5 @@
+use "./metarow.css"
+
 component MetaRow {
   props { icon, text }
   template {

@@ -1,3 +1,5 @@
+use "./thumbnail.css"
+
 component Thumbnail {
   props { avatar, name }
   template {

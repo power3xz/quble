@@ -1,3 +1,5 @@
+use "./activity.css"
+
 component Activity {
   props { icon, text, time }
   template {

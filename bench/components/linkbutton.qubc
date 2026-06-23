@@ -1,3 +1,5 @@
+use "./linkbutton.css"
+
 component LinkButton {
   props { link, theme }
   template {
