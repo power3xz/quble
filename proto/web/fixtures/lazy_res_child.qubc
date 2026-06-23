@@ -1,0 +1,5 @@
+use "./styled_res.css"
+
+component Styled {
+  template { span(class="s") {} }
+}

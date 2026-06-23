@@ -3,7 +3,7 @@
 // (compile_file은 dist/<name>.qubb로 쓰므로, 컴파일 후 그 파일을 읽는다.)
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -17,4 +17,13 @@ export const buildFixture = (name) => {
     stdio: ["ignore", "ignore", "inherit"],
   });
   return new Uint8Array(readFileSync(join(PROTO, "dist", `${name}.qubb`)));
+};
+
+// 위와 같이 빌드하되 { qubb, resmap }를 돌려준다. resmap은 dist/<name>.resmap.json
+// (use한 리소스가 있을 때만 생성됨 — 없으면 빈 배열).
+export const buildFixtureWithResmap = (name) => {
+  const qubb = buildFixture(name);
+  const resmapPath = join(PROTO, "dist", `${name}.resmap.json`);
+  const resmap = existsSync(resmapPath) ? JSON.parse(readFileSync(resmapPath, "utf8")) : [];
+  return { qubb, resmap };
 };

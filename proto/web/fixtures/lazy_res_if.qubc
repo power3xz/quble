@@ -1,0 +1,12 @@
+use Styled from "./lazy_res_child.qubc"
+
+component Outer {
+  props { show }
+  template {
+    div() {
+      @if (show) {
+        Styled() {}
+      }
+    }
+  }
+}
