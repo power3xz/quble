@@ -45,7 +45,7 @@ fn main() -> ExitCode {
             }
         };
         let resmap_path = out_dir.join(format!("{name}.resmap.json"));
-        if let Err(e) = std::fs::write(&resmap_path, json_array(&emitted)) {
+        if let Err(e) = std::fs::write(&resmap_path, quble::json_array(&emitted)) {
             eprintln!("리소스맵 쓰기 실패 {}: {e}", resmap_path.display());
             return ExitCode::FAILURE;
         }
@@ -64,51 +64,11 @@ fn emit_resources(out_dir: &Path, resources: &[String]) -> std::io::Result<Vec<S
     let mut emitted = Vec::with_capacity(resources.len());
     for path in resources {
         let bytes = std::fs::read(path)?;
-        let src = Path::new(path);
-        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("res");
-        let ext = src.extension().and_then(|s| s.to_str()).unwrap_or("");
-        let hash = content_hash(&bytes);
-        let out_name = if ext.is_empty() {
-            format!("{stem}.{hash}")
-        } else {
-            format!("{stem}.{hash}.{ext}")
-        };
-        std::fs::write(res_dir.join(&out_name), &bytes)?;
-        emitted.push(format!("res/{out_name}"));
+        let out_path = quble::asset_path(Path::new(path), &bytes);
+        // out_path는 "res/<name>" — res_dir엔 파일명만 쓰고, 사이드맵엔 상대경로 그대로 둔다.
+        let out_name = out_path.strip_prefix("res/").unwrap_or(&out_path);
+        std::fs::write(res_dir.join(out_name), &bytes)?;
+        emitted.push(out_path);
     }
     Ok(emitted)
-}
-
-/// 콘텐츠 해시(FNV-1a 64bit). 자산 파일명·dedup용. 알고리즘이 고정 상수(offset basis·prime)라
-/// 버전 간 안정 — 표준 라이브러리 해시류와 달리 산출물 식별자로 오래 쓸 수 있다.
-fn content_hash(bytes: &[u8]) -> String {
-    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = OFFSET_BASIS;
-    for &byte in bytes {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(PRIME);
-    }
-    format!("{hash:016x}")
-}
-
-/// 문자열 배열을 JSON 배열 문자열로(의존 없이 직접 조립). 따옴표·백슬래시만 이스케이프 —
-/// 경로엔 제어문자가 없다고 본다.
-fn json_array(items: &[String]) -> String {
-    let mut out = String::from("[");
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push('"');
-        for ch in item.chars() {
-            if ch == '"' || ch == '\\' {
-                out.push('\\');
-            }
-            out.push(ch);
-        }
-        out.push('"');
-    }
-    out.push(']');
-    out
 }
