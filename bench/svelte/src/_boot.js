@@ -4,6 +4,13 @@ import { mount } from "svelte";
 
 const name = location.pathname.split("/").filter(Boolean).pop();
 
+// 뷰를 변수 경로로 동적 import 하면 Vite가 그 청크의 CSS <link>를 자동 주입하지 못한다.
+// 뷰와 같은 이름의 <Name>.css를 직접 건다(스타일 없는 뷰는 404지만 무해).
+const css = document.createElement("link");
+css.rel = "stylesheet";
+css.href = `/svelte/assets/${name}.css`;
+document.head.appendChild(css);
+
 import(`./views/${name}.svelte`).then((mod) => {
   mount(mod.default, { target: document.getElementById("root") });
 });

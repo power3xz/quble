@@ -307,6 +307,8 @@ fn serve_react_asset(req: Request, url: &str) {
         Ok(bytes) => {
             let ct = if rel.ends_with(".js") {
                 "text/javascript; charset=utf-8"
+            } else if rel.ends_with(".css") {
+                "text/css; charset=utf-8"
             } else if rel.ends_with(".html") {
                 "text/html; charset=utf-8"
             } else {
@@ -330,6 +332,8 @@ fn serve_svelte_asset(req: Request, url: &str) {
         Ok(bytes) => {
             let ct = if rel.ends_with(".js") {
                 "text/javascript; charset=utf-8"
+            } else if rel.ends_with(".css") {
+                "text/css; charset=utf-8"
             } else {
                 "application/octet-stream"
             };
