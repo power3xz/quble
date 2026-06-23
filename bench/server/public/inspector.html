@@ -18,6 +18,13 @@
           <label class="inspector__label" for="qubb">qubb</label>
           <select class="inspector__select" id="qubb"></select>
         </div>
+        <div class="inspector__field">
+          <label class="inspector__label" for="url">qubb url</label>
+          <div class="inspector__url">
+            <input class="inspector__url-input" id="url" type="text" placeholder="https://.../card.qubb">
+            <button class="inspector__url-load" id="url-load">load</button>
+          </div>
+        </div>
         <div class="inspector__meta" id="meta"></div>
         <ul class="inspector__list" id="list"></ul>
         <div class="inspector__reslist" id="reslist"></div>
@@ -51,6 +58,8 @@
     import { compile, createStore } from "/runtime.js";
 
     const qubbSelect = document.getElementById("qubb");
+    const urlInput = document.getElementById("url");
+    const urlLoad = document.getElementById("url-load");
     const list = document.getElementById("list");
     const src = document.getElementById("src");
     const meta = document.getElementById("meta");
@@ -128,14 +137,25 @@
     let leafOf = {}; // argName -> leafIndex. set 대상(string·bool만 의미 있음).
     let currentResmap = []; // 현재 qubb의 resId -> href. 디컴파일 use href·사이드바 리소스 목록용.
 
-    // qubb를 fetch해 디코드하고, 안에 든 컴포넌트들을 목록으로 그린다. 첫 컴포넌트를 자동 선택.
-    const loadQubb = async (name) => {
-      const res = await fetch("/components/" + name + ".qubb");
+    // 서버 적재 컴포넌트(select)를 연다 — /components/<name>.qubb + /resmap/<name>.
+    const loadByName = (name) => loadQubb("/components/" + name + ".qubb", "/resmap/" + name);
+
+    // 임의 qubb URL을 연다. resmap은 같은 경로에서 확장자만 바꾼다(우리 산출물 규칙):
+    // ".../card.qubb" -> ".../card.resmap.json". (다른 확장자면 뒤에 그냥 붙인다.)
+    const loadByUrl = (qubbUrl) => {
+      const resmapUrl = qubbUrl.replace(/\.qubb$/, "") + ".resmap.json";
+      return loadQubb(qubbUrl, resmapUrl);
+    };
+
+    // qubbUrl·resmapUrl로 fetch해 디코드하고, 안에 든 컴포넌트들을 목록으로 그린다.
+    // resmap fetch 실패(없는 서버)는 빈 배열로 폴백 — 리소스 로드 없이 디컴파일·프리뷰만.
+    const loadQubb = async (qubbUrl, resmapUrl) => {
+      const res = await fetch(qubbUrl);
       const bytes = new Uint8Array(await res.arrayBuffer());
       const result = inspect(bytes);
       module = result.module;
       // 리소스맵(resId -> URL)도 받아 compile에 주입 — LOAD_RES가 <link>로 스타일을 붙인다.
-      currentResmap = await (await fetch("/resmap/" + name)).json();
+      currentResmap = await fetch(resmapUrl).then((r) => (r.ok ? r.json() : [])).catch(() => []);
       blueprintOf = compile(bytes, currentResmap);
       meta.textContent = `${result.components.length}개 컴포넌트 · ${bytes.length} bytes`;
       list.replaceChildren();
@@ -274,7 +294,20 @@
       }
     };
 
-    qubbSelect.onchange = () => loadQubb(qubbSelect.value);
+    qubbSelect.onchange = () => loadByName(qubbSelect.value);
+
+    // URL 입력으로 임의 qubb를 연다(서버 목록 밖). resmap은 같은 경로 규칙으로 유도.
+    urlLoad.onclick = () => {
+      const url = urlInput.value.trim();
+      if (url) {
+        loadByUrl(url);
+      }
+    };
+    urlInput.onkeydown = (e) => {
+      if (e.key === "Enter") {
+        urlLoad.onclick();
+      }
+    };
 
     // 적재 컴포넌트 목록을 서버에서 받아 셀렉트박스를 채우고 첫 항목을 연다.
     const names = await (await fetch("/components")).json();
@@ -285,7 +318,7 @@
       qubbSelect.appendChild(opt);
     }
     if (names.length > 0) {
-      loadQubb(names[0]);
+      loadByName(names[0]);
     }
   </script>
 </body>

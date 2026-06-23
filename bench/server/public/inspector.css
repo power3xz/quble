@@ -106,6 +106,43 @@ body {
   border-color: var(--accent);
 }
 
+/* qubb URL 입력 — input + load 버튼 한 행. */
+.inspector__url {
+  display: flex;
+  gap: 6px;
+}
+
+.inspector__url-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+}
+
+.inspector__url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.inspector__url-load {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inspector__url-load:hover {
+  filter: brightness(1.1);
+}
+
 .inspector__meta {
   font-size: 12px;
   color: var(--text-dim);
