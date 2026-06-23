@@ -135,7 +135,8 @@
     let currentArgs = []; // [{ name, type }] — 현재 컴포넌트의 arg 스펙.
     let ctx = null; // 현재 프리뷰 인스턴스의 store(반응 갱신 대상).
     let leafOf = {}; // argName -> leafIndex. set 대상(string·bool만 의미 있음).
-    let currentResmap = []; // 현재 qubb의 resId -> href. 디컴파일 use href·사이드바 리소스 목록용.
+    let currentResmap = []; // 현재 qubb의 resId -> 원본 경로(res/...). 디컴파일 use·사이드바 표시용.
+    let currentResolvedResmap = []; // resId -> qubb origin 기준 절대 URL. runtime <link>·fetch용.
 
     // 서버 적재 컴포넌트(select)를 연다 — /components/<name>.qubb + /resmap/<name>.
     const loadByName = (name) => loadQubb("/components/" + name + ".qubb", "/resmap/" + name);
@@ -154,9 +155,13 @@
       const bytes = new Uint8Array(await res.arrayBuffer());
       const result = inspect(bytes);
       module = result.module;
-      // 리소스맵(resId -> URL)도 받아 compile에 주입 — LOAD_RES가 <link>로 스타일을 붙인다.
+      // 리소스맵(resId -> 경로)을 받는다. 표시·디컴파일엔 원본 경로(`res/...`)를 그대로 쓰고,
+      // runtime <link>·fetch엔 qubb URL을 base로 절대화한 것을 쓴다 — custom url로 로드한 경우
+      // 리소스도 그 origin에서 받아와야 하기 때문.
       currentResmap = await fetch(resmapUrl).then((r) => (r.ok ? r.json() : [])).catch(() => []);
-      blueprintOf = compile(bytes, currentResmap);
+      const qubbBase = new URL(qubbUrl, location.href);
+      currentResolvedResmap = currentResmap.map((path) => new URL(path, qubbBase).href);
+      blueprintOf = compile(bytes, currentResolvedResmap);
       meta.textContent = `${result.components.length}개 컴포넌트 · ${bytes.length} bytes`;
       list.replaceChildren();
       // 사이드바 컴포넌트 목록 아래에 이 qubb의 리소스(resId -> href)를 나열.
@@ -170,7 +175,8 @@
           const item = document.createElement("div");
           item.className = "inspector__res";
           item.innerHTML = `<span class="inspector__item-id">${resId}</span>${href}`;
-          item.onclick = () => showResource(href, item);
+          // 표시는 원본 경로, fetch는 절대화한 URL.
+          item.onclick = () => showResource(currentResolvedResmap[resId], item);
           reslist.appendChild(item);
         });
       }
