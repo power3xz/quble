@@ -149,6 +149,45 @@ body {
   color: var(--accent);
 }
 
+/* 리소스 목록 — 컴포넌트 목록 아래. resId + href. */
+.inspector__reslist {
+  margin-top: 16px;
+}
+
+.inspector__reslist-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.inspector__res {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font: 12px "SF Mono", Menlo, Consolas, monospace;
+  color: var(--text-dim);
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.inspector__res:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.inspector__res--active {
+  background: var(--accent-soft);
+  color: #eceef1;
+}
+
+.inspector__res--active .inspector__item-id {
+  color: var(--accent);
+}
+
 /* 뷰 — 왼쪽 코드/컨트롤 컬럼 + 오른쪽 프리뷰. */
 .inspector__view {
   flex: 1;

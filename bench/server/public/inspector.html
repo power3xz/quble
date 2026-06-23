@@ -20,12 +20,13 @@
         </div>
         <div class="inspector__meta" id="meta"></div>
         <ul class="inspector__list" id="list"></ul>
+        <div class="inspector__reslist" id="reslist"></div>
       </aside>
 
       <main class="inspector__view">
         <div class="inspector__pane">
           <div class="inspector__panel">
-            <div class="inspector__panel-title">qubc</div>
+            <div class="inspector__panel-title" id="src-title">qubc</div>
             <pre class="inspector__source inspector__source--empty" id="src">왼쪽에서 컴포넌트를 선택하세요.</pre>
           </div>
           <div class="inspector__controls">
@@ -55,12 +56,15 @@
     const meta = document.getElementById("meta");
     const argsBox = document.getElementById("args");
     const stage = document.getElementById("stage");
+    const reslist = document.getElementById("reslist");
+    const srcTitle = document.getElementById("src-title");
 
     let module = null;
     let blueprintOf = null; // 현재 qubb의 컴파일된 blueprint 팩토리.
     let currentArgs = []; // [{ name, type }] — 현재 컴포넌트의 arg 스펙.
     let ctx = null; // 현재 프리뷰 인스턴스의 store(반응 갱신 대상).
     let leafOf = {}; // argName -> leafIndex. set 대상(string·bool만 의미 있음).
+    let currentResmap = []; // 현재 qubb의 resId -> href. 디컴파일 use href·사이드바 리소스 목록용.
 
     // qubb를 fetch해 디코드하고, 안에 든 컴포넌트들을 목록으로 그린다. 첫 컴포넌트를 자동 선택.
     const loadQubb = async (name) => {
@@ -69,10 +73,25 @@
       const result = inspect(bytes);
       module = result.module;
       // 리소스맵(resId -> URL)도 받아 compile에 주입 — LOAD_RES가 <link>로 스타일을 붙인다.
-      const resmap = await (await fetch("/resmap/" + name)).json();
-      blueprintOf = compile(bytes, resmap);
+      currentResmap = await (await fetch("/resmap/" + name)).json();
+      blueprintOf = compile(bytes, currentResmap);
       meta.textContent = `${result.components.length}개 컴포넌트 · ${bytes.length} bytes`;
       list.replaceChildren();
+      // 사이드바 컴포넌트 목록 아래에 이 qubb의 리소스(resId -> href)를 나열.
+      reslist.replaceChildren();
+      if (currentResmap.length > 0) {
+        const title = document.createElement("div");
+        title.className = "inspector__reslist-title";
+        title.textContent = "resources";
+        reslist.appendChild(title);
+        currentResmap.forEach((href, resId) => {
+          const item = document.createElement("div");
+          item.className = "inspector__res";
+          item.innerHTML = `<span class="inspector__item-id">${resId}</span>${href}`;
+          item.onclick = () => showResource(href, item);
+          reslist.appendChild(item);
+        });
+      }
       for (const comp of result.components) {
         const li = document.createElement("li");
         li.className = "inspector__item";
@@ -97,14 +116,36 @@
       return input.value;
     };
 
+    // 리소스를 클릭하면 qubc 패널 자리에 그 CSS 내용을 보여준다(href를 fetch).
+    const showResource = async (href, item) => {
+      for (const el of reslist.querySelectorAll(".inspector__res")) {
+        el.classList.remove("inspector__res--active");
+      }
+      item.classList.add("inspector__res--active");
+      // 컴포넌트 선택 강조는 해제 — 지금 보는 건 컴포넌트가 아니라 리소스다.
+      for (const el of list.children) {
+        el.classList.remove("inspector__item--active");
+      }
+      srcTitle.textContent = "css";
+      src.classList.remove("inspector__source--empty");
+      src.textContent = "불러오는 중…";
+      const css = await (await fetch(href)).text();
+      src.textContent = css;
+    };
+
     // 한 컴포넌트를 선택한다 — qubc 표시 + arg 입력 UI 생성 + 프리뷰 마운트.
     const select = (compId, li) => {
       for (const el of list.children) {
         el.classList.remove("inspector__item--active");
       }
+      // 리소스 뷰에서 컴포넌트로 돌아오면 리소스 강조 해제 + 타이틀 복귀.
+      for (const el of reslist.querySelectorAll(".inspector__res")) {
+        el.classList.remove("inspector__res--active");
+      }
       li.classList.add("inspector__item--active");
+      srcTitle.textContent = "qubc";
       src.classList.remove("inspector__source--empty");
-      src.textContent = decompileComponent(module, compId);
+      src.textContent = decompileComponent(module, compId, currentResmap);
 
       currentArgs = componentArgs(module, compId);
       buildArgInputs();
