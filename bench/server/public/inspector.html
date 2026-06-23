@@ -23,7 +23,24 @@
       </aside>
 
       <main class="inspector__view">
-        <pre class="inspector__source inspector__source--empty" id="src">왼쪽에서 컴포넌트를 선택하세요.</pre>
+        <div class="inspector__pane">
+          <div class="inspector__panel">
+            <div class="inspector__panel-title">qubc</div>
+            <pre class="inspector__source inspector__source--empty" id="src">왼쪽에서 컴포넌트를 선택하세요.</pre>
+          </div>
+          <div class="inspector__controls">
+            <div class="inspector__panel-title">arguments</div>
+            <div class="inspector__args" id="args">
+              <p class="inspector__placeholder">컴포넌트를 선택하면 arg 입력이 표시됩니다.</p>
+            </div>
+          </div>
+        </div>
+        <div class="inspector__viewer">
+          <div class="inspector__panel-title">preview</div>
+          <div class="inspector__stage" id="stage">
+            <p class="inspector__placeholder">미리보기는 다음 단계에서 연결됩니다.</p>
+          </div>
+        </div>
       </main>
     </div>
   </div>

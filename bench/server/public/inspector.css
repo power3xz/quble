@@ -149,26 +149,81 @@ body {
   color: var(--accent);
 }
 
-/* 뷰 — qubc 코드 패널. */
+/* 뷰 — 왼쪽 코드/컨트롤 컬럼 + 오른쪽 프리뷰. */
 .inspector__view {
   flex: 1;
   min-width: 0;
+  display: flex;
+  gap: 20px;
   padding: 20px;
-  overflow: auto;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.inspector__source {
-  margin: 0;
-  padding: 20px;
+.inspector__pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 공통 패널 박스 — 타이틀 + 내용. */
+.inspector__panel,
+.inspector__controls,
+.inspector__viewer {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
+  padding: 16px 20px;
+  box-sizing: border-box;
+}
+
+/* qubc 패널 — 타이틀 아래 코드가 높이 고정 + 내부 스크롤. */
+.inspector__source {
+  margin: 0;
+  height: 380px;
+  box-sizing: border-box;
   color: #d6dbe2;
   font: 13px/1.7 "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   tab-size: 2;
-  overflow-x: auto;
+  overflow: auto;
 }
 
 .inspector__source--empty {
   color: var(--text-dim);
+}
+
+/* 컨트롤 패널 — arg 입력 자리(내용은 다음 단계). */
+.inspector__controls {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 프리뷰 — 렌더 stage 자리(다음 단계). pane과 반반 너비. */
+.inspector__viewer {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.inspector__stage {
+  flex: 1;
+}
+
+.inspector__panel-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.inspector__placeholder {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0;
 }
