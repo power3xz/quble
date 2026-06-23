@@ -1,9 +1,12 @@
 //! AST. 한 파일에 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간(텍스트·속성).
 
-/// 한 소스(.qubc 한 파일)의 파싱 결과: 최상위 use 문들 + 컴포넌트 정의들.
+/// 한 소스 파일(.qubc 하나)의 파싱 결과: 최상위 use 문들 + 컴포넌트 정의들.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Source {
+pub struct SourceFile {
     pub uses: Vec<Use>,
+    /// `use './x.css'` — 이 파일이 참조하는 외부 리소스 경로(등장 순서). 이 파일의 모든
+    /// 컴포넌트가 공유한다(lazy build에서 컴포넌트가 그려질 때 로드).
+    pub resources: Vec<String>,
     pub comps: Vec<Component>,
 }
 

@@ -140,6 +140,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `IF`              | 0x0c | cond: u16             | scope                     | `scope[cond]`(불리언)으로 분기 시작. then 가지 코드가 이어진다.            |
 | `ELSE`            | 0x0d | —                     | —                         | then 가지 끝, else 가지 시작. (else 있을 때만)                            |
 | `IF_END`          | 0x0e | —                     | —                         | if 블록 끝.                                                              |
+| `LOAD_RES`        | 0x0f | res: u16              | 모듈 전역 리소스          | `res`(resId)의 외부 리소스(CSS 등)를 로드. resId->URL은 런타임이 주입.    |
 
 설계 메모:
 
@@ -173,6 +174,15 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 - 반복(`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다. 방향만 — 점프 없이 **해석단이
   본문 구간을 N회 반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계 표기·leafIndex 회수
   (REACTIVITY.md §3)가 엮여 별도 작업.
+- **외부 리소스 — `LOAD_RES res`.** 컴포넌트가 `use './style.css'`로 CSS를 참조하면 정의 코드
+  앞머리에 `LOAD_RES resId`를 하나 낸다. 런타임이 resId를 URL로 풀어 로드(클라: `<link>` 삽입,
+  중복 URL 스킵). **URL은 바이트코드에 없다** — 빌드/배포마다 바뀌므로(해시 파일명·CDN 경로)
+  런타임이 `{resId: url}` 맵을 주입한다. 컴파일러는 `resId -> 경로` 사이드맵을 qubb 밖으로 내보내고,
+  빌드가 거기에 URL을 붙여 런타임 맵을 만든다.
+  - **resId는 모듈 전역 인덱스**다. scope offset·comp_id가 모듈 로컬인 것과 같은 결 — 한 모듈
+    안에서만 유효한 0,1,2…. 같은 경로는 같은 resId로 합친다(컴파일타임 정규화·중복 제거).
+  - **qubb 안에 리소스 테이블은 두지 않는다.** 빌드가 이미 resId->경로를 알아 qubb에 또 담는 건
+    잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
 
 ## 5.1 분기 — `IF`/`ELSE`/`IF_END`
 

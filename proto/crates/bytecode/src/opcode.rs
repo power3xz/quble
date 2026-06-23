@@ -30,6 +30,8 @@ pub enum Op {
     Else = 0x0d,
     /// if 블록 끝.
     IfEnd = 0x0e,
+    /// 외부 리소스(CSS 등) 로드. operand는 모듈 전역 resId. resId->URL은 런타임이 주입.
+    LoadRes = 0x0f,
 }
 
 impl Op {
@@ -51,6 +53,7 @@ impl Op {
             0x0c => Op::If,
             0x0d => Op::Else,
             0x0e => Op::IfEnd,
+            0x0f => Op::LoadRes,
             _ => return None,
         })
     }

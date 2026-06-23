@@ -7,7 +7,7 @@
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
-use crate::ast::{AttrValue, Component, Node, Source, Use};
+use crate::ast::{AttrValue, Component, Node, SourceFile, Use};
 use crate::lexer::{Keyword, Token};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -16,15 +16,27 @@ pub enum ParseError {
     Expected { want: String, got: String },
 }
 
+/// `use` 문 한 줄의 두 형태. 컴포넌트 import(`use A from "..."`)와 리소스(`use "..."`)는
+/// 같은 키워드로 시작하지만 다른 곳에 모인다(전자는 use 그래프, 후자는 SourceFile.resources).
+enum UseDecl {
+    Component(Use),
+    Resource(String),
+}
+
 /// 한 소스를 파싱. 최상위 use 문(있으면 component 앞)과 컴포넌트 정의들을 모은다.
 /// 컴포넌트 정의 순서는 codegen에서 의미를 갖지 않는다(CompLookup이 forward 참조 허용).
-pub fn parse(tokens: &[Token]) -> Result<Source, ParseError> {
+pub fn parse(tokens: &[Token]) -> Result<SourceFile, ParseError> {
     let mut p = Parser { tokens, pos: 0 };
     let mut uses = Vec::new();
+    let mut resources = Vec::new();
     let mut comps = Vec::new();
     while let Some(Token::Ident(s)) = p.peek() {
         match s.as_str() {
-            "use" => uses.push(p.use_decl()?),
+            // `use` 다음이 문자열이면 리소스(`use './x.css'`), 식별자면 컴포넌트 import.
+            "use" => match p.use_decl()? {
+                UseDecl::Component(u) => uses.push(u),
+                UseDecl::Resource(path) => resources.push(path),
+            },
             "component" => comps.push(p.component()?),
             other => {
                 return Err(ParseError::Expected {
@@ -41,7 +53,7 @@ pub fn parse(tokens: &[Token]) -> Result<Source, ParseError> {
             got: format!("{t:?}"),
         });
     }
-    Ok(Source { uses, comps })
+    Ok(SourceFile { uses, resources, comps })
 }
 
 struct Parser<'a> {
@@ -96,9 +108,16 @@ impl<'a> Parser<'a> {
     }
 
 
-    // use IDENT (, IDENT)* from STRING
-    fn use_decl(&mut self) -> Result<Use, ParseError> {
+    // 컴포넌트 import:  use IDENT (, IDENT)* from STRING
+    // 리소스:           use STRING
+    fn use_decl(&mut self) -> Result<UseDecl, ParseError> {
         self.keyword("use")?;
+        // `use` 다음이 문자열이면 리소스(컴포넌트명·from 없음).
+        if let Some(Token::Str(path)) = self.peek() {
+            let path = path.clone();
+            self.next()?;
+            return Ok(UseDecl::Resource(path));
+        }
         let mut names = Vec::new();
         names.push(self.ident()?);
         while matches!(self.peek(), Some(Token::Comma)) {
@@ -115,7 +134,7 @@ impl<'a> Parser<'a> {
                 })
             }
         };
-        Ok(Use { names, path })
+        Ok(UseDecl::Component(Use { names, path }))
     }
 
     // component IDENT { [props { ... }] template { NODE* } }

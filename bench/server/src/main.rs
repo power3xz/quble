@@ -118,6 +118,7 @@ fn build_components() -> HashMap<String, Vec<u8>> {
         // compile_file이 엔트리를 읽고 use는 importer 기준 상대경로로 해소한다.
         let bytes = compiler::compile_file(path.to_str().unwrap())
             .expect("컴파일 실패")
+            .bytecode
             .into_vec();
         map.insert(name, bytes);
     }

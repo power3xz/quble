@@ -105,6 +105,7 @@ mod tests {
         assert_eq!(Op::from_u8(0x0c), Some(Op::If));
         assert_eq!(Op::from_u8(0x0d), Some(Op::Else));
         assert_eq!(Op::from_u8(0x0e), Some(Op::IfEnd));
+        assert_eq!(Op::from_u8(0x0f), Some(Op::LoadRes));
         assert_eq!(Op::from_u8(0xff), None);
     }
 

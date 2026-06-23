@@ -1,6 +1,7 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{AttrValue, Component, Node};
+use crate::ast::{AttrValue, Node};
+use crate::resolve::FlatComp;
 use bytecode::{encode, tags, CompDef, ConstPool, Module, Op};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -22,11 +23,11 @@ struct CompLookup<'a> {
 }
 
 impl<'a> CompLookup<'a> {
-    fn build(comps: &'a [Component]) -> Self {
+    fn build(comps: &'a [FlatComp]) -> Self {
         let by_name = comps
             .iter()
             .enumerate()
-            .map(|(i, c)| (c.name.as_str(), (i as u16, c.props.as_slice())))
+            .map(|(i, fc)| (fc.comp.name.as_str(), (i as u16, fc.comp.props.as_slice())))
             .collect();
         CompLookup { by_name }
     }
@@ -38,16 +39,28 @@ impl<'a> CompLookup<'a> {
 }
 
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
-pub fn generate(comps: &[Component]) -> Result<Box<[u8]>, CodegenError> {
+/// 두 번째 반환값은 리소스 사이드맵 — 인덱스가 모듈 전역 resId, 값이 정규화 경로.
+/// 빌드 단계가 이걸 받아 내용 해시·복사·URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
+pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenError> {
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
     let mut code = Vec::new();
     let mut defs = Vec::new();
+    // 정규화 경로 -> resId. 등장 순서로 0,1,2…. 같은 경로는 같은 resId(모듈 전역 dedup).
+    let mut res_ids: Vec<String> = Vec::new();
 
     // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
-    for comp in comps {
+    for fc in comps {
+        let comp = &fc.comp;
         let name_idx = pool.intern(&comp.name);
         let code_off = code.len() as u32;
+        // 리소스 로드를 정의 앞머리에 깐다. lazy build에서 이 컴포넌트가 실제로 그려질 때만
+        // 실행돼 리소스가 로드된다(같은 파일 컴포넌트가 같은 LOAD_RES를 내도 런타임이 URL dedup).
+        for res_path in &fc.resources {
+            let res_id = res_id_for(&mut res_ids, res_path);
+            code.push(Op::LoadRes as u8);
+            code.extend_from_slice(&res_id.to_le_bytes());
+        }
         for node in &comp.template {
             emit_node(node, &comp.props, &comp_lookup, &mut pool, &mut code)?;
         }
@@ -60,7 +73,16 @@ pub fn generate(comps: &[Component]) -> Result<Box<[u8]>, CodegenError> {
     }
 
     let module = Module::new(pool, defs, code);
-    Ok(encode(&module).into_boxed_slice())
+    Ok((encode(&module).into_boxed_slice(), res_ids))
+}
+
+/// 정규화 경로의 모듈 전역 resId. 이미 본 경로면 그 인덱스, 처음이면 끝에 추가하고 새 인덱스.
+fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
+    if let Some(i) = res_ids.iter().position(|p| p == path) {
+        return i as u16;
+    }
+    res_ids.push(path.to_string());
+    (res_ids.len() - 1) as u16
 }
 
 /// 변수명을 scope 인덱스로. 선언 순서 = scope 인덱스. 미선언이면 에러.

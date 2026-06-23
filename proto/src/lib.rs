@@ -20,8 +20,8 @@ pub fn render_with(
     comp_id: u16,
     scope: &[String],
 ) -> Result<String, RenderError> {
-    let bytecode = compiler::compile_src(entry_path, src, resolver).map_err(RenderError::Compile)?;
-    renderer::render_to_string(&bytecode, comp_id, scope).map_err(RenderError::Render)
+    let output = compiler::compile_src(entry_path, src, resolver).map_err(RenderError::Compile)?;
+    renderer::render_to_string(&output.bytecode, comp_id, scope).map_err(RenderError::Render)
 }
 
 #[cfg(test)]

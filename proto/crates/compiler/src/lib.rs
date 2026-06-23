@@ -18,6 +18,14 @@ pub enum CompileError {
     Codegen(codegen::CodegenError),
 }
 
+/// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 — 빌드 파이프라인이 사이드맵으로
+/// 내용 해시·복사·URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
+pub struct CompileOutput {
+    pub bytecode: Box<[u8]>,
+    /// 인덱스 = 모듈 전역 resId, 값 = 리소스 정규화 경로.
+    pub resources: Vec<String>,
+}
+
 /// 엔트리 소스를 직렬화된 바이트코드로 컴파일. use 그래프를 resolver로 따라가
 /// 모든 컴포넌트를 한 모듈로 평탄화한다. entry_path는 엔트리 소스 자신의 정규화 경로로,
 /// 첫 use의 base가 된다(엔트리 컴포넌트가 ID 0).
@@ -25,14 +33,15 @@ pub fn compile_src(
     entry_path: &str,
     src: &str,
     resolver: &impl Resolver,
-) -> Result<Box<[u8]>, CompileError> {
+) -> Result<CompileOutput, CompileError> {
     let comps = resolve::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
-    codegen::generate(&comps).map_err(CompileError::Codegen)
+    let (bytecode, resources) = codegen::generate(&comps).map_err(CompileError::Codegen)?;
+    Ok(CompileOutput { bytecode, resources })
 }
 
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
 /// 정규화한 절대경로로 해소한다(파일시스템 resolver).
-pub fn compile_file(path: &str) -> Result<Box<[u8]>, CompileError> {
+pub fn compile_file(path: &str) -> Result<CompileOutput, CompileError> {
     let not_found = || {
         CompileError::Resolve(ResolveError::NotFound {
             base: String::new(),
@@ -59,7 +68,7 @@ mod tests {
 
     /// use 없는 단일 소스를 컴파일(테스트용). resolver는 호출되지 않으므로 항상 None.
     fn compile(src: &str) -> Result<Box<[u8]>, CompileError> {
-        compile_src("entry", src, &(|_: &str, _: &str| None))
+        compile_src("entry", src, &(|_: &str, _: &str| None)).map(|o| o.bytecode)
     }
 
     /// 경로->소스 메모리맵으로 컴파일(테스트용). 경로 정규화 없이 문자열 그대로 키.
@@ -74,7 +83,7 @@ mod tests {
                 .find(|(p, _)| p == target)
                 .map(|(p, s)| (p.clone(), s.clone()))
         };
-        compile_src("entry", entry_src, &resolver)
+        compile_src("entry", entry_src, &resolver).map(|o| o.bytecode)
     }
 
     const HELLO: &str = r#"
@@ -270,6 +279,63 @@ mod tests {
         assert_eq!(names[0], "Card", "엔트리가 ID 0");
         assert!(names.contains(&"Thumb".to_string()));
         assert!(names.contains(&"Badge".to_string()));
+    }
+
+    /// `use "./x.css"` — 리소스를 use한 컴포넌트는 정의 코드 앞머리에 LOAD_RES 0을 낸다.
+    /// 사이드맵 resources[0]은 정규화 경로(dedup 키). resolver가 정규화 경로를 돌려준다(소스는 버려짐).
+    #[test]
+    fn compiles_load_res_for_used_css() {
+        use bytecode::{decode, Op};
+
+        let entry = r#"
+            use "./card.css"
+            component Card { template { div() {} } }
+        "#;
+        // 정규화 경로를 직접 매핑("./card.css" -> "/abs/card.css"). 소스는 빈 문자열(컴파일러가 안 씀).
+        let resolver = |_base: &str, target: &str| match target {
+            "./card.css" => Some(("/abs/card.css".to_string(), String::new())),
+            _ => None,
+        };
+        let output = compile_src("entry", entry, &resolver).unwrap();
+
+        // 사이드맵: resId 0 -> 정규화 경로.
+        assert_eq!(output.resources, vec!["/abs/card.css".to_string()]);
+
+        // 코드 앞머리가 LOAD_RES 0.
+        let module = decode(&output.bytecode).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        assert_eq!(code[0], Op::LoadRes as u8);
+        assert_eq!(u16::from_le_bytes([code[1], code[2]]), 0);
+    }
+
+    /// 같은 파일의 두 컴포넌트는 같은 리소스를 공유 — 둘 다 LOAD_RES 0을 내고 resId는 하나(dedup).
+    #[test]
+    fn same_file_components_share_res_id() {
+        use bytecode::{decode, Op};
+
+        let entry = r#"
+            use "./shared.css"
+            component A { template { div() {} } }
+            component B { template { span() {} } }
+        "#;
+        let resolver = |_base: &str, target: &str| match target {
+            "./shared.css" => Some(("/abs/shared.css".to_string(), String::new())),
+            _ => None,
+        };
+        let output = compile_src("entry", entry, &resolver).unwrap();
+
+        // 리소스는 하나만(dedup).
+        assert_eq!(output.resources, vec!["/abs/shared.css".to_string()]);
+
+        // 두 컴포넌트 모두 코드 앞머리가 LOAD_RES 0.
+        let module = decode(&output.bytecode).unwrap();
+        for id in 0..2 {
+            let def = module.def(id).unwrap();
+            let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+            assert_eq!(code[0], Op::LoadRes as u8, "def {id} 앞머리 LOAD_RES");
+            assert_eq!(u16::from_le_bytes([code[1], code[2]]), 0);
+        }
     }
 
     /// resolver가 경로를 못 찾으면 NotFound.

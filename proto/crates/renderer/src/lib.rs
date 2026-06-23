@@ -129,6 +129,12 @@ fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Re
             Op::Else => skip_branch(code, &mut pc)?,
             // 정상 종료 마커. 할 일 없음.
             Op::IfEnd => {}
+            // 외부 리소스 로드. SSR은 컴포넌트 조각 HTML만 내므로 <link>를 둘 head가 없다.
+            // resId만 건너뛰고 출력엔 영향 주지 않는다(클라 런타임이 <link>를 붙인다).
+            // head 수집 방식은 미결(BYTECODE.md §5 설계 메모).
+            Op::LoadRes => {
+                read_u16(code, &mut pc)?;
+            }
         }
     }
     Ok(())
@@ -151,7 +157,7 @@ fn truthy(val: &str) -> bool {
 fn operand_len(op: Op) -> usize {
     match op {
         Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd => 0,
-        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::If => 2,
+        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::If | Op::LoadRes => 2,
         Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar => 4,
     }
 }

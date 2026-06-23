@@ -9,6 +9,14 @@ use crate::ast::Component;
 use crate::lexer;
 use crate::parse;
 
+/// 평탄화된 컴포넌트 + 그 컴포넌트가 속한 파일의 리소스 경로(`use './x.css'`).
+/// 같은 파일에서 나온 컴포넌트는 같은 resources를 복제해 가진다(파일 단위 선언이라
+/// 어느 컴포넌트가 쓰는지 특정 불가 — 전부 후보). codegen이 정의 앞에 LOAD_RES를 낸다.
+pub struct FlatComp {
+    pub comp: Component,
+    pub resources: Vec<String>,
+}
+
 /// use 경로 해소기. base(use를 적은 소스의 정규화 경로)와 target(`./Foo.qubc`)을 받아
 /// 대상의 (정규화 경로, 소스 문자열)을 돌려준다. 못 찾으면 None.
 pub trait Resolver {
@@ -46,7 +54,7 @@ pub fn flatten(
     entry_path: &str,
     entry_src: &str,
     resolver: &impl Resolver,
-) -> Result<Vec<Component>, ResolveError> {
+) -> Result<Vec<FlatComp>, ResolveError> {
     let mut ctx = Ctx {
         acc: Vec::new(),
         origin: Vec::new(),
@@ -59,7 +67,7 @@ pub fn flatten(
 }
 
 struct Ctx {
-    acc: Vec<Component>,        // 평탄화 결과 (엔트리 ID 0, 순서 유지)
+    acc: Vec<FlatComp>,        // 평탄화 결과 (엔트리 ID 0, 순서 유지)
     origin: Vec<(String, String)>, // (컴포넌트명, 출처 정규화 경로) — 동명 충돌 판정용
     recursed: Vec<String>,     // 의존성 재귀를 끝낸 경로 (한 파일의 use 그래프는 한 번만 탐)
     visiting: Vec<String>,     // 현재 DFS 경로 (순환 감지)
@@ -93,7 +101,23 @@ fn collect(
         }
     }
 
+    // 리소스 경로를 정규화한다(컴포넌트 import와 같은 resolver). 정규화 경로의 동일성이
+    // 모듈 전역 resId dedup 키 — 상대경로가 달라도 같은 파일이면 합쳐진다. 소스 텍스트는
+    // 버린다(내용 해시·복사·URL화는 빌드 단계). drop으로 즉시 반납돼 누적되지 않는다.
+    let mut resources = Vec::with_capacity(source.resources.len());
+    for res_path in &source.resources {
+        let (canonical, _src) =
+            resolver
+                .resolve(path, res_path)
+                .ok_or_else(|| ResolveError::NotFound {
+                    base: path.to_string(),
+                    target: res_path.clone(),
+                })?;
+        resources.push(canonical);
+    }
+
     // 가져올 컴포넌트를 acc에 넣는다. 같은 이름이 다른 파일에서 왔으면 충돌, 같은 파일이면 다이아몬드(skip).
+    // 리소스는 파일 단위 선언이라 이 파일의 모든 컴포넌트가 같은 목록을 복제해 가진다(A안).
     for comp in source.comps {
         if !take(&comp.name) {
             continue;
@@ -105,7 +129,10 @@ fn collect(
             continue; // 같은 파일 같은 컴포넌트 — 이미 들어감.
         }
         ctx.origin.push((comp.name.clone(), path.to_string()));
-        ctx.acc.push(comp);
+        ctx.acc.push(FlatComp {
+            comp,
+            resources: resources.clone(),
+        });
     }
 
     // 이 파일의 의존성 재귀는 한 번만 (다이아몬드여도 use 그래프는 한 번 탐).
