@@ -25,7 +25,7 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
   from "...module.css"` + `class=[...]`를 예시).
   - [x] 외부 CSS 로드 — `use "./x.css"`로 참조한 리소스를 컴파일러가 산출하고 컴포넌트가 그려질 때
     로드(`LOAD_RES`, BYTECODE.md §5).
-  - [ ] 런타임 로드 — 주입받은 URL로 실제 적용(클라 `<link>`, SSR head 수집은 미정).
+  - [x] 런타임 로드 — 주입받은 URL(resmap)로 실제 적용. SSR은 `<link>` 인라인, 클라는 `LOAD_RES`에서 `<link>` 삽입.
   - [ ] 격리, 동적 class 배열. 방법 미정.
 
 ## 데이터
@@ -49,5 +49,6 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 ## 개발 환경
 
 - [x] 컴파일 바이너리 (`quble <qubc>` → dist/qubb)
+- [x] dev 서버 (`quble-serve <path>`) — 컴파일해 메모리에서 바로 서빙(qubb·resmap·res). dist 안 거침.
 - [x] bench 비교 환경 (qubb vs React lazy chunk 네트워크 비용)
-- [x] qubb 인스펙터 — qubb를 qubc로 디컴파일 + 컴포넌트 선택·arg 입력으로 실시간 렌더 (IDEAS.md 컴포넌트 뷰어)
+- [x] qubb 인스펙터 — qubb를 qubc로 디컴파일 + 컴포넌트 선택·arg 입력으로 실시간 렌더 (IDEAS.md 컴포넌트 뷰어). 임의 qubb url 로드 지원.
