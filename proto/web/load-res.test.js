@@ -11,7 +11,8 @@ const { compile, createStore } = await import("./runtime.js");
 
 const qubb = buildFixture("styled_res");
 
-// 각 테스트 전에 head의 stylesheet link를 비워 테스트 간 dedup 상태가 안 섞이게 한다.
+// 각 테스트 전에 head의 stylesheet link를 비운다. dedup Set은 compile 단위라 새 compile마다
+// 깨끗하므로 따로 비울 필요 없다.
 beforeEach(() => {
   for (const link of [...document.head.querySelectorAll("link[rel=stylesheet]")]) {
     link.remove();
@@ -28,10 +29,11 @@ test("LOAD_RES가 resId의 URL로 <link>를 head에 삽입한다", () => {
   assert.deepEqual(hrefs(), ["/res/styled.abc.css"]);
 });
 
-test("같은 URL은 dedup — 두 번 인스턴스화해도 <link>는 하나", () => {
-  const resmap = ["/res/styled.abc.css"];
-  compile(qubb, resmap)(0)(createStore({}), []);
-  compile(qubb, resmap)(0)(createStore({}), []);
+test("같은 URL은 dedup — 한 compile에서 두 번 인스턴스화해도 <link>는 하나", () => {
+  // dedup은 compile 단위 — 같은 blueprint를 두 번 인스턴스화하면 href는 한 번만 삽입된다.
+  const blueprint = compile(qubb, ["/res/styled.abc.css"])(0);
+  blueprint(createStore({}), []);
+  blueprint(createStore({}), []);
   assert.deepEqual(hrefs(), ["/res/styled.abc.css"], "중복 href 스킵");
 });
 

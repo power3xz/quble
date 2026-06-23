@@ -253,7 +253,7 @@ const decode = (bytes) => {
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
 // @returns      Blueprint: (ctx, rootPaths) => Instance { nodes, regions }
-const compileDef = (module, compId, resmap = []) => {
+const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
   const def = module.defs[compId];
   if (!def) {
     throw new Error("bad component " + compId);
@@ -328,10 +328,13 @@ const compileDef = (module, compId, resmap = []) => {
             break;
           }
           case OP.LOAD_RES: {
-            // 리소스 로드 — resId의 URL로 <link>를 document.head에 삽입. 이미 같은 href가
-            // 있으면 스킵(여러 컴포넌트·재마운트가 같은 리소스를 써도 한 번만).
+            // 리소스 로드 — resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
+            // 스킵(한 compile의 여러 컴포넌트·인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
+            // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
+            // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
             const url = resmap[u16at()];
-            if (url && !document.head.querySelector(`link[href="${url}"]`)) {
+            if (url && !loadedHrefs.has(url)) {
+              loadedHrefs.add(url);
               const link = document.createElement("link");
               link.rel = "stylesheet";
               link.href = url;
@@ -498,5 +501,8 @@ const compileDef = (module, compId, resmap = []) => {
 // @returns      blueprintOf: (compId) => Blueprint
 export const compile = (bytes, resmap = []) => {
   const module = decode(bytes);
-  return (compId) => compileDef(module, compId, resmap);
+  // LOAD_RES dedup 집합은 compile 단위 — 이 compile에서 나온 모든 blueprint·인스턴스가 공유하되,
+  // 다른 compile(다른 렌더 세션)은 깨끗한 Set으로 시작한다.
+  const loadedHrefs = new Set();
+  return (compId) => compileDef(module, compId, resmap, loadedHrefs);
 };
