@@ -59,6 +59,68 @@
     const reslist = document.getElementById("reslist");
     const srcTitle = document.getElementById("src-title");
 
+    // HTML 이스케이프 — 토큰 텍스트를 innerHTML에 넣기 전에 적용.
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const span = (cls, text) => `<span class="tok-${cls}">${esc(text)}</span>`;
+
+    // qubc 하이라이트 — 우리 문법 토큰을 <span>으로. 매칭 안 된 텍스트는 이스케이프만.
+    // 토큰: 문자열 "...", 변수 {arg}, 키워드, 디렉티브 @if/@for, 컴포넌트명(대문자 시작).
+    const QUBC_KEYWORDS = new Set(["component", "props", "template", "use", "from"]);
+    const highlightQubc = (text) => {
+      // 교대 매칭: 문자열 | 변수 | 디렉티브 | 식별자. 나머지(기호·공백)는 그대로.
+      // 변수는 {arg}처럼 공백 없는 단일 식별자만 — 블록 구분자 `{`(뒤에 공백)와 구별된다.
+      const re = /("[^"]*")|(\{[A-Za-z_]\w*\})|(@\w+)|([A-Za-z_]\w*)/g;
+      let out = "";
+      let last = 0;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        out += esc(text.slice(last, m.index));
+        if (m[1]) {
+          out += span("string", m[1]);
+        } else if (m[2]) {
+          out += span("var", m[2]);
+        } else if (m[3]) {
+          out += span("directive", m[3]);
+        } else {
+          const word = m[4];
+          if (QUBC_KEYWORDS.has(word)) {
+            out += span("keyword", word);
+          } else if (/^[A-Z]/.test(word)) {
+            out += span("type", word); // 컴포넌트명
+          } else {
+            out += esc(word);
+          }
+        }
+        last = re.lastIndex;
+      }
+      out += esc(text.slice(last));
+      return out;
+    };
+
+    // css 하이라이트 — 거친 토큰(주석·셀렉터·속성·값). 완전 파싱이 아니라 색칠용이라
+    // 엣지에서 색이 어긋나도 안전(내용은 그대로). 주석 우선, 그다음 셀렉터{본문} 블록.
+    const highlightCss = (text) => {
+      const re = /(\/\*[\s\S]*?\*\/)|([^{}]+)(\{)([^}]*)(\})/g;
+      let out = "";
+      let last = 0;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        out += esc(text.slice(last, m.index));
+        if (m[1]) {
+          out += span("comment", m[1]);
+        } else {
+          // 셀렉터 { 속성: 값; ... }
+          out += span("selector", m[2]) + esc(m[3]);
+          // 본문은 `prop: value;` 단위로 — prop만 칠하고 값은 그대로.
+          out += m[4].replace(/([\w-]+)(\s*:)/g, (_, prop, colon) => span("prop", prop) + colon);
+          out += esc(m[5]);
+        }
+        last = re.lastIndex;
+      }
+      out += esc(text.slice(last));
+      return out;
+    };
+
     let module = null;
     let blueprintOf = null; // 현재 qubb의 컴파일된 blueprint 팩토리.
     let currentArgs = []; // [{ name, type }] — 현재 컴포넌트의 arg 스펙.
@@ -130,7 +192,7 @@
       src.classList.remove("inspector__source--empty");
       src.textContent = "불러오는 중…";
       const css = await (await fetch(href)).text();
-      src.textContent = css;
+      src.innerHTML = highlightCss(css);
     };
 
     // 한 컴포넌트를 선택한다 — qubc 표시 + arg 입력 UI 생성 + 프리뷰 마운트.
@@ -145,7 +207,7 @@
       li.classList.add("inspector__item--active");
       srcTitle.textContent = "qubc";
       src.classList.remove("inspector__source--empty");
-      src.textContent = decompileComponent(module, compId, currentResmap);
+      src.innerHTML = highlightQubc(decompileComponent(module, compId, currentResmap));
 
       currentArgs = componentArgs(module, compId);
       buildArgInputs();

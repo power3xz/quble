@@ -233,6 +233,40 @@ body {
   color: var(--text-dim);
 }
 
+/* syntax highlight 토큰 — qubc·css 공용. 소프트 다크 팔레트. */
+.tok-keyword {
+  color: #c678dd;
+}
+
+.tok-directive {
+  color: #e5c07b;
+}
+
+.tok-type {
+  color: #61afef;
+}
+
+.tok-string {
+  color: #98c379;
+}
+
+.tok-var {
+  color: #e5c07b;
+}
+
+.tok-comment {
+  color: #6b727d;
+  font-style: italic;
+}
+
+.tok-selector {
+  color: #61afef;
+}
+
+.tok-prop {
+  color: #56b6c2;
+}
+
 /* 컨트롤 패널 — arg 입력 자리(내용은 다음 단계). */
 .inspector__controls {
   flex: 1;
