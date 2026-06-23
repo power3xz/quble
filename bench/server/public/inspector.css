@@ -210,10 +210,6 @@ body {
   overflow: auto;
 }
 
-.inspector__stage {
-  flex: 1;
-}
-
 .inspector__panel-title {
   font-size: 11px;
   text-transform: uppercase;
@@ -226,4 +222,43 @@ body {
   color: var(--text-dim);
   font-size: 13px;
   margin: 0;
+}
+
+/* arg 입력 행. */
+.inspector__arg {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.inspector__arg-name {
+  font: 12px "SF Mono", Menlo, Consolas, monospace;
+  color: var(--text-dim);
+}
+
+.inspector__arg-input {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font: inherit;
+  width: 160px;
+}
+
+.inspector__arg-input[type="checkbox"] {
+  width: auto;
+}
+
+/* 프리뷰 stage — 렌더된 컴포넌트가 밝은 바탕에서 보이게. */
+.inspector__stage {
+  flex: 1;
+  background: #fff;
+  color: #1a1c20;
+  border-radius: 8px;
+  padding: 16px;
+  overflow: auto;
 }

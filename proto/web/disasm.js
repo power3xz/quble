@@ -110,15 +110,21 @@ const decompileBody = (module, def) => {
   let depth = 1; // template { 안 -> 기본 1단 들여쓰기
   let maxArg = -1;
   const uses = []; // 합성하는 자식 컴포넌트명(중복 없이, 등장 순서). use 선언 복원용.
+  const argTypes = []; // offset -> "bool"|"number"|"string". seenArg가 용도로 채운다.
 
   const u16 = () => {
     const v = code[pc] | (code[pc + 1] << 8);
     pc += 2;
     return v;
   };
-  const seenArg = (offset) => {
+  // arg 등장을 기록한다. type은 용도("bool"=IF, "number"=FOR, "string"=그 외).
+  // 같은 arg가 여러 곳이면 if/for의 강한 타입이 string을 덮어쓴다(역방향은 안 덮음).
+  const seenArg = (offset, type) => {
     if (offset > maxArg) {
       maxArg = offset;
+    }
+    if (argTypes[offset] === undefined || type !== "string") {
+      argTypes[offset] = type;
     }
     return "arg" + offset;
   };
@@ -167,10 +173,10 @@ const decompileBody = (module, def) => {
         attrs.push(module.pool[u16()] + "=" + quote(module.pool[u16()]));
         break;
       case OP.ATTR_G_VAR:
-        attrs.push(ATTRS[u16()] + "={" + seenArg(u16()) + "}");
+        attrs.push(ATTRS[u16()] + "={" + seenArg(u16(), "string") + "}");
         break;
       case OP.ATTR_L_VAR:
-        attrs.push(module.pool[u16()] + "={" + seenArg(u16()) + "}");
+        attrs.push(module.pool[u16()] + "={" + seenArg(u16(), "string") + "}");
         break;
       case OP.ELEM_CLOSE_OPEN:
         flushOpen(false);
@@ -179,14 +185,14 @@ const decompileBody = (module, def) => {
         lines.push(pad() + quote(module.pool[u16()]));
         break;
       case OP.TEXT_VAR:
-        lines.push(pad() + "{" + seenArg(u16()) + "}");
+        lines.push(pad() + "{" + seenArg(u16(), "string") + "}");
         break;
       case OP.ELEM_END:
         depth -= 1;
         lines.push(pad() + "}");
         break;
       case OP.PUSH_ARG:
-        pendingArgs.push(seenArg(u16()));
+        pendingArgs.push(seenArg(u16(), "string"));
         break;
       case OP.RENDER: {
         const name = compName(u16());
@@ -205,7 +211,7 @@ const decompileBody = (module, def) => {
         break;
       }
       case OP.IF:
-        lines.push(pad() + "@if " + seenArg(u16()) + " {");
+        lines.push(pad() + "@if " + seenArg(u16(), "bool") + " {");
         depth += 1;
         break;
       case OP.ELSE:
@@ -218,7 +224,7 @@ const decompileBody = (module, def) => {
         lines.push(pad() + "}");
         break;
       case OP.FOR:
-        lines.push(pad() + "@for " + seenArg(u16()) + " {");
+        lines.push(pad() + "@for " + seenArg(u16(), "number") + " {");
         depth += 1;
         break;
       case OP.FOR_END:
@@ -229,7 +235,7 @@ const decompileBody = (module, def) => {
         throw new Error("bad opcode 0x" + op.toString(16));
     }
   }
-  return { lines, maxArg, uses };
+  return { lines, maxArg, uses, argTypes };
 };
 
 // 한 컴포넌트 def를 완전한 qubc 소스 문자열로 디컴파일한다.
@@ -271,6 +277,28 @@ export const decompileComponent = (module, compId) => {
   out.push("  }");
   out.push("}");
   return out.join("\n");
+};
+
+// 한 컴포넌트의 arg 목록을 용도 추론 타입과 함께 돌려준다(프리뷰 입력 UI용).
+//
+// 참조된 arg는 0..maxArg 전부 포함한다(인덱스 정합). 타입은 쓰인 위치에서 추론한다 —
+// IF=bool, FOR=number, 그 외(텍스트·속성·합성 인자)=string. 한 arg가 여러 곳이면 if/for의
+// 강한 타입이 우선한다(seenArg). 어디에도 안 쓰인 중간 arg는 string으로 채운다.
+//
+// @param module 디코드된 모듈
+// @param compId 컴포넌트 def 인덱스
+// @returns      Array<{ name: string, type: "bool"|"number"|"string" }>
+export const componentArgs = (module, compId) => {
+  const def = module.defs[compId];
+  if (!def) {
+    throw new Error("bad component " + compId);
+  }
+  const { maxArg, argTypes } = decompileBody(module, def);
+  const args = [];
+  for (let i = 0; i <= maxArg; i++) {
+    args.push({ name: "arg" + i, type: argTypes[i] ?? "string" });
+  }
+  return args;
 };
 
 // qubb 바이트에서 컴포넌트 목록을 뽑는다([{ compId, name }]).
