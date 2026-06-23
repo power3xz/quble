@@ -2,6 +2,7 @@
 //! 출력은 SSR 문자열(브라우저 DOM 아님). 일회성·무상태 순수 함수. 상세는 proto/BYTECODE.md.
 
 use bytecode::{DecodeError, Module, Op};
+use std::collections::HashSet;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RenderError {
@@ -23,6 +24,8 @@ pub enum RenderError {
     UnbalancedEnd,
     /// 범위 밖 scope 인덱스 (주입 값 부족).
     BadScope(u16),
+    /// 범위 밖 리소스 ID (res_paths 부족).
+    BadResource(u16),
 }
 
 impl From<DecodeError> for RenderError {
@@ -33,15 +36,31 @@ impl From<DecodeError> for RenderError {
 
 /// 바이트코드를 디코드하고 comp_id를 진입점으로 렌더해 HTML 문자열을 만든다.
 /// scope는 런타임 주입 값 배열 — `TEXT_VAR idx`가 `scope[idx]`를 참조한다.
-pub fn render_to_string(bytes: &[u8], comp_id: u16, scope: &[String]) -> Result<String, RenderError> {
+/// res_paths는 resId -> 리소스 경로(resmap) — `LOAD_RES resId`를 `<link href>`로 인라인한다.
+pub fn render_to_string(
+    bytes: &[u8],
+    comp_id: u16,
+    scope: &[String],
+    res_paths: &[String],
+) -> Result<String, RenderError> {
     let module = bytecode::decode(bytes)?;
     let mut out = String::new();
-    exec(&module, comp_id, scope, &mut out)?;
+    // 이미 <link>로 낸 resId — 여러 컴포넌트가 같은 리소스를 써도 한 번만 낸다.
+    let mut emitted = HashSet::new();
+    exec(&module, comp_id, scope, res_paths, &mut emitted, &mut out)?;
     Ok(out)
 }
 
 /// 한 컴포넌트 정의의 코드를 실행한다. RENDER를 만나면 재귀한다.
-fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Result<(), RenderError> {
+/// emitted는 재귀 전체에서 공유되는 <link> dedup 집합.
+fn exec(
+    module: &Module,
+    comp_id: u16,
+    scope: &[String],
+    res_paths: &[String],
+    emitted: &mut HashSet<u16>,
+    out: &mut String,
+) -> Result<(), RenderError> {
     let def = module.def(comp_id).ok_or(RenderError::BadComponent(comp_id))?;
     let start = def.code_off as usize;
     let end = start + def.code_len as usize;
@@ -113,7 +132,7 @@ fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Re
                 let child_comp_id = read_u16(code, &mut pc)?;
                 // 쌓인 인자(부모 값들)를 자식 scope로 넘기고 버퍼를 비운다.
                 let child_scope = std::mem::take(&mut args);
-                exec(module, child_comp_id, &child_scope, out)?;
+                exec(module, child_comp_id, &child_scope, res_paths, emitted, out)?;
             }
             Op::If => {
                 let cond = read_u16(code, &mut pc)?;
@@ -129,11 +148,18 @@ fn exec(module: &Module, comp_id: u16, scope: &[String], out: &mut String) -> Re
             Op::Else => skip_branch(code, &mut pc)?,
             // 정상 종료 마커. 할 일 없음.
             Op::IfEnd => {}
-            // 외부 리소스 로드. SSR은 컴포넌트 조각 HTML만 내므로 <link>를 둘 head가 없다.
-            // resId만 건너뛰고 출력엔 영향 주지 않는다(클라 런타임이 <link>를 붙인다).
-            // head 수집 방식은 미결(BYTECODE.md §5 설계 메모).
+            // 외부 리소스 로드. resId의 리소스 경로를 <link>로 인라인한다(중복 resId 스킵).
+            // head 조립 계층이 없어 조각 자리에 인라인 — <link>는 body에서도 브라우저가 처리한다.
             Op::LoadRes => {
-                read_u16(code, &mut pc)?;
+                let res_id = read_u16(code, &mut pc)?;
+                if emitted.insert(res_id) {
+                    let path = res_paths
+                        .get(res_id as usize)
+                        .ok_or(RenderError::BadResource(res_id))?;
+                    out.push_str("<link rel=\"stylesheet\" href=\"");
+                    escape_attr(path, out);
+                    out.push_str("\">");
+                }
             }
         }
     }
@@ -307,6 +333,11 @@ mod tests {
             self.code.push(Op::IfEnd as u8);
             self
         }
+        fn load_res(&mut self, res_id: u16) -> &mut Self {
+            self.code.push(Op::LoadRes as u8);
+            self.code.extend_from_slice(&res_id.to_le_bytes());
+            self
+        }
     }
 
     fn t(name: &str) -> u16 {
@@ -348,7 +379,7 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
-            render_to_string(&bytes, 0, &[]).unwrap(),
+            render_to_string(&bytes, 0, &[], &[]).unwrap(),
             r#"<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>"#
         );
     }
@@ -374,7 +405,7 @@ mod tests {
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
-            render_to_string(&bytes, 0, &[]).unwrap(),
+            render_to_string(&bytes, 0, &[], &[]).unwrap(),
             r#"<div title="a&quot;b&lt;c">x &lt; y &amp; z</div>"#
         );
     }
@@ -404,7 +435,73 @@ mod tests {
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
-        assert_eq!(render_to_string(&bytes, 0, &[]).unwrap(), "<div><span>hi</span></div>");
+        assert_eq!(render_to_string(&bytes, 0, &[], &[]).unwrap(), "<div><span>hi</span></div>");
+    }
+
+    /// LOAD_RES가 정의 앞머리에서 <link>를 인라인한다. res_paths[resId]가 href.
+    #[test]
+    fn load_res_inlines_link() {
+        let mut pool = ConstPool::new();
+        let name = pool.intern("Styled");
+
+        // LOAD_RES 0; span() {} — 정의 앞머리에 리소스 로드.
+        let mut a = Asm::new();
+        a.load_res(0).open(t("span")).close_open().end().halt();
+        let code = a.code;
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        let res_paths = vec!["/res/styled.abc.css".to_string()];
+        assert_eq!(
+            render_to_string(&bytes, 0, &[], &res_paths).unwrap(),
+            r#"<link rel="stylesheet" href="/res/styled.abc.css"><span></span>"#
+        );
+    }
+
+    /// 부모와 자식이 같은 resId를 LOAD_RES하면 <link>는 한 번만 난다(재귀 전체 dedup).
+    #[test]
+    fn load_res_dedups_across_render() {
+        let mut pool = ConstPool::new();
+        let parent = pool.intern("Parent");
+        let child = pool.intern("Child");
+
+        // 자식: LOAD_RES 0; span() {}
+        let mut c = Asm::new();
+        c.load_res(0).open(t("span")).close_open().end().halt();
+        // 부모: LOAD_RES 0; div() { RENDER child }
+        let mut p = Asm::new();
+        p.load_res(0).open(t("div")).close_open().render(1).end().halt();
+
+        let child_len = c.code.len() as u32;
+        let parent_len = p.code.len() as u32;
+        let mut code = c.code;
+        code.extend_from_slice(&p.code);
+        let defs = vec![
+            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len },
+            CompDef { name_idx: child, code_off: 0, code_len: child_len },
+        ];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        let res_paths = vec!["/res/x.css".to_string()];
+        // 부모가 먼저 <link>를 내고, 자식의 같은 resId는 스킵된다.
+        assert_eq!(
+            render_to_string(&bytes, 0, &[], &res_paths).unwrap(),
+            r#"<link rel="stylesheet" href="/res/x.css"><div><span></span></div>"#
+        );
+    }
+
+    /// res_paths 범위 밖 resId면 BadResource.
+    #[test]
+    fn load_res_out_of_range_errors() {
+        let mut pool = ConstPool::new();
+        let name = pool.intern("Styled");
+        let mut a = Asm::new();
+        a.load_res(5).open(t("span")).close_open().end().halt();
+        let code = a.code;
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let bytes = encode(&Module::new(pool, defs, code));
+
+        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadResource(5)));
     }
 
     /// 합성 + PUSH_ARG: 부모가 자기 scope의 일부를 자식에게 넘긴다.
@@ -441,7 +538,7 @@ mod tests {
 
         let scope = vec!["A".to_string(), "B".to_string()];
         assert_eq!(
-            render_to_string(&bytes, 0, &scope).unwrap(),
+            render_to_string(&bytes, 0, &scope, &[]).unwrap(),
             "<div>A<span>B</span></div>"
         );
     }
@@ -461,7 +558,7 @@ mod tests {
 
         let scope = vec!["세계 <b>".to_string()];
         assert_eq!(
-            render_to_string(&bytes, 0, &scope).unwrap(),
+            render_to_string(&bytes, 0, &scope, &[]).unwrap(),
             "<h1>세계 &lt;b&gt;</h1>"
         );
     }
@@ -488,7 +585,7 @@ mod tests {
 
         let scope = vec!["card".to_string(), r#"a"b"#.to_string()];
         assert_eq!(
-            render_to_string(&bytes, 0, &scope).unwrap(),
+            render_to_string(&bytes, 0, &scope, &[]).unwrap(),
             r#"<div class="card" data-x="a&quot;b"></div>"#
         );
     }
@@ -505,7 +602,7 @@ mod tests {
         let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
         let bytes = encode(&Module::new(pool, defs, code));
 
-        assert_eq!(render_to_string(&bytes, 0, &[]), Err(RenderError::BadScope(0)));
+        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
     }
 
     /// scope에 값이 없으면 BadScope.
@@ -519,14 +616,14 @@ mod tests {
         let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
         let bytes = encode(&Module::new(pool, defs, code));
 
-        assert_eq!(render_to_string(&bytes, 0, &[]), Err(RenderError::BadScope(0)));
+        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
     }
 
     /// 한 컴포넌트 정의를 인코딩해 렌더 (단일 def, scope 주입). if 테스트 공용.
     fn render_one(pool: ConstPool, code: Vec<u8>, scope: &[String]) -> String {
         let defs = vec![CompDef { name_idx: 0, code_off: 0, code_len: code.len() as u32 }];
         let bytes = encode(&Module::new(pool, defs, code));
-        render_to_string(&bytes, 0, scope).unwrap()
+        render_to_string(&bytes, 0, scope, &[]).unwrap()
     }
 
     /// if true → then 가지를, false → else 가지를 출력. div() { @if c { "T" } @else { "F" } }
@@ -597,11 +694,11 @@ mod tests {
     #[test]
     fn bad_component_id() {
         let bytes = encode(&Module::new(ConstPool::new(), vec![], vec![]));
-        assert_eq!(render_to_string(&bytes, 0, &[]), Err(RenderError::BadComponent(0)));
+        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadComponent(0)));
     }
 
     #[test]
     fn rejects_bad_bytes() {
-        assert!(matches!(render_to_string(b"nope", 0, &[]), Err(RenderError::Decode(_))));
+        assert!(matches!(render_to_string(b"nope", 0, &[], &[]), Err(RenderError::Decode(_))));
     }
 }

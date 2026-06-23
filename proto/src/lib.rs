@@ -21,7 +21,8 @@ pub fn render_with(
     scope: &[String],
 ) -> Result<String, RenderError> {
     let output = compiler::compile_src(entry_path, src, resolver).map_err(RenderError::Compile)?;
-    renderer::render_to_string(&output.bytecode, comp_id, scope).map_err(RenderError::Render)
+    renderer::render_to_string(&output.bytecode, comp_id, scope, &output.resources)
+        .map_err(RenderError::Render)
 }
 
 #[cfg(test)]

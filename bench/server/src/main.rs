@@ -26,8 +26,8 @@ const REACT_DIST: &str = "../react/dist";
 const SVELTE_DIST: &str = "../svelte/dist";
 
 fn main() {
-    let components = build_components();
-    println!("적재된 컴포넌트: {:?}", components.keys().collect::<Vec<_>>());
+    let loaded = build_components();
+    println!("적재된 컴포넌트: {:?}", loaded.components.keys().collect::<Vec<_>>());
 
     let server = Server::http(ADDR).expect("서버 시작 실패");
     println!("listening on http://{ADDR}");
@@ -55,7 +55,7 @@ fn main() {
             }
         } else if path == "/components" {
             // 적재 컴포넌트 이름 목록(JSON 배열) — inspector 셀렉트박스용.
-            let mut names = components.keys().cloned().collect::<Vec<_>>();
+            let mut names = loaded.components.keys().cloned().collect::<Vec<_>>();
             names.sort();
             let json = format!(
                 "[{}]",
@@ -66,19 +66,29 @@ fn main() {
             .strip_prefix("/components/")
             .and_then(|n| n.strip_suffix(".qubb"))
         {
-            match components.get(name) {
+            match loaded.components.get(name) {
                 Some(bytes) => respond(req, bytes.clone(), "application/octet-stream"),
                 None => not_found(req),
             }
+        } else if path.starts_with("/res/") {
+            // 산출 리소스(`res/<hash>.css`) 정적 서빙 — SSR <link href>가 가리키는 경로.
+            // path는 선행 '/'가 있으므로 떼고 assets 키(`res/...`)와 맞춘다.
+            match loaded.assets.get(&path[1..]) {
+                Some(content) => respond(req, content.clone(), "text/css; charset=utf-8"),
+                None => not_found(req),
+            }
         } else if let Some(name) = path.strip_prefix("/ssr/") {
-            match components.get(name) {
-                Some(bytes) => match renderer::render_to_string(bytes, 0, &scope_from_query(query)) {
-                    Ok(html) => {
-                        let page = page_shell(&format!("SSR {name}"), &html);
-                        respond(req, page.into_bytes(), "text/html; charset=utf-8");
+            match loaded.components.get(name) {
+                Some(bytes) => {
+                    let res_paths = loaded.resmaps.get(name).map(Vec::as_slice).unwrap_or(&[]);
+                    match renderer::render_to_string(bytes, 0, &scope_from_query(query), res_paths) {
+                        Ok(html) => {
+                            let page = page_shell(&format!("SSR {name}"), &html);
+                            respond(req, page.into_bytes(), "text/html; charset=utf-8");
+                        }
+                        Err(e) => server_error(req, format!("렌더 실패: {e:?}")),
                     }
-                    Err(e) => server_error(req, format!("렌더 실패: {e:?}")),
-                },
+                }
                 None => not_found(req),
             }
         } else if let Some(name) = path.strip_prefix("/react-csr/") {
@@ -105,9 +115,23 @@ fn main() {
     }
 }
 
-/// components 디렉토리의 *.qubc를 전부 컴파일해 name(확장자 제외) → qubb 맵으로.
-fn build_components() -> HashMap<String, Vec<u8>> {
-    let mut map = HashMap::new();
+/// 시작 시 컴파일해 메모리에 적재한 산출물. 디스크에 떨구지 않고 전부 메모리에서 제공한다.
+struct Loaded {
+    /// name(확장자 제외) → qubb 바이트.
+    components: HashMap<String, Vec<u8>>,
+    /// name → resId별 산출 리소스 경로(`res/<hash>.css`). SSR이 <link href>로 인라인.
+    resmaps: HashMap<String, Vec<String>>,
+    /// 산출 경로(`res/<hash>.css`) → CSS 내용. `/res/...` 요청에 응답.
+    assets: HashMap<String, Vec<u8>>,
+}
+
+/// components 디렉토리의 *.qubc를 전부 컴파일하고, use한 CSS를 내용 해시 경로로 메모리에 적재한다.
+fn build_components() -> Loaded {
+    let mut loaded = Loaded {
+        components: HashMap::new(),
+        resmaps: HashMap::new(),
+        assets: HashMap::new(),
+    };
     let dir = fs::read_dir(COMPONENTS_DIR).expect("components 디렉토리 읽기 실패");
     for entry in dir.filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -116,13 +140,48 @@ fn build_components() -> HashMap<String, Vec<u8>> {
         }
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap().to_string();
         // compile_file이 엔트리를 읽고 use는 importer 기준 상대경로로 해소한다.
-        let bytes = compiler::compile_file(path.to_str().unwrap())
-            .expect("컴파일 실패")
-            .bytecode
-            .into_vec();
-        map.insert(name, bytes);
+        let output = compiler::compile_file(path.to_str().unwrap()).expect("컴파일 실패");
+
+        // 리소스(원본 정규화 경로)를 읽어 내용 해시 경로(`res/<basename>.<hash>.css`)로.
+        // 산출 경로는 SSR <link href>이자 assets 키 — 둘이 같아야 브라우저가 받아온다.
+        let mut res_paths = Vec::with_capacity(output.resources.len());
+        for origin in &output.resources {
+            let content = fs::read(origin).expect("리소스 읽기 실패");
+            let out_path = asset_path(std::path::Path::new(origin), &content);
+            // assets 키는 `res/...`(라우팅이 선행 '/'를 떼고 맞춘다). SSR href는 페이지 경로와
+            // 무관하게 `/res/...` 절대경로여야 한다(상대경로면 /ssr/ 기준으로 잘못 요청됨).
+            res_paths.push(format!("/{out_path}"));
+            loaded.assets.entry(out_path).or_insert(content);
+        }
+        loaded.resmaps.insert(name.clone(), res_paths);
+        loaded.components.insert(name, output.bytecode.into_vec());
     }
-    map
+    loaded
+}
+
+/// 원본 경로 + 내용으로 산출 자산 경로 `res/<basename>.<내용해시>.<ext>`를 만든다.
+/// CLI(main.rs)의 산출 규칙과 같아야 한다. 평탄화 시 동명 충돌 방지 + 캐시 버스팅.
+fn asset_path(origin: &std::path::Path, content: &[u8]) -> String {
+    let stem = origin.file_stem().and_then(|s| s.to_str()).unwrap_or("res");
+    let ext = origin.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let hash = content_hash(content);
+    if ext.is_empty() {
+        format!("res/{stem}.{hash}")
+    } else {
+        format!("res/{stem}.{hash}.{ext}")
+    }
+}
+
+/// 콘텐츠 해시(FNV-1a 64bit). CLI(main.rs)와 같은 알고리즘 — 산출 경로가 일치해야 한다.
+fn content_hash(bytes: &[u8]) -> String {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET_BASIS;
+    for &byte in bytes {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(PRIME);
+    }
+    format!("{hash:016x}")
 }
 
 /// query의 `scope=` 반복 키를 순서대로 scope 배열로. (퍼센트 디코딩 포함)

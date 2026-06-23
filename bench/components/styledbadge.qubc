@@ -1,0 +1,7 @@
+use "./styledbadge.css"
+
+component StyledBadge {
+  template {
+    span(class="sbadge") { "STYLED" }
+  }
+}

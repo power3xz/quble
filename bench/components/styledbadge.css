@@ -1,0 +1,8 @@
+.sbadge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #4a90d9;
+  color: #fff;
+  font: 600 13px/1 -apple-system, system-ui, sans-serif;
+}
