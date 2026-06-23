@@ -53,6 +53,15 @@ fn main() {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }
+        } else if path == "/components" {
+            // 적재 컴포넌트 이름 목록(JSON 배열) — inspector 셀렉트박스용.
+            let mut names = components.keys().cloned().collect::<Vec<_>>();
+            names.sort();
+            let json = format!(
+                "[{}]",
+                names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(",")
+            );
+            respond(req, json.into_bytes(), "application/json; charset=utf-8");
         } else if let Some(name) = path
             .strip_prefix("/components/")
             .and_then(|n| n.strip_suffix(".qubb"))

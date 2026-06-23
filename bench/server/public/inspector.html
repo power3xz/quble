@@ -2,47 +2,34 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>qubb inspector — 디컴파일러</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <style>
-    .inspector { display: flex; gap: 16px; align-items: flex-start; }
-    .side { width: 220px; flex-shrink: 0; }
-    .side ul { list-style: none; padding: 0; margin: 8px 0 0; }
-    .side li { padding: 6px 10px; border-radius: 6px; cursor: pointer; }
-    .side li:hover { background: #f0f0f0; }
-    .side li.active { background: #4a90d9; color: #fff; }
-    .main { flex: 1; min-width: 0; }
-    pre.qubc { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; tab-size: 2; }
-    .muted { color: #888; font-size: 13px; }
-  </style>
+  <title>qubb inspector</title>
+  <link rel="stylesheet" href="/public/inspector.css">
 </head>
 <body>
-  <p>qubb를 골라 안에 인코딩된 컴포넌트를 까본다. 컴포넌트를 선택하면 <b>qubc</b>로 디컴파일해 보여준다.
-     변수는 원래 이름이 바이트코드에 없어(scope 인덱스만) <code>arg0, arg1…</code>로 복원한다.</p>
-  <p>
-    qubb:
-    <select id="qubb"></select>
-  </p>
-
   <div class="inspector">
-    <div class="side">
-      <div class="muted" id="meta"></div>
-      <ul id="list"></ul>
-    </div>
-    <div class="main">
-      <pre class="qubc" id="src">왼쪽에서 컴포넌트를 선택하세요.</pre>
+    <header class="inspector__header">
+      <span class="inspector__logo">Q</span>
+      <span class="inspector__title">qubb inspector <span class="inspector__title-sub">— qubc 디컴파일러</span></span>
+    </header>
+
+    <div class="inspector__body">
+      <aside class="inspector__sidebar">
+        <div class="inspector__field">
+          <label class="inspector__label" for="qubb">qubb</label>
+          <select class="inspector__select" id="qubb"></select>
+        </div>
+        <div class="inspector__meta" id="meta"></div>
+        <ul class="inspector__list" id="list"></ul>
+      </aside>
+
+      <main class="inspector__view">
+        <pre class="inspector__source inspector__source--empty" id="src">왼쪽에서 컴포넌트를 선택하세요.</pre>
+      </main>
     </div>
   </div>
 
   <script type="module">
     import { inspect, decompileComponent } from "/disasm.js";
-
-    // 서버에 적재된 분석 대상 qubb들. 이름·구조는 qubb 안에 인코딩돼 있어 여기선 파일명만 안다.
-    const QUBBS = [
-      "profilecard", "dashboard", "composed_triple", "product", "grid", "article", "big",
-      "triple_if", "iftest", "heavyif", "fortest", "heavyfor",
-      "greeting", "linkbutton", "thumbnail", "badge", "stat", "metarow", "activity", "tag", "box", "inner_pair",
-    ];
 
     const qubbSelect = document.getElementById("qubb");
     const list = document.getElementById("list");
@@ -50,13 +37,6 @@
     const meta = document.getElementById("meta");
 
     let module = null;
-
-    for (const name of QUBBS) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name + ".qubb";
-      qubbSelect.appendChild(opt);
-    }
 
     // qubb를 fetch해 디코드하고, 안에 든 컴포넌트들을 목록으로 그린다. 첫 컴포넌트를 자동 선택.
     const loadQubb = async (name) => {
@@ -68,7 +48,8 @@
       list.replaceChildren();
       for (const comp of result.components) {
         const li = document.createElement("li");
-        li.textContent = `[${comp.compId}] ${comp.name}`;
+        li.className = "inspector__item";
+        li.innerHTML = `<span class="inspector__item-id">${comp.compId}</span>${comp.name}`;
         li.onclick = () => select(comp.compId, li);
         list.appendChild(li);
       }
@@ -80,14 +61,26 @@
     // 한 컴포넌트를 qubc로 디컴파일해 표시한다.
     const select = (compId, li) => {
       for (const el of list.children) {
-        el.classList.remove("active");
+        el.classList.remove("inspector__item--active");
       }
-      li.classList.add("active");
+      li.classList.add("inspector__item--active");
+      src.classList.remove("inspector__source--empty");
       src.textContent = decompileComponent(module, compId);
     };
 
     qubbSelect.onchange = () => loadQubb(qubbSelect.value);
-    loadQubb(QUBBS[0]);
+
+    // 적재 컴포넌트 목록을 서버에서 받아 셀렉트박스를 채우고 첫 항목을 연다.
+    const names = await (await fetch("/components")).json();
+    for (const name of names) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name + ".qubb";
+      qubbSelect.appendChild(opt);
+    }
+    if (names.length > 0) {
+      loadQubb(names[0]);
+    }
   </script>
 </body>
 </html>
