@@ -6,6 +6,8 @@ members = ["crates/bytecode", "crates/renderer", "crates/compiler"]
 name = "quble"
 version = "0.0.0"
 edition = "2021"
+# 기본 실행 바이너리 — `cargo run`(bin 미지정)은 컴파일러를 돌린다(fixture 빌드 등).
+default-run = "quble"
 
 [dependencies]
 compiler = { path = "crates/compiler" }
