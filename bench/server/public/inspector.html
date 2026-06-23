@@ -68,7 +68,9 @@
       const bytes = new Uint8Array(await res.arrayBuffer());
       const result = inspect(bytes);
       module = result.module;
-      blueprintOf = compile(bytes);
+      // 리소스맵(resId -> URL)도 받아 compile에 주입 — LOAD_RES가 <link>로 스타일을 붙인다.
+      const resmap = await (await fetch("/resmap/" + name)).json();
+      blueprintOf = compile(bytes, resmap);
       meta.textContent = `${result.components.length}개 컴포넌트 · ${bytes.length} bytes`;
       list.replaceChildren();
       for (const comp of result.components) {

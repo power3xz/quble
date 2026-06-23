@@ -41,6 +41,7 @@ const OP = {
   IF: 0x0c,
   ELSE: 0x0d,
   IF_END: 0x0e,
+  LOAD_RES: 0x0f,
 };
 
 // ── store 컨텍스트 (pub/sub) ──────────────────────────────────────────
@@ -110,6 +111,7 @@ const operandLen = (op) => {
     case OP.RENDER:
     case OP.PUSH_ARG:
     case OP.IF:
+    case OP.LOAD_RES:
       return 2;
     case OP.ATTR_G:
     case OP.ATTR_L:
@@ -251,7 +253,7 @@ const decode = (bytes) => {
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
 // @returns      Blueprint: (ctx, rootPaths) => Instance { nodes, regions }
-const compileDef = (module, compId) => {
+const compileDef = (module, compId, resmap = []) => {
   const def = module.defs[compId];
   if (!def) {
     throw new Error("bad component " + compId);
@@ -323,6 +325,18 @@ const compileDef = (module, compId) => {
         switch (op) {
           case OP.HALT: {
             pc = endPc;
+            break;
+          }
+          case OP.LOAD_RES: {
+            // 리소스 로드 — resId의 URL로 <link>를 document.head에 삽입. 이미 같은 href가
+            // 있으면 스킵(여러 컴포넌트·재마운트가 같은 리소스를 써도 한 번만).
+            const url = resmap[u16at()];
+            if (url && !document.head.querySelector(`link[href="${url}"]`)) {
+              const link = document.createElement("link");
+              link.rel = "stylesheet";
+              link.href = url;
+              document.head.appendChild(link);
+            }
             break;
           }
           case OP.ELEM_OPEN: {
@@ -479,9 +493,10 @@ const compileDef = (module, compId) => {
 //       const inst = blueprintOf(0)(ctx, paths);
 //       root.append(...inst.nodes);
 //
-// @param bytes qubb 바이트
-// @returns     blueprintOf: (compId) => Blueprint
-export const compile = (bytes) => {
+// @param bytes  qubb 바이트
+// @param resmap resId -> URL 매핑(LOAD_RES가 <link>로 삽입). 없으면 리소스 로드 생략.
+// @returns      blueprintOf: (compId) => Blueprint
+export const compile = (bytes, resmap = []) => {
   const module = decode(bytes);
-  return (compId) => compileDef(module, compId);
+  return (compId) => compileDef(module, compId, resmap);
 };

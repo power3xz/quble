@@ -70,6 +70,18 @@ fn main() {
                 Some(bytes) => respond(req, bytes.clone(), "application/octet-stream"),
                 None => not_found(req),
             }
+        } else if let Some(name) = path.strip_prefix("/resmap/") {
+            // 리소스맵(JSON 배열, 인덱스=resId, 값=`/res/...` URL) — 클라 런타임이 LOAD_RES에 쓴다.
+            match loaded.resmaps.get(name) {
+                Some(paths) => {
+                    let json = format!(
+                        "[{}]",
+                        paths.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(",")
+                    );
+                    respond(req, json.into_bytes(), "application/json; charset=utf-8");
+                }
+                None => not_found(req),
+            }
         } else if path.starts_with("/res/") {
             // 산출 리소스(`res/<hash>.css`) 정적 서빙 — SSR <link href>가 가리키는 경로.
             // path는 선행 '/'가 있으므로 떼고 assets 키(`res/...`)와 맞춘다.

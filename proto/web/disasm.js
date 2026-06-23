@@ -26,8 +26,9 @@ const OP = {
   IF: 0x0c,
   ELSE: 0x0d,
   IF_END: 0x0e,
-  FOR: 0x0f,
-  FOR_END: 0x10,
+  LOAD_RES: 0x0f,
+  FOR: 0x10,
+  FOR_END: 0x11,
 };
 
 // ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
@@ -110,6 +111,7 @@ const decompileBody = (module, def) => {
   let depth = 1; // template { 안 -> 기본 1단 들여쓰기
   let maxArg = -1;
   const uses = []; // 합성하는 자식 컴포넌트명(중복 없이, 등장 순서). use 선언 복원용.
+  const resIds = []; // LOAD_RES가 가리킨 resId(중복 없이, 등장 순서). 경로는 qubb에 없어 placeholder.
   const argTypes = []; // offset -> "bool"|"number"|"string". seenArg가 용도로 채운다.
 
   const u16 = () => {
@@ -223,6 +225,15 @@ const decompileBody = (module, def) => {
         depth -= 1;
         lines.push(pad() + "}");
         break;
+      case OP.LOAD_RES: {
+        // 리소스 로드는 본문이 아니라 파일 헤더의 use로 복원된다(코드 앞머리). resId만 모은다 —
+        // 경로는 qubb에 없어 use "res<id>" placeholder로 낸다.
+        const resId = u16();
+        if (!resIds.includes(resId)) {
+          resIds.push(resId);
+        }
+        break;
+      }
       case OP.FOR:
         lines.push(pad() + "@for " + seenArg(u16(), "number") + " {");
         depth += 1;
@@ -235,7 +246,7 @@ const decompileBody = (module, def) => {
         throw new Error("bad opcode 0x" + op.toString(16));
     }
   }
-  return { lines, maxArg, uses, argTypes };
+  return { lines, maxArg, uses, resIds, argTypes };
 };
 
 // 한 컴포넌트 def를 완전한 qubc 소스 문자열로 디컴파일한다.
@@ -253,13 +264,17 @@ export const decompileComponent = (module, compId) => {
     throw new Error("bad component " + compId);
   }
   const name = module.pool[def.nameIdx];
-  const { lines, maxArg, uses } = decompileBody(module, def);
+  const { lines, maxArg, uses, resIds } = decompileBody(module, def);
 
   const out = [];
+  // 리소스 use(경로는 qubb에 없어 resId placeholder). 컴포넌트 import보다 위에 둔다.
+  for (const resId of resIds) {
+    out.push('use "res' + resId + '"');
+  }
   for (const childName of uses) {
     out.push('use ' + childName + ' from "./' + childName + '.qubc"');
   }
-  if (uses.length > 0) {
+  if (uses.length > 0 || resIds.length > 0) {
     out.push("");
   }
   out.push("component " + name + " {");

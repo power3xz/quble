@@ -1,0 +1,7 @@
+use "./styled_res.css"
+
+component StyledRes {
+  template {
+    div(class="box") {}
+  }
+}
