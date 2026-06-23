@@ -21,6 +21,9 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] `@if` / `@else` — 조건 분기. 클라 region/branch swap + 비활성 가지 lazy build(REACTIVITY.md §8).
   중첩·형제·else 없는 if, 합성 경계를 넘는 if(RENDER 인라인 재진입으로 자식 if가 부모 region 트리에 합류)까지. (SSR은 분기 평가 후 활성 가지만 렌더.)
 - [ ] `{expr}` — 표현식 (JS 위임 여부 포함). 지금은 단순 변수 참조만.
+- [ ] 컴포넌트 스타일링 — 외부 CSS를 어떻게 표현·격리할지(DESIGN.md 부록 B가 `import styles
+  from "...module.css"` + `class=[...]`를 예시). 선결: 외부 CSS 파일을 qubb에 어떻게 담을지
+  (밖에 두고 클래스명만 / 인라인 / 둘 다), 격리 방식, 동적 class 배열의 바이트코드 표현. 방법 미정.
 
 ## 데이터
 
@@ -44,3 +47,4 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 
 - [x] 컴파일 바이너리 (`quble <qubc>` → dist/qubb)
 - [x] bench 비교 환경 (qubb vs React lazy chunk 네트워크 비용)
+- [x] qubb 인스펙터 — qubb를 qubc로 디컴파일 + 컴포넌트 선택·arg 입력으로 실시간 렌더 (IDEAS.md 컴포넌트 뷰어)
