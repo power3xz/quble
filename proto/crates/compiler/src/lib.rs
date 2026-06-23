@@ -338,6 +338,86 @@ mod tests {
         }
     }
 
+    /// 여러 파일이 각자 다른 CSS를 use하면 resId가 모듈 전역으로 0,1,2…로 매겨진다.
+    /// 한 컴포넌트가 여러 CSS를 use하면 LOAD_RES를 여러 개 내고, 이미 쓰인 경로는 resId를
+    /// 재사용한다(전역 dedup). entry(app)=0, A(a)=1, B(b)=2, C(app·b·c)는 0·2 재사용 + c=3.
+    #[test]
+    fn res_ids_are_module_global() {
+        use bytecode::{decode, Op};
+
+        let entry = r#"
+            use "./app.css"
+            use A from "./a.qubc"
+            use B from "./b.qubc"
+            use C from "./c.qubc"
+            component App { template { div() { A() {} B() {} C() {} } } }
+        "#;
+        let a = r#"
+            use "./a.css"
+            component A { template { span() {} } }
+        "#;
+        let b = r#"
+            use "./b.css"
+            component B { template { p() {} } }
+        "#;
+        // C는 여러 CSS를 use — app·b는 이미 발급된 resId 재사용, c만 신규.
+        let c = r#"
+            use "./app.css"
+            use "./b.css"
+            use "./c.css"
+            component C { template { a() {} } }
+        "#;
+        // .qubc는 소스를, .css는 정규화 경로 + 빈 소스를 돌려준다.
+        let resolver = |_base: &str, target: &str| match target {
+            "./a.qubc" => Some(("./a.qubc".to_string(), a.to_string())),
+            "./b.qubc" => Some(("./b.qubc".to_string(), b.to_string())),
+            "./c.qubc" => Some(("./c.qubc".to_string(), c.to_string())),
+            "./app.css" => Some(("/abs/app.css".to_string(), String::new())),
+            "./a.css" => Some(("/abs/a.css".to_string(), String::new())),
+            "./b.css" => Some(("/abs/b.css".to_string(), String::new())),
+            "./c.css" => Some(("/abs/c.css".to_string(), String::new())),
+            _ => None,
+        };
+        let output = compile_src("entry", entry, &resolver).unwrap();
+
+        // 사이드맵: 등장 순서대로 전역 0,1,2,3. entry(app), a, b, 그다음 C의 신규 c.
+        // C의 app·b는 재사용이라 사이드맵에 새로 추가되지 않는다.
+        assert_eq!(
+            output.resources,
+            vec![
+                "/abs/app.css".to_string(),
+                "/abs/a.css".to_string(),
+                "/abs/b.css".to_string(),
+                "/abs/c.css".to_string(),
+            ]
+        );
+
+        let module = decode(&output.bytecode).unwrap();
+        // 컴포넌트 ID로 이름을 확인해 매핑이 어긋나도 잡히게 한다.
+        let id_of = |name: &str| {
+            (0..)
+                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_idx).unwrap()) == Some(name))
+                .unwrap()
+        };
+        // 한 컴포넌트의 코드 앞머리 LOAD_RES들을 순서대로 모은다(연속한 LOAD_RES만).
+        let load_res_ids = |id: u16| {
+            let def = module.def(id).unwrap();
+            let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+            let mut ids = Vec::new();
+            let mut pc = 0;
+            while pc < code.len() && code[pc] == Op::LoadRes as u8 {
+                ids.push(u16::from_le_bytes([code[pc + 1], code[pc + 2]]));
+                pc += 3;
+            }
+            ids
+        };
+        assert_eq!(load_res_ids(id_of("App")), vec![0], "App은 app.css=0");
+        assert_eq!(load_res_ids(id_of("A")), vec![1], "A는 a.css=1");
+        assert_eq!(load_res_ids(id_of("B")), vec![2], "B는 b.css=2");
+        // C는 app(0)·b(2) 재사용 + c(3) 신규 — use 순서대로 셋.
+        assert_eq!(load_res_ids(id_of("C")), vec![0, 2, 3], "C는 app=0·b=2 재사용 + c=3");
+    }
+
     /// resolver가 경로를 못 찾으면 NotFound.
     #[test]
     fn use_unresolved_path_errors() {
