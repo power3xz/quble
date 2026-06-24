@@ -75,6 +75,14 @@ props 객체·반응성.
 
 (프로토타입이라 ID 호환성은 신경 쓰지 않는다 — 필요하면 재배치.)
 
+### 전역 DOM 이벤트 테이블 (프로토타입 시작 집합)
+
+`번호: 이벤트종류` 표. `BIND_EVENT`의 `event_type`이 이 번호로 어떤 DOM 이벤트인지 가리킨다.
+
+```
+0:click
+```
+
 ---
 
 ## 3. 정의(definition) vs 렌더(render)
@@ -104,8 +112,18 @@ props 객체·반응성.
   entries    : count × ( len:u16, bytes:[u8;len] )
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
   count      : u16
-  defs       : count × ( name_idx:u16, code_off:u32, code_len:u32 )
-               // name_idx = 상수풀의 컴포넌트명. code_off/len = 코드 영역 내 구획.
+  defs       : count × (
+                 name_idx   : u16        // 상수풀의 컴포넌트명
+                 code_off   : u32        // 코드 영역 내 구획
+                 code_len   : u32
+                 event_count: u16        // 이 컴포넌트가 선언한 이벤트 수
+                 events     : event_count × (
+                   name_idx     : u16    // 이벤트명("CLICK") — 상수풀. 핸들러 키 매칭용
+                   payload_count: u16
+                   payload      : payload_count × ( field_idx:u16, offset:u16 )
+                                  // field_idx = 필드명("title") 상수풀. offset = 그 prop의 scope offset
+                 )
+               )
 [ 코드 ]
   len        : u32
   code       : [u8; len]   // 모든 정의의 코드가 이어짐. 테이블의 off/len으로 구획.
@@ -141,6 +159,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ELSE`            | 0x0d | —                     | —                         | then 가지 끝, else 가지 시작. (else 있을 때만)                            |
 | `IF_END`          | 0x0e | —                     | —                         | if 블록 끝.                                                              |
 | `LOAD_RES`        | 0x0f | res: u16              | 모듈 전역 리소스          | `res`(resId)의 외부 리소스(CSS 등)를 로드. resId->URL은 런타임이 주입.    |
+| `BIND_EVENT`      | 0x10 | event_type:u16, event_idx:u16 | type=전역 DOM 이벤트, idx=컴포넌트 이벤트 | 지금 여는 요소에 리스너를 묶는다. `event_type` DOM 이벤트가 일어나면 컴포넌트 이벤트 `event_idx`를 발생시킨다. |
 
 설계 메모:
 
@@ -191,6 +210,18 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     안에서만 유효한 0,1,2…. 같은 정규화 경로는 같은 resId로 합친다(컴파일타임 정규화·중복 제거).
   - **qubb 안에 리소스 테이블은 두지 않는다.** 빌드가 이미 resId->경로를 알아 qubb에 또 담는 건
     잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
+- **이벤트 — `BIND_EVENT` + 컴포넌트 이벤트 테이블.** 정의와 발생이 나뉜다.
+  - **정의**는 컴포넌트 테이블(§4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
+    이벤트명·payload(필드명 + 그 prop의 offset)가 그 컴포넌트의 이벤트 배열에 들어간다.
+    `event_idx`는 이 배열의 인덱스(0,1,2…).
+  - **발생 배선**은 코드의 `BIND_EVENT`다. `button(@click:TOGGLE)`은 그 요소에
+    `BIND_EVENT click, 0`(click이 일어나면 0번 이벤트)을 낸다. 속성처럼 `ELEM_OPEN`과
+    `ELEM_CLOSE_OPEN` 사이에 온다.
+  - **발생 시 런타임**: 0번 이벤트 정의를 보고 payload offset들의 현재값을 모아
+    `data = { title: … }`를 만들고, 핸들러(이벤트명으로 찾음)에 넘긴다. 핸들러는 JS로 런타임에
+    주입된다(`{ TOGGLE: (data) => … }`). 같은 이벤트명 = 같은 핸들러.
+  - 핸들러 본문·`set`은 바이트코드에 없다 — 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
+    낸다. 본문은 호스트 JS에 위임(DESIGN §5.4 방향).
 
 ## 5.1 분기 — `IF`/`ELSE`/`IF_END`
 
