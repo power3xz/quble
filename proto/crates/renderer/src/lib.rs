@@ -161,6 +161,12 @@ fn exec(
                     out.push_str("\">");
                 }
             }
+            // 이벤트 배선. SSR은 정적 HTML이라 리스너가 없다 — operand만 소비하고 무시한다
+            // (이벤트는 클라 런타임이 단다). event_type·event_idx 4바이트.
+            Op::BindEvent => {
+                read_u16(code, &mut pc)?;
+                read_u16(code, &mut pc)?;
+            }
         }
     }
     Ok(())
@@ -184,7 +190,7 @@ fn operand_len(op: Op) -> usize {
     match op {
         Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd => 0,
         Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::If | Op::LoadRes => 2,
-        Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar => 4,
+        Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar | Op::BindEvent => 4,
     }
 }
 
