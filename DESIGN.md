@@ -257,6 +257,52 @@ type TEventHandler<TStore> = (
 바이너리 컴파일 산출물과 런타임 실행 모델(VM vs JS 코드 생성)은 별도 트랙으로 둔다.
 프론트엔드 워크로드 특성상 JS 코드 생성 경로가 유력하나, 추후 결정.
 
+### 5.4 핸들러 문법 (아이디어)
+
+핸들러는 컴포넌트와 분리된 선언이다(사용처에 묶이고, `get`/`set`/`goTo`가 부수효과라
+순수 컴포넌트의 위치 독립성을 깨므로). 수렴 중인 형태:
+
+    handle MyTodoCard.TodoItem.CompleteButton.TOGGLE (data) {
+      <본문 — JS 위임>
+    }
+
+방향:
+
+- **fullname 통째 표기** — 한 핸들러에서 "트리 어디서 난 무슨 이벤트"가 한눈에
+  들어와야 한다.
+- **fullname은 경로 토큰** — 문자열 리터럴이 아니라 점으로 잇는 토큰. 점마다
+  컴파일러가 합성 트리에서 실재하는 다음 마디만 자동완성하고, 없는 경로는 컴파일
+  에러로 검증한다(문자열 키로는 불가능).
+- **열린 구조** — 각 `handle`은 독립 최상위 선언. 항목 추가가 늘 문법 완성 상태.
+- **본문은 JS 위임** — `{ }` 안은 JS 비슷한 표현식, quble는 깊이 파싱하지 않는다.
+  quble의 책임은 fullname 생성과 본문 진입 시 스코프 주입(`data`, `provided`, `get`,
+  `set`, `goTo`). 표현식 평가는 호스트에 위임.
+- **인자 바인딩** — `data`는 `events` 스키마에서, `provided`는 §5.1 구조에서. 둘 다
+  leafIndex 묶음(`data`=자기 offset, `provided`=조상 컨텍스트 offset).
+
+탈락한 대안:
+
+- **경로 블록 중첩** — prefix를 묶어 트리 모양과 일치시키지만, 한 핸들러에서
+  fullname이 조각나 한눈에 안 들어온다.
+
+      handlers {
+        MyTodoCard.TodoItem {
+          CompleteButton.TOGGLE (data) { ... }
+        }
+      }
+
+- **객체 리터럴** — 닫는 `}`까지 가야 문법이 완성돼 항목 추가 도중이 불안정하고,
+  fullname이 문자열 키라 "문자열 안" 자동완성·트리 검증이 약하다.
+
+      handlers = {
+        "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data) => { ... },
+      }
+
+관통 기준: 자동완성을 문법이 떠받쳐야 관련 도구(에디터 지원·이벤트 카탈로그·
+unhandled-event 경고) 개발이 쉬워진다(§4.1의 "DX는 도구로 푼다"와 직결).
+
+미결: 본문 위임의 정확한 경계(그대로 토해내기 vs `set`/`goTo` 같은 키워드만 인식).
+
 ---
 
 ## 부록 A. 예시 — TodoItem.comp
