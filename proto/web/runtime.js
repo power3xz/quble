@@ -52,6 +52,7 @@ const ATTRS = [
   "style",
   "placeholder",
 ];
+const DOM_EVENTS = ["click"]; // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type.
 
 const OP = {
   HALT: 0x00,
@@ -70,6 +71,7 @@ const OP = {
   ELSE: 0x0d,
   IF_END: 0x0e,
   LOAD_RES: 0x0f,
+  BIND_EVENT: 0x10,
 };
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -99,6 +101,7 @@ const operandLen = (op) => {
     case OP.ATTR_L:
     case OP.ATTR_G_VAR:
     case OP.ATTR_L_VAR:
+    case OP.BIND_EVENT:
       return 4;
     default:
       throw new Error("bad opcode 0x" + op.toString(16));
@@ -212,7 +215,22 @@ const decode = (bytes) => {
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
-    defs.push({ nameIdx: r.u16(), codeOff: r.u32(), codeLen: r.u32() });
+    const nameIdx = r.u16();
+    const codeOff = r.u32();
+    const codeLen = r.u32();
+    // 이벤트 테이블 (BYTECODE.md §4) — event_count, [(nameIdx, payload_count, [(fieldIdx, offset)])]
+    const eventCount = r.u16();
+    const events = [];
+    for (let e = 0; e < eventCount; e++) {
+      const evNameIdx = r.u16();
+      const payloadCount = r.u16();
+      const payload = [];
+      for (let p = 0; p < payloadCount; p++) {
+        payload.push({ fieldIdx: r.u16(), offset: r.u16() });
+      }
+      events.push({ nameIdx: evNameIdx, payload });
+    }
+    defs.push({ nameIdx, codeOff, codeLen, events });
   }
 
   const codeLen = r.u32();
@@ -237,7 +255,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 — def·자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
-  return (ctx, rootPaths) => {
+  return (ctx, rootPaths, handlers = {}) => {
     // 인스턴스 불변 상태 — 모든 build(최초·lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
     // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
@@ -255,6 +273,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     //
     // @param code             해석할 바이트코드(자식은 자식 def 구간)
     // @param paths            offset → store 경로 매핑(자식은 자식 paths)
+    // @param events           현재 def의 이벤트 테이블(BIND_EVENT가 event_idx로 참조. 자식은 자식 def의 것)
     // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
     // @param startRegionIndex 구독을 쌓을 region
     // @param startBranchIndex 구독을 쌓을 가지(THEN/ELSE)
@@ -262,6 +281,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     const interpret = (
       code,
       paths,
+      events,
       startPc,
       endPc,
       startRegionIndex,
@@ -354,6 +374,27 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             el.setAttribute(name, v);
             break;
           }
+          case OP.BIND_EVENT: {
+            // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
+            const domEvent = DOM_EVENTS[u16at()];
+            const event = events[u16at()];
+            const eventName = module.pool[event.nameIdx];
+            // payload offset들을 leafIndex로 풀어, 발생 시점의 현재값을 필드명 키로 모은다.
+            // offset->leafIndex는 발생 때가 아니라 지금(바인딩 때) 한 번 푼다(paths는 인스턴스 불변).
+            const fields = event.payload.map((p) => ({
+              name: module.pool[p.fieldIdx],
+              leafIndex: ctx.leafOf(paths[p.offset]),
+            }));
+            const el = pending;
+            el.addEventListener(domEvent, () => {
+              const data = {};
+              for (const f of fields) {
+                data[f.name] = ctx.get(f.leafIndex);
+              }
+              handlers[eventName]?.(data);
+            });
+            break;
+          }
           case OP.ELEM_CLOSE_OPEN: {
             nodeTop().appendChild(pending);
             nodeStack.push(pending);
@@ -397,6 +438,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             const childFragment = interpret(
               module.code,
               childPaths,
+              childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
               childDef.codeOff,
               childDef.codeOff + childDef.codeLen,
               startRegionIndex,
@@ -430,6 +472,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               const f = interpret(
                 code,
                 paths,
+                events,
                 thenStart,
                 thenEnd,
                 regionIndex,
@@ -444,6 +487,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
                   : interpret(
                       code,
                       paths,
+                      events,
                       elseStart,
                       ifEndPc,
                       regionIndex,
@@ -492,6 +536,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     const fragment = interpret(
       module.code,
       rootPaths,
+      def.events, // 루트 def의 이벤트 테이블
       def.codeOff,
       def.codeOff + def.codeLen,
       0,
