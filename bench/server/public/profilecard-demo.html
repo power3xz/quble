@@ -9,7 +9,7 @@
     <div id="root" class="cards"></div>
 
     <script type="module">
-      import { compile, createFlatStoreSubject } from "/runtime.js";
+      import { compile, createLeafStoreSubject } from "/runtime.js";
 
       // profilecard.qubb + resmap(LOAD_RES가 resmap[resId] URL로 <link> 삽입 → CSS도 클라가 로드).
       const bytes = new Uint8Array(
@@ -194,7 +194,7 @@
           const merged = { ...common, ...person };
           // 값은 store가 들고, blueprint엔 paths(키 이름)를 넘긴다 — runtime이 scope offset을
           // paths[offset]로 풀어 ctx에서 resolve한다(dashboard-demo와 동일).
-          const ctx = createFlatStoreSubject(merged);
+          const ctx = createLeafStoreSubject(merged);
           const inst = blueprintOf(0)(ctx, paths);
           root.append(...inst.nodes);
         }

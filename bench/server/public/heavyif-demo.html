@@ -19,23 +19,23 @@
   <div id="root"></div>
 
   <script type="module">
-    import { compile, createFlatStoreSubject } from "/runtime.js";
+    import { compile, createLeafStoreSubject } from "/runtime.js";
 
     const res = await fetch("/components/heavyif.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
     const ROWS = 1000;
 
     const paths = ["show", "sharedA", "sharedB"];
-    const ctx = createFlatStoreSubject({ show: true, sharedA: 0, sharedB: 0 });
+    const ctx = createLeafStoreSubject({ show: true, sharedA: 0, sharedB: 0 });
 
     const blueprintOf = compile(bytes);
     const inst = blueprintOf(0)(ctx, paths);
     const root = document.getElementById("root");
     root.replaceChildren(...inst.nodes);
 
-    const showLeaf = ctx.resolve("show");
-    const aLeaf = ctx.resolve("sharedA");
-    const bLeaf = ctx.resolve("sharedB");
+    const showLeaf = ctx.leafOf("show");
+    const aLeaf = ctx.leafOf("sharedA");
+    const bLeaf = ctx.leafOf("sharedB");
 
     const log = (line) => {
       document.getElementById("log").textContent += "\n" + line;
@@ -68,7 +68,7 @@
     document.getElementById("bench-build").onclick = () => {
       const runs = 100;
       // 매번 새 인스턴스화(양쪽 가지 다 build). detached — 부착 안 함.
-      const tmp = createFlatStoreSubject({ show: true, sharedA: 0, sharedB: 0 });
+      const tmp = createLeafStoreSubject({ show: true, sharedA: 0, sharedB: 0 });
       for (let i = 0; i < 10; i++) { blueprintOf(0)(tmp, paths); }
       const start = performance.now();
       for (let i = 0; i < runs; i++) { blueprintOf(0)(tmp, paths); }

@@ -12,7 +12,7 @@
 // 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
 //
 // 인덱스 세 축 (REACTIVITY.md §1~§3):
-//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.resolve가 lazy 발급).
+//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.leafOf가 lazy 발급).
 
 import {
   THEN_INDEX,
@@ -22,8 +22,8 @@ import {
   attachBranch,
 } from "./region.js";
 
-// 상태 저장소(ctx)는 flat-store.js가 정의한다. blueprint가 받는 ctx가 이것 — 편의상 여기서 재공개한다.
-export { createFlatStoreSubject } from "./flat-store.js";
+// 상태 저장소(ctx)는 leaf-store.js가 정의한다. blueprint가 받는 ctx가 이것 — 편의상 여기서 재공개한다.
+export { createLeafStoreSubject } from "./leaf-store.js";
 
 const TAGS = [
   "div",
@@ -297,7 +297,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
         if (path === undefined) {
           throw new Error("no path for offset " + offset);
         }
-        const leafIndex = ctx.resolve(path);
+        const leafIndex = ctx.leafOf(path);
         const initial = ctx.get(leafIndex) ?? "";
         branch.leafIndices.push(leafIndex);
         branch.updateFns.push(update);
@@ -409,7 +409,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
           }
           case OP.IF: {
             const condOffset = u16at();
-            const condLeafIndex = ctx.resolve(paths[condOffset]);
+            const condLeafIndex = ctx.leafOf(paths[condOffset]);
             const regionIndex = appendRegion(regions, condLeafIndex);
             const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록

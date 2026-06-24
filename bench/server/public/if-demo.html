@@ -20,14 +20,14 @@
   <p>DOM에서 <code>&lt;!--qb:region#N--&gt;</code> 주석이 if 자리(anchor)다.</p>
 
   <script type="module">
-    import { compile, createFlatStoreSubject } from "/runtime.js";
+    import { compile, createLeafStoreSubject } from "/runtime.js";
 
     const res = await fetch("/components/iftest.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
 
     // props 순서 = paths 순서: loggedIn(cond), name
     const paths = ["loggedIn", "name"];
-    const ctx = createFlatStoreSubject({ loggedIn: true, name: "철수" });
+    const ctx = createLeafStoreSubject({ loggedIn: true, name: "철수" });
 
     const blueprintOf = compile(bytes);
     const inst = blueprintOf(0)(ctx, paths);
@@ -36,12 +36,12 @@
     let loggedIn = true;
     document.getElementById("toggle").onclick = () => {
       loggedIn = !loggedIn;
-      ctx.set(ctx.resolve("loggedIn"), loggedIn);
+      ctx.set(ctx.leafOf("loggedIn"), loggedIn);
     };
     let n = 0;
     document.getElementById("rename").onclick = () => {
       const name = ["영희", "민수", "지영"][n++ % 3];
-      ctx.set(ctx.resolve("name"), name);
+      ctx.set(ctx.leafOf("name"), name);
     };
 
     // 디버깅: 인스턴스의 region 트리를 콘솔에 노출

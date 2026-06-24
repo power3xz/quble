@@ -29,14 +29,14 @@
   <p>DOM의 <code>&lt;!--qb:region#N--&gt;</code>가 각 if 자리(anchor). 콘솔에 <code>window.inst</code>.</p>
 
   <script type="module">
-    import { compile, createFlatStoreSubject } from "/runtime.js";
+    import { compile, createLeafStoreSubject } from "/runtime.js";
 
     const res = await fetch("/components/composed_triple.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
 
     const paths = ["c1", "c2", "c3", "a", "b", "c", "d"];
     const state = { c1: true, c2: true, c3: true, a: "a", b: "b", c: "c", d: "d" };
-    const ctx = createFlatStoreSubject(state);
+    const ctx = createLeafStoreSubject(state);
 
     const inst = compile(bytes)(0)(ctx, paths);
     const root = document.getElementById("root");
@@ -58,7 +58,7 @@
 
     const toggle = (key) => () => {
       state[key] = !state[key];
-      ctx.set(ctx.resolve(key), state[key]);
+      ctx.set(ctx.leafOf(key), state[key]);
       refresh();
     };
     document.getElementById("t-c1").onclick = toggle("c1");

@@ -34,7 +34,7 @@
   <p>DOM에서 <code>&lt;!--qb:region#N--&gt;</code> 주석이 각 if 자리(anchor). 콘솔에 <code>inst.regions</code>.</p>
 
   <script type="module">
-    import { compile, createFlatStoreSubject } from "/runtime.js";
+    import { compile, createLeafStoreSubject } from "/runtime.js";
 
     const res = await fetch("/components/dashboard.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
@@ -49,7 +49,7 @@
       plan: "Pro",
       notifCount: 3,
     };
-    const ctx = createFlatStoreSubject(state);
+    const ctx = createLeafStoreSubject(state);
 
     const blueprintOf = compile(bytes);
     const inst = blueprintOf(0)(ctx, paths);
@@ -57,7 +57,7 @@
 
     const toggle = (key) => () => {
       state[key] = !state[key];
-      ctx.set(ctx.resolve(key), state[key]);
+      ctx.set(ctx.leafOf(key), state[key]);
     };
     document.getElementById("t-logged").onclick = toggle("loggedIn");
     document.getElementById("t-premium").onclick = toggle("isPremium");
@@ -66,16 +66,16 @@
     let nameIndex = 0;
     document.getElementById("c-name").onclick = () => {
       state.name = ["영희", "민수", "지영"][nameIndex++ % 3];
-      ctx.set(ctx.resolve("name"), state.name);
+      ctx.set(ctx.leafOf("name"), state.name);
     };
     let planIndex = 0;
     document.getElementById("c-plan").onclick = () => {
       state.plan = ["Pro", "Team", "Enterprise"][planIndex++ % 3];
-      ctx.set(ctx.resolve("plan"), state.plan);
+      ctx.set(ctx.leafOf("plan"), state.plan);
     };
     document.getElementById("c-count").onclick = () => {
       state.notifCount += 1;
-      ctx.set(ctx.resolve("notifCount"), state.notifCount);
+      ctx.set(ctx.leafOf("notifCount"), state.notifCount);
     };
 
     window.inst = inst;
