@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>quble — 이벤트 발생 데모 (ProfileCard / Thumbnail 클릭)</title>
+    <link rel="stylesheet" href="/public/style.css" />
+    <style>
+      .avatar { cursor: pointer; }
+      #log { padding: 8px 12px; background: #f6f8fa; color: #1f2328; border-radius: 6px; font-family: monospace; }
+    </style>
+  </head>
+  <body>
+    <pre id="log">썸네일(아바타)을 클릭하면 CLICK_THUMBNAIL 이벤트가 발생합니다.</pre>
+    <div id="root" class="cards"></div>
+
+    <script type="module">
+      import { compile, createLeafStoreSubject } from "/runtime.js";
+
+      const bytes = new Uint8Array(
+        await (await fetch("/components/profilecard.qubb")).arrayBuffer(),
+      );
+      const resmap = await (await fetch("/resmap/profilecard")).json();
+      const blueprintOf = compile(bytes, resmap);
+
+      // profilecard.qubc props 선언 순서.
+      const paths = [
+        "name", "role", "bio", "avatar", "link", "theme",
+        "followersLabel", "followers", "followingLabel", "following", "postsLabel", "posts",
+        "locationIcon", "location", "companyIcon", "company",
+        "site", "github", "twitter",
+        "act1Icon", "act1Text", "act1Time", "act2Icon", "act2Text", "act2Time",
+        "act3Icon", "act3Text", "act3Time",
+        "tag1", "tag2", "tag3", "tag4",
+      ];
+
+      const person = {
+        name: "김에이", role: "엔지니어", bio: "백엔드와 컴파일러를 좋아합니다.",
+        avatar: "/img/a", link: "/u/a", theme: "light",
+        followersLabel: "팔로워", followers: "1.2k",
+        followingLabel: "팔로잉", following: "180",
+        postsLabel: "게시물", posts: "342",
+        locationIcon: "📍", location: "서울", companyIcon: "🏢", company: "Quble Inc.",
+        site: "/s/a", github: "/gh/a", twitter: "/tw/a",
+        act1Icon: "✅", act1Text: "바이트코드 풀 최적화 머지", act1Time: "2시간 전",
+        act2Icon: "⭐", act2Text: "컴파일러 PR 리뷰", act2Time: "어제",
+        act3Icon: "💬", act3Text: "반응성 모델 논의", act3Time: "3일 전",
+        tag1: "rust", tag2: "compiler", tag3: "wasm", tag4: "ssr",
+      };
+
+      const ctx = createLeafStoreSubject(person);
+      const log = document.getElementById("log");
+
+      // 자식(Thumbnail)이 발생시킨 CLICK_THUMBNAIL을, 부모(ProfileCard) 인스턴스의 handlers가 잡는다.
+      // 핸들러를 자식에 따로 안 넘긴다 — RENDER가 인라인 재진입이라 같은 handlers를 공유한다.
+      // 핸들러가 theme을 토글 set → article(class={theme})이 반응성으로 갱신돼 카드 테마가 바뀐다.
+      let theme = person.theme;
+      const handlers = {
+        CLICK_THUMBNAIL: (data) => {
+          theme = theme === "light" ? "dark" : "light";
+          ctx.setPath("theme", theme);
+          log.textContent = `${data.name} 썸네일 클릭 → theme: ${theme}`;
+        },
+      };
+
+      const inst = blueprintOf(0)(ctx, paths, handlers);
+      document.getElementById("root").append(...inst.nodes);
+    </script>
+  </body>
+</html>

@@ -20,8 +20,18 @@ pub struct Use {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Component {
     pub name: String,
-    pub props: Vec<String>,  // 선언 순서 = scope 인덱스
-    pub template: Vec<Node>, // 루트 노드들 (fragment 허용)
+    pub props: Vec<String>,   // 선언 순서 = scope 인덱스
+    pub events: Vec<Event>,   // 선언 순서 = event_idx (BIND_EVENT가 참조)
+    pub template: Vec<Node>,  // 루트 노드들 (fragment 허용)
+}
+
+/// `events { TOGGLE({ label: title, on }) }` — 컴포넌트가 선언한 이벤트.
+/// payload 각 항목은 (이벤트필드명, prop명). `{ title }` 단축은 ("title","title")로 푼다.
+/// prop명은 props에 있어야 한다(codegen이 검증).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Event {
+    pub name: String,
+    pub payload: Vec<(String, String)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -29,6 +39,8 @@ pub enum Node {
     Element {
         tag: String,
         attrs: Vec<(String, AttrValue)>,
+        /// `@click:TOGGLE` — (DOM이벤트, 이벤트명). 이 요소가 무엇에 반응해 무슨 이벤트를 쏘나.
+        event_bindings: Vec<(String, String)>,
         children: Vec<Node>,
     },
     Text(String),

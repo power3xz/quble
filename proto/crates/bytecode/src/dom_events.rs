@@ -1,0 +1,18 @@
+//! 전역 DOM 이벤트 테이블. 파일에 직렬화되지 않고 코드에 고정된다(BYTECODE.md §2).
+//! `BIND_EVENT`의 event_type이 이 ID로 어떤 DOM 이벤트인지 가리킨다. DOM 이벤트는 닫힌
+//! 집합이라 통째로 전역에 둔다. 예약 ID는 안정적이어야 하므로 **추가만, 재배치 금지**.
+
+/// 프로토타입 시작 집합. 인덱스 = 예약 DOM 이벤트 ID.
+const DOM_EVENTS: &[&str] = &[
+    "click", // 0
+];
+
+/// DOM 이벤트 ID → 이름. 범위를 벗어나면 None.
+pub fn dom_event_name(id: u16) -> Option<&'static str> {
+    DOM_EVENTS.get(id as usize).copied()
+}
+
+/// DOM 이벤트명 → ID. 전역 집합에 없으면 None.
+pub fn dom_event_id(name: &str) -> Option<u16> {
+    DOM_EVENTS.iter().position(|&e| e == name).map(|i| i as u16)
+}

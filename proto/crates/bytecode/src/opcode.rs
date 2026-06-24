@@ -32,6 +32,9 @@ pub enum Op {
     IfEnd = 0x0e,
     /// 외부 리소스(CSS 등) 로드. operand는 모듈 전역 resId. resId->URL은 런타임이 주입.
     LoadRes = 0x0f,
+    /// 지금 여는 요소에 리스너를 묶는다. operand: event_type(전역 DOM 이벤트), event_idx(컴포넌트 이벤트).
+    /// event_type DOM 이벤트가 일어나면 컴포넌트 이벤트 event_idx를 발생시킨다.
+    BindEvent = 0x10,
 }
 
 impl Op {
@@ -54,6 +57,7 @@ impl Op {
             0x0d => Op::Else,
             0x0e => Op::IfEnd,
             0x0f => Op::LoadRes,
+            0x10 => Op::BindEvent,
             _ => return None,
         })
     }

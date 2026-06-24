@@ -2,13 +2,14 @@
 //! 상세는 proto/BYTECODE.md 참고.
 
 pub mod attrs;
+pub mod dom_events;
 pub mod tags;
 mod module;
 mod opcode;
 mod pool;
 mod serialize;
 
-pub use module::{CompDef, Module};
+pub use module::{CompDef, EventDef, Module};
 pub use opcode::Op;
 pub use pool::ConstPool;
 pub use serialize::{decode, encode, DecodeError};
@@ -54,6 +55,7 @@ mod tests {
             name_idx: hello_name,
             code_off: 0,
             code_len: code.len() as u32,
+            events: vec![],
         }];
         Module::new(pool, defs, code)
     }
