@@ -50,6 +50,21 @@ TEXT_VAR만 쓰고 @for·이벤트가 없는 페이지면 그 핸들러만 보�
 
 **미결:** 모드를 어디서 선언하나(빌드 플래그 vs 진입점 메타). 한 빌드에 app/lib가 섞일 때.
 
+### 이벤트 핸들러에 props leafIndices 넘기기
+
+정적 분석 때 컴포넌트 props를 분석해 leafIndices를 이벤트와 함께 넘긴다. 핸들러에서
+props에 값을 할당하면 그 leafIndex로 set한다.
+
+    handle <event_name> (leafStore, data, provided, props) {
+      leafStore.switch.on = !data.on;  // (A) 다른 데이터를 수정
+      props.on = !data.on;             // (B) 자신의 컴포넌트 데이터를 수정
+    }
+
+- `leafStore` — 다른 데이터 수정(앱 전체 접근).
+- `props` — 자신의 컴포넌트 데이터 수정. props의 leafIndex로 set.
+
+인터페이스 미확정.
+
 ### 비동기 컴포넌트 로드 (코드 분할, `LAZY_RENDER` opcode)
 
 RENDER를 interpret 인라인 재진입으로 바꾸니(REACTIVITY.md 합성), lazy build 구조가
