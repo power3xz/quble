@@ -34,7 +34,7 @@
   <p>DOM에서 <code>&lt;!--qb:region#N--&gt;</code> 주석이 각 if 자리(anchor). 콘솔에 <code>inst.regions</code>.</p>
 
   <script type="module">
-    import { compile, createStore } from "/runtime.js";
+    import { compile, createFlatStoreSubject } from "/runtime.js";
 
     const res = await fetch("/components/dashboard.qubb");
     const bytes = new Uint8Array(await res.arrayBuffer());
@@ -49,7 +49,7 @@
       plan: "Pro",
       notifCount: 3,
     };
-    const ctx = createStore(state);
+    const ctx = createFlatStoreSubject(state);
 
     const blueprintOf = compile(bytes);
     const inst = blueprintOf(0)(ctx, paths);

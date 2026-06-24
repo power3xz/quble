@@ -71,7 +71,7 @@ const teardownBranchSubs = (ctx, branch) => {
 const restoreBranchSubs = (ctx, branch) => {
   const { leafIndices, updateFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
-    updateFns[i](ctx.leaves[leafIndices[i]]); // 비활성 동안 놓친 값 따라잡기
+    updateFns[i](ctx.get(leafIndices[i])); // 비활성 동안 놓친 값 따라잡기
     ctx.subscribe(leafIndices[i], updateFns[i]);
   }
 };

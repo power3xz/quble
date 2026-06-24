@@ -22,8 +22,36 @@ import {
   attachBranch,
 } from "./region.js";
 
-const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
-const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
+// 상태 저장소(ctx)는 flat-store.js가 정의한다. blueprint가 받는 ctx가 이것 — 편의상 여기서 재공개한다.
+export { createFlatStoreSubject } from "./flat-store.js";
+
+const TAGS = [
+  "div",
+  "span",
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "a",
+  "ul",
+  "li",
+  "button",
+  "article",
+  "img",
+];
+const ATTRS = [
+  "class",
+  "id",
+  "src",
+  "alt",
+  "href",
+  "type",
+  "name",
+  "value",
+  "title",
+  "style",
+  "placeholder",
+];
 
 const OP = {
   HALT: 0x00,
@@ -42,52 +70,6 @@ const OP = {
   ELSE: 0x0d,
   IF_END: 0x0e,
   LOAD_RES: 0x0f,
-};
-
-// ── store 컨텍스트 (pub/sub) ──────────────────────────────────────────
-// 반응 상태 저장소를 만든다 — leafIndex로 값을 읽고/쓰고/구독한다.
-//
-// 값은 leaves(평탄 배열)에 leafIndex로 담기고, set은 그 leaf의 구독자에게 새 값을 통지한다.
-// path는 resolve가 leafIndex로 lazy 발급(pathCache)한다.
-//
-// @param defaultValue 경로 해석의 뿌리 객체(resolve가 path를 이 객체에서 읽어 초기값 발급)
-// @returns            { leaves, set, subscribe, unsubscribe, resolve }
-export const createStore = (defaultValue) => {
-  const leaves = [];
-  const subscribers = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
-  const pathCache = new Map(); // path → leafIndex
-
-  const set = (leafIndex, value) => {
-    leaves[leafIndex] = value;
-    const subs = subscribers[leafIndex];
-    if (subs) {
-      // 스냅샷 순회 — 콜백(cond)이 activateBranch로 구독을 해제할 수 있어 원본 순회는 깨진다.
-      for (const fn of [...subs]) {
-        fn(value);
-      }
-    }
-  };
-
-  const subscribe = (leafIndex, fn) => {
-    (subscribers[leafIndex] ??= new Set()).add(fn);
-  };
-
-  const unsubscribe = (leafIndex, fn) => {
-    subscribers[leafIndex]?.delete(fn);
-  };
-
-  const resolve = (path) => {
-    let leafIndex = pathCache.get(path);
-    if (leafIndex !== undefined) {
-      return leafIndex;
-    }
-    leafIndex = leaves.length;
-    leaves[leafIndex] = readPath(defaultValue, path);
-    pathCache.set(path, leafIndex);
-    return leafIndex;
-  };
-
-  return { leaves, set, subscribe, unsubscribe, resolve };
 };
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -171,19 +153,6 @@ const ifBranchRanges = (code, thenStart) => {
   return { thenEnd, elseStart: -1, ifEndPc: thenEnd }; // else 없는 if
 };
 
-// 점 표기 경로로 객체를 파고들어 값을 읽는다("a.b.c" → obj.a.b.c).
-//
-// @param defaultValue 뿌리 객체
-// @param path         점으로 구분된 경로 문자열
-// @returns            경로가 가리키는 값
-const readPath = (defaultValue, path) => {
-  let cur = defaultValue;
-  for (const key of path.split(".")) {
-    cur = cur[key];
-  }
-  return cur;
-};
-
 // ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
 class Reader {
   constructor(bytes) {
@@ -219,7 +188,14 @@ class Reader {
 const decode = (bytes) => {
   const r = new Reader(bytes);
   const magic = r.take(4);
-  if (!(magic[0] === 0x51 && magic[1] === 0x42 && magic[2] === 0x4c && magic[3] === 0x00)) {
+  if (
+    !(
+      magic[0] === 0x51 &&
+      magic[1] === 0x42 &&
+      magic[2] === 0x4c &&
+      magic[3] === 0x00
+    )
+  ) {
     throw new Error("bad magic"); // "QBL\0"
   }
   const version = r.u16();
@@ -283,7 +259,14 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     // @param startRegionIndex 구독을 쌓을 region
     // @param startBranchIndex 구독을 쌓을 가지(THEN/ELSE)
     // @returns                직속 노드를 담은 DocumentFragment
-    const interpret = (code, paths, startPc, endPc, startRegionIndex, startBranchIndex) => {
+    const interpret = (
+      code,
+      paths,
+      startPc,
+      endPc,
+      startRegionIndex,
+      startBranchIndex,
+    ) => {
       const fragment = document.createDocumentFragment();
       const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
       let pending = null;
@@ -315,7 +298,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
           throw new Error("no path for offset " + offset);
         }
         const leafIndex = ctx.resolve(path);
-        const initial = ctx.leaves[leafIndex] ?? "";
+        const initial = ctx.get(leafIndex) ?? "";
         branch.leafIndices.push(leafIndex);
         branch.updateFns.push(update);
         return initial;
@@ -378,7 +361,9 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             break;
           }
           case OP.TEXT: {
-            nodeTop().appendChild(document.createTextNode(module.pool[u16at()]));
+            nodeTop().appendChild(
+              document.createTextNode(module.pool[u16at()]),
+            );
             break;
           }
           case OP.TEXT_VAR: {
@@ -435,17 +420,35 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
 
             // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
             const thenStart = pc;
-            const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(code, thenStart);
+            const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(
+              code,
+              thenStart,
+            );
 
             // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
             const buildThen = () => {
-              const f = interpret(code, paths, thenStart, thenEnd, regionIndex, THEN_INDEX);
+              const f = interpret(
+                code,
+                paths,
+                thenStart,
+                thenEnd,
+                regionIndex,
+                THEN_INDEX,
+              );
               thenBranch.nodes = Array.from(f.childNodes);
             };
             const buildElse = () => {
-              const f = elseStart === -1
-                ? document.createDocumentFragment() // else 없는 if — 빈 가지
-                : interpret(code, paths, elseStart, ifEndPc, regionIndex, ELSE_INDEX);
+              const f =
+                elseStart === -1
+                  ? document.createDocumentFragment() // else 없는 if — 빈 가지
+                  : interpret(
+                      code,
+                      paths,
+                      elseStart,
+                      ifEndPc,
+                      regionIndex,
+                      ELSE_INDEX,
+                    );
               elseBranch.nodes = Array.from(f.childNodes);
             };
             thenBranch.lazyBuild = buildThen;
@@ -453,13 +456,20 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
 
             // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateBranch가 lazyBuild 호출.
             ctx.subscribe(condLeafIndex, (condValue) => {
-              activateBranch(ctx, regions, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+              activateBranch(
+                ctx,
+                regions,
+                regionIndex,
+                condValue ? THEN_INDEX : ELSE_INDEX,
+              );
             });
             // build는 "생성만" 한다 — 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
             // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachBranch가 일괄).
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-            const initialBranchIndex = ctx.leaves[condLeafIndex] ? THEN_INDEX : ELSE_INDEX;
+            const initialBranchIndex = ctx.get(condLeafIndex)
+              ? THEN_INDEX
+              : ELSE_INDEX;
             const initialBranch = region.branches[initialBranchIndex];
             initialBranch.lazyBuild();
             initialBranch.built = true;
@@ -479,7 +489,14 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 — 부모 nodes 오염 방지). 그 뒤
     // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-    const fragment = interpret(module.code, rootPaths, def.codeOff, def.codeOff + def.codeLen, 0, THEN_INDEX);
+    const fragment = interpret(
+      module.code,
+      rootPaths,
+      def.codeOff,
+      def.codeOff + def.codeLen,
+      0,
+      THEN_INDEX,
+    );
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 — attach가 anchor.after로 채운다
     attachBranch(ctx, regions, rootRegion);

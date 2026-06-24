@@ -3,7 +3,7 @@
 // build → swap → 재귀 구독. 검증은 사용자가 보는 결과(HTML)와 region 상태로 한다.
 //
 // 구독 0(안 보이는 가지)은 "비활성 가지 leaf를 set해도 화면이 안 바뀐다"로 행동 검증한다 —
-// createStore는 subscribers를 노출하지 않으므로(최소 노출), 부작용으로 간접 확인한다.
+// createFlatStoreSubject는 subscribers를 노출하지 않으므로(최소 노출), 부작용으로 간접 확인한다.
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
@@ -11,7 +11,7 @@ import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 i
 import { buildFixture } from "./fixtures/build.js";
 
 // dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
-const { compile, createStore } = await import("./runtime.js");
+const { compile, createFlatStoreSubject } = await import("./runtime.js");
 
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb = {};
@@ -23,10 +23,10 @@ before(() => {
 
 // 한 인스턴스를 만들어 { ctx, inst, host, set } 묶음으로 — set은 path로 바로 쓰게.
 const instantiate = (name, paths, values) => {
-  const ctx = createStore(values);
+  const ctx = createFlatStoreSubject(values);
   const inst = compile(qubb[name])(0)(ctx, paths);
   const host = mount(inst);
-  const set = (path, value) => ctx.set(ctx.resolve(path), value);
+  const set = (path, value) => ctx.setPath(path, value);
   return { ctx, inst, host, set };
 };
 

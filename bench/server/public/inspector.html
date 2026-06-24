@@ -55,7 +55,7 @@
 
   <script type="module">
     import { inspect, decompileComponent, componentArgs } from "/disasm.js";
-    import { compile, createStore } from "/runtime.js";
+    import { compile, createFlatStoreSubject } from "/runtime.js";
 
     const qubbSelect = document.getElementById("qubb");
     const urlInput = document.getElementById("url");
@@ -290,7 +290,7 @@
         values[arg.name] = readInput(arg);
         paths.push(arg.name);
       }
-      ctx = createStore(values);
+      ctx = createFlatStoreSubject(values);
       const inst = blueprintOf(compId)(ctx, paths);
       stage.replaceChildren(...inst.nodes);
       // 인스턴스화 중 쓰인 arg는 pathCache에 leafIndex가 잡혔다. resolve로 그 인덱스를 받아둔다.
