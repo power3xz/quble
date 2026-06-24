@@ -27,9 +27,10 @@ const OP = {
   ELSE: 0x0d,
   IF_END: 0x0e,
   LOAD_RES: 0x0f,
-  FOR: 0x10,
-  FOR_END: 0x11,
+  BIND_EVENT: 0x10,
 };
+
+const DOM_EVENTS = ["click"]; // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type.
 
 // ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
 class Reader {
@@ -75,20 +76,37 @@ const decode = (bytes) => {
   }
 
   const poolCount = r.u16();
+  const poolStart = r.pos; // count 헤더 직후 — 풀 항목들의 직렬화 바이트 시작
   const pool = [];
   for (let i = 0; i < poolCount; i++) {
     pool.push(r.str());
   }
+  const poolBytes = r.pos - poolStart; // 항목들(각 u16 길이 + UTF-8)의 총 바이트
 
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
-    defs.push({ nameIdx: r.u16(), codeOff: r.u32(), codeLen: r.u32() });
+    const nameIdx = r.u16();
+    const codeOff = r.u32();
+    const codeLen = r.u32();
+    // 이벤트 테이블 (BYTECODE.md §4) — event_count, [(nameIdx, payload_count, [(fieldIdx, offset)])]
+    const eventCount = r.u16();
+    const events = [];
+    for (let e = 0; e < eventCount; e++) {
+      const evNameIdx = r.u16();
+      const payloadCount = r.u16();
+      const payload = [];
+      for (let p = 0; p < payloadCount; p++) {
+        payload.push({ fieldIdx: r.u16(), offset: r.u16() });
+      }
+      events.push({ nameIdx: evNameIdx, payload });
+    }
+    defs.push({ nameIdx, codeOff, codeLen, events });
   }
 
   const codeLen = r.u32();
   const code = r.take(codeLen);
-  return { pool, defs, code };
+  return { pool, poolBytes, defs, code };
 };
 
 // 속성값 안의 따옴표를 이스케이프해 qubc 문자열 리터럴로 만든다.
@@ -234,16 +252,22 @@ const decompileBody = (module, def) => {
         }
         break;
       }
-      case OP.FOR:
-        lines.push(pad() + "@for " + seenArg(u16(), "number") + " {");
-        depth += 1;
+      case OP.BIND_EVENT: {
+        // 여는 태그에 리스너를 묶는다 -> 속성처럼 한 줄에 합친다. `@click:EVENT`.
+        const domEvent = DOM_EVENTS[u16()];
+        const event = def.events[u16()];
+        attrs.push("@" + domEvent + ":" + module.pool[event.nameIdx]);
         break;
-      case OP.FOR_END:
-        depth -= 1;
-        lines.push(pad() + "}");
-        break;
+      }
       default:
         throw new Error("bad opcode 0x" + op.toString(16));
+    }
+  }
+  // events payload가 참조하는 offset도 props 복원 범위에 포함한다 — payload만 쓰고 본문엔
+  // 안 쓰인 prop(arg1 등)이 props 블록에 빠지면 디컴파일 qubc가 불완전해진다.
+  for (const event of def.events) {
+    for (const p of event.payload) {
+      seenArg(p.offset, "string");
     }
   }
   return { lines, maxArg, uses, resIds, argTypes };
@@ -287,6 +311,20 @@ export const decompileComponent = (module, compId, resmap = []) => {
       args.push("arg" + i);
     }
     out.push("  props { " + args.join(", ") + " }");
+  }
+  // events 블록 복원. payload는 (필드명, offset) — 필드명은 pool, prop은 offset->argN.
+  // 필드명이 argN과 같으면 shorthand({ field }), 다르면 매핑({ field: argN }).
+  if (def.events.length > 0) {
+    const decls = def.events.map((event) => {
+      const eventName = module.pool[event.nameIdx];
+      const fields = event.payload.map((p) => {
+        const field = module.pool[p.fieldIdx];
+        const prop = "arg" + p.offset;
+        return field === prop ? field : field + ": " + prop;
+      });
+      return eventName + "({ " + fields.join(", ") + " })";
+    });
+    out.push("  events { " + decls.join(", ") + " }");
   }
   out.push("  template {");
   for (const line of lines) {
