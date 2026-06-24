@@ -10,15 +10,18 @@ pub enum Token {
     RParen, // )
     Eq,     // =
     Comma,  // ,
+    Colon,  // :
     /// `@` 뒤에 오는 예약어. `@if` → `At(Keyword::If)`.
     At(Keyword),
 }
 
-/// `@` 디렉티브 키워드. 지금은 분기만(`@if`/`@else`).
+/// `@` 디렉티브 키워드. 분기(`@if`/`@else`)와 DOM 이벤트(`@click`).
+/// DOM 이벤트는 닫힌 집합이라 여기 박는다(필요할 때 input·scroll 등 추가).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Keyword {
     If,
     Else,
+    Click,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,6 +65,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 chars.next();
                 toks.push(Token::Comma);
             }
+            ':' => {
+                chars.next();
+                toks.push(Token::Colon);
+            }
             '@' => {
                 chars.next(); // @
                 let mut s = String::new();
@@ -76,6 +83,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 let kw = match s.as_str() {
                     "if" => Keyword::If,
                     "else" => Keyword::Else,
+                    "click" => Keyword::Click,
                     _ => return Err(LexError::UnknownDirective(s)),
                 };
                 toks.push(Token::At(kw));

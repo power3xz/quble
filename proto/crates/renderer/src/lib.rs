@@ -381,6 +381,7 @@ mod tests {
             name_idx: hello,
             code_off: 0,
             code_len: code.len() as u32,
+            events: vec![],
         }];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -407,7 +408,7 @@ mod tests {
             .halt();
 
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
@@ -436,8 +437,8 @@ mod tests {
         code.extend_from_slice(&p.code);
 
         let defs = vec![
-            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len },
-            CompDef { name_idx: child, code_off: 0, code_len: child_len },
+            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len, events: vec![] },
+            CompDef { name_idx: child, code_off: 0, code_len: child_len, events: vec![] },
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -454,7 +455,7 @@ mod tests {
         let mut a = Asm::new();
         a.load_res(0).open(t("span")).close_open().end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         let res_paths = vec!["/res/styled.abc.css".to_string()];
@@ -483,8 +484,8 @@ mod tests {
         let mut code = c.code;
         code.extend_from_slice(&p.code);
         let defs = vec![
-            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len },
-            CompDef { name_idx: child, code_off: 0, code_len: child_len },
+            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len, events: vec![] },
+            CompDef { name_idx: child, code_off: 0, code_len: child_len, events: vec![] },
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -504,7 +505,7 @@ mod tests {
         let mut a = Asm::new();
         a.load_res(5).open(t("span")).close_open().end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadResource(5)));
@@ -537,8 +538,8 @@ mod tests {
         code.extend_from_slice(&p.code);
 
         let defs = vec![
-            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len },
-            CompDef { name_idx: child, code_off: 0, code_len: child_len },
+            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len, events: vec![] },
+            CompDef { name_idx: child, code_off: 0, code_len: child_len, events: vec![] },
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -559,7 +560,7 @@ mod tests {
         a.open(t("h1")).close_open().text_var(0).end().halt();
 
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         let scope = vec!["세계 <b>".to_string()];
@@ -586,7 +587,7 @@ mod tests {
             .halt();
 
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         let scope = vec!["card".to_string(), r#"a"b"#.to_string()];
@@ -605,7 +606,7 @@ mod tests {
         let mut a = Asm::new();
         a.open(t("div")).attr_g_var(class_g, 0).close_open().end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
@@ -619,7 +620,7 @@ mod tests {
         let mut a = Asm::new();
         a.open(t("p")).close_open().text_var(0).end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
@@ -627,7 +628,7 @@ mod tests {
 
     /// 한 컴포넌트 정의를 인코딩해 렌더 (단일 def, scope 주입). if 테스트 공용.
     fn render_one(pool: ConstPool, code: Vec<u8>, scope: &[String]) -> String {
-        let defs = vec![CompDef { name_idx: 0, code_off: 0, code_len: code.len() as u32 }];
+        let defs = vec![CompDef { name_idx: 0, code_off: 0, code_len: code.len() as u32, events: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
         render_to_string(&bytes, 0, scope, &[]).unwrap()
     }

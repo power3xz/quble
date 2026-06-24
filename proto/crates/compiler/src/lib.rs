@@ -111,6 +111,7 @@ mod tests {
                 tag,
                 attrs,
                 children,
+                ..
             } => {
                 assert_eq!(tag, "div");
                 assert_eq!(
@@ -176,6 +177,7 @@ mod tests {
                 name_idx: hello,
                 code_off: 0,
                 code_len: code.len() as u32,
+                events: vec![],
             }],
             code,
         );

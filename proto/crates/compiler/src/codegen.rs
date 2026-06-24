@@ -1,8 +1,8 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{AttrValue, Node};
+use crate::ast::{AttrValue, Event, Node};
 use crate::resolve::FlatComp;
-use bytecode::{encode, tags, CompDef, ConstPool, Module, Op};
+use bytecode::{encode, tags, CompDef, ConstPool, EventDef, Module, Op};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CodegenError {
@@ -14,6 +14,8 @@ pub enum CodegenError {
     UnknownComponent(String),
     /// 자식 prop명이 자식 props 선언에 없음 (use-site 바인딩 오류).
     UnknownArg { comp: String, prop: String },
+    /// `@click:EVENT`이 이 컴포넌트 events에 없는 이벤트명을 가리킴.
+    UnknownEvent(String),
 }
 
 /// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
@@ -62,13 +64,38 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
             code.extend_from_slice(&res_id.to_le_bytes());
         }
         for node in &comp.template {
-            emit_node(node, &comp.props, &comp_lookup, &mut pool, &mut code)?;
+            emit_node(
+                node,
+                &comp.props,
+                &comp.events,
+                &comp_lookup,
+                &mut pool,
+                &mut code,
+            )?;
         }
         code.push(Op::Halt as u8);
+        // events를 직렬화용 EventDef로 변환(코드와 무관 — 컴포넌트 테이블로 간다).
+        // payload의 prop명을 scope offset으로, 필드명을 상수풀 인덱스로.
+        let events = comp
+            .events
+            .iter()
+            .map(|e| {
+                let payload = e
+                    .payload
+                    .iter()
+                    .map(|(field, prop)| Ok((pool.intern(field), prop_index(prop, &comp.props)?)))
+                    .collect::<Result<Vec<_>, CodegenError>>()?;
+                Ok(EventDef {
+                    name_idx: pool.intern(&e.name),
+                    payload,
+                })
+            })
+            .collect::<Result<Vec<_>, CodegenError>>()?;
         defs.push(CompDef {
             name_idx,
             code_off,
             code_len: code.len() as u32 - code_off,
+            events,
         });
     }
 
@@ -97,6 +124,7 @@ fn prop_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
 fn emit_node(
     node: &Node,
     props: &[String],
+    events: &[Event],
     comp_lookup: &CompLookup,
     pool: &mut ConstPool,
     code: &mut Vec<u8>,
@@ -112,11 +140,32 @@ fn emit_node(
             code.push(Op::TextVar as u8);
             code.extend_from_slice(&idx.to_le_bytes());
         }
-        Node::Element { tag, attrs, children } => {
+        Node::Element {
+            tag,
+            attrs,
+            event_bindings,
+            children,
+        } => {
             let tag_id = tags::tag_id(tag).ok_or_else(|| CodegenError::UnknownTag(tag.clone()))?;
 
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
+
+            // 이벤트 바인딩 — 속성과 같은 자리(여는 태그 진행 중). event_idx는 이 컴포넌트
+            // events에서 이벤트명으로 찾는다(선언 순서 = idx).
+            for (dom_event, event_name) in event_bindings {
+                // 렉서가 닫힌 집합(Keyword)으로 걸러 알려진 DOM 이벤트만 온다.
+                let event_type = bytecode::dom_events::dom_event_id(dom_event)
+                    .expect("렉서가 거른 DOM 이벤트만 온다");
+                let event_idx = events
+                    .iter()
+                    .position(|e| &e.name == event_name)
+                    .ok_or_else(|| CodegenError::UnknownEvent(event_name.clone()))?
+                    as u16;
+                code.push(Op::BindEvent as u8);
+                code.extend_from_slice(&event_type.to_le_bytes());
+                code.extend_from_slice(&event_idx.to_le_bytes());
+            }
 
             for (name, value) in attrs {
                 // 두 축이 opcode를 가른다.
@@ -125,7 +174,10 @@ fn emit_node(
                 let is_var = matches!(value, AttrValue::Var(_));
                 let (op, name_operand) = match bytecode::attrs::attr_id(name) {
                     Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
-                    None => (if is_var { Op::AttrLVar } else { Op::AttrL }, pool.intern(name)),
+                    None => (
+                        if is_var { Op::AttrLVar } else { Op::AttrL },
+                        pool.intern(name),
+                    ),
                 };
                 let value_operand = match value {
                     AttrValue::Static(s) => pool.intern(s),
@@ -139,7 +191,7 @@ fn emit_node(
             code.push(Op::ElemCloseOpen as u8);
 
             for child in children {
-                emit_node(child, props, comp_lookup, pool, code)?;
+                emit_node(child, props, events, comp_lookup, pool, code)?;
             }
 
             // END는 operand 없음 — 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
@@ -177,13 +229,13 @@ fn emit_node(
             code.extend_from_slice(&offset.to_le_bytes());
 
             for node in then {
-                emit_node(node, props, comp_lookup, pool, code)?;
+                emit_node(node, props, events, comp_lookup, pool, code)?;
             }
 
             if !else_.is_empty() {
                 code.push(Op::Else as u8);
                 for node in else_ {
-                    emit_node(node, props, comp_lookup, pool, code)?;
+                    emit_node(node, props, events, comp_lookup, pool, code)?;
                 }
             }
 

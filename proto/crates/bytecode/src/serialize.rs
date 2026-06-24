@@ -1,6 +1,6 @@
 //! 모듈 ↔ 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
 
-use crate::module::{CompDef, Module};
+use crate::module::{CompDef, EventDef, Module};
 use crate::pool::ConstPool;
 
 const MAGIC: &[u8; 4] = b"QBL\0";
@@ -33,6 +33,16 @@ pub fn encode(m: &Module) -> Vec<u8> {
         put_u16(&mut out, d.name_idx);
         put_u32(&mut out, d.code_off);
         put_u32(&mut out, d.code_len);
+        // 이벤트 테이블 (BYTECODE.md §4) — event_count, [(name_idx, payload_count, [(field_idx, offset)])]
+        put_u16(&mut out, d.events.len() as u16);
+        for e in &d.events {
+            put_u16(&mut out, e.name_idx);
+            put_u16(&mut out, e.payload.len() as u16);
+            for (field_idx, offset) in &e.payload {
+                put_u16(&mut out, *field_idx);
+                put_u16(&mut out, *offset);
+            }
+        }
     }
 
     // 코드
@@ -80,11 +90,21 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
     let def_count = r.u16()?;
     let mut defs = Vec::with_capacity(def_count as usize);
     for _ in 0..def_count {
-        defs.push(CompDef {
-            name_idx: r.u16()?,
-            code_off: r.u32()?,
-            code_len: r.u32()?,
-        });
+        let name_idx = r.u16()?;
+        let code_off = r.u32()?;
+        let code_len = r.u32()?;
+        let event_count = r.u16()?;
+        let mut events = Vec::with_capacity(event_count as usize);
+        for _ in 0..event_count {
+            let name_idx = r.u16()?;
+            let payload_count = r.u16()?;
+            let mut payload = Vec::with_capacity(payload_count as usize);
+            for _ in 0..payload_count {
+                payload.push((r.u16()?, r.u16()?));
+            }
+            events.push(EventDef { name_idx, payload });
+        }
+        defs.push(CompDef { name_idx, code_off, code_len, events });
     }
 
     // 코드

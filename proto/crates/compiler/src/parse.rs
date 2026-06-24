@@ -7,7 +7,7 @@
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
-use crate::ast::{AttrValue, Component, Node, SourceFile, Use};
+use crate::ast::{AttrValue, Component, Event, Node, SourceFile, Use};
 use crate::lexer::{Keyword, Token};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -150,12 +150,19 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        // events 블록도 선택적이며 props 다음, template 앞에 온다.
+        let events = if matches!(self.peek(), Some(Token::Ident(s)) if s == "events") {
+            self.events()?
+        } else {
+            Vec::new()
+        };
+
         self.keyword("template")?;
         self.expect(&Token::LBrace)?;
         let template = self.nodes()?;
         self.expect(&Token::RBrace)?; // template
         self.expect(&Token::RBrace)?; // component
-        Ok(Component { name, props, template })
+        Ok(Component { name, props, events, template })
     }
 
     // props { IDENT (, IDENT)* }
@@ -180,6 +187,61 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Token::RBrace)?;
         Ok(props)
+    }
+
+    // events { EVENT* }   — EVENT = NAME ( { PAYLOAD } )
+    fn events(&mut self) -> Result<Vec<Event>, ParseError> {
+        self.keyword("events")?;
+        self.expect(&Token::LBrace)?;
+        let mut events = Vec::new();
+        while matches!(self.peek(), Some(Token::Ident(_))) {
+            events.push(self.event_decl()?);
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(events)
+    }
+
+    // NAME ( { PAYLOAD } )   — TOGGLE({ label: title, on })
+    fn event_decl(&mut self) -> Result<Event, ParseError> {
+        let name = self.ident()?;
+        self.expect(&Token::LParen)?;
+        self.expect(&Token::LBrace)?;
+        let payload = self.payload()?;
+        self.expect(&Token::RBrace)?;
+        self.expect(&Token::RParen)?;
+        Ok(Event { name, payload })
+    }
+
+    // RBrace 전까지 payload 필드를 모은다. 각 필드는 `field` 또는 `field: prop`.
+    // 단축형 `field`는 (field, field)로 푼다(필드명 = prop명). 콤마는 선택적 구분자.
+    fn payload(&mut self) -> Result<Vec<(String, String)>, ParseError> {
+        let mut payload = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::RBrace) | None => break,
+                Some(Token::Comma) => {
+                    self.next()?;
+                }
+                Some(Token::Ident(_)) => {
+                    let field = self.ident()?;
+                    // `: prop` 매핑이 있으면 prop명을, 없으면 단축형(field = prop).
+                    let prop = if matches!(self.peek(), Some(Token::Colon)) {
+                        self.next()?; // :
+                        self.ident()?
+                    } else {
+                        field.clone()
+                    };
+                    payload.push((field, prop));
+                }
+                Some(t) => {
+                    return Err(ParseError::Expected {
+                        want: "payload field or }".into(),
+                        got: format!("{t:?}"),
+                    })
+                }
+            }
+        }
+        Ok(payload)
     }
 
     // RBrace를 만날 때까지 노드를 모은다.
@@ -289,26 +351,44 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    // IDENT ( ATTR* ) { NODE* }
+    // IDENT ( (ATTR | @click:EVENT)* ) { NODE* }
     fn element(&mut self) -> Result<Node, ParseError> {
         let tag = self.ident()?;
         self.expect(&Token::LParen)?;
-        let attrs = self.attrs()?;
+        let (attrs, event_bindings) = self.attrs()?;
         self.expect(&Token::RParen)?;
         self.expect(&Token::LBrace)?;
         let children = self.nodes()?;
         self.expect(&Token::RBrace)?;
-        Ok(Node::Element { tag, attrs, children })
+        Ok(Node::Element { tag, attrs, event_bindings, children })
     }
 
-    // RParen 전까지 ATTR을 모은다. 콤마는 선택적 구분자.
-    fn attrs(&mut self) -> Result<Vec<(String, AttrValue)>, ParseError> {
+    // RParen 전까지 ATTR과 이벤트 바인딩(`@click:EVENT`)을 모은다. 콤마는 선택적 구분자.
+    // 둘이 같은 괄호 안에 섞여 와 한 번에 모으고 (attrs, event_bindings)로 가른다.
+    #[allow(clippy::type_complexity)]
+    fn attrs(&mut self) -> Result<(Vec<(String, AttrValue)>, Vec<(String, String)>), ParseError> {
         let mut attrs = Vec::new();
+        let mut event_bindings = Vec::new();
         loop {
             match self.peek() {
                 Some(Token::RParen) | None => break,
                 Some(Token::Comma) => {
                     self.next()?;
+                }
+                // `@click:EVENT` — DOM 이벤트 바인딩. dom_event는 닫힌 집합(Keyword).
+                Some(Token::At(_)) => {
+                    let dom_event = match self.next()? {
+                        Token::At(Keyword::Click) => "click".to_string(),
+                        got => {
+                            return Err(ParseError::Expected {
+                                want: "DOM event directive (@click)".into(),
+                                got: format!("{got:?}"),
+                            })
+                        }
+                    };
+                    self.expect(&Token::Colon)?;
+                    let event_name = self.ident()?;
+                    event_bindings.push((dom_event, event_name));
                 }
                 Some(Token::Ident(_)) => {
                     let name = self.ident()?;
@@ -336,13 +416,13 @@ impl<'a> Parser<'a> {
                 }
                 Some(t) => {
                     return Err(ParseError::Expected {
-                        want: "attribute name or )".into(),
+                        want: "attribute name, @event, or )".into(),
                         got: format!("{t:?}"),
                     })
                 }
             }
         }
-        Ok(attrs)
+        Ok((attrs, event_bindings))
     }
 }
 
