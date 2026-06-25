@@ -7,7 +7,7 @@
 //
 // 포맷·테이블은 runtime.js와 같아야 한다(같은 계약). 여기선 디코드만 하므로 독립 디코더를 둔다.
 
-const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img"];
+const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img", "section", "header", "footer", "nav", "main", "aside", "label"];
 const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
 
 const OP = {

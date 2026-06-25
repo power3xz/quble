@@ -38,6 +38,13 @@ const TAGS = [
   "button",
   "article",
   "img",
+  "section",
+  "header",
+  "footer",
+  "nav",
+  "main",
+  "aside",
+  "label",
 ];
 const ATTRS = [
   "class",

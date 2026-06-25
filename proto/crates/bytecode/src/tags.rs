@@ -15,6 +15,13 @@ const TAGS: &[&str] = &[
     "button",  // 9
     "article", // 10
     "img",     // 11
+    "section", // 12
+    "header",  // 13
+    "footer",  // 14
+    "nav",     // 15
+    "main",    // 16
+    "aside",   // 17
+    "label",   // 18
 ];
 
 /// 태그 ID → 태그명. 범위를 벗어나면 None.
