@@ -1,0 +1,11 @@
+use Badge from "./badge.qubc"
+
+component LitBadge {
+  props { primaryRole, secondaryRole }
+  template {
+    div(class="litbadge") {
+      Badge(role={primaryRole} theme="light") {}
+      Badge(role={secondaryRole} theme="light") {}
+    }
+  }
+}
