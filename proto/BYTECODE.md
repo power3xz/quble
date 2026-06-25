@@ -62,7 +62,10 @@ props 객체·반응성.
 
 ```
 0:div  1:span  2:p  3:h1  4:h2  5:h3  6:a  7:ul  8:li  9:button  10:article  11:img
+12:section  13:header  14:footer  15:nav  16:main  17:aside  18:label
 ```
+
+추가만, 재배치 금지(예약 ID 안정). 시맨틱 태그(section~label)는 알림 패널 데모에서 편입.
 
 ### 전역 상수풀 — 속성명 (프로토타입 시작 집합)
 
