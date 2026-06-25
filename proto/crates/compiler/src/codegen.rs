@@ -1,6 +1,6 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{AttrValue, Event, Node};
+use crate::ast::{ArgValue, AttrValue, Event, Node};
 use crate::resolve::FlatComp;
 use bytecode::{encode, tags, CompDef, ConstPool, EventDef, Module, Op};
 
@@ -203,10 +203,11 @@ fn emit_node(
                 .get(name)
                 .ok_or_else(|| CodegenError::UnknownComponent(name.clone()))?;
 
-            // 자식 props 선언 순서대로 PUSH_ARG를 낸다. 각 자식 prop에 바인딩된 부모 변수를
-            // 부모 scope offset으로 풀어 싣는다. (지금은 전부 바인딩 가정 — 순서만으로 매핑.)
+            // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 offset을 싣는
+            // PUSH_ARG, 리터럴(`prop="lit"`)은 상수풀 인덱스를 싣는 PUSH_ARG_LIT.
+            // (지금은 전부 바인딩 가정 — 순서만으로 매핑.)
             for child_prop in child_props {
-                let parent_var = args
+                let arg_value = args
                     .iter()
                     .find(|(p, _)| p == child_prop)
                     .map(|(_, v)| v)
@@ -214,9 +215,18 @@ fn emit_node(
                         comp: name.clone(),
                         prop: child_prop.clone(),
                     })?;
-                let offset = prop_index(parent_var, props)?;
-                code.push(Op::PushArg as u8);
-                code.extend_from_slice(&offset.to_le_bytes());
+                match arg_value {
+                    ArgValue::Var(parent_var) => {
+                        let offset = prop_index(parent_var, props)?;
+                        code.push(Op::PushArg as u8);
+                        code.extend_from_slice(&offset.to_le_bytes());
+                    }
+                    ArgValue::Literal(literal) => {
+                        let value_index = pool.intern(literal);
+                        code.push(Op::PushArgLit as u8);
+                        code.extend_from_slice(&value_index.to_le_bytes());
+                    }
+                }
             }
 
             code.push(Op::Render as u8);

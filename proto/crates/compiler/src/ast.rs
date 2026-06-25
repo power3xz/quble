@@ -46,11 +46,11 @@ pub enum Node {
     Text(String),
     /// `{name}` 보간 — props 이름 참조. codegen이 scope 인덱스로 해석.
     Var(String),
-    /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})`.
-    /// args = (자식 prop명, 부모 변수명). codegen이 자식 props 순서로 PUSH_ARG를 낸다.
+    /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
+    /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
     Component {
         name: String,
-        args: Vec<(String, String)>,
+        args: Vec<(String, ArgValue)>,
     },
     /// `@if (cond) { then } @else { else_ }` — 조건 분기. cond는 불리언 prop명 하나
     /// (표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
@@ -67,4 +67,13 @@ pub enum Node {
 pub enum AttrValue {
     Static(String),
     Var(String),
+}
+
+/// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`).
+/// 변수는 부모 store 슬롯을 자식과 공유한다(자식 수정이 부모에 반영). 리터럴은 부모와 무관한
+/// 독립 값으로, 런타임이 자식 인스턴스에 고유 leaf로 심는다(원본과 분리, 자식이 독립 수정).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ArgValue {
+    Var(String),
+    Literal(String),
 }

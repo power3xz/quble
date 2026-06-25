@@ -7,7 +7,7 @@
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
-use crate::ast::{AttrValue, Component, Event, Node, SourceFile, Use};
+use crate::ast::{ArgValue, AttrValue, Component, Event, Node, SourceFile, Use};
 use crate::lexer::{Keyword, Token};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -325,8 +325,9 @@ impl<'a> Parser<'a> {
         Ok(Node::Component { name, args })
     }
 
-    // RParen 전까지 `prop = { var }` 인자를 모은다. 공백 구분(콤마 없음).
-    fn component_args(&mut self) -> Result<Vec<(String, String)>, ParseError> {
+    // RParen 전까지 `prop = {var}`(부모 변수) 또는 `prop = "lit"`(리터럴) 인자를 모은다.
+    // 공백 구분(콤마 없음).
+    fn component_args(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
         let mut args = Vec::new();
         loop {
             match self.peek() {
@@ -334,15 +335,30 @@ impl<'a> Parser<'a> {
                 Some(Token::Ident(_)) => {
                     let prop = self.ident()?;
                     self.expect(&Token::Eq)?;
-                    // use-site 바인딩 값은 `{var}`(부모 변수)만. 정적 문자열은 아직 미지원.
-                    self.expect(&Token::LBrace)?;
-                    let var = self.ident()?;
-                    self.expect(&Token::RBrace)?;
-                    args.push((prop, var));
+                    // 값은 `{var}`(부모 변수, 슬롯 공유) 또는 `"lit"`(리터럴, 독립 값).
+                    let value = match self.peek() {
+                        Some(Token::LBrace) => {
+                            self.next()?; // {
+                            let var = self.ident()?;
+                            self.expect(&Token::RBrace)?;
+                            ArgValue::Var(var)
+                        }
+                        Some(Token::Str(_)) => match self.next()? {
+                            Token::Str(s) => ArgValue::Literal(s.clone()),
+                            _ => unreachable!(),
+                        },
+                        got => {
+                            return Err(ParseError::Expected {
+                                want: "component arg value ({var} or \"lit\")".into(),
+                                got: format!("{got:?}"),
+                            })
+                        }
+                    };
+                    args.push((prop, value));
                 }
                 Some(t) => {
                     return Err(ParseError::Expected {
-                        want: "component arg (prop={var}) or )".into(),
+                        want: "component arg (prop={var} or prop=\"lit\") or )".into(),
                         got: format!("{t:?}"),
                     })
                 }

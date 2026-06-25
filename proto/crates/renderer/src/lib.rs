@@ -128,6 +128,12 @@ fn exec(
                 let val = scope.get(offset as usize).ok_or(RenderError::BadScope(offset))?;
                 args.push(val.clone());
             }
+            // 리터럴 인자: 상수풀 값을 그대로 자식 scope로 넘긴다. SSR은 정적 렌더라 자식이
+            // 수정하든 말든 상관없어(leaf·반응성 없음) 변수 인자와 같은 문자열로 취급한다.
+            Op::PushArgLit => {
+                let val_idx = read_u16(code, &mut pc)?;
+                args.push(get_const(module, val_idx)?.to_string());
+            }
             Op::Render => {
                 let child_comp_id = read_u16(code, &mut pc)?;
                 // 쌓인 인자(부모 값들)를 자식 scope로 넘기고 버퍼를 비운다.
@@ -189,7 +195,7 @@ fn truthy(val: &str) -> bool {
 fn operand_len(op: Op) -> usize {
     match op {
         Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd => 0,
-        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::If | Op::LoadRes => 2,
+        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::If | Op::LoadRes => 2,
         Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar | Op::BindEvent => 4,
     }
 }

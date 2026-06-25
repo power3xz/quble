@@ -28,6 +28,7 @@ const OP = {
   IF_END: 0x0e,
   LOAD_RES: 0x0f,
   BIND_EVENT: 0x10,
+  PUSH_ARG_LIT: 0x11,
 };
 
 const DOM_EVENTS = ["click"]; // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type.
@@ -212,7 +213,11 @@ const decompileBody = (module, def) => {
         lines.push(pad() + "}");
         break;
       case OP.PUSH_ARG:
-        pendingArgs.push(seenArg(u16(), "string"));
+        pendingArgs.push({ kind: "var", text: seenArg(u16(), "string") });
+        break;
+      case OP.PUSH_ARG_LIT:
+        // 리터럴 인자: 부모 변수가 아니라 상수풀 값. `argN="lit"`으로 복원(변수의 `={x}`와 구분).
+        pendingArgs.push({ kind: "lit", text: quote(module.pool[u16()]) });
         break;
       case OP.RENDER: {
         const name = compName(u16());
@@ -225,7 +230,11 @@ const decompileBody = (module, def) => {
         // 같은 부모값을 여러 자식 prop에 줘도(arg0={arg5} arg1={arg5}) 자식 offset은 i라 안 깨진다.
         // 자식명은 comp_id로 def 테이블에서 복원하고(compName), 슬롯은 언어상 항상 비어(컴파일러
         // parse.rs: 슬롯 미지원) {}로 닫는다.
-        const binds = pendingArgs.map((parentArg, childOffset) => "arg" + childOffset + "={" + parentArg + "}");
+        const binds = pendingArgs.map((arg, childOffset) =>
+          arg.kind === "lit"
+            ? "arg" + childOffset + "=" + arg.text
+            : "arg" + childOffset + "={" + arg.text + "}",
+        );
         pendingArgs = [];
         lines.push(pad() + name + "(" + binds.join(" ") + ") {}");
         break;

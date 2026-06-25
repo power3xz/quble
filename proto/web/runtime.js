@@ -79,6 +79,7 @@ const OP = {
   IF_END: 0x0e,
   LOAD_RES: 0x0f,
   BIND_EVENT: 0x10,
+  PUSH_ARG_LIT: 0x11,
 };
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -101,6 +102,7 @@ const operandLen = (op) => {
     case OP.TEXT_VAR:
     case OP.RENDER:
     case OP.PUSH_ARG:
+    case OP.PUSH_ARG_LIT:
     case OP.IF:
     case OP.LOAD_RES:
       return 2;
@@ -430,6 +432,18 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             if (path === undefined) {
               throw new Error("no path for offset " + parentOffset);
             }
+            args.push(path);
+            break;
+          }
+          case OP.PUSH_ARG_LIT: {
+            // 리터럴 인자(불변): 상수 값을 store에 leaf로 심고 그 path를 자식에게 넘긴다.
+            // 자식은 변수 인자(PUSH_ARG)와 똑같이 path로 받아 분기 없이 처리한다 — 단지 부모
+            // 슬롯이 아니라 이 리터럴만의 leaf라 불변이다(set 경로는 컴파일타임 거부 예정).
+            // path를 pool 인덱스로 지어 같은 리터럴은 같은 path=같은 leaf로 모인다 — leafOf가
+            // pathCache로 처음만 발급하므로 module.pool 값이 store에 딱 한 번만 복사된다.
+            const poolIndex = u16at();
+            const path = "$lit." + poolIndex;
+            ctx.seed(path, module.pool[poolIndex]);
             args.push(path);
             break;
           }

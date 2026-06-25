@@ -105,6 +105,48 @@ mod tests {
         );
     }
 
+    /// use-site 리터럴 인자: 부모가 자식에 변수가 아닌 리터럴을 직접 넘긴다(`Label(text="고정")`).
+    /// 부모 scope에 없는 값이라 PUSH_ARG_LIT로 상수풀에서 자식에 전달된다.
+    #[test]
+    fn composition_passes_literal_to_child() {
+        let src = r#"
+            component Card {
+              template {
+                div(class="card") {
+                  Label(text="고정") {}
+                }
+              }
+            }
+            component Label {
+              props { text }
+              template { span(class="label") { {text} } }
+            }
+        "#;
+        let html = render_source(src, 0, &[]).unwrap();
+        assert_eq!(
+            html,
+            r#"<div class="card"><span class="label">고정</span></div>"#
+        );
+    }
+
+    /// 한 자식에 리터럴 인자와 변수 인자를 섞어 넘긴다 — PUSH_ARG_LIT·PUSH_ARG가 자식 prop
+    /// 선언 순서대로 정렬돼 함께 전달된다.
+    #[test]
+    fn composition_mixes_literal_and_var_args() {
+        let src = r#"
+            component Parent {
+              props { name }
+              template { Child(label="이름:" value={name}) {} }
+            }
+            component Child {
+              props { label, value }
+              template { div() { {label} " " {value} } }
+            }
+        "#;
+        let html = render_source(src, 0, &["철수".to_string()]).unwrap();
+        assert_eq!(html, "<div>이름: 철수</div>");
+    }
+
     /// 자식 props 선언 순서대로 PUSH_ARG가 정렬된다 — use-site 인자 순서와 무관.
     #[test]
     fn composition_reorders_args_to_child_prop_order() {

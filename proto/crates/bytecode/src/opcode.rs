@@ -35,6 +35,10 @@ pub enum Op {
     /// 지금 여는 요소에 리스너를 묶는다. operand: event_type(전역 DOM 이벤트), event_idx(컴포넌트 이벤트).
     /// event_type DOM 이벤트가 일어나면 컴포넌트 이벤트 event_idx를 발생시킨다.
     BindEvent = 0x10,
+    /// 리터럴 인자를 자식 인자 버퍼에 push. operand: 상수풀 값 인덱스. 뒤따르는 RENDER가 소비.
+    /// PushArg와 달리 부모 슬롯을 공유하지 않고, 런타임이 자식 인스턴스에 고유 leaf로 심는다
+    /// (use-site 리터럴 `Comp(prop="lit")`의 인코딩 — 원본과 분리된 독립 값).
+    PushArgLit = 0x11,
 }
 
 impl Op {
@@ -58,6 +62,7 @@ impl Op {
             0x0e => Op::IfEnd,
             0x0f => Op::LoadRes,
             0x10 => Op::BindEvent,
+            0x11 => Op::PushArgLit,
             _ => return None,
         })
     }
