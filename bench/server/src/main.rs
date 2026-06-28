@@ -28,7 +28,10 @@ const SVELTE_DIST: &str = "../svelte/dist";
 
 fn main() {
     let loaded = build_components();
-    println!("적재된 컴포넌트: {:?}", loaded.components.keys().collect::<Vec<_>>());
+    println!(
+        "적재된 컴포넌트: {:?}",
+        loaded.components.keys().collect::<Vec<_>>()
+    );
 
     let server = Server::http(ADDR).expect("서버 시작 실패");
     println!("listening on http://{ADDR}");
@@ -61,11 +64,16 @@ fn main() {
             }
         } else if path == "/components" {
             // 적재 컴포넌트 이름 목록(JSON 배열) — inspector 셀렉트박스용.
+            // litprofilecard(리터럴 인자 데모)를 맨 앞으로 — 나머지는 알파벳순.
             let mut names = loaded.components.keys().cloned().collect::<Vec<_>>();
-            names.sort();
+            names.sort_by_key(|n| (n != "litprofilecard", n.clone()));
             let json = format!(
                 "[{}]",
-                names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(",")
+                names
+                    .iter()
+                    .map(|n| format!("\"{n}\""))
+                    .collect::<Vec<_>>()
+                    .join(",")
             );
             respond(req, json.into_bytes(), "application/json; charset=utf-8");
         } else if let Some(name) = path
@@ -82,7 +90,11 @@ fn main() {
                 Some(paths) => {
                     let json = format!(
                         "[{}]",
-                        paths.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(",")
+                        paths
+                            .iter()
+                            .map(|p| format!("\"{p}\""))
+                            .collect::<Vec<_>>()
+                            .join(",")
                     );
                     respond(req, json.into_bytes(), "application/json; charset=utf-8");
                 }
@@ -99,7 +111,8 @@ fn main() {
             match loaded.components.get(name) {
                 Some(bytes) => {
                     let res_paths = loaded.resmaps.get(name).map(Vec::as_slice).unwrap_or(&[]);
-                    match renderer::render_to_string(bytes, 0, &scope_from_query(query), res_paths) {
+                    match renderer::render_to_string(bytes, 0, &scope_from_query(query), res_paths)
+                    {
                         Ok(html) => {
                             let page = page_shell(&format!("SSR {name}"), &html);
                             respond(req, page.into_bytes(), "text/html; charset=utf-8");
@@ -111,17 +124,29 @@ fn main() {
             }
         } else if let Some(name) = path.strip_prefix("/react-csr/") {
             let name = name.to_string();
-            respond(req, react_csr_page(&name, query).into_bytes(), "text/html; charset=utf-8");
+            respond(
+                req,
+                react_csr_page(&name, query).into_bytes(),
+                "text/html; charset=utf-8",
+            );
         } else if path.starts_with("/react/assets/") {
             serve_react_asset(req, &path);
         } else if let Some(name) = path.strip_prefix("/react/") {
             // /react/<Name> → 부트 HTML. _boot.js가 views/<Name>.jsx를 동적 import 해 렌더.
-            respond(req, boot_page("/react/assets/_boot.js", name).into_bytes(), "text/html; charset=utf-8");
+            respond(
+                req,
+                boot_page("/react/assets/_boot.js", name).into_bytes(),
+                "text/html; charset=utf-8",
+            );
         } else if path.starts_with("/svelte/assets/") {
             serve_svelte_asset(req, &path);
         } else if let Some(name) = path.strip_prefix("/svelte/") {
             // /svelte/<Name> → 부트 HTML. _boot.js가 views/<Name>.svelte를 동적 import 해 mount.
-            respond(req, boot_page("/svelte/assets/_boot.js", name).into_bytes(), "text/html; charset=utf-8");
+            respond(
+                req,
+                boot_page("/svelte/assets/_boot.js", name).into_bytes(),
+                "text/html; charset=utf-8",
+            );
         } else if path.starts_with("/img/") {
             // 예제 상품 이미지는 전부 플레이스홀더 한 장으로.
             serve_public(req, "placeholder.svg");
@@ -156,7 +181,11 @@ fn build_components() -> Loaded {
         if path.extension().and_then(|s| s.to_str()) != Some("qubc") {
             continue;
         }
-        let name = path.file_stem().and_then(|s| s.to_str()).unwrap().to_string();
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap()
+            .to_string();
         // compile_file이 엔트리를 읽고 use는 importer 기준 상대경로로 해소한다.
         let output = compiler::compile_file(path.to_str().unwrap()).expect("컴파일 실패");
 
@@ -287,11 +316,7 @@ fn props_json_from_query(query: &str) -> String {
         .map(|(k, v)| {
             let key = percent_decode(k);
             let val = percent_decode(v);
-            format!(
-                "\"{}\":\"{}\"",
-                json_escape(&key),
-                json_escape(&val)
-            )
+            format!("\"{}\":\"{}\"", json_escape(&key), json_escape(&val))
         })
         .collect();
     format!("{{{}}}", pairs.join(","))
