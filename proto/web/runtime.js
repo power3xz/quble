@@ -80,6 +80,7 @@ const OP = {
   LOAD_RES: 0x0f,
   BIND_EVENT: 0x10,
   PUSH_ARG_LIT: 0x11,
+  PUSH_PATH_SEGMENT: 0x12,
 };
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -103,6 +104,7 @@ const operandLen = (op) => {
     case OP.RENDER:
     case OP.PUSH_ARG:
     case OP.PUSH_ARG_LIT:
+    case OP.PUSH_PATH_SEGMENT:
     case OP.IF:
     case OP.LOAD_RES:
       return 2;
@@ -286,6 +288,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
     // @param startRegionIndex 구독을 쌓을 region
     // @param startBranchIndex 구독을 쌓을 가지(THEN/ELSE)
+    // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
     // @returns                직속 노드를 담은 DocumentFragment
     const interpret = (
       code,
@@ -295,11 +298,13 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
       endPc,
       startRegionIndex,
       startBranchIndex,
+      pathPrefix,
     ) => {
       const fragment = document.createDocumentFragment();
       const nodeStack = [fragment]; // 노드 스택 — DOM 부모 추적
       let pending = null;
       let args = [];
+      let segment = null; // 다음 RENDER가 소비할 경로 세그먼트(PUSH_PATH_SEGMENT가 적재)
       let pc = startPc;
 
       // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
@@ -388,6 +393,9 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             const domEvent = DOM_EVENTS[u16at()];
             const event = events[u16at()];
             const eventName = module.pool[event.nameIdx];
+            // fullname = 합성 경로 + 로컬 이벤트명(누가 쐈나). 바인딩 시점에 불변이라 콜백 밖에서
+            // 한 번 짓는다(루트는 prefix가 비어 로컬명 그대로 — 기존 동작과 호환).
+            const fullName = pathPrefix ? pathPrefix + "." + eventName : eventName;
             // payload offset들을 leafIndex로 풀어, 발생 시점의 현재값을 필드명 키로 모은다.
             // offset->leafIndex는 발생 때가 아니라 지금(바인딩 때) 한 번 푼다(paths는 인스턴스 불변).
             const fields = event.payload.map((p) => ({
@@ -400,7 +408,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               for (const f of fields) {
                 data[f.name] = ctx.get(f.leafIndex);
               }
-              handlers[eventName]?.(data);
+              handlers[fullName]?.(data);
             });
             break;
           }
@@ -447,10 +455,19 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             args.push(path);
             break;
           }
+          case OP.PUSH_PATH_SEGMENT: {
+            // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
+            // 단일 변수로 적재 — args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
+            segment = module.pool[u16at()];
+            break;
+          }
           case OP.RENDER: {
             const childCompId = u16at();
             const childPaths = args;
             args = [];
+            // 자식 경로 prefix = 부모 prefix + 세그먼트. 이벤트 fullname의 path 축을 누적한다.
+            const childPrefix = pathPrefix ? pathPrefix + "." + segment : segment;
+            segment = null;
             // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 paths로 같은 interpret에 돌린다.
             // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) → 자식 IF는 이 가지의
             // childRegionIndices에 합류하고 같은 regions 배열에 append된다(인덱스 전역 유일).
@@ -464,6 +481,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               childDef.codeOff + childDef.codeLen,
               startRegionIndex,
               startBranchIndex,
+              childPrefix,
             );
             for (const node of childFragment.childNodes) {
               nodeTop().appendChild(node);
@@ -498,6 +516,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
                 thenEnd,
                 regionIndex,
                 THEN_INDEX,
+                pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
               );
               thenBranch.nodes = Array.from(f.childNodes);
             };
@@ -513,6 +532,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
                       ifEndPc,
                       regionIndex,
                       ELSE_INDEX,
+                      pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
                     );
               elseBranch.nodes = Array.from(f.childNodes);
             };
@@ -562,6 +582,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
       def.codeOff + def.codeLen,
       0,
       THEN_INDEX,
+      "", // 루트 경로 prefix 비어 있음
     );
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 — attach가 anchor.after로 채운다

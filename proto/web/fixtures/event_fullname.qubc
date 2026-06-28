@@ -1,0 +1,15 @@
+component Card {
+  template {
+    div() {
+      Toggle(label="A" on="off") {}
+    }
+  }
+}
+
+component Toggle {
+  props { label, on }
+  events { TOGGLE({ label, on }) }
+  template {
+    button(@click:TOGGLE) { {label} }
+  }
+}
