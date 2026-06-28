@@ -1,0 +1,57 @@
+use "./profilecard.css"
+use Thumbnail from "./thumbnail.qubc"
+use Badge from "./badge.qubc"
+use Stat from "./stat.qubc"
+use MetaRow from "./metarow.qubc"
+use Activity from "./activity.qubc"
+use Tag from "./tag.qubc"
+use LinkButton from "./linkbutton.qubc"
+
+component LitProfileCard {
+  props {
+    name, role, bio, avatar, link,
+    followersLabel, followers, followingLabel, following, postsLabel, posts,
+    location, company,
+    site, github, twitter,
+    act1Text, act1Time, act2Text, act2Time, act3Text, act3Time,
+    tag1, tag2, tag3, tag4
+  }
+  template {
+    article(class="light") {
+      div(class="header") {
+        Thumbnail(avatar={avatar} name={name}) {}
+        div(class="ident") {
+          h3(class="name") { {name} }
+          Badge(role={role} theme="light") {}
+        }
+      }
+      p(class="bio") { {bio} }
+      div(class="stats") {
+        Stat(label={followersLabel} value={followers}) {}
+        Stat(label={followingLabel} value={following}) {}
+        Stat(label={postsLabel} value={posts}) {}
+      }
+      div(class="meta") {
+        MetaRow(icon="📍" text={location}) {}
+        MetaRow(icon="🏢" text={company}) {}
+      }
+      div(class="activity") {
+        Activity(icon="✏️" text={act1Text} time={act1Time}) {}
+        Activity(icon="⭐" text={act2Text} time={act2Time}) {}
+        Activity(icon="🔔" text={act3Text} time={act3Time}) {}
+      }
+      div(class="tags") {
+        Tag(text={tag1} theme="light") {}
+        Tag(text={tag2} theme="light") {}
+        Tag(text={tag3} theme="light") {}
+        Tag(text={tag4} theme="light") {}
+      }
+      div(class="links") {
+        LinkButton(link={site} theme="light") {}
+        LinkButton(link={github} theme="light") {}
+        LinkButton(link={twitter} theme="light") {}
+      }
+      a(class="profile" href={link}) { "전체 프로필 보기" }
+    }
+  }
+}
