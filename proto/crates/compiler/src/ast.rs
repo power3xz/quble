@@ -20,9 +20,9 @@ pub struct Use {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Component {
     pub name: String,
-    pub props: Vec<String>,   // 선언 순서 = scope 인덱스
-    pub events: Vec<Event>,   // 선언 순서 = event_idx (BIND_EVENT가 참조)
-    pub template: Vec<Node>,  // 루트 노드들 (fragment 허용)
+    pub props: Vec<String>,  // 선언 순서 = scope 인덱스
+    pub events: Vec<Event>,  // 선언 순서 = event_idx (BIND_EVENT가 참조)
+    pub template: Vec<Node>, // 루트 노드들 (fragment 허용)
 }
 
 /// `events { TOGGLE({ label: title, on }) }` — 컴포넌트가 선언한 이벤트.
