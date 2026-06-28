@@ -55,6 +55,17 @@ These are the load-bearing invariants any implementation must preserve:
   (`goTo`) — not plain callbacks. `data` and `provided` types are compiler-generated from
   the `events` schema bound to the fullname (§2.5).
 
+## Anticipated Change Points (quble)
+
+For the global *Anticipated Change Points* exception (in `~/.claude/CLAUDE.md`), DESIGN.md
+is this project's "committed design source": a change recorded there counts as committed,
+not hypothetical. The typical seam here is the **bytecode contract** — opcodes and their
+operands (opcode.rs ↔ runtime.js ↔ disasm.js ↔ renderer). When DESIGN.md commits to a
+feature whose only clean landing spot is a new opcode or operand, adding that opcode now —
+even before the feature fully lands — localizes the future edit and avoids re-touching the
+operand format and every decoder later. That is allowed; speculative flexibility for
+undesigned features is not.
+
 ## Language Surface
 
 Component blocks: `props`, `contexts`, `events` (name + payload schema), `template`.
