@@ -229,6 +229,12 @@ fn emit_node(
                 }
             }
 
+            // 합성 경로 세그먼트 = 자식 type-name(alias 도입 시 이 값만 바뀐다). 뒤따르는
+            // RENDER가 소비해 자식 경로 prefix에 잇는다 — 이벤트 fullname의 path 축.
+            let segment_index = pool.intern(name);
+            code.push(Op::PushPathSegment as u8);
+            code.extend_from_slice(&segment_index.to_le_bytes());
+
             code.push(Op::Render as u8);
             code.extend_from_slice(&child_id.to_le_bytes());
         }

@@ -549,4 +549,60 @@ mod tests {
         assert!(names.contains(&"Y".to_string()), "Right가 use한 Y");
         assert!(!names.contains(&"Z".to_string()), "아무도 use 안 한 Z는 제외");
     }
+
+    /// 합성은 RENDER 직전에 PUSH_PATH_SEGMENT를 낸다 — operand는 자식 type-name 상수풀 인덱스.
+    /// 이벤트 fullname의 path 축(누가 쐈나)을 누적할 세그먼트다(alias 도입 전엔 type-name 그대로).
+    #[test]
+    fn composition_emits_push_path_segment_of_child_type_name() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer { template { div() { Inner() {} } } }
+            component Inner { template { span() {} } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        // Outer(엔트리=ID 0) 코드에서 PUSH_PATH_SEGMENT를 찾는다.
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let seg_pos = code
+            .iter()
+            .position(|&b| b == Op::PushPathSegment as u8)
+            .expect("합성이 PUSH_PATH_SEGMENT를 내야 한다");
+
+        // operand는 "Inner"를 가리킨다.
+        let seg_idx = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
+        assert_eq!(module.pool.get(seg_idx).unwrap(), "Inner");
+
+        // 바로 뒤에 RENDER가 온다 — 세그먼트를 소비하는 합성.
+        assert_eq!(code[seg_pos + 3], Op::Render as u8);
+    }
+
+    /// 같은 자식을 두 번 합성하면 PUSH_PATH_SEGMENT가 같은 세그먼트로 두 번 나온다 —
+    /// alias 없는 동일 type-name은 같은 fullname을 의도적으로 공유한다(§1.3).
+    #[test]
+    fn duplicate_composition_repeats_same_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer { template { div() { Inner() {} Inner() {} } } }
+            component Inner { template { span() {} } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let seg_indices: Vec<u16> = code
+            .iter()
+            .enumerate()
+            .filter(|(_, &b)| b == Op::PushPathSegment as u8)
+            .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
+            .collect();
+
+        assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 → 세그먼트 둘");
+        assert_eq!(seg_indices[0], seg_indices[1], "같은 type-name은 같은 상수풀 인덱스");
+        assert_eq!(module.pool.get(seg_indices[0]).unwrap(), "Inner");
+    }
 }

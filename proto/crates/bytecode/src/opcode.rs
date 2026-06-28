@@ -39,6 +39,9 @@ pub enum Op {
     /// PushArg와 달리 부모 슬롯을 공유하지 않고, 런타임이 자식 인스턴스에 고유 leaf로 심는다
     /// (use-site 리터럴 `Comp(prop="lit")`의 인코딩 — 원본과 분리된 독립 값).
     PushArgLit = 0x11,
+    /// 합성 경로(fullname)에 세그먼트 하나를 민다. operand: 상수풀 세그먼트 인덱스(자식 type-name).
+    /// 뒤따르는 RENDER가 소비. 이벤트 fullname의 path 축을 누적한다(context 축 `@with`와 무관).
+    PushPathSegment = 0x12,
 }
 
 impl Op {
@@ -63,6 +66,7 @@ impl Op {
             0x0f => Op::LoadRes,
             0x10 => Op::BindEvent,
             0x11 => Op::PushArgLit,
+            0x12 => Op::PushPathSegment,
             _ => return None,
         })
     }

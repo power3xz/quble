@@ -173,6 +173,11 @@ fn exec(
                 read_u16(code, &mut pc)?;
                 read_u16(code, &mut pc)?;
             }
+            // 합성 경로 세그먼트. fullname은 이벤트(클라 전용)를 위한 것이라 SSR엔 무의미 —
+            // operand만 소비하고 무시한다.
+            Op::PushPathSegment => {
+                read_u16(code, &mut pc)?;
+            }
         }
     }
     Ok(())
@@ -195,7 +200,7 @@ fn truthy(val: &str) -> bool {
 fn operand_len(op: Op) -> usize {
     match op {
         Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd => 0,
-        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::If | Op::LoadRes => 2,
+        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes => 2,
         Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar | Op::BindEvent => 4,
     }
 }
