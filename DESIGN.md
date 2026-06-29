@@ -303,6 +303,11 @@ unhandled-event 경고) 개발이 쉬워진다(§4.1의 "DX는 도구로 푼다"
 
 미결: 본문 위임의 정확한 경계(그대로 토해내기 vs `set`/`goTo` 같은 키워드만 인식).
 
+**중간 단계:** 전용 `handle` 문법은 종착점이고, 당분간은 모듈과 1:1로 묶인
+TypeScript 파일로 작성한다(`card.qubc` <-> `card.qubc.handler.ts`). 매개변수 타입과
+자동완성은 VSCode 확장이 제공하고, 컴파일 시 짝꿍 핸들러 파일은 CSS와 같은 부류로
+res에 포함한다.
+
 ---
 
 ## 부록 A. 예시 — TodoItem.comp
