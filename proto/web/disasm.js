@@ -169,7 +169,7 @@ const decompileBody = (module, def) => {
   // 여는 태그 한 줄을 만든다. selfClose면 한 줄로 닫고(`div() {}` 대신 빈 본문),
   // 아니면 `{`를 열고 depth를 늘린다.
   const flushOpen = (selfClose) => {
-    const attrStr = attrs.join(", ");
+    const attrStr = attrs.join(" ");
     if (selfClose) {
       lines.push(pad() + tag + "(" + attrStr + ") {}");
     } else {

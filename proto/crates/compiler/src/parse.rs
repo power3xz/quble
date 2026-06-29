@@ -397,9 +397,6 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 Some(Token::RParen) | None => break,
-                Some(Token::Comma) => {
-                    self.next()?;
-                }
                 // `@click:EVENT` — DOM 이벤트 바인딩. dom_event는 닫힌 집합(Keyword).
                 Some(Token::At(_)) => {
                     let dom_event = match self.next()? {

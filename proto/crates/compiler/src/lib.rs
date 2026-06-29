@@ -656,4 +656,14 @@ mod tests {
         assert_eq!(module.pool.get(seg_indices[0]).unwrap(), "Save");
         assert_eq!(module.pool.get(seg_indices[1]).unwrap(), "Cancel");
     }
+
+    /// 요소 속성은 공백 구분 — 속성 사이 콤마는 우리 문법이 아니라 ParseError로 거부한다.
+    #[test]
+    fn element_attrs_reject_comma_separator() {
+        let src = r#"component A { template { div(class="x", id="y") {} } }"#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
 }
