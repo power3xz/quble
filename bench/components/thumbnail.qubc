@@ -2,7 +2,7 @@ use "./thumbnail.css"
 
 component Thumbnail {
   props { avatar, name }
-  events { CLICK_THUMBNAIL({ name }) }
+  events { CLICK_THUMBNAIL({ name, avatar }) }
   template {
     img(class="avatar" src={avatar} alt={name} @click:CLICK_THUMBNAIL) {}
   }
