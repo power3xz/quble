@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Quble 클라이언트 런타임(실험) — runtime.js/region.js. 테스트는 node --test + jsdom.",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test --test-concurrency=1"
   },
   "devDependencies": {
     "jsdom": "^29.1.1"
