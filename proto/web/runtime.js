@@ -421,6 +421,9 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             }
             const el = pending;
             el.addEventListener(domEvent, (domEventObject) => {
+              // 위임 리스너는 자기 선에서 버블을 끊는다(디폴트). fullname은 박힌 위치 하나로
+              // 디스패치되며, 조상 요소의 같은 DOM 이벤트 위임으로 새지 않는다. 끄는 옵션은 미정.
+              domEventObject.stopPropagation();
               const data = {};
               for (const name in props) {
                 data[name] = ctx.get(props[name]);

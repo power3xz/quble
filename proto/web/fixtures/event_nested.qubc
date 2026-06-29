@@ -1,0 +1,12 @@
+component Nested {
+  props { label }
+  events {
+    OUTER({ label })
+    INNER({ label })
+  }
+  template {
+    div(@click:OUTER) {
+      button(@click:INNER) { {label} }
+    }
+  }
+}
