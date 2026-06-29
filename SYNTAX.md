@@ -10,8 +10,8 @@ DESIGN.md에 흩어진 문법을 한곳에 정리한다. 이 문서는 **표층 
 ## 1. 파일 구조
 
 ```
-import Button from "./Button"          // 다른 컴포넌트 import
-import styles from "./Card.module.css" // 에셋 import
+use Button from "./Button"          // 다른 컴포넌트 import (여러 개: use A, B from "…")
+use "./Card.module.css"             // 에셋 — 이름 없이 경로만
 
 component IDENT {
   props    { … }   // 선택
@@ -21,7 +21,7 @@ component IDENT {
 }
 ```
 
-한 파일에 `import …`들과 하나의 `component` 선언. 블록 순서는 위 관례를 따른다.
+한 파일에 `use …`들과 컴포넌트 선언(들). 블록 순서는 위 관례를 따른다.
 
 ---
 

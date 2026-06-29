@@ -47,7 +47,9 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 ## 합성 / 이벤트
 
 - [x] 합성 — 컴포넌트 호출(`Comp(p={var})`), 다중 정의, use-site 바인딩(`PUSH_ARG`+`RENDER`로 부모->자식 path 전달). 공유 검증.
-- [ ] 별칭 / 슬롯 / fullname — 별칭 붙여 분리, `{}` 슬롯, 경로 누적 식별자.
+- [x] fullname — 합성 경로를 누적한 이벤트 식별자(`Toggle.TOGGLE`). 별칭 없으면 타입명이 마디.
+- [x] 별칭 — `Alias: Comp(...)`로 경로 마디를 별칭으로(분리), 생략 시 타입명 공유.
+- [ ] 슬롯 — `{}` 자식 콘텐츠 주입.
 - [ ] contexts / events — 핸들러(fullname에 묶임), 이벤트 위임 (`action(EVENT, data)`). 모델: [REACTIVITY.md](REACTIVITY.md) §6·§7.
 
 ## 전송 / 보안
@@ -60,3 +62,4 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] dev 서버 (`quble-serve <path>`) — 컴파일해 메모리에서 바로 서빙(qubb·resmap·res). dist 안 거침.
 - [x] bench 비교 환경 (qubb vs React lazy chunk 네트워크 비용)
 - [x] qubb 인스펙터 — qubb를 qubc로 디컴파일 + 컴포넌트 선택·arg 입력으로 실시간 렌더 (IDEAS.md 컴포넌트 뷰어). 임의 qubb url 로드 지원.
+- [x] VSCode `.qubc` 신택스 하이라이팅 (`editors/vscode/`) — 현행 문법만 칠한다.
