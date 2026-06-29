@@ -276,7 +276,7 @@
       eventsPanel.innerHTML = events
         .map((event) => {
           const fields = event.payload
-            .map((p) => `<li class="inspector__event-field"><span class="inspector__event-field-name">${esc(p.field)}</span><span class="inspector__event-field-offset">@${p.offset}</span></li>`)
+            .map((p) => `<li class="inspector__event-field"><span class="inspector__event-field-name">${esc(p.field)}</span><span class="inspector__event-field-offset">arg${p.offset}</span></li>`)
             .join("");
           return (
             `<div class="inspector__event">` +
