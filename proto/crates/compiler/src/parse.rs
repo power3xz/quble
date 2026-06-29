@@ -306,9 +306,18 @@ impl<'a> Parser<'a> {
         Ok(Node::Var(name))
     }
 
-    // COMP ( ARG* ) { }   — 대문자 컴포넌트 호출. ARG = prop = { var }.
+    // [ALIAS :] COMP ( ARG* ) { }   — 대문자 컴포넌트 호출. ARG = prop = { var }.
+    // `Alias: Comp(...)`면 앞 Ident가 use-site 별칭(fullname 세그먼트). 없으면 type-name.
+    // node 자리의 `대문자Ident :`는 alias뿐이라, 한 칸 앞 콜론으로 갈리고 모호하지 않다.
     // 슬롯(자식 노드)은 아직 미지원 — 블록은 비어야 한다.
     fn component_call(&mut self) -> Result<Node, ParseError> {
+        let alias = if matches!(self.tokens.get(self.pos + 1), Some(Token::Colon)) {
+            let alias = self.ident()?;
+            self.expect(&Token::Colon)?;
+            Some(alias)
+        } else {
+            None
+        };
         let name = self.ident()?;
         self.expect(&Token::LParen)?;
         let args = self.component_args()?;
@@ -322,7 +331,7 @@ impl<'a> Parser<'a> {
             });
         }
         self.expect(&Token::RBrace)?;
-        Ok(Node::Component { name, args })
+        Ok(Node::Component { alias, name, args })
     }
 
     // RParen 전까지 `prop = {var}`(부모 변수) 또는 `prop = "lit"`(리터럴) 인자를 모은다.

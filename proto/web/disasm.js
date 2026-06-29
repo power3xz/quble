@@ -163,6 +163,8 @@ const decompileBody = (module, def) => {
 
   // 자식 인자 누적(PUSH_ARG -> RENDER). 자식 props offset 순서대로 쌓인다.
   let pendingArgs = [];
+  // 다음 RENDER가 쓸 경로 세그먼트(PUSH_PATH_SEGMENT가 적재). type-name과 다르면 use-site alias.
+  let pendingSegment = null;
 
   // 여는 태그 한 줄을 만든다. selfClose면 한 줄로 닫고(`div() {}` 대신 빈 본문),
   // 아니면 `{`를 열고 depth를 늘린다.
@@ -237,7 +239,10 @@ const decompileBody = (module, def) => {
             : "arg" + childOffset + "={" + arg.text + "}",
         );
         pendingArgs = [];
-        lines.push(pad() + name + "(" + binds.join(" ") + ") {}");
+        // 세그먼트가 type-name과 다르면 use-site alias — `Alias: Comp(...)`로 복원.
+        const prefix = pendingSegment && pendingSegment !== name ? pendingSegment + ": " : "";
+        pendingSegment = null;
+        lines.push(pad() + prefix + name + "(" + binds.join(" ") + ") {}");
         break;
       }
       case OP.IF:
@@ -270,10 +275,9 @@ const decompileBody = (module, def) => {
         break;
       }
       case OP.PUSH_PATH_SEGMENT:
-        // 소스 복원엔 안 쓴다 — 뒤따르는 RENDER가 compName으로 같은 type-name을 이미 복원한다
-        // (이벤트 fullname 산출은 별도: collectEventFullnames). operand만 소비. (alias 도입 시
-        // 세그먼트가 compName과 달라져 `Alias: Comp(...)` 복원에 쓰인다.)
-        u16();
+        // 다음 RENDER가 쓸 세그먼트를 잡는다. type-name과 같으면 무명, 다르면 use-site alias라
+        // `Alias: Comp(...)`로 복원한다. (이벤트 fullname 산출은 별도: collectEventFullnames.)
+        pendingSegment = module.pool[u16()];
         break;
       default:
         throw new Error("bad opcode 0x" + op.toString(16));

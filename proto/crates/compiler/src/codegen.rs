@@ -197,7 +197,7 @@ fn emit_node(
             // END는 operand 없음 — 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
             code.push(Op::ElemEnd as u8);
         }
-        Node::Component { name, args } => {
+        Node::Component { alias, name, args } => {
             // 자식 ID와 props 선언을 찾는다.
             let (child_id, child_props) = comp_lookup
                 .get(name)
@@ -229,9 +229,11 @@ fn emit_node(
                 }
             }
 
-            // 합성 경로 세그먼트 = 자식 type-name(alias 도입 시 이 값만 바뀐다). 뒤따르는
-            // RENDER가 소비해 자식 경로 prefix에 잇는다 — 이벤트 fullname의 path 축.
-            let segment_index = pool.intern(name);
+            // 합성 경로 세그먼트 = use-site alias가 있으면 alias, 없으면 자식 type-name.
+            // 뒤따르는 RENDER가 소비해 자식 경로 prefix에 잇는다 — 이벤트 fullname의 path 축.
+            // (alias 생략 = 동일 type-name 공유, alias 부여 = 분리. §1.3)
+            let segment = alias.as_deref().unwrap_or(name);
+            let segment_index = pool.intern(segment);
             code.push(Op::PushPathSegment as u8);
             code.extend_from_slice(&segment_index.to_le_bytes());
 

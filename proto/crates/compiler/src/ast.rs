@@ -48,7 +48,10 @@ pub enum Node {
     Var(String),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
+    /// alias = use-site 별칭(`Alias: Comp(...)`). 있으면 이게 fullname path 세그먼트가 되고,
+    /// 없으면 type-name을 그대로 쓴다(§1.3 — alias 없는 동일 type-name은 의도적 공유).
     Component {
+        alias: Option<String>,
         name: String,
         args: Vec<(String, ArgValue)>,
     },

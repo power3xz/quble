@@ -605,4 +605,55 @@ mod tests {
         assert_eq!(seg_indices[0], seg_indices[1], "같은 type-name은 같은 상수풀 인덱스");
         assert_eq!(module.pool.get(seg_indices[0]).unwrap(), "Inner");
     }
+
+    /// `Alias: Comp(...)` — alias가 있으면 세그먼트는 type-name이 아니라 alias다.
+    #[test]
+    fn alias_replaces_type_name_in_path_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer { template { div() { Done: Inner() {} } } }
+            component Inner { template { span() {} } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let seg_pos = code
+            .iter()
+            .position(|&b| b == Op::PushPathSegment as u8)
+            .expect("합성이 PUSH_PATH_SEGMENT를 내야 한다");
+
+        // operand는 type-name "Inner"가 아니라 alias "Done".
+        let seg_idx = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
+        assert_eq!(module.pool.get(seg_idx).unwrap(), "Done");
+    }
+
+    /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 — alias 부여는 분리의 명시적 행위(§1.3).
+    #[test]
+    fn distinct_aliases_split_shared_type_name() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer { template { div() { Save: Inner() {} Cancel: Inner() {} } } }
+            component Inner { template { span() {} } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let seg_indices: Vec<u16> = code
+            .iter()
+            .enumerate()
+            .filter(|(_, &b)| b == Op::PushPathSegment as u8)
+            .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
+            .collect();
+
+        assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 → 세그먼트 둘");
+        assert_ne!(seg_indices[0], seg_indices[1], "다른 alias는 다른 세그먼트");
+        assert_eq!(module.pool.get(seg_indices[0]).unwrap(), "Save");
+        assert_eq!(module.pool.get(seg_indices[1]).unwrap(), "Cancel");
+    }
 }

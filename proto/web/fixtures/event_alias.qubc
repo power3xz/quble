@@ -1,0 +1,17 @@
+component Bar {
+  template {
+    div() {
+      Save: Button(label="저장") {}
+      Cancel: Button(label="취소") {}
+      Button(label="더보기") {}
+    }
+  }
+}
+
+component Button {
+  props { label }
+  events { CLICK({ label }) }
+  template {
+    button(@click:CLICK) { {label} }
+  }
+}
