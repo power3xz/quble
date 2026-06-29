@@ -20,7 +20,7 @@ pub enum RenderError {
     BadTag(u16),
     /// 범위 밖 전역 속성명 ID.
     BadAttr(u16),
-    /// 여는 태그 없이 END (스택 불균형 — 손상된 바이트코드).
+    /// 여는 태그 없이 END (스택 불균형 - 손상된 바이트코드).
     UnbalancedEnd,
     /// 범위 밖 scope 인덱스 (주입 값 부족).
     BadScope(u16),
@@ -35,8 +35,8 @@ impl From<DecodeError> for RenderError {
 }
 
 /// 바이트코드를 디코드하고 comp_id를 진입점으로 렌더해 HTML 문자열을 만든다.
-/// scope는 런타임 주입 값 배열 — `TEXT_VAR idx`가 `scope[idx]`를 참조한다.
-/// res_paths는 resId -> 리소스 경로(resmap) — `LOAD_RES resId`를 `<link href>`로 인라인한다.
+/// scope는 런타임 주입 값 배열 - `TEXT_VAR idx`가 `scope[idx]`를 참조한다.
+/// res_paths는 resId -> 리소스 경로(resmap) - `LOAD_RES resId`를 `<link href>`로 인라인한다.
 pub fn render_to_string(
     bytes: &[u8],
     comp_id: u16,
@@ -45,7 +45,7 @@ pub fn render_to_string(
 ) -> Result<String, RenderError> {
     let module = bytecode::decode(bytes)?;
     let mut out = String::new();
-    // 이미 <link>로 낸 resId — 여러 컴포넌트가 같은 리소스를 써도 한 번만 낸다.
+    // 이미 <link>로 낸 resId - 여러 컴포넌트가 같은 리소스를 써도 한 번만 낸다.
     let mut emitted = HashSet::new();
     exec(&module, comp_id, scope, res_paths, &mut emitted, &mut out)?;
     Ok(out)
@@ -155,7 +155,7 @@ fn exec(
             // 정상 종료 마커. 할 일 없음.
             Op::IfEnd => {}
             // 외부 리소스 로드. resId의 리소스 경로를 <link>로 인라인한다(중복 resId 스킵).
-            // head 조립 계층이 없어 조각 자리에 인라인 — <link>는 body에서도 브라우저가 처리한다.
+            // head 조립 계층이 없어 조각 자리에 인라인 - <link>는 body에서도 브라우저가 처리한다.
             Op::LoadRes => {
                 let res_id = read_u16(code, &mut pc)?;
                 if emitted.insert(res_id) {
@@ -167,13 +167,13 @@ fn exec(
                     out.push_str("\">");
                 }
             }
-            // 이벤트 배선. SSR은 정적 HTML이라 리스너가 없다 — operand만 소비하고 무시한다
+            // 이벤트 배선. SSR은 정적 HTML이라 리스너가 없다 - operand만 소비하고 무시한다
             // (이벤트는 클라 런타임이 단다). event_type·event_idx 4바이트.
             Op::BindEvent => {
                 read_u16(code, &mut pc)?;
                 read_u16(code, &mut pc)?;
             }
-            // 합성 경로 세그먼트. fullname은 이벤트(클라 전용)를 위한 것이라 SSR엔 무의미 —
+            // 합성 경로 세그먼트. fullname은 이벤트(클라 전용)를 위한 것이라 SSR엔 무의미 -
             // operand만 소비하고 무시한다.
             Op::PushPathSegment => {
                 read_u16(code, &mut pc)?;
@@ -190,7 +190,7 @@ fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, RenderError> {
 }
 
 /// 불리언 scope 값의 truthy 판정. 빈 문자열·"false"·"0"은 falsy, 그 외 truthy.
-/// (cond는 불리언 scope offset 하나 — BYTECODE.md §5.1)
+/// (cond는 불리언 scope offset 하나 - BYTECODE.md §5.1)
 fn truthy(val: &str) -> bool {
     !(val.is_empty() || val == "false" || val == "0")
 }
@@ -224,7 +224,7 @@ fn skip_branch(code: &[u8], pc: &mut usize) -> Result<(), RenderError> {
             _ => *pc += operand_len(op),
         }
     }
-    // 매칭 마커 없이 코드 끝 — 손상된 바이트코드.
+    // 매칭 마커 없이 코드 끝 - 손상된 바이트코드.
     Err(RenderError::UnbalancedEnd)
 }
 
@@ -462,7 +462,7 @@ mod tests {
         let mut pool = ConstPool::new();
         let name = pool.intern("Styled");
 
-        // LOAD_RES 0; span() {} — 정의 앞머리에 리소스 로드.
+        // LOAD_RES 0; span() {} - 정의 앞머리에 리소스 로드.
         let mut a = Asm::new();
         a.load_res(0).open(t("span")).close_open().end().halt();
         let code = a.code;
@@ -523,17 +523,17 @@ mod tests {
     }
 
     /// 합성 + PUSH_ARG: 부모가 자기 scope의 일부를 자식에게 넘긴다.
-    /// 부모 div() { {a} Comp(name={b}) } — 부모 scope=["A","B"], 자식은 b만 받아 출력.
+    /// 부모 div() { {a} Comp(name={b}) } - 부모 scope=["A","B"], 자식은 b만 받아 출력.
     #[test]
     fn render_passes_args_to_child() {
         let mut pool = ConstPool::new();
         let parent = pool.intern("Parent");
         let child = pool.intern("Child");
 
-        // 자식: span() { {0} }  — 받은 scope[0]을 출력.
+        // 자식: span() { {0} }  - 받은 scope[0]을 출력.
         let mut c = Asm::new();
         c.open(t("span")).close_open().text_var(0).end().halt();
-        // 부모: div() { {0} PUSH_ARG 1; RENDER child }  — 자기 scope[0] 출력 + 자식엔 scope[1] 전달.
+        // 부모: div() { {0} PUSH_ARG 1; RENDER child }  - 자기 scope[0] 출력 + 자식엔 scope[1] 전달.
         let mut p = Asm::new();
         p.open(t("div"))
             .close_open()
@@ -681,7 +681,7 @@ mod tests {
         assert_eq!(render_one(pool, code, &["false".into()]), "<div></div>");
     }
 
-    /// 중첩 if — 바깥 then 안의 안쪽 if/else가 바깥 ELSE를 침범하지 않는지(depth 카운팅).
+    /// 중첩 if - 바깥 then 안의 안쪽 if/else가 바깥 ELSE를 침범하지 않는지(depth 카운팅).
     /// @if a { @if b { "AB" } @else { "Ab" } } @else { "x" }
     #[test]
     fn nested_if_depth() {

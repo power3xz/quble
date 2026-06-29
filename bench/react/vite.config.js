@@ -13,7 +13,7 @@ export default {
         "react-csr": resolve(__dirname, "src/react-csr.jsx"),
         _boot: resolve(__dirname, "src/_boot.jsx"),
       },
-      // 해시 없는 고정 파일명 — 서버가 prefix로 찾을 필요 없이 경로를 직접 안다.
+      // 해시 없는 고정 파일명 - 서버가 prefix로 찾을 필요 없이 경로를 직접 안다.
       output: {
         entryFileNames: "assets/[name].js",
         chunkFileNames: "assets/[name].js",

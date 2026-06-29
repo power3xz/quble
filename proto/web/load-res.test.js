@@ -1,4 +1,4 @@
-// LOAD_RES 통합 테스트 — 실제 컴파일러(.qubc → .qubb, use "x.css" → LOAD_RES)와 실제
+// LOAD_RES 통합 테스트 - 실제 컴파일러(.qubc → .qubb, use "x.css" → LOAD_RES)와 실제
 // runtime.js를 jsdom 위에서 돌린다. compile(bytes, resmap)이 LOAD_RES를 만나 resId의 URL로
 // <link>를 document.head에 삽입하는지, 같은 URL은 dedup되는지 검증한다.
 
@@ -29,8 +29,8 @@ test("LOAD_RES가 resId의 URL로 <link>를 head에 삽입한다", () => {
   assert.deepEqual(hrefs(), ["/res/styled.abc.css"]);
 });
 
-test("같은 URL은 dedup — 한 compile에서 두 번 인스턴스화해도 <link>는 하나", () => {
-  // dedup은 compile 단위 — 같은 blueprint를 두 번 인스턴스화하면 href는 한 번만 삽입된다.
+test("같은 URL은 dedup - 한 compile에서 두 번 인스턴스화해도 <link>는 하나", () => {
+  // dedup은 compile 단위 - 같은 blueprint를 두 번 인스턴스화하면 href는 한 번만 삽입된다.
   const blueprint = compile(qubb, ["/res/styled.abc.css"])(0);
   blueprint(createLeafStoreSubject({}), []);
   blueprint(createLeafStoreSubject({}), []);
@@ -43,13 +43,13 @@ test("resmap 없으면 <link>를 안 만든다(리소스 로드 생략)", () => 
 });
 
 // @if 가지 안에서만 RENDER되는 (다른 파일) 컴포넌트의 LOAD_RES는 그 가지가 켜질 때까지
-// 미뤄진다 — lazy build가 자식 def를 해석하지 않으면 자식 def 앞머리의 LOAD_RES도 실행되지
+// 미뤄진다 - lazy build가 자식 def를 해석하지 않으면 자식 def 앞머리의 LOAD_RES도 실행되지
 // 않기 때문. 이게 "lazy 가지의 CSS가 늦게 로드된다"는 현 동작의 근거다.
 test("@if 비활성 가지 안의 컴포넌트 CSS는 가지가 켜질 때 로드된다(lazy)", () => {
   const { qubb: outerQubb, resmap } = buildFixtureWithResmap("lazy_res_if");
   assert.equal(resmap.length, 1, "Styled의 CSS 하나가 resmap에 있다");
 
-  // Outer = comp 0. props [show]. show=false로 시작 — @if 가지 비활성.
+  // Outer = comp 0. props [show]. show=false로 시작 - @if 가지 비활성.
   const ctx = createLeafStoreSubject({ show: false });
   compile(outerQubb, resmap)(0)(ctx, ["show"]);
   assert.deepEqual(hrefs(), [], "가지가 꺼져 있으면 자식 CSS는 아직 로드되지 않는다");

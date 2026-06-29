@@ -1,5 +1,5 @@
 //! use 그래프를 따라가 여러 소스의 컴포넌트를 하나의 평탄한 Vec<Component>로 모은다(A안).
-//! 모듈 포맷은 안 건드린다 — codegen이 평탄화된 정의들을 단일 패스로 처리한다.
+//! 모듈 포맷은 안 건드린다 - codegen이 평탄화된 정의들을 단일 패스로 처리한다.
 //!
 //! 경로 의미론은 컴파일러가 모른다. resolver가 (base, target)을 정규화된 경로로 풀어 소스와 함께
 //! 돌려준다. 컴파일러는 그 정규화된 경로의 동일성만으로 다이아몬드(중복 skip)와 순환(에러)을 본다.
@@ -11,7 +11,7 @@ use crate::parse;
 
 /// 평탄화된 컴포넌트 + 그 컴포넌트가 속한 파일의 리소스 경로(`use './x.css'`).
 /// 같은 파일에서 나온 컴포넌트는 같은 resources를 복제해 가진다(파일 단위 선언이라
-/// 어느 컴포넌트가 쓰는지 특정 불가 — 전부 후보). codegen이 정의 앞에 LOAD_RES를 낸다.
+/// 어느 컴포넌트가 쓰는지 특정 불가 - 전부 후보). codegen이 정의 앞에 LOAD_RES를 낸다.
 pub struct FlatComp {
     pub comp: Component,
     pub resources: Vec<String>,
@@ -49,7 +49,7 @@ pub enum ResolveError {
 
 /// 엔트리 소스를 파싱하고 use 그래프를 따라가 컴포넌트를 평탄화한다.
 /// 엔트리는 모든 컴포넌트를 가져가고(ID 0부터), use 대상 파일은 나열된 이름만 가져온다.
-/// 안 쓰는 컴포넌트는 병합에서 제외된다 — 쓰려면 codegen이 CompLookup에서 막는다.
+/// 안 쓰는 컴포넌트는 병합에서 제외된다 - 쓰려면 codegen이 CompLookup에서 막는다.
 pub fn flatten(
     entry_path: &str,
     entry_src: &str,
@@ -61,14 +61,14 @@ pub fn flatten(
         recursed: Vec::new(),
         visiting: Vec::new(),
     };
-    // 엔트리는 want=None — 자기 파일 컴포넌트 전부.
+    // 엔트리는 want=None - 자기 파일 컴포넌트 전부.
     collect(entry_path, entry_src, None, resolver, &mut ctx)?;
     Ok(ctx.acc)
 }
 
 struct Ctx {
     acc: Vec<FlatComp>,        // 평탄화 결과 (엔트리 ID 0, 순서 유지)
-    origin: Vec<(String, String)>, // (컴포넌트명, 출처 정규화 경로) — 동명 충돌 판정용
+    origin: Vec<(String, String)>, // (컴포넌트명, 출처 정규화 경로) - 동명 충돌 판정용
     recursed: Vec<String>,     // 의존성 재귀를 끝낸 경로 (한 파일의 use 그래프는 한 번만 탐)
     visiting: Vec<String>,     // 현재 DFS 경로 (순환 감지)
 }
@@ -102,7 +102,7 @@ fn collect(
     }
 
     // 리소스 경로를 정규화한다(컴포넌트 import와 같은 resolver). 정규화 경로의 동일성이
-    // 모듈 전역 resId dedup 키 — 상대경로가 달라도 같은 파일이면 합쳐진다. 소스 텍스트는
+    // 모듈 전역 resId dedup 키 - 상대경로가 달라도 같은 파일이면 합쳐진다. 소스 텍스트는
     // 버린다(내용 해시·복사·URL화는 빌드 단계). drop으로 즉시 반납돼 누적되지 않는다.
     let mut resources = Vec::with_capacity(source.resources.len());
     for res_path in &source.resources {
@@ -126,7 +126,7 @@ fn collect(
             if origin != path {
                 return Err(ResolveError::DuplicateComponent(comp.name.clone()));
             }
-            continue; // 같은 파일 같은 컴포넌트 — 이미 들어감.
+            continue; // 같은 파일 같은 컴포넌트 - 이미 들어감.
         }
         ctx.origin.push((comp.name.clone(), path.to_string()));
         ctx.acc.push(FlatComp {

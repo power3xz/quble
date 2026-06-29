@@ -1,13 +1,13 @@
 // qubb(컴파일된 바이너리) -> qubc(소스 형태) 디컴파일러.
 //
-// 바이트코드에는 심볼 이름이 없다 — props 변수는 scope 인덱스로만 남는다(BYTECODE.md §5).
+// 바이트코드에는 심볼 이름이 없다 - props 변수는 scope 인덱스로만 남는다(BYTECODE.md §5).
 // 그래서 변수 참조는 원래 이름을 복원할 수 없어 arg0, arg1...(인덱스)로 보여준다. 그 인덱스를
 // 참조하면 props 선언이 있어야 정합하므로, 코드에서 쓰인 최대 offset까지 props { arg0..argN }을
 // 함께 복원한다. 합성(RENDER)은 comp_id로 자식 def명을 복원한다(별칭은 미구현이라 일반 컴포넌트).
 //
 // 포맷·테이블은 runtime.js와 같아야 한다(같은 계약). 여기선 디코드만 하므로 독립 디코더를 둔다.
 
-const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img", "section", "header", "footer", "nav", "main", "aside", "label"];
+const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img", "section", "header", "footer", "nav", "main", "aside", "label", "input"];
 const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
 
 const OP = {
@@ -32,7 +32,22 @@ const OP = {
   PUSH_PATH_SEGMENT: 0x12,
 };
 
-const DOM_EVENTS = ["click"]; // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type.
+// 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
+const DOM_EVENTS = [
+  "click",
+  "input",
+  "change",
+  "submit",
+  "focus",
+  "blur",
+  "keydown",
+  "keyup",
+  "mousedown",
+  "mouseup",
+  "mouseenter",
+  "mouseleave",
+  "scroll",
+];
 
 // ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
 class Reader {
@@ -78,7 +93,7 @@ const decode = (bytes) => {
   }
 
   const poolCount = r.u16();
-  const poolStart = r.pos; // count 헤더 직후 — 풀 항목들의 직렬화 바이트 시작
+  const poolStart = r.pos; // count 헤더 직후 - 풀 항목들의 직렬화 바이트 시작
   const pool = [];
   for (let i = 0; i < poolCount; i++) {
     pool.push(r.str());
@@ -91,7 +106,7 @@ const decode = (bytes) => {
     const nameIdx = r.u16();
     const codeOff = r.u32();
     const codeLen = r.u32();
-    // 이벤트 테이블 (BYTECODE.md §4) — event_count, [(nameIdx, payload_count, [(fieldIdx, offset)])]
+    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameIdx, payload_count, [(fieldIdx, offset)])]
     const eventCount = r.u16();
     const events = [];
     for (let e = 0; e < eventCount; e++) {
@@ -239,7 +254,7 @@ const decompileBody = (module, def) => {
             : "arg" + childOffset + "={" + arg.text + "}",
         );
         pendingArgs = [];
-        // 세그먼트가 type-name과 다르면 use-site alias — `Alias: Comp(...)`로 복원.
+        // 세그먼트가 type-name과 다르면 use-site alias - `Alias: Comp(...)`로 복원.
         const prefix = pendingSegment && pendingSegment !== name ? pendingSegment + ": " : "";
         pendingSegment = null;
         lines.push(pad() + prefix + name + "(" + binds.join(" ") + ") {}");
@@ -259,7 +274,7 @@ const decompileBody = (module, def) => {
         lines.push(pad() + "}");
         break;
       case OP.LOAD_RES: {
-        // 리소스 로드는 본문이 아니라 파일 헤더의 use로 복원된다(코드 앞머리). resId만 모은다 —
+        // 리소스 로드는 본문이 아니라 파일 헤더의 use로 복원된다(코드 앞머리). resId만 모은다 -
         // 경로는 qubb에 없어 use "res<id>" placeholder로 낸다.
         const resId = u16();
         if (!resIds.includes(resId)) {
@@ -283,7 +298,7 @@ const decompileBody = (module, def) => {
         throw new Error("bad opcode 0x" + op.toString(16));
     }
   }
-  // events payload가 참조하는 offset도 props 복원 범위에 포함한다 — payload만 쓰고 본문엔
+  // events payload가 참조하는 offset도 props 복원 범위에 포함한다 - payload만 쓰고 본문엔
   // 안 쓰인 prop(arg1 등)이 props 블록에 빠지면 디컴파일 qubc가 불완전해진다.
   for (const event of def.events) {
     for (const p of event.payload) {
@@ -296,7 +311,7 @@ const decompileBody = (module, def) => {
 // 한 컴포넌트 def를 완전한 qubc 소스 문자열로 디컴파일한다.
 //
 // props는 본문이 참조한 최대 offset까지 arg0..argN으로 복원한다(인덱스 정합). 본문이 변수를 안
-// 쓰면 props 블록을 생략한다. 합성하는 자식은 상단에 use로 선언한다 — 파일 경로는 바이트코드에
+// 쓰면 props 블록을 생략한다. 합성하는 자식은 상단에 use로 선언한다 - 파일 경로는 바이트코드에
 // 없어 컴포넌트명의 qubc를 플랫 구조에서 참조한다고 가정한다("./<Name>.qubc").
 //
 // @param module 디코드된 모듈
@@ -332,7 +347,7 @@ export const decompileComponent = (module, compId, resmap = []) => {
     }
     out.push("  props { " + args.join(", ") + " }");
   }
-  // events 블록 복원. payload는 (필드명, offset) — 필드명은 pool, prop은 offset->argN.
+  // events 블록 복원. payload는 (필드명, offset) - 필드명은 pool, prop은 offset->argN.
   // 필드명이 argN과 같으면 shorthand({ field }), 다르면 매핑({ field: argN }).
   if (def.events.length > 0) {
     const decls = def.events.map((event) => {
@@ -357,7 +372,7 @@ export const decompileComponent = (module, compId, resmap = []) => {
 
 // 한 컴포넌트의 arg 목록을 용도 추론 타입과 함께 돌려준다(프리뷰 입력 UI용).
 //
-// 참조된 arg는 0..maxArg 전부 포함한다(인덱스 정합). 타입은 쓰인 위치에서 추론한다 —
+// 참조된 arg는 0..maxArg 전부 포함한다(인덱스 정합). 타입은 쓰인 위치에서 추론한다 -
 // IF=bool, FOR=number, 그 외(텍스트·속성·합성 인자)=string. 한 arg가 여러 곳이면 if/for의
 // 강한 타입이 우선한다(seenArg). 어디에도 안 쓰인 중간 arg는 string으로 채운다.
 //
@@ -399,15 +414,15 @@ const OPERAND_LEN = (op) => {
 
 // 루트 컴포넌트에서 합성 트리를 걸어 발사 가능한 이벤트를 모은다. runtime이 런타임에 pathPrefix로
 // 누적하는 fullname을, 같은 규칙으로 정적으로 산출한다(인스펙터가 핸들러를 fullname으로 걸고 이벤트
-// 패널에 표시할 때 쓴다). @if 가지는 then·else 둘 다 순회 — 어느 가지가 켜지든 그 이벤트가 발사될 수
+// 패널에 표시할 때 쓴다). @if 가지는 then·else 둘 다 순회 - 어느 가지가 켜지든 그 이벤트가 발사될 수
 // 있으니 가능한 모든 fullname을 모은다. 같은 fullname은 한 번만(의도된 공유).
 //
 // @param module     decode된 모듈
 // @param rootCompId 프리뷰가 마운트하는 루트 컴포넌트 id
 // @returns          [{ fullname, payload: [{ field, source }] }]
 //                   source는 payload 값의 출처를 루트 기준으로 역추적한 것:
-//                     { kind: "arg", offset }     변수 경로 — 루트 scope의 arg{offset}
-//                     { kind: "literal", value }  리터럴 인자로 끊긴 경로 — 그 상수값
+//                     { kind: "arg", offset }     변수 경로 - 루트 scope의 arg{offset}
+//                     { kind: "literal", value }  리터럴 인자로 끊긴 경로 - 그 상수값
 //                   합성 시 PushArg는 자식 offset을 부모 offset으로 잇고, PushArgLit은 상수로 끊는다.
 export const collectEventFullnames = (module, rootCompId) => {
   const events = [];
@@ -442,7 +457,7 @@ export const collectEventFullnames = (module, rootCompId) => {
         argParents.push(toRoot(code[pc] | (code[pc + 1] << 8)));
         pc += 2;
       } else if (op === OP.PUSH_ARG_LIT) {
-        // 리터럴 인자 — 부모 scope 값이 아니라 상수. 여기서 체인이 끊긴다.
+        // 리터럴 인자 - 부모 scope 값이 아니라 상수. 여기서 체인이 끊긴다.
         argParents.push({ kind: "literal", value: module.pool[code[pc] | (code[pc + 1] << 8)] });
         pc += 2;
       } else if (op === OP.RENDER) {

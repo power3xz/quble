@@ -1,8 +1,8 @@
-// @if 통합 테스트 — 실제 컴파일러(.qubc → .qubb)와 실제 runtime.js를 jsdom 위에서 돌린다.
+// @if 통합 테스트 - 실제 컴파일러(.qubc → .qubb)와 실제 runtime.js를 jsdom 위에서 돌린다.
 // 가짜 interpret 복제본이 아니라 진짜 경로를 검증한다: 바이트코드 해석 → region 트리 → lazy
 // build → swap → 재귀 구독. 검증은 사용자가 보는 결과(HTML)와 region 상태로 한다.
 //
-// 구독 0(안 보이는 가지)은 "비활성 가지 leaf를 set해도 화면이 안 바뀐다"로 행동 검증한다 —
+// 구독 0(안 보이는 가지)은 "비활성 가지 leaf를 set해도 화면이 안 바뀐다"로 행동 검증한다 -
 // createLeafStoreSubject는 subscribers를 노출하지 않으므로(최소 노출), 부작용으로 간접 확인한다.
 
 import { test, before } from "node:test";
@@ -21,7 +21,7 @@ before(() => {
   }
 });
 
-// 한 인스턴스를 만들어 { ctx, inst, host, set } 묶음으로 — set은 path로 바로 쓰게.
+// 한 인스턴스를 만들어 { ctx, inst, host, set } 묶음으로 - set은 path로 바로 쓰게.
 const instantiate = (name, paths, values) => {
   const ctx = createLeafStoreSubject(values);
   const inst = compile(qubb[name])(0)(ctx, paths);
@@ -30,13 +30,13 @@ const instantiate = (name, paths, values) => {
   return { ctx, inst, host, set };
 };
 
-// region 트리 탐색 — regions[regionIndex] 가지(branchIndex)의 nth 자식 region.
+// region 트리 탐색 - regions[regionIndex] 가지(branchIndex)의 nth 자식 region.
 const THEN = 0;
 const ELSE = 1;
 const childRegion = (inst, regionIndex, branchIndex, nth = 0) =>
   inst.regions[inst.regions[regionIndex].branches[branchIndex].childRegionIndices[nth]];
 
-// 텍스트만 추출(주석 anchor·태그 제외) — swap 가시화 확인용.
+// 텍스트만 추출(주석 anchor·태그 제외) - swap 가시화 확인용.
 const texts = (host) => [...host.querySelectorAll("p")].map((p) => p.textContent);
 
 // ── 단일 if ──────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ test("단일 if: swap이 보이는 가지를 바꾼다(A→B→A)", () => {
 
 test("단일 if: 비활성 가지 set은 화면을 안 바꾼다(구독 0)", () => {
   const { host, set } = instantiate("single_if", ["cond", "a", "b"], { cond: true, a: "A", b: "B" });
-  set("b", "B2"); // else 비활성 — 구독 0이라 무반응
+  set("b", "B2"); // else 비활성 - 구독 0이라 무반응
   assert.deepEqual(texts(host), ["A"], "여전히 A");
   set("cond", false); // else 활성화 → 최신값 B2 따라잡기
   assert.deepEqual(texts(host), ["B2"], "재활성 시 놓친 값 반영");
@@ -116,7 +116,7 @@ test("else 없는 if: true면 렌더, false면 빈 자리(anchor만)", () => {
   assert.deepEqual(texts(t.host), ["A"], "then 보임");
 
   const f = instantiate("no_else_if", ["cond", "a"], { cond: false, a: "A" });
-  assert.deepEqual(texts(f.host), [], "빈 가지 — p 없음");
+  assert.deepEqual(texts(f.host), [], "빈 가지 - p 없음");
   assert.match(f.host.innerHTML, /<!--qb:region#\d+-->/, "anchor는 남음");
 
   f.set("cond", true); // 빈 else → then 첫 build
@@ -150,7 +150,7 @@ test("3단 중첩: 최하단까지 렌더, 최상단 swap이 전부 detach", () 
   set("c3", false);
   assert.deepEqual(texts(host), ["B"], "최하단만 else(b)");
   set("c1", false);
-  assert.deepEqual(texts(host), ["D"], "최상단 else(d) — 2·3단 통째 사라짐");
+  assert.deepEqual(texts(host), ["D"], "최상단 else(d) - 2·3단 통째 사라짐");
   set("c1", true);
   assert.deepEqual(texts(host), ["B"], "복귀 시 안쪽 상태(c3=false) 유지 → b");
 });
@@ -168,7 +168,7 @@ test("합성 3단: triple_if를 부모+자식으로 쪼개도 동일 동작", ()
   set("c3", false);
   assert.deepEqual(texts(host), ["B"], "최하단만 else(b)");
   set("c1", false);
-  assert.deepEqual(texts(host), ["D"], "최상단 else(d) — 자식(2·3단) 통째 사라짐");
+  assert.deepEqual(texts(host), ["D"], "최상단 else(d) - 자식(2·3단) 통째 사라짐");
   set("c1", true);
   assert.deepEqual(texts(host), ["B"], "복귀 시 자식 안쪽 상태(c3=false) 유지 → b");
 });

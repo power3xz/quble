@@ -4,13 +4,13 @@
 #[derive(Debug, PartialEq, Eq)]
 pub struct SourceFile {
     pub uses: Vec<Use>,
-    /// `use './x.css'` — 이 파일이 참조하는 외부 리소스 경로(등장 순서). 이 파일의 모든
+    /// `use './x.css'` - 이 파일이 참조하는 외부 리소스 경로(등장 순서). 이 파일의 모든
     /// 컴포넌트가 공유한다(lazy build에서 컴포넌트가 그려질 때 로드).
     pub resources: Vec<String>,
     pub comps: Vec<Component>,
 }
 
-/// `use A, B from "path"` — path 소스에서 이름 A·B를 현재 스코프로 가져온다.
+/// `use A, B from "path"` - path 소스에서 이름 A·B를 현재 스코프로 가져온다.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Use {
     pub names: Vec<String>,
@@ -25,7 +25,7 @@ pub struct Component {
     pub template: Vec<Node>, // 루트 노드들 (fragment 허용)
 }
 
-/// `events { TOGGLE({ label: title, on }) }` — 컴포넌트가 선언한 이벤트.
+/// `events { TOGGLE({ label: title, on }) }` - 컴포넌트가 선언한 이벤트.
 /// payload 각 항목은 (이벤트필드명, prop명). `{ title }` 단축은 ("title","title")로 푼다.
 /// prop명은 props에 있어야 한다(codegen이 검증).
 #[derive(Debug, PartialEq, Eq)]
@@ -39,23 +39,23 @@ pub enum Node {
     Element {
         tag: String,
         attrs: Vec<(String, AttrValue)>,
-        /// `@click:TOGGLE` — (DOM이벤트, 이벤트명). 이 요소가 무엇에 반응해 무슨 이벤트를 쏘나.
+        /// `@click:TOGGLE` - (DOM이벤트, 이벤트명). 이 요소가 무엇에 반응해 무슨 이벤트를 쏘나.
         event_bindings: Vec<(String, String)>,
         children: Vec<Node>,
     },
     Text(String),
-    /// `{name}` 보간 — props 이름 참조. codegen이 scope 인덱스로 해석.
+    /// `{name}` 보간 - props 이름 참조. codegen이 scope 인덱스로 해석.
     Var(String),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
     /// alias = use-site 별칭(`Alias: Comp(...)`). 있으면 이게 fullname path 세그먼트가 되고,
-    /// 없으면 type-name을 그대로 쓴다(§1.3 — alias 없는 동일 type-name은 의도적 공유).
+    /// 없으면 type-name을 그대로 쓴다(§1.3 - alias 없는 동일 type-name은 의도적 공유).
     Component {
         alias: Option<String>,
         name: String,
         args: Vec<(String, ArgValue)>,
     },
-    /// `@if (cond) { then } @else { else_ }` — 조건 분기. cond는 불리언 prop명 하나
+    /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop명 하나
     /// (표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
     If {
         cond: String,

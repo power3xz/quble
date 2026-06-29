@@ -1,0 +1,7 @@
+component Field {
+  props { value }
+  events { EDIT({ value }) }
+  template {
+    input(@input:EDIT) { {value} }
+  }
+}

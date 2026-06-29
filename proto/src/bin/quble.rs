@@ -56,7 +56,7 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// 리소스 정규화 경로들을 dist/res/로 복사한다. 파일명은 `<basename>.<내용해시>.css` —
+/// 리소스 정규화 경로들을 dist/res/로 복사한다. 파일명은 `<basename>.<내용해시>.css` -
 /// 평탄화 시 동명 충돌을 막고 캐시 버스팅도 겸한다. resId 순서대로 산출 상대경로(`res/...`)를 반환.
 fn emit_resources(out_dir: &Path, resources: &[String]) -> std::io::Result<Vec<String>> {
     let res_dir = out_dir.join("res");
@@ -65,7 +65,7 @@ fn emit_resources(out_dir: &Path, resources: &[String]) -> std::io::Result<Vec<S
     for path in resources {
         let bytes = std::fs::read(path)?;
         let out_path = quble::asset_path(Path::new(path), &bytes);
-        // out_path는 "res/<name>" — res_dir엔 파일명만 쓰고, 사이드맵엔 상대경로 그대로 둔다.
+        // out_path는 "res/<name>" - res_dir엔 파일명만 쓰고, 사이드맵엔 상대경로 그대로 둔다.
         let out_name = out_path.strip_prefix("res/").unwrap_or(&out_path);
         std::fs::write(res_dir.join(out_name), &bytes)?;
         emitted.push(out_path);

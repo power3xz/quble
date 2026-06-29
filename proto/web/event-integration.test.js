@@ -1,4 +1,4 @@
-// 이벤트 발생 통합 테스트 — 실제 컴파일러(.qubc → .qubb, events{}·@click:EVENT → BIND_EVENT)와
+// 이벤트 발생 통합 테스트 - 실제 컴파일러(.qubc → .qubb, events{}·@click:EVENT → BIND_EVENT)와
 // 실제 runtime.js를 jsdom 위에서 돌린다. 단일 컴포넌트(합성·fullname 없음): 버튼 클릭 → 이벤트
 // 발생 → payload(현재값) 조립 → 핸들러 호출 → 핸들러의 set이 기존 반응성으로 DOM을 갱신.
 
@@ -14,7 +14,7 @@ before(() => {
   qubb = buildFixture("event_toggle");
 });
 
-// Toggle 인스턴스 하나 — { ctx, host, button }. props [label, on].
+// Toggle 인스턴스 하나 - { ctx, host, button }. props [label, on].
 const instantiate = (values, handlers) => {
   const ctx = createLeafStoreSubject(values);
   const inst = compile(qubb)(0)(ctx, ["label", "on"], handlers);

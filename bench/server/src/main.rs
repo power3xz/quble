@@ -63,8 +63,8 @@ fn main() {
                 Err(_) => not_found(req),
             }
         } else if path == "/components" {
-            // 적재 컴포넌트 이름 목록(JSON 배열) — inspector 셀렉트박스용.
-            // litprofilecard(리터럴 인자 데모)를 맨 앞으로 — 나머지는 알파벳순.
+            // 적재 컴포넌트 이름 목록(JSON 배열) - inspector 셀렉트박스용.
+            // litprofilecard(리터럴 인자 데모)를 맨 앞으로 - 나머지는 알파벳순.
             let mut names = loaded.components.keys().cloned().collect::<Vec<_>>();
             names.sort_by_key(|n| (n != "litprofilecard", n.clone()));
             let json = format!(
@@ -85,7 +85,7 @@ fn main() {
                 None => not_found(req),
             }
         } else if let Some(name) = path.strip_prefix("/resmap/") {
-            // 리소스맵(JSON 배열, 인덱스=resId, 값=`/res/...` URL) — 클라 런타임이 LOAD_RES에 쓴다.
+            // 리소스맵(JSON 배열, 인덱스=resId, 값=`/res/...` URL) - 클라 런타임이 LOAD_RES에 쓴다.
             match loaded.resmaps.get(name) {
                 Some(paths) => {
                     let json = format!(
@@ -101,7 +101,7 @@ fn main() {
                 None => not_found(req),
             }
         } else if path.starts_with("/res/") {
-            // 산출 리소스(`res/<hash>.css`) 정적 서빙 — SSR <link href>가 가리키는 경로.
+            // 산출 리소스(`res/<hash>.css`) 정적 서빙 - SSR <link href>가 가리키는 경로.
             // path는 선행 '/'가 있으므로 떼고 assets 키(`res/...`)와 맞춘다.
             match loaded.assets.get(&path[1..]) {
                 Some(content) => respond(req, content.clone(), "text/css; charset=utf-8"),
@@ -190,7 +190,7 @@ fn build_components() -> Loaded {
         let output = compiler::compile_file(path.to_str().unwrap()).expect("컴파일 실패");
 
         // 리소스(원본 정규화 경로)를 읽어 내용 해시 경로(`res/<basename>.<hash>.css`)로.
-        // 산출 경로는 SSR <link href>이자 assets 키 — 둘이 같아야 브라우저가 받아온다.
+        // 산출 경로는 SSR <link href>이자 assets 키 - 둘이 같아야 브라우저가 받아온다.
         let mut res_paths = Vec::with_capacity(output.resources.len());
         for origin in &output.resources {
             let content = fs::read(origin).expect("리소스 읽기 실패");
@@ -219,7 +219,7 @@ fn asset_path(origin: &std::path::Path, content: &[u8]) -> String {
     }
 }
 
-/// 콘텐츠 해시(FNV-1a 64bit). CLI(main.rs)와 같은 알고리즘 — 산출 경로가 일치해야 한다.
+/// 콘텐츠 해시(FNV-1a 64bit). CLI(main.rs)와 같은 알고리즘 - 산출 경로가 일치해야 한다.
 fn content_hash(bytes: &[u8]) -> String {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -283,7 +283,7 @@ fn boot_page(boot_src: &str, name: &str) -> String {
     )
 }
 
-/// SSR·CSR 공통 페이지 셸. body만 다르고 골격(html+style)은 동일 — 외형을 맞춰 비교 가능.
+/// SSR·CSR 공통 페이지 셸. body만 다르고 골격(html+style)은 동일 - 외형을 맞춰 비교 가능.
 fn page_shell(title: &str, body: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
@@ -307,7 +307,7 @@ fn react_csr_page(component: &str, query: &str) -> String {
     page_shell(&format!("React CSR {component}"), &body)
 }
 
-/// 키=값 query를 JSON 객체 문자열로. (`scope`는 우리 전용 키라 제외 안 함 — react-csr는 이름 props만 씀)
+/// 키=값 query를 JSON 객체 문자열로. (`scope`는 우리 전용 키라 제외 안 함 - react-csr는 이름 props만 씀)
 fn props_json_from_query(query: &str) -> String {
     let pairs: Vec<String> = query
         .split('&')

@@ -41,7 +41,7 @@ impl<'a> CompLookup<'a> {
 }
 
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
-/// 두 번째 반환값은 리소스 사이드맵 — 인덱스가 모듈 전역 resId, 값이 정규화 경로.
+/// 두 번째 반환값은 리소스 사이드맵 - 인덱스가 모듈 전역 resId, 값이 정규화 경로.
 /// 빌드 단계가 이걸 받아 내용 해시·복사·URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
 pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenError> {
     let comp_lookup = CompLookup::build(comps);
@@ -74,7 +74,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
             )?;
         }
         code.push(Op::Halt as u8);
-        // events를 직렬화용 EventDef로 변환(코드와 무관 — 컴포넌트 테이블로 간다).
+        // events를 직렬화용 EventDef로 변환(코드와 무관 - 컴포넌트 테이블로 간다).
         // payload의 prop명을 scope offset으로, 필드명을 상수풀 인덱스로.
         let events = comp
             .events
@@ -151,10 +151,10 @@ fn emit_node(
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
 
-            // 이벤트 바인딩 — 속성과 같은 자리(여는 태그 진행 중). event_idx는 이 컴포넌트
+            // 이벤트 바인딩 - 속성과 같은 자리(여는 태그 진행 중). event_idx는 이 컴포넌트
             // events에서 이벤트명으로 찾는다(선언 순서 = idx).
             for (dom_event, event_name) in event_bindings {
-                // 렉서가 닫힌 집합(Keyword)으로 걸러 알려진 DOM 이벤트만 온다.
+                // 렉서가 닫힌 집합(Directive)으로 걸러 알려진 DOM 이벤트만 온다.
                 let event_type = bytecode::dom_events::dom_event_id(dom_event)
                     .expect("렉서가 거른 DOM 이벤트만 온다");
                 let event_idx = events
@@ -194,7 +194,7 @@ fn emit_node(
                 emit_node(child, props, events, comp_lookup, pool, code)?;
             }
 
-            // END는 operand 없음 — 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
+            // END는 operand 없음 - 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
             code.push(Op::ElemEnd as u8);
         }
         Node::Component { alias, name, args } => {
@@ -205,7 +205,7 @@ fn emit_node(
 
             // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 offset을 싣는
             // PUSH_ARG, 리터럴(`prop="lit"`)은 상수풀 인덱스를 싣는 PUSH_ARG_LIT.
-            // (지금은 전부 바인딩 가정 — 순서만으로 매핑.)
+            // (지금은 전부 바인딩 가정 - 순서만으로 매핑.)
             for child_prop in child_props {
                 let arg_value = args
                     .iter()
@@ -230,7 +230,7 @@ fn emit_node(
             }
 
             // 합성 경로 세그먼트 = use-site alias가 있으면 alias, 없으면 자식 type-name.
-            // 뒤따르는 RENDER가 소비해 자식 경로 prefix에 잇는다 — 이벤트 fullname의 path 축.
+            // 뒤따르는 RENDER가 소비해 자식 경로 prefix에 잇는다 - 이벤트 fullname의 path 축.
             // (alias 생략 = 동일 type-name 공유, alias 부여 = 분리. §1.3)
             let segment = alias.as_deref().unwrap_or(name);
             let segment_index = pool.intern(segment);
@@ -241,7 +241,7 @@ fn emit_node(
             code.extend_from_slice(&child_id.to_le_bytes());
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop — scope offset 하나. (표현식은 이후 단계)
+            // cond는 불리언 prop - scope offset 하나. (표현식은 이후 단계)
             let offset = prop_index(cond, props)?;
             code.push(Op::If as u8);
             code.extend_from_slice(&offset.to_le_bytes());
