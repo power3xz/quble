@@ -1,4 +1,4 @@
-// click 외 DOM 이벤트(@input) 통합 테스트 — 새로 추가한 DOM 이벤트 종류가 실제 컴파일러로
+// click 외 DOM 이벤트(@input) 통합 테스트 - 새로 추가한 DOM 이벤트 종류가 실제 컴파일러로
 // BIND_EVENT를 내고, runtime.js가 그 event_type을 input 리스너로 풀어 핸들러를 부르는지.
 
 import { test, before } from "node:test";
@@ -13,7 +13,7 @@ before(() => {
   qubb = buildFixture("event_input");
 });
 
-// Field 인스턴스 하나 — props [value].
+// Field 인스턴스 하나 - props [value].
 const instantiate = (values, handlers) => {
   const ctx = createLeafStoreSubject(values);
   const inst = compile(qubb)(0)(ctx, ["value"], handlers);

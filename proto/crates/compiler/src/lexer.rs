@@ -1,4 +1,4 @@
-//! 렉서: `.qubc` 소스를 토큰으로. MVP 문법만 — 식별자, 괄호/중괄호, `=`, `,`, 문자열.
+//! 렉서: `.qubc` 소스를 토큰으로. MVP 문법만 - 식별자, 괄호/중괄호, `=`, `,`, 문자열.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {

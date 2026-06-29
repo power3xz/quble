@@ -1,5 +1,5 @@
 //! quble-serve: <path>(파일 또는 디렉토리)의 .qubc를 컴파일해 메모리에 적재하고, 산출물을
-//! HTTP로 바로 서빙한다. dev용 — 디스크의 dist를 거치지 않고 전부 메모리에서 제공한다.
+//! HTTP로 바로 서빙한다. dev용 - 디스크의 dist를 거치지 않고 전부 메모리에서 제공한다.
 //!
 //!  - GET /<name>.qubb         : 컴파일된 바이트코드.
 //!  - GET /<name>.resmap.json  : resId -> 산출 리소스 경로(`res/...`) 사이드맵.
@@ -110,7 +110,7 @@ fn load_one(path: &Path, loaded: &mut Loaded) -> std::io::Result<()> {
     let mut res_paths = Vec::with_capacity(output.resources.len());
     for origin in &output.resources {
         let content = std::fs::read(origin)?;
-        // 산출 경로는 resmap 값이자 assets 키 — 둘이 같아야 클라가 받아온다. CLI 산출물과 동일하게
+        // 산출 경로는 resmap 값이자 assets 키 - 둘이 같아야 클라가 받아온다. CLI 산출물과 동일하게
         // 상대경로(`res/...`)로 둔다(SSR 없이 raw resmap만 내주므로 절대경로가 필요 없다).
         let out_path = quble::asset_path(Path::new(origin), &content);
         loaded.assets.entry(out_path.clone()).or_insert(content);
@@ -155,7 +155,7 @@ fn route(target: &str, loaded: &Loaded) -> (&'static str, &'static str, Vec<u8>)
             return ("200 OK", "application/json; charset=utf-8", quble::json_array(paths).into_bytes());
         }
     } else if let Some(key) = target.strip_prefix('/') {
-        // /res/<file> — assets 키는 선행 '/' 없는 `res/...`.
+        // /res/<file> - assets 키는 선행 '/' 없는 `res/...`.
         if key.starts_with("res/") {
             if let Some(content) = loaded.assets.get(key) {
                 return ("200 OK", "text/css; charset=utf-8", content.clone());

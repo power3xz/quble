@@ -3,7 +3,7 @@
 use std::path::Path;
 
 /// 콘텐츠 해시(FNV-1a 64bit). 자산 파일명·dedup용. 알고리즘이 고정 상수(offset basis·prime)라
-/// 버전 간 안정 — 표준 라이브러리 해시류와 달리 산출물 식별자로 오래 쓸 수 있다.
+/// 버전 간 안정 - 표준 라이브러리 해시류와 달리 산출물 식별자로 오래 쓸 수 있다.
 pub fn content_hash(bytes: &[u8]) -> String {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -28,7 +28,7 @@ pub fn asset_path(origin: &Path, content: &[u8]) -> String {
     }
 }
 
-/// 문자열 배열을 JSON 배열 문자열로(의존 없이 직접 조립). 따옴표·백슬래시만 이스케이프 —
+/// 문자열 배열을 JSON 배열 문자열로(의존 없이 직접 조립). 따옴표·백슬래시만 이스케이프 -
 /// 경로엔 제어문자가 없다고 본다.
 pub fn json_array(items: &[String]) -> String {
     let mut out = String::from("[");
@@ -57,7 +57,7 @@ pub enum RenderError {
 
 /// use 없는 단일 .qubc 소스를 컴파일하고 comp_id를 진입점으로 렌더해 HTML을 만든다.
 pub fn render_source(src: &str, comp_id: u16, scope: &[String]) -> Result<String, RenderError> {
-    // 단일 소스 — resolver는 호출되지 않는다.
+    // 단일 소스 - resolver는 호출되지 않는다.
     render_with("entry", src, &(|_: &str, _: &str| None), comp_id, scope)
 }
 
@@ -79,7 +79,7 @@ mod tests {
     use super::*;
 
     /// 합성 end-to-end: 부모(Card)가 자식(Label)을 호출하며 자기 scope의 값을 바인딩한다.
-    /// Label(text={title}) — title은 부모 offset1. 자식은 그 값을 받아 출력.
+    /// Label(text={title}) - title은 부모 offset1. 자식은 그 값을 받아 출력.
     #[test]
     fn composition_passes_parent_value_to_child() {
         let src = r#"
@@ -129,7 +129,7 @@ mod tests {
         );
     }
 
-    /// 한 자식에 리터럴 인자와 변수 인자를 섞어 넘긴다 — PUSH_ARG_LIT·PUSH_ARG가 자식 prop
+    /// 한 자식에 리터럴 인자와 변수 인자를 섞어 넘긴다 - PUSH_ARG_LIT·PUSH_ARG가 자식 prop
     /// 선언 순서대로 정렬돼 함께 전달된다.
     #[test]
     fn composition_mixes_literal_and_var_args() {
@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(html, "<div>이름: 철수</div>");
     }
 
-    /// 자식 props 선언 순서대로 PUSH_ARG가 정렬된다 — use-site 인자 순서와 무관.
+    /// 자식 props 선언 순서대로 PUSH_ARG가 정렬된다 - use-site 인자 순서와 무관.
     #[test]
     fn composition_reorders_args_to_child_prop_order() {
         let src = r#"
@@ -165,7 +165,7 @@ mod tests {
     }
 
     /// use로 외부 소스의 컴포넌트를 합성. 메모리맵 resolver가 경로를 정규화 없이 그대로 키로 쓴다.
-    /// 단일 파일(composition_passes_parent_value_to_child)과 같은 HTML이 나와야 한다 — 평탄화 동등성.
+    /// 단일 파일(composition_passes_parent_value_to_child)과 같은 HTML이 나와야 한다 - 평탄화 동등성.
     #[test]
     fn use_composes_external_source() {
         let entry = r#"

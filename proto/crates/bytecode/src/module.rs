@@ -3,7 +3,7 @@
 use crate::pool::ConstPool;
 
 /// 컴포넌트가 선언한 이벤트 하나. `event_idx`는 이 항목이 CompDef.events에서 갖는 배열 인덱스
-/// (BIND_EVENT가 참조). payload는 함께 싣는 (field_idx, offset) 쌍 — field_idx는 필드명 상수풀
+/// (BIND_EVENT가 참조). payload는 함께 싣는 (field_idx, offset) 쌍 - field_idx는 필드명 상수풀
 /// 인덱스, offset은 그 값을 읽을 scope offset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventDef {

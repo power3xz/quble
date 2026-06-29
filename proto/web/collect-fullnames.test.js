@@ -1,4 +1,4 @@
-// collectEventFullnames 단위 테스트 — 루트에서 합성 트리를 걸어 발사 가능한 이벤트 fullname을
+// collectEventFullnames 단위 테스트 - 루트에서 합성 트리를 걸어 발사 가능한 이벤트 fullname을
 // 정적으로 산출한다(인스펙터가 핸들러를 fullname으로 걸 때 쓴다). runtime의 pathPrefix 누적과
 // 같은 결과를 디코드 단계에서 뽑는지 본다.
 

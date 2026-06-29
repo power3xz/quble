@@ -18,7 +18,7 @@ pub enum CompileError {
     Codegen(codegen::CodegenError),
 }
 
-/// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 — 빌드 파이프라인이 사이드맵으로
+/// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 - 빌드 파이프라인이 사이드맵으로
 /// 내용 해시·복사·URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
 pub struct CompileOutput {
     pub bytecode: Box<[u8]>,
@@ -236,7 +236,7 @@ mod tests {
     }
 
     /// `@input:EVENT`이 닫힌 DOM 이벤트 집합의 input ID(1)로 BIND_EVENT를 낸다.
-    /// (click 외 이벤트가 끝까지 — 렉서 -> 파서 -> codegen — 흐르는지.)
+    /// (click 외 이벤트가 끝까지 - 렉서 -> 파서 -> codegen - 흐르는지.)
     #[test]
     fn compiles_non_click_dom_event() {
         use bytecode::{decode, Op};
@@ -288,7 +288,7 @@ mod tests {
         ));
     }
 
-    /// 한 .qubc에서 여러 컴포넌트를 use. 셋 다 한 모듈로 평탄화돼야 한다 —
+    /// 한 .qubc에서 여러 컴포넌트를 use. 셋 다 한 모듈로 평탄화돼야 한다 -
     /// decode해서 def 개수(3)와 이름(Card/Thumb/Badge), 엔트리 Card가 ID 0인지 확인.
     #[test]
     fn use_multiple_from_one_source() {
@@ -314,7 +314,7 @@ mod tests {
         let bytes = compile_map(entry, &[("./parts.qubc", parts)]).unwrap();
         let module = decode(&bytes).unwrap();
 
-        // def(0..)를 순서대로 읽어 이름을 모은다 — None이 나오면 끝.
+        // def(0..)를 순서대로 읽어 이름을 모은다 - None이 나오면 끝.
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
@@ -327,7 +327,7 @@ mod tests {
         assert!(names.contains(&"Badge".to_string()));
     }
 
-    /// `use "./x.css"` — 리소스를 use한 컴포넌트는 정의 코드 앞머리에 LOAD_RES 0을 낸다.
+    /// `use "./x.css"` - 리소스를 use한 컴포넌트는 정의 코드 앞머리에 LOAD_RES 0을 낸다.
     /// 사이드맵 resources[0]은 정규화 경로(dedup 키). resolver가 정규화 경로를 돌려준다(소스는 버려짐).
     #[test]
     fn compiles_load_res_for_used_css() {
@@ -355,7 +355,7 @@ mod tests {
         assert_eq!(u16::from_le_bytes([code[1], code[2]]), 0);
     }
 
-    /// 같은 파일의 두 컴포넌트는 같은 리소스를 공유 — 둘 다 LOAD_RES 0을 내고 resId는 하나(dedup).
+    /// 같은 파일의 두 컴포넌트는 같은 리소스를 공유 - 둘 다 LOAD_RES 0을 내고 resId는 하나(dedup).
     #[test]
     fn same_file_components_share_res_id() {
         use bytecode::{decode, Op};
@@ -406,7 +406,7 @@ mod tests {
             use "./b.css"
             component B { template { p() {} } }
         "#;
-        // C는 여러 CSS를 use — app·b는 이미 발급된 resId 재사용, c만 신규.
+        // C는 여러 CSS를 use - app·b는 이미 발급된 resId 재사용, c만 신규.
         let c = r#"
             use "./app.css"
             use "./b.css"
@@ -460,7 +460,7 @@ mod tests {
         assert_eq!(load_res_ids(id_of("App")), vec![0], "App은 app.css=0");
         assert_eq!(load_res_ids(id_of("A")), vec![1], "A는 a.css=1");
         assert_eq!(load_res_ids(id_of("B")), vec![2], "B는 b.css=2");
-        // C는 app(0)·b(2) 재사용 + c(3) 신규 — use 순서대로 셋.
+        // C는 app(0)·b(2) 재사용 + c(3) 신규 - use 순서대로 셋.
         assert_eq!(load_res_ids(id_of("C")), vec![0, 2, 3], "C는 app=0·b=2 재사용 + c=3");
     }
 
@@ -594,7 +594,7 @@ mod tests {
         assert!(!names.contains(&"Z".to_string()), "아무도 use 안 한 Z는 제외");
     }
 
-    /// 합성은 RENDER 직전에 PUSH_PATH_SEGMENT를 낸다 — operand는 자식 type-name 상수풀 인덱스.
+    /// 합성은 RENDER 직전에 PUSH_PATH_SEGMENT를 낸다 - operand는 자식 type-name 상수풀 인덱스.
     /// 이벤트 fullname의 path 축(누가 쐈나)을 누적할 세그먼트다(alias 도입 전엔 type-name 그대로).
     #[test]
     fn composition_emits_push_path_segment_of_child_type_name() {
@@ -619,11 +619,11 @@ mod tests {
         let seg_idx = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
         assert_eq!(module.pool.get(seg_idx).unwrap(), "Inner");
 
-        // 바로 뒤에 RENDER가 온다 — 세그먼트를 소비하는 합성.
+        // 바로 뒤에 RENDER가 온다 - 세그먼트를 소비하는 합성.
         assert_eq!(code[seg_pos + 3], Op::Render as u8);
     }
 
-    /// 같은 자식을 두 번 합성하면 PUSH_PATH_SEGMENT가 같은 세그먼트로 두 번 나온다 —
+    /// 같은 자식을 두 번 합성하면 PUSH_PATH_SEGMENT가 같은 세그먼트로 두 번 나온다 -
     /// alias 없는 동일 type-name은 같은 fullname을 의도적으로 공유한다(§1.3).
     #[test]
     fn duplicate_composition_repeats_same_segment() {
@@ -650,7 +650,7 @@ mod tests {
         assert_eq!(module.pool.get(seg_indices[0]).unwrap(), "Inner");
     }
 
-    /// `Alias: Comp(...)` — alias가 있으면 세그먼트는 type-name이 아니라 alias다.
+    /// `Alias: Comp(...)` - alias가 있으면 세그먼트는 type-name이 아니라 alias다.
     #[test]
     fn alias_replaces_type_name_in_path_segment() {
         use bytecode::{decode, Op};
@@ -674,7 +674,7 @@ mod tests {
         assert_eq!(module.pool.get(seg_idx).unwrap(), "Done");
     }
 
-    /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 — alias 부여는 분리의 명시적 행위(§1.3).
+    /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 - alias 부여는 분리의 명시적 행위(§1.3).
     #[test]
     fn distinct_aliases_split_shared_type_name() {
         use bytecode::{decode, Op};
@@ -701,7 +701,7 @@ mod tests {
         assert_eq!(module.pool.get(seg_indices[1]).unwrap(), "Cancel");
     }
 
-    /// 요소 속성은 공백 구분 — 속성 사이 콤마는 우리 문법이 아니라 ParseError로 거부한다.
+    /// 요소 속성은 공백 구분 - 속성 사이 콤마는 우리 문법이 아니라 ParseError로 거부한다.
     #[test]
     fn element_attrs_reject_comma_separator() {
         let src = r#"component A { template { div(class="x", id="y") {} } }"#;

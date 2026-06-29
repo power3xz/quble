@@ -11,7 +11,7 @@ DESIGN.md에 흩어진 문법을 한곳에 정리한다. 이 문서는 **표층 
 
 ```
 use Button from "./Button"          // 다른 컴포넌트 import (여러 개: use A, B from "…")
-use "./Card.module.css"             // 에셋 — 이름 없이 경로만
+use "./Card.module.css"             // 에셋 - 이름 없이 경로만
 
 component IDENT {
   props    { … }   // 선택
@@ -33,7 +33,7 @@ component IDENT {
 props { id, title, description, completed, priority, tags, dueDate, assignee }
 ```
 
-쉼표로 구분된 이름 목록. (현재 타입 표기는 없음 — A-3 미결.)
+쉼표로 구분된 이름 목록. (현재 타입 표기는 없음 - A-3 미결.)
 
 ### 2.2 `contexts`
 
@@ -71,7 +71,7 @@ events {
 
 ---
 
-## 3. template — 요소 문법
+## 3. template - 요소 문법
 
 ### 3.1 요소
 
@@ -117,7 +117,7 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
 
 ---
 
-## 4. template — 디렉티브
+## 4. template - 디렉티브
 
 | 문법 | 의미 |
 |---|---|
@@ -155,7 +155,7 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
 ```
 
 > 의미론 주의: `@if`/`@for`의 조건·이터러블과 `{EXPR}` 보간은 **서버·클라 양쪽에서
-> 평가**된다(SSR). 따라서 결정적·부수효과 없는 식이어야 한다 — 미확정 해석, process.md A-2.
+> 평가**된다(SSR). 따라서 결정적·부수효과 없는 식이어야 한다 - 미확정 해석, process.md A-2.
 
 ---
 
@@ -163,11 +163,11 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
 
 문법상 EXPR이 등장하는 위치:
 
-1. `{EXPR}` — template 자식 보간
-2. `"… {EXPR} …"` — 문자열 리터럴 내 보간
-3. `attr={EXPR}` — 속성 값
-4. `@if (EXPR)` / `@for (_ in EXPR)` — 디렉티브 조건/이터러블
-5. `key: EXPR` — contexts 값, events 페이로드 값
+1. `{EXPR}` - template 자식 보간
+2. `"… {EXPR} …"` - 문자열 리터럴 내 보간
+3. `attr={EXPR}` - 속성 값
+4. `@if (EXPR)` / `@for (_ in EXPR)` - 디렉티브 조건/이터러블
+5. `key: EXPR` - contexts 값, events 페이로드 값
 
 관찰된 식 형태: prop 참조(`title`), 멤버 접근(`styles.variant`, `tags.length`),
 단항(`!completed`), 비교(`tags.length > 0`), 호출(`Date.now()`).
@@ -191,14 +191,14 @@ const handlers: TEventHandlers<
 
 - 키는 **풀네임**(use-site에서 바깥→안쪽 경로 누적, 컨텍스트는 경로에 안 낌).
 - `(data, { provided, get, set })` 시그니처. 반환 `{ goTo, newPage? } | void | Promise`.
-- 핸들러 본문은 **클라이언트 전용** — 호스트 JS에 위임 가능.
+- 핸들러 본문은 **클라이언트 전용** - 호스트 JS에 위임 가능.
 
 ---
 
 ## 미정 (문법에 영향)
 
-- **타입 표기** — props/events 페이로드에 타입 문법이 없음 (A-3).
-- **표현식 부분집합** — 허용 식 범위 (A-2).
-- **`@for` key** — 안정적 key 문법 필요 여부 (DESIGN.md §5.1).
+- **타입 표기** - props/events 페이로드에 타입 문법이 없음 (A-3).
+- **표현식 부분집합** - 허용 식 범위 (A-2).
+- **`@for` key** - 안정적 key 문법 필요 여부 (DESIGN.md §5.1).
 - 그 외 `@with` 외 디렉티브, 주석 문법, 이벤트명/별칭 명명 규칙 등 미관찰.
 ```

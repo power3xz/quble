@@ -33,7 +33,7 @@ pub fn encode(m: &Module) -> Vec<u8> {
         put_u16(&mut out, d.name_idx);
         put_u32(&mut out, d.code_off);
         put_u32(&mut out, d.code_len);
-        // 이벤트 테이블 (BYTECODE.md §4) — event_count, [(name_idx, payload_count, [(field_idx, offset)])]
+        // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(name_idx, payload_count, [(field_idx, offset)])]
         put_u16(&mut out, d.events.len() as u16);
         for e in &d.events {
             put_u16(&mut out, e.name_idx);

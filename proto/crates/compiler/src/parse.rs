@@ -189,7 +189,7 @@ impl<'a> Parser<'a> {
         Ok(props)
     }
 
-    // events { EVENT* }   — EVENT = NAME ( { PAYLOAD } )
+    // events { EVENT* }   - EVENT = NAME ( { PAYLOAD } )
     fn events(&mut self) -> Result<Vec<Event>, ParseError> {
         self.keyword("events")?;
         self.expect(&Token::LBrace)?;
@@ -201,7 +201,7 @@ impl<'a> Parser<'a> {
         Ok(events)
     }
 
-    // NAME ( { PAYLOAD } )   — TOGGLE({ label: title, on })
+    // NAME ( { PAYLOAD } )   - TOGGLE({ label: title, on })
     fn event_decl(&mut self) -> Result<Event, ParseError> {
         let name = self.ident()?;
         self.expect(&Token::LParen)?;
@@ -306,10 +306,10 @@ impl<'a> Parser<'a> {
         Ok(Node::Var(name))
     }
 
-    // [ALIAS :] COMP ( ARG* ) { }   — 대문자 컴포넌트 호출. ARG = prop = { var }.
+    // [ALIAS :] COMP ( ARG* ) { }   - 대문자 컴포넌트 호출. ARG = prop = { var }.
     // `Alias: Comp(...)`면 앞 Ident가 use-site 별칭(fullname 세그먼트). 없으면 type-name.
     // node 자리의 `대문자Ident :`는 alias뿐이라, 한 칸 앞 콜론으로 갈리고 모호하지 않다.
-    // 슬롯(자식 노드)은 아직 미지원 — 블록은 비어야 한다.
+    // 슬롯(자식 노드)은 아직 미지원 - 블록은 비어야 한다.
     fn component_call(&mut self) -> Result<Node, ParseError> {
         let alias = if matches!(self.tokens.get(self.pos + 1), Some(Token::Colon)) {
             let alias = self.ident()?;
@@ -397,7 +397,7 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 Some(Token::RParen) | None => break,
-                // `@click:EVENT` — DOM 이벤트 바인딩. 디렉티브는 닫힌 집합(Directive).
+                // `@click:EVENT` - DOM 이벤트 바인딩. 디렉티브는 닫힌 집합(Directive).
                 Some(Token::At(_)) => {
                     let dom_event = match self.next()? {
                         Token::At(directive) => match directive.dom_event_name() {
@@ -456,7 +456,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// 식별자가 대문자로 시작하나 — 컴포넌트 호출(true) vs HTML 태그(false) 구분.
+/// 식별자가 대문자로 시작하나 - 컴포넌트 호출(true) vs HTML 태그(false) 구분.
 fn starts_upper(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_uppercase())
 }

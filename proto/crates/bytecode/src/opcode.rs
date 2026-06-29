@@ -22,7 +22,7 @@ pub enum Op {
     AttrLVar = 0x0a,
     /// 부모 offset 하나를 자식 인자 버퍼에 push. 뒤따르는 RENDER가 소비.
     /// 부모의 paths/scope[offset]을 자식에게 그대로 넘긴다(한 단계 풀기). 순서 = 자식 offset 0,1,2….
-    /// use-site 바인딩(`Comp(name={b})` — b는 부모 offset)의 인코딩.
+    /// use-site 바인딩(`Comp(name={b})` - b는 부모 offset)의 인코딩.
     PushArg = 0x0b,
     /// 분기 시작. scope offset 하나(불리언)로 then/else를 가른다. then 가지 코드가 이어진다.
     If = 0x0c,
@@ -37,7 +37,7 @@ pub enum Op {
     BindEvent = 0x10,
     /// 리터럴 인자를 자식 인자 버퍼에 push. operand: 상수풀 값 인덱스. 뒤따르는 RENDER가 소비.
     /// PushArg와 달리 부모 슬롯을 공유하지 않고, 런타임이 자식 인스턴스에 고유 leaf로 심는다
-    /// (use-site 리터럴 `Comp(prop="lit")`의 인코딩 — 원본과 분리된 독립 값).
+    /// (use-site 리터럴 `Comp(prop="lit")`의 인코딩 - 원본과 분리된 독립 값).
     PushArgLit = 0x11,
     /// 합성 경로(fullname)에 세그먼트 하나를 민다. operand: 상수풀 세그먼트 인덱스(자식 type-name).
     /// 뒤따르는 RENDER가 소비. 이벤트 fullname의 path 축을 누적한다(context 축 `@with`와 무관).

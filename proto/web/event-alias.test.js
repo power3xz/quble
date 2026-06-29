@@ -1,4 +1,4 @@
-// alias 단위 테스트 — `Alias: Comp(...)`는 fullname 세그먼트를 type-name 대신 alias로 박는다.
+// alias 단위 테스트 - `Alias: Comp(...)`는 fullname 세그먼트를 type-name 대신 alias로 박는다.
 // 같은 Button이라도 alias가 다르면 fullname이 갈리고(분리), alias가 없으면 type-name으로 공유한다.
 // disasm 라운드트립은 세그먼트≠type-name일 때 `Alias: Comp(...)`로 복원하는지 본다.
 
