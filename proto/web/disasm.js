@@ -29,6 +29,7 @@ const OP = {
   LOAD_RES: 0x0f,
   BIND_EVENT: 0x10,
   PUSH_ARG_LIT: 0x11,
+  PUSH_PATH_SEGMENT: 0x12,
 };
 
 const DOM_EVENTS = ["click"]; // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type.
@@ -268,6 +269,12 @@ const decompileBody = (module, def) => {
         attrs.push("@" + domEvent + ":" + module.pool[event.nameIdx]);
         break;
       }
+      case OP.PUSH_PATH_SEGMENT:
+        // 소스 복원엔 안 쓴다 — 뒤따르는 RENDER가 compName으로 같은 type-name을 이미 복원한다
+        // (이벤트 fullname 산출은 별도: collectEventFullnames). operand만 소비. (alias 도입 시
+        // 세그먼트가 compName과 달라져 `Alias: Comp(...)` 복원에 쓰인다.)
+        u16();
+        break;
       default:
         throw new Error("bad opcode 0x" + op.toString(16));
     }
@@ -364,6 +371,79 @@ export const componentArgs = (module, compId) => {
     args.push({ name: "arg" + i, type: argTypes[i] ?? "string" });
   }
   return args;
+};
+
+// opcode의 operand 바이트 수(스킵용). runtime.js operandLen과 같은 계약.
+const OPERAND_LEN = (op) => {
+  switch (op) {
+    case OP.HALT:
+    case OP.ELEM_CLOSE_OPEN:
+    case OP.ELEM_END:
+    case OP.ELSE:
+    case OP.IF_END:
+      return 0;
+    case OP.ATTR_G:
+    case OP.ATTR_L:
+    case OP.ATTR_G_VAR:
+    case OP.ATTR_L_VAR:
+    case OP.BIND_EVENT:
+      return 4;
+    default:
+      return 2; // ELEM_OPEN·TEXT·TEXT_VAR·RENDER·PUSH_ARG·PUSH_ARG_LIT·PUSH_PATH_SEGMENT·IF·LOAD_RES
+  }
+};
+
+// 루트 컴포넌트에서 합성 트리를 걸어 발사 가능한 이벤트 fullname을 모은다. runtime이 런타임에
+// pathPrefix로 누적하는 fullname을, 같은 규칙으로 정적으로 산출한다(인스펙터가 핸들러를 fullname으로
+// 걸 때 쓴다). @if 가지는 then·else 둘 다 순회 — 어느 가지가 켜지든 그 이벤트가 발사될 수 있으니
+// 가능한 모든 fullname을 모은다. 같은 fullname은 한 번만(의도된 공유).
+//
+// @param module     decode된 모듈
+// @param rootCompId 프리뷰가 마운트하는 루트 컴포넌트 id
+// @returns          fullname 문자열 배열(루트 자신의 이벤트는 prefix 없는 로컬명)
+export const collectEventFullnames = (module, rootCompId) => {
+  const fullnames = [];
+  const add = (name) => {
+    if (!fullnames.includes(name)) {
+      fullnames.push(name);
+    }
+  };
+
+  const walk = (compId, pathPrefix) => {
+    const def = module.defs[compId];
+    if (!def) {
+      return;
+    }
+    const code = module.code;
+    let pc = def.codeOff;
+    const end = def.codeOff + def.codeLen;
+    let segment = null; // 다음 RENDER가 쓸 경로 세그먼트(PUSH_PATH_SEGMENT가 적재)
+
+    while (pc < end) {
+      const op = code[pc++];
+      if (op === OP.PUSH_PATH_SEGMENT) {
+        segment = module.pool[code[pc] | (code[pc + 1] << 8)];
+        pc += 2;
+      } else if (op === OP.RENDER) {
+        const childId = code[pc] | (code[pc + 1] << 8);
+        pc += 2;
+        const childPrefix = pathPrefix ? pathPrefix + "." + segment : segment;
+        segment = null;
+        walk(childId, childPrefix);
+      } else if (op === OP.BIND_EVENT) {
+        pc += 2; // event_type 스킵
+        const event = def.events[code[pc] | (code[pc + 1] << 8)];
+        pc += 2;
+        const localName = module.pool[event.nameIdx];
+        add(pathPrefix ? pathPrefix + "." + localName : localName);
+      } else {
+        pc += OPERAND_LEN(op);
+      }
+    }
+  };
+
+  walk(rootCompId, "");
+  return fullnames;
 };
 
 // qubb 바이트에서 컴포넌트 목록을 뽑는다([{ compId, name }]).
