@@ -393,19 +393,21 @@ const OPERAND_LEN = (op) => {
   }
 };
 
-// 루트 컴포넌트에서 합성 트리를 걸어 발사 가능한 이벤트 fullname을 모은다. runtime이 런타임에
-// pathPrefix로 누적하는 fullname을, 같은 규칙으로 정적으로 산출한다(인스펙터가 핸들러를 fullname으로
-// 걸 때 쓴다). @if 가지는 then·else 둘 다 순회 — 어느 가지가 켜지든 그 이벤트가 발사될 수 있으니
-// 가능한 모든 fullname을 모은다. 같은 fullname은 한 번만(의도된 공유).
+// 루트 컴포넌트에서 합성 트리를 걸어 발사 가능한 이벤트를 모은다. runtime이 런타임에 pathPrefix로
+// 누적하는 fullname을, 같은 규칙으로 정적으로 산출한다(인스펙터가 핸들러를 fullname으로 걸고 이벤트
+// 패널에 표시할 때 쓴다). @if 가지는 then·else 둘 다 순회 — 어느 가지가 켜지든 그 이벤트가 발사될 수
+// 있으니 가능한 모든 fullname을 모은다. 같은 fullname은 한 번만(의도된 공유).
 //
 // @param module     decode된 모듈
 // @param rootCompId 프리뷰가 마운트하는 루트 컴포넌트 id
-// @returns          fullname 문자열 배열(루트 자신의 이벤트는 prefix 없는 로컬명)
+// @returns          [{ fullname, payload: [{ field, offset }] }] (루트 자신의 이벤트는 prefix 없는 로컬명)
 export const collectEventFullnames = (module, rootCompId) => {
-  const fullnames = [];
-  const add = (name) => {
-    if (!fullnames.includes(name)) {
-      fullnames.push(name);
+  const events = [];
+  const seen = new Set();
+  const add = (fullname, payload) => {
+    if (!seen.has(fullname)) {
+      seen.add(fullname);
+      events.push({ fullname, payload });
     }
   };
 
@@ -435,7 +437,11 @@ export const collectEventFullnames = (module, rootCompId) => {
         const event = def.events[code[pc] | (code[pc + 1] << 8)];
         pc += 2;
         const localName = module.pool[event.nameIdx];
-        add(pathPrefix ? pathPrefix + "." + localName : localName);
+        const payload = event.payload.map((p) => ({
+          field: module.pool[p.fieldIdx],
+          offset: p.offset,
+        }));
+        add(pathPrefix ? pathPrefix + "." + localName : localName, payload);
       } else {
         pc += OPERAND_LEN(op);
       }
@@ -443,7 +449,7 @@ export const collectEventFullnames = (module, rootCompId) => {
   };
 
   walk(rootCompId, "");
-  return fullnames;
+  return events;
 };
 
 // qubb 바이트에서 컴포넌트 목록을 뽑는다([{ compId, name }]).

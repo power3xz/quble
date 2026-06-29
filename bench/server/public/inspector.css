@@ -432,9 +432,48 @@ body {
   padding: 2px 7px;
 }
 
-.inspector__badge--event {
-  color: #e5c07b;
-  border-color: rgba(229, 192, 123, 0.3);
+/* 이벤트 패널 — 이 컴포넌트를 루트로 쓸 때 발사되는 fullname + payload. */
+.inspector__events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspector__event {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 8px 10px;
+}
+
+.inspector__event-name {
+  font: 12px "SF Mono", Menlo, Consolas, monospace;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.inspector__event-fields {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inspector__event-field {
+  display: flex;
+  justify-content: space-between;
+  font: 11px "SF Mono", Menlo, Consolas, monospace;
+  color: var(--text-dim);
+}
+
+.inspector__event-field-name {
+  color: var(--text);
+}
+
+.inspector__event-field-offset {
+  color: var(--text-dim);
 }
 
 /* 이벤트 로그 — 프리뷰 아래. 시각 + 이벤트명 + data. */
