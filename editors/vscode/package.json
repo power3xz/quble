@@ -1,0 +1,28 @@
+{
+  "name": "quble",
+  "displayName": "Quble",
+  "description": "Quble 컴포넌트 언어(.qubc) 신택스 하이라이팅",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "quble",
+        "aliases": ["Quble", "quble"],
+        "extensions": [".qubc"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "quble",
+        "scopeName": "source.quble",
+        "path": "./syntaxes/quble.tmLanguage.json"
+      }
+    ]
+  }
+}

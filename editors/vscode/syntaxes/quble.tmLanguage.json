@@ -1,0 +1,105 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Quble",
+  "scopeName": "source.quble",
+  "patterns": [
+    { "include": "#use" },
+    { "include": "#component" },
+    { "include": "#block-keyword" },
+    { "include": "#directive" },
+    { "include": "#event-name" },
+    { "include": "#composition" },
+    { "include": "#tag" },
+    { "include": "#attribute" },
+    { "include": "#interpolation" },
+    { "include": "#string" }
+  ],
+  "repository": {
+    "use": {
+      "comment": "use X, Y from \"path\" — 다른 소스의 컴포넌트 import.",
+      "begin": "\\b(use)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.use.quble" }
+      },
+      "end": "$",
+      "patterns": [
+        { "match": "\\b(from)\\b", "name": "keyword.control.use.quble" },
+        { "include": "#string" },
+        { "match": "[A-Za-z_][A-Za-z0-9_]*", "name": "entity.name.type.component.quble" }
+      ]
+    },
+    "component": {
+      "match": "\\b(component)\\s+([A-Z][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.component.quble" },
+        "2": { "name": "entity.name.type.component.quble" }
+      }
+    },
+    "block-keyword": {
+      "match": "\\b(props|events|template)\\b",
+      "name": "keyword.other.block.quble"
+    },
+    "directive": {
+      "match": "(@)(if|else|click)\\b",
+      "name": "keyword.control.directive.quble"
+    },
+    "composition": {
+      "comment": "Alias: Comp(...) 또는 Comp(...) — 대문자 식별자. 별칭이 있으면 별칭이 경로 마디.",
+      "patterns": [
+        {
+          "match": "\\b([A-Z][A-Za-z0-9_]*)\\s*(:)\\s*([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "entity.name.tag.alias.quble" },
+            "2": { "name": "punctuation.separator.alias.quble" },
+            "3": { "name": "entity.name.type.component.quble" }
+          }
+        },
+        {
+          "match": "\\b([A-Z][A-Za-z0-9_]*)(?=\\s*\\()",
+          "name": "entity.name.type.component.quble"
+        }
+      ]
+    },
+    "event-name": {
+      "comment": "대문자 스네이크 관례 — TOGGLE, CLICK_STAT. @click:EVENT 및 events 블록 선언.",
+      "match": "\\b([A-Z][A-Z0-9_]*)\\b",
+      "name": "constant.other.event.quble"
+    },
+    "tag": {
+      "match": "\\b([a-z][a-zA-Z0-9-]*)(?=\\s*\\()",
+      "name": "entity.name.tag.quble"
+    },
+    "attribute": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(=)",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.quble" },
+        "2": { "name": "keyword.operator.assignment.quble" }
+      }
+    },
+    "interpolation": {
+      "comment": "{var} 보간 — proto는 단일 prop 참조만(표현식 미구현). 블록 본문의 `{`와 구별하려고 `{ 식별자 }` 한 덩어리만 매칭한다(begin/end로 열면 블록 `{`를 삼킨다).",
+      "match": "(\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
+      "captures": {
+        "1": { "name": "punctuation.section.embedded.begin.quble" },
+        "2": { "name": "variable.other.quble" },
+        "3": { "name": "punctuation.section.embedded.end.quble" }
+      }
+    },
+    "string": {
+      "comment": "문자열 안 {var} 보간 허용.",
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.quble",
+      "patterns": [
+        {
+          "match": "(\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
+          "captures": {
+            "1": { "name": "punctuation.section.embedded.begin.quble" },
+            "2": { "name": "variable.other.quble" },
+            "3": { "name": "punctuation.section.embedded.end.quble" }
+          }
+        }
+      ]
+    }
+  }
+}
