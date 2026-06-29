@@ -472,8 +472,13 @@ body {
   color: var(--text);
 }
 
-.inspector__event-field-offset {
+/* payload 값의 출처. 변수(arg)는 중립, 리터럴은 상수라 강조색 + 따옴표로 구분. */
+.inspector__event-field-source--arg {
   color: var(--text-dim);
+}
+
+.inspector__event-field-source--literal {
+  color: #e5c07b;
 }
 
 /* 이벤트 로그 — 프리뷰 아래. 시각 + 이벤트명 + data. */

@@ -276,7 +276,13 @@
       eventsPanel.innerHTML = events
         .map((event) => {
           const fields = event.payload
-            .map((p) => `<li class="inspector__event-field"><span class="inspector__event-field-name">${esc(p.field)}</span><span class="inspector__event-field-offset">arg${p.offset}</span></li>`)
+            .map((p) => {
+              // 출처: 변수면 루트 arg{N}(중립), 리터럴이면 그 상수값(따옴표 + 강조).
+              const source = p.source.kind === "literal"
+                ? `<span class="inspector__event-field-source inspector__event-field-source--literal">"${esc(p.source.value)}"</span>`
+                : `<span class="inspector__event-field-source inspector__event-field-source--arg">arg${p.source.offset}</span>`;
+              return `<li class="inspector__event-field"><span class="inspector__event-field-name">${esc(p.field)}</span>${source}</li>`;
+            })
             .join("");
           return (
             `<div class="inspector__event">` +

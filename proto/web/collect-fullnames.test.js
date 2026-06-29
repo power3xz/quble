@@ -17,22 +17,31 @@ before(() => {
   module = decodeForTest(qubb).module;
 });
 
-test("합성된 자식 이벤트는 fullname(자식 type-name 누적)으로 수집된다", () => {
-  // Card(루트, comp 0) -> Toggle 합성. Toggle의 TOGGLE은 "Toggle.TOGGLE"로.
+test("리터럴 인자로 합성하면 payload 출처가 그 상수값으로 끊긴다", () => {
+  // Card(루트, comp 0) -> Toggle을 리터럴(label="A" on="off")로 합성. fullname "Toggle.TOGGLE",
+  // payload 출처는 부모 scope 값이 아니라 리터럴이라 { kind:"literal", value }.
   const events = collectEventFullnames(module, 0);
   assert.deepEqual(events, [
     {
       fullname: "Toggle.TOGGLE",
       payload: [
-        { field: "label", offset: 0 },
-        { field: "on", offset: 1 },
+        { field: "label", source: { kind: "literal", value: "A" } },
+        { field: "on", source: { kind: "literal", value: "off" } },
       ],
     },
   ]);
 });
 
-test("루트 컴포넌트 자신의 이벤트는 prefix 없는 로컬명으로 수집된다", () => {
-  // Toggle을 루트(comp 1)로 직접 보면 합성 경로가 없어 "TOGGLE".
+test("루트 컴포넌트 자신의 이벤트는 payload 출처가 자기 prop arg offset", () => {
+  // Toggle을 루트(comp 1)로 직접 보면 합성 경로가 없어 "TOGGLE", 출처는 자기 prop arg offset.
   const events = collectEventFullnames(module, 1);
-  assert.deepEqual(events.map((e) => e.fullname), ["TOGGLE"]);
+  assert.deepEqual(events, [
+    {
+      fullname: "TOGGLE",
+      payload: [
+        { field: "label", source: { kind: "arg", offset: 0 } },
+        { field: "on", source: { kind: "arg", offset: 1 } },
+      ],
+    },
+  ]);
 });

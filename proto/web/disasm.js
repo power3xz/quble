@@ -400,7 +400,11 @@ const OPERAND_LEN = (op) => {
 //
 // @param module     decode된 모듈
 // @param rootCompId 프리뷰가 마운트하는 루트 컴포넌트 id
-// @returns          [{ fullname, payload: [{ field, offset }] }] (루트 자신의 이벤트는 prefix 없는 로컬명)
+// @returns          [{ fullname, payload: [{ field, source }] }]
+//                   source는 payload 값의 출처를 루트 기준으로 역추적한 것:
+//                     { kind: "arg", offset }     변수 경로 — 루트 scope의 arg{offset}
+//                     { kind: "literal", value }  리터럴 인자로 끊긴 경로 — 그 상수값
+//                   합성 시 PushArg는 자식 offset을 부모 offset으로 잇고, PushArgLit은 상수로 끊는다.
 export const collectEventFullnames = (module, rootCompId) => {
   const events = [];
   const seen = new Set();
@@ -411,7 +415,9 @@ export const collectEventFullnames = (module, rootCompId) => {
     }
   };
 
-  const walk = (compId, pathPrefix) => {
+  // toRoot: 이 컴포넌트의 로컬 offset을 출처 source로 환산한다. 루트는 그대로 arg{offset}.
+  // 합성 자식은 RENDER에서 만든 환산기(자식 offset -> 부모 출처 -> 상위 toRoot)를 받는다.
+  const walk = (compId, pathPrefix, toRoot) => {
     const def = module.defs[compId];
     if (!def) {
       return;
@@ -420,18 +426,31 @@ export const collectEventFullnames = (module, rootCompId) => {
     let pc = def.codeOff;
     const end = def.codeOff + def.codeLen;
     let segment = null; // 다음 RENDER가 쓸 경로 세그먼트(PUSH_PATH_SEGMENT가 적재)
+    let argParents = []; // 다음 RENDER가 쓸 자식 인자: 자식 offset i -> 부모 출처
 
     while (pc < end) {
       const op = code[pc++];
       if (op === OP.PUSH_PATH_SEGMENT) {
         segment = module.pool[code[pc] | (code[pc + 1] << 8)];
         pc += 2;
+      } else if (op === OP.PUSH_ARG) {
+        // 자식 offset(등장 순서) <- 부모 offset(operand). 부모 offset을 상위로 마저 환산해 둔다.
+        argParents.push(toRoot(code[pc] | (code[pc + 1] << 8)));
+        pc += 2;
+      } else if (op === OP.PUSH_ARG_LIT) {
+        // 리터럴 인자 — 부모 scope 값이 아니라 상수. 여기서 체인이 끊긴다.
+        argParents.push({ kind: "literal", value: module.pool[code[pc] | (code[pc + 1] << 8)] });
+        pc += 2;
       } else if (op === OP.RENDER) {
         const childId = code[pc] | (code[pc + 1] << 8);
         pc += 2;
         const childPrefix = pathPrefix ? pathPrefix + "." + segment : segment;
+        // 자식 offset -> 이 컴포넌트가 넘긴 인자의 출처(이미 루트까지 환산됨).
+        const parents = argParents;
+        const childToRoot = (childOffset) => parents[childOffset];
         segment = null;
-        walk(childId, childPrefix);
+        argParents = [];
+        walk(childId, childPrefix, childToRoot);
       } else if (op === OP.BIND_EVENT) {
         pc += 2; // event_type 스킵
         const event = def.events[code[pc] | (code[pc + 1] << 8)];
@@ -439,7 +458,7 @@ export const collectEventFullnames = (module, rootCompId) => {
         const localName = module.pool[event.nameIdx];
         const payload = event.payload.map((p) => ({
           field: module.pool[p.fieldIdx],
-          offset: p.offset,
+          source: toRoot(p.offset), // payload 값의 출처를 루트 기준으로
         }));
         add(pathPrefix ? pathPrefix + "." + localName : localName, payload);
       } else {
@@ -448,7 +467,7 @@ export const collectEventFullnames = (module, rootCompId) => {
     }
   };
 
-  walk(rootCompId, "");
+  walk(rootCompId, "", (offset) => ({ kind: "arg", offset })); // 루트 항등 = arg{offset}
   return events;
 };
 
