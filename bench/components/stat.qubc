@@ -2,8 +2,11 @@ use "./stat.css"
 
 component Stat {
   props { label, value }
+  events {
+    CLICK_STAT({ label: value })
+  }
   template {
-    div(class="stat") {
+    div(class="stat" @click:CLICK_STAT) {
       span(class="value") { {value} }
       span(class="label") { {label} }
     }

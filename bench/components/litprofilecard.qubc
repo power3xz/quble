@@ -19,7 +19,7 @@ component LitProfileCard {
   template {
     article(class="light") {
       div(class="header") {
-        Thumbnail(avatar={avatar} name={name}) {}
+        MainThumb: Thumbnail(avatar={avatar} name={name}) {}
         div(class="ident") {
           h3(class="name") { {name} }
           Badge(role={role} theme="light") {}
@@ -27,9 +27,9 @@ component LitProfileCard {
       }
       p(class="bio") { {bio} }
       div(class="stats") {
-        Stat(label={followersLabel} value={followers}) {}
-        Stat(label={followingLabel} value={following}) {}
-        Stat(label={postsLabel} value={posts}) {}
+        FirstStat: Stat(label={followersLabel} value={followers}) {}
+        SecondStat: Stat(label={followingLabel} value={following}) {}
+        ThirdStat: Stat(label={postsLabel} value={posts}) {}
       }
       div(class="meta") {
         MetaRow(icon="📍" text={location}) {}
