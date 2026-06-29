@@ -396,19 +396,25 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // fullname = 합성 경로 + 로컬 이벤트명(누가 쐈나). 바인딩 시점에 불변이라 콜백 밖에서
             // 한 번 짓는다(루트는 prefix가 비어 로컬명 그대로 — 기존 동작과 호환).
             const fullName = pathPrefix ? pathPrefix + "." + eventName : eventName;
-            // payload offset들을 leafIndex로 풀어, 발생 시점의 현재값을 필드명 키로 모은다.
+            // payload offset들을 leafIndex로 풀어 props 맵(필드명 -> leafIndex)을 짓는다.
             // offset->leafIndex는 발생 때가 아니라 지금(바인딩 때) 한 번 푼다(paths는 인스턴스 불변).
-            const fields = event.payload.map((p) => ({
-              name: module.pool[p.fieldIdx],
-              leafIndex: ctx.leafOf(paths[p.offset]),
-            }));
+            // props는 핸들러의 set/get 대상(set(props.name, v)), data는 발생 시점 현재값.
+            const props = {};
+            for (const p of event.payload) {
+              props[module.pool[p.fieldIdx]] = ctx.leafOf(paths[p.offset]);
+            }
             const el = pending;
-            el.addEventListener(domEvent, () => {
+            el.addEventListener(domEvent, (domEventObject) => {
               const data = {};
-              for (const f of fields) {
-                data[f.name] = ctx.get(f.leafIndex);
+              for (const name in props) {
+                data[name] = ctx.get(props[name]);
               }
-              handlers[fullName]?.(data);
+              handlers[fullName]?.(data, {
+                event: domEventObject,
+                set: ctx.set,
+                get: ctx.get,
+                props,
+              });
             });
             break;
           }

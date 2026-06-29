@@ -56,6 +56,39 @@ test("핸들러의 set이 DOM을 갱신한다(클릭 → set → 텍스트 변�
   assert.equal(button.textContent, "끄기", "핸들러 set이 텍스트 갱신");
 });
 
+test("둘째 인자 set/props로 상태를 바꾸면 DOM이 갱신된다", () => {
+  const { button } = instantiate({ label: "켜기", on: false }, {
+    TOGGLE: (data, { set, props }) => {
+      set(props.label, "끄기"); // props.label = label leafIndex, set이 통지 -> DOM
+    },
+  });
+  assert.equal(button.textContent, "켜기", "초기 label");
+  button.click();
+  assert.equal(button.textContent, "끄기", "핸들러 set이 텍스트 갱신");
+});
+
+test("둘째 인자 get으로 현재값을 읽는다", () => {
+  let read = null;
+  const { button } = instantiate({ label: "현재값", on: false }, {
+    TOGGLE: (data, { get, props }) => {
+      read = get(props.label);
+    },
+  });
+  button.click();
+  assert.equal(read, "현재값", "get(props.label)이 현재값");
+});
+
+test("둘째 인자 event로 DOM 이벤트 객체를 받는다", () => {
+  let received = null;
+  const { button } = instantiate({ label: "A", on: false }, {
+    TOGGLE: (data, { event }) => {
+      received = event;
+    },
+  });
+  button.click();
+  assert.equal(received?.type, "click", "DOM click 이벤트 객체 전달");
+});
+
 test("핸들러 없는 이벤트는 무시된다(에러 없음)", () => {
   const { button } = instantiate({ label: "A", on: false }, {});
   assert.doesNotThrow(() => button.click(), "핸들러 없어도 클릭은 안전");
