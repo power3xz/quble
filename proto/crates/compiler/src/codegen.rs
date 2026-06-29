@@ -154,7 +154,7 @@ fn emit_node(
             // 이벤트 바인딩 — 속성과 같은 자리(여는 태그 진행 중). event_idx는 이 컴포넌트
             // events에서 이벤트명으로 찾는다(선언 순서 = idx).
             for (dom_event, event_name) in event_bindings {
-                // 렉서가 닫힌 집합(Keyword)으로 걸러 알려진 DOM 이벤트만 온다.
+                // 렉서가 닫힌 집합(Directive)으로 걸러 알려진 DOM 이벤트만 온다.
                 let event_type = bytecode::dom_events::dom_event_id(dom_event)
                     .expect("렉서가 거른 DOM 이벤트만 온다");
                 let event_idx = events

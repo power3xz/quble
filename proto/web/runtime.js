@@ -45,6 +45,7 @@ const TAGS = [
   "main",
   "aside",
   "label",
+  "input",
 ];
 const ATTRS = [
   "class",
@@ -59,7 +60,22 @@ const ATTRS = [
   "style",
   "placeholder",
 ];
-const DOM_EVENTS = ["click"]; // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type.
+// 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
+const DOM_EVENTS = [
+  "click",
+  "input",
+  "change",
+  "submit",
+  "focus",
+  "blur",
+  "keydown",
+  "keyup",
+  "mousedown",
+  "mouseup",
+  "mouseenter",
+  "mouseleave",
+  "scroll",
+];
 
 const OP = {
   HALT: 0x00,

@@ -235,6 +235,50 @@ mod tests {
         ));
     }
 
+    /// `@input:EVENT`이 닫힌 DOM 이벤트 집합의 input ID(1)로 BIND_EVENT를 낸다.
+    /// (click 외 이벤트가 끝까지 — 렉서 -> 파서 -> codegen — 흐르는지.)
+    #[test]
+    fn compiles_non_click_dom_event() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { value }
+              events { EDIT({ value }) }
+              template { input(@input:EDIT) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // BIND_EVENT event_type=1(input) event_idx=0 가 코드에 있어야 한다.
+        let input_id = bytecode::dom_events::dom_event_id("input").unwrap();
+        let mut bind = vec![Op::BindEvent as u8];
+        bind.extend_from_slice(&input_id.to_le_bytes());
+        bind.extend_from_slice(&0u16.to_le_bytes()); // EDIT = event_idx 0
+        assert!(
+            code.windows(bind.len()).any(|w| w == bind.as_slice()),
+            "BIND_EVENT input(1) idx 0 가 코드에 있어야",
+        );
+    }
+
+    /// 닫힌 집합 밖 디렉티브(`@hover`)는 렉서가 그 자리에서 거부한다(확정적 검증).
+    #[test]
+    fn unknown_dom_event_directive_errors() {
+        let src = r#"
+            component C {
+              events { X({ a }) }
+              template { div(@hover:X) {} }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Lex(_)))
+        ));
+    }
+
     #[test]
     fn missing_brace_errors() {
         let src = r#"component C { template { div() { } "#;

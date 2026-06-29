@@ -4,7 +4,19 @@
 
 /// 프로토타입 시작 집합. 인덱스 = 예약 DOM 이벤트 ID.
 const DOM_EVENTS: &[&str] = &[
-    "click", // 0
+    "click",       // 0
+    "input",       // 1
+    "change",      // 2
+    "submit",      // 3
+    "focus",       // 4
+    "blur",        // 5
+    "keydown",     // 6
+    "keyup",       // 7
+    "mousedown",   // 8
+    "mouseup",     // 9
+    "mouseenter",  // 10
+    "mouseleave",  // 11
+    "scroll",      // 12
 ];
 
 /// DOM 이벤트 ID → 이름. 범위를 벗어나면 None.

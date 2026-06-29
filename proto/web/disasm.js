@@ -7,7 +7,7 @@
 //
 // 포맷·테이블은 runtime.js와 같아야 한다(같은 계약). 여기선 디코드만 하므로 독립 디코더를 둔다.
 
-const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img", "section", "header", "footer", "nav", "main", "aside", "label"];
+const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img", "section", "header", "footer", "nav", "main", "aside", "label", "input"];
 const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
 
 const OP = {
@@ -32,7 +32,22 @@ const OP = {
   PUSH_PATH_SEGMENT: 0x12,
 };
 
-const DOM_EVENTS = ["click"]; // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type.
+// 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
+const DOM_EVENTS = [
+  "click",
+  "input",
+  "change",
+  "submit",
+  "focus",
+  "blur",
+  "keydown",
+  "keyup",
+  "mousedown",
+  "mouseup",
+  "mouseenter",
+  "mouseleave",
+  "scroll",
+];
 
 // ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
 class Reader {

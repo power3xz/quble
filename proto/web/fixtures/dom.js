@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 
 const dom = new JSDOM("<!DOCTYPE html><body></body>");
 globalThis.document = dom.window.document;
+globalThis.Event = dom.window.Event;
 
 // 인스턴스 노드를 새 호스트 div에 붙이고 호스트를 돌려준다(innerHTML 검사용).
 export const mount = (instance) => {

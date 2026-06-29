@@ -11,17 +11,51 @@ pub enum Token {
     Eq,     // =
     Comma,  // ,
     Colon,  // :
-    /// `@` 뒤에 오는 예약어. `@if` → `At(Keyword::If)`.
-    At(Keyword),
+    /// `@` 뒤에 오는 디렉티브. `@if` -> `At(Directive::If)`.
+    At(Directive),
 }
 
-/// `@` 디렉티브 키워드. 분기(`@if`/`@else`)와 DOM 이벤트(`@click`).
-/// DOM 이벤트는 닫힌 집합이라 여기 박는다(필요할 때 input·scroll 등 추가).
+/// `@` 디렉티브. 분기(`@if`/`@else`)와 DOM 이벤트(`@click`).
+/// DOM 이벤트는 닫힌 집합이라 여기 박는다(필요할 때 추가).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Keyword {
+pub enum Directive {
     If,
     Else,
     Click,
+    Input,
+    Change,
+    Submit,
+    Focus,
+    Blur,
+    KeyDown,
+    KeyUp,
+    MouseDown,
+    MouseUp,
+    MouseEnter,
+    MouseLeave,
+    Scroll,
+}
+
+impl Directive {
+    /// DOM 이벤트 디렉티브면 그 이벤트명, 구조 디렉티브(`@if`/`@else`)면 None.
+    pub fn dom_event_name(&self) -> Option<&'static str> {
+        match self {
+            Directive::If | Directive::Else => None,
+            Directive::Click => Some("click"),
+            Directive::Input => Some("input"),
+            Directive::Change => Some("change"),
+            Directive::Submit => Some("submit"),
+            Directive::Focus => Some("focus"),
+            Directive::Blur => Some("blur"),
+            Directive::KeyDown => Some("keydown"),
+            Directive::KeyUp => Some("keyup"),
+            Directive::MouseDown => Some("mousedown"),
+            Directive::MouseUp => Some("mouseup"),
+            Directive::MouseEnter => Some("mouseenter"),
+            Directive::MouseLeave => Some("mouseleave"),
+            Directive::Scroll => Some("scroll"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -81,9 +115,21 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     }
                 }
                 let kw = match s.as_str() {
-                    "if" => Keyword::If,
-                    "else" => Keyword::Else,
-                    "click" => Keyword::Click,
+                    "if" => Directive::If,
+                    "else" => Directive::Else,
+                    "click" => Directive::Click,
+                    "input" => Directive::Input,
+                    "change" => Directive::Change,
+                    "submit" => Directive::Submit,
+                    "focus" => Directive::Focus,
+                    "blur" => Directive::Blur,
+                    "keydown" => Directive::KeyDown,
+                    "keyup" => Directive::KeyUp,
+                    "mousedown" => Directive::MouseDown,
+                    "mouseup" => Directive::MouseUp,
+                    "mouseenter" => Directive::MouseEnter,
+                    "mouseleave" => Directive::MouseLeave,
+                    "scroll" => Directive::Scroll,
                     _ => return Err(LexError::UnknownDirective(s)),
                 };
                 toks.push(Token::At(kw));
