@@ -2,3 +2,4 @@ target/
 node_modules/
 dist/
 .dev-host-data/
+.DS_Store
