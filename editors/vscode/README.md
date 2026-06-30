@@ -9,20 +9,32 @@ Quble 컴포넌트 언어(`.qubc`) 신택스 하이라이팅.
 - DOM 이벤트 위임 `@click` `@input` `@change` `@submit` `@focus` `@blur` `@keydown` `@keyup` `@mousedown` `@mouseup` `@mouseenter` `@mouseleave` `@scroll`
 - 합성·별칭 `Alias: Comp(...)`, 이벤트명(대문자 스네이크), 태그(소문자), 속성, 문자열, `{var}` 보간
 
-## 핸들러 이벤트 자동완성
+## 핸들러 타입 생성
 
-`*.qubc.handlers.ts` 파일의 문자열 키 자리에서, 짝 `.qubc`가 발사하는 이벤트 fullname을
-자동완성으로 제안한다(예: `card.qubc.handlers.ts` -> `card.qubc`).
+`*.qubc.handlers.ts`를 열거나 짝 `.qubc`를 저장하면, 확장이 짝 `x.qubc.d.ts`(`Handlers`
+인터페이스)를 생성한다. handlers.ts가 이를 `import type`으로 받으면 TS가 키·payload·context를
+타입으로 강제한다 - 잘못된 이벤트명은 컴파일 에러, payload 필드는 정확한 타입(리터럴은 그 값으로
+좁힘), `params.context.<이름>.<필드>`까지 잡힌다.
 
 ```ts
 // card.qubc.handlers.ts
-const handlers = {
-  'MainThumb.CLICK_THUMBNAIL': () => {},  // <- 문자열 안에서 후보가 뜬다
+import type { Handlers } from "./card.qubc";
+
+const handlers: Handlers = {
+  // 키를 치면 fullname 후보가 뜨고, 빠진 핸들러·없는 이벤트명을 TS가 잡는다.
+  'MainThumb.CLICK_THUMBNAIL': (data, params) => {
+    data.avatar;                    // string
+    params.context.HoverArea.title; // 리터럴이면 그 값으로 좁혀짐
+  },
 };
+export default handlers;
 ```
 
-동작: 짝 `.qubc`를 컴파일러(`quble-bytecode`)로 qubb 바이트코드로 만들고, `disasm.js`로
-합성 트리를 걸어 fullname을 산출한다. 따옴표 입력 또는 `Trigger Suggest`(Ctrl+Space)로 뜬다.
+일부 이벤트만 처리하려면 `Partial<Handlers>`를 쓴다.
+
+동작: 짝 `.qubc`를 컴파일러(`quble-bytecode`)로 qubb 바이트코드로 만들고, `disasm.js`의
+`handlersDts`로 합성 트리를 걸어 `.d.ts` 텍스트를 산출한다. 생성된 `.d.ts`는 빌드 산출물이다
+(gitignore - `.qubc`에서 언제든 재생성).
 
 전제: 확장이 호출하는 컴파일러 바이너리가 빌드돼 있어야 한다.
 
