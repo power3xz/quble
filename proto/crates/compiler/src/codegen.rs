@@ -54,7 +54,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
     for fc in comps {
         let comp = &fc.comp;
-        let name_const_idx = pool.intern(&comp.name);
+        let name_const_index = pool.intern(&comp.name);
         let code_off = code.len() as u32;
         // 리소스 로드를 정의 앞머리에 깐다. lazy build에서 이 컴포넌트가 실제로 그려질 때만
         // 실행돼 리소스가 로드된다(같은 파일 컴포넌트가 같은 LOAD_RES를 내도 런타임이 URL dedup).
@@ -75,7 +75,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
         }
         code.push(Op::Halt as u8);
         // events를 직렬화용 EventDef로 변환(코드와 무관 - 컴포넌트 테이블로 간다).
-        // payload의 prop명을 scope offset으로, 필드명을 상수풀 인덱스로.
+        // payload의 prop명을 scope index로, 필드명을 상수풀 인덱스로.
         let events = comp
             .events
             .iter()
@@ -85,19 +85,19 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                     .iter()
                     .map(|(field, prop)| {
                         Ok(Field {
-                            name_const_idx: pool.intern(field),
+                            name_const_index: pool.intern(field),
                             value: FieldValue::Scope(prop_name_to_scope_index(prop, &comp.props)?),
                         })
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
-                    name_const_idx: pool.intern(&e.name),
+                    name_const_index: pool.intern(&e.name),
                     fields,
                 })
             })
             .collect::<Result<Vec<_>, CodegenError>>()?;
         defs.push(CompDef {
-            name_const_idx,
+            name_const_index,
             code_off,
             code_len: code.len() as u32 - code_off,
             events,
@@ -136,14 +136,14 @@ fn emit_node(
 ) -> Result<(), CodegenError> {
     match node {
         Node::Text(s) => {
-            let idx = pool.intern(s);
+            let index = pool.intern(s);
             code.push(Op::Text as u8);
-            code.extend_from_slice(&idx.to_le_bytes());
+            code.extend_from_slice(&index.to_le_bytes());
         }
         Node::Var(name) => {
-            let idx = prop_name_to_scope_index(name, props)?;
+            let index = prop_name_to_scope_index(name, props)?;
             code.push(Op::TextVar as u8);
-            code.extend_from_slice(&idx.to_le_bytes());
+            code.extend_from_slice(&index.to_le_bytes());
         }
         Node::Element {
             tag,
@@ -156,26 +156,26 @@ fn emit_node(
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
 
-            // 이벤트 바인딩 - 속성과 같은 자리(여는 태그 진행 중). event_idx는 이 컴포넌트
-            // events에서 이벤트명으로 찾는다(선언 순서 = idx).
+            // 이벤트 바인딩 - 속성과 같은 자리(여는 태그 진행 중). event_index는 이 컴포넌트
+            // events에서 이벤트명으로 찾는다(선언 순서 = index).
             for (dom_event, event_name) in event_bindings {
                 // 렉서가 닫힌 집합(Directive)으로 걸러 알려진 DOM 이벤트만 온다.
                 let event_type = bytecode::dom_events::dom_event_id(dom_event)
                     .expect("렉서가 거른 DOM 이벤트만 온다");
-                let event_idx = events
+                let event_index = events
                     .iter()
                     .position(|e| &e.name == event_name)
                     .ok_or_else(|| CodegenError::UnknownEvent(event_name.clone()))?
                     as u16;
                 code.push(Op::BindEvent as u8);
                 code.extend_from_slice(&event_type.to_le_bytes());
-                code.extend_from_slice(&event_idx.to_le_bytes());
+                code.extend_from_slice(&event_index.to_le_bytes());
             }
 
             for (name, value) in attrs {
                 // 두 축이 opcode를 가른다.
                 //   name : 전역 속성명 테이블에 있으면 G(전역 ID), 없으면 L(상수풀 인덱스)
-                //   value: 정적이면 상수풀 인덱스, 변수면 scope offset
+                //   value: 정적이면 상수풀 인덱스, 변수면 scope index
                 let is_var = matches!(value, AttrValue::Var(_));
                 let (op, name_operand) = match bytecode::attrs::attr_id(name) {
                     Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
@@ -208,7 +208,7 @@ fn emit_node(
                 .get(name)
                 .ok_or_else(|| CodegenError::UnknownComponent(name.clone()))?;
 
-            // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 offset을 싣는
+            // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 scope index을 싣는
             // PUSH_ARG, 리터럴(`prop="lit"`)은 상수풀 인덱스를 싣는 PUSH_ARG_LIT.
             // (지금은 전부 바인딩 가정 - 순서만으로 매핑.)
             for child_prop in child_props {
@@ -222,9 +222,9 @@ fn emit_node(
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
-                        let offset = prop_name_to_scope_index(parent_var, props)?;
+                        let scope_index = prop_name_to_scope_index(parent_var, props)?;
                         code.push(Op::PushArg as u8);
-                        code.extend_from_slice(&offset.to_le_bytes());
+                        code.extend_from_slice(&scope_index.to_le_bytes());
                     }
                     ArgValue::Literal(literal) => {
                         let value_index = pool.intern(literal);
@@ -246,10 +246,10 @@ fn emit_node(
             code.extend_from_slice(&child_id.to_le_bytes());
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop - scope offset 하나. (표현식은 이후 단계)
-            let offset = prop_name_to_scope_index(cond, props)?;
+            // cond는 불리언 prop - scope index 하나. (표현식은 이후 단계)
+            let scope_index = prop_name_to_scope_index(cond, props)?;
             code.push(Op::If as u8);
-            code.extend_from_slice(&offset.to_le_bytes());
+            code.extend_from_slice(&scope_index.to_le_bytes());
 
             for node in then {
                 emit_node(node, props, events, comp_lookup, pool, code)?;

@@ -174,7 +174,7 @@ mod tests {
         let expected = Module::new(
             pool,
             vec![CompDef {
-                name_const_idx: hello,
+                name_const_index: hello,
                 code_off: 0,
                 code_len: code.len() as u32,
                 events: vec![],
@@ -186,8 +186,8 @@ mod tests {
         assert_eq!(&got[..], encode(&expected).as_slice());
     }
 
-    /// `class={c}`는 전역 name + 변수값 → AttrGVar(name=전역 ID, value=scope offset),
-    /// `data-x={d}`는 로컬 name + 변수값 → AttrLVar(name=상수풀 인덱스, value=scope offset).
+    /// `class={c}`는 전역 name + 변수값 → AttrGVar(name=전역 ID, value=scope index),
+    /// `data-x={d}`는 로컬 name + 변수값 → AttrLVar(name=상수풀 인덱스, value=scope index).
     #[test]
     fn compiles_attr_var_opcodes() {
         use bytecode::{decode, Op};
@@ -215,10 +215,10 @@ mod tests {
         push16(&mut want, bytecode::tags::tag_id("div").unwrap());
         want.push(Op::AttrGVar as u8);
         push16(&mut want, class_g);
-        push16(&mut want, 0); // c = scope offset 0
+        push16(&mut want, 0); // c = scope index 0
         want.push(Op::AttrLVar as u8);
         push16(&mut want, data_x);
-        push16(&mut want, 1); // d = scope offset 1
+        push16(&mut want, 1); // d = scope index 1
         want.push(Op::ElemCloseOpen as u8);
         want.push(Op::ElemEnd as u8);
         want.push(Op::Halt as u8);
@@ -253,14 +253,14 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // BIND_EVENT event_type=1(input) event_idx=0 가 코드에 있어야 한다.
+        // BIND_EVENT event_type=1(input) event_index=0 가 코드에 있어야 한다.
         let input_id = bytecode::dom_events::dom_event_id("input").unwrap();
         let mut bind = vec![Op::BindEvent as u8];
         bind.extend_from_slice(&input_id.to_le_bytes());
-        bind.extend_from_slice(&0u16.to_le_bytes()); // EDIT = event_idx 0
+        bind.extend_from_slice(&0u16.to_le_bytes()); // EDIT = event_index 0
         assert!(
             code.windows(bind.len()).any(|w| w == bind.as_slice()),
-            "BIND_EVENT input(1) idx 0 가 코드에 있어야",
+            "BIND_EVENT input(1) index 0 가 코드에 있어야",
         );
     }
 
@@ -318,7 +318,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_const_idx).unwrap().to_string());
+            names.push(module.pool.get(def.name_const_index).unwrap().to_string());
             id += 1;
         }
         assert_eq!(names.len(), 3, "Card+Thumb+Badge 셋 다 들어가야 함");
@@ -442,7 +442,7 @@ mod tests {
         // 컴포넌트 ID로 이름을 확인해 매핑이 어긋나도 잡히게 한다.
         let id_of = |name: &str| {
             (0..)
-                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_const_idx).unwrap()) == Some(name))
+                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_const_index).unwrap()) == Some(name))
                 .unwrap()
         };
         // 한 컴포넌트의 코드 앞머리 LOAD_RES들을 순서대로 모은다(연속한 LOAD_RES만).
@@ -534,7 +534,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_const_idx).unwrap().to_string());
+            names.push(module.pool.get(def.name_const_index).unwrap().to_string());
             id += 1;
         }
         names
@@ -616,8 +616,8 @@ mod tests {
             .expect("합성이 PUSH_PATH_SEGMENT를 내야 한다");
 
         // operand는 "Inner"를 가리킨다.
-        let seg_idx = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
-        assert_eq!(module.pool.get(seg_idx).unwrap(), "Inner");
+        let seg_index = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
+        assert_eq!(module.pool.get(seg_index).unwrap(), "Inner");
 
         // 바로 뒤에 RENDER가 온다 - 세그먼트를 소비하는 합성.
         assert_eq!(code[seg_pos + 3], Op::Render as u8);
@@ -670,8 +670,8 @@ mod tests {
             .expect("합성이 PUSH_PATH_SEGMENT를 내야 한다");
 
         // operand는 type-name "Inner"가 아니라 alias "Done".
-        let seg_idx = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
-        assert_eq!(module.pool.get(seg_idx).unwrap(), "Done");
+        let seg_index = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
+        assert_eq!(module.pool.get(seg_index).unwrap(), "Done");
     }
 
     /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 - alias 부여는 분리의 명시적 행위(§1.3).

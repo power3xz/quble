@@ -23,8 +23,8 @@ impl ConstPool {
     }
 
     /// 인덱스 → 문자열. 범위를 벗어나면 None.
-    pub fn get(&self, idx: u16) -> Option<&str> {
-        self.entries.get(idx as usize).map(|s| s.as_str())
+    pub fn get(&self, index: u16) -> Option<&str> {
+        self.entries.get(index as usize).map(|s| s.as_str())
     }
 
     pub(crate) fn len(&self) -> usize {

@@ -6,7 +6,7 @@ use crate::pool::ConstPool;
 /// 바이트코드 u16과의 변환은 encode/decode에 가둔다 - 비트연산(0x8000)이 한 곳에만 존재.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldValue {
-    /// scope offset. 런타임이 paths[idx]로 읽는다.
+    /// scope index. 런타임이 paths[index]로 읽는다.
     Scope(u16),
     /// 컴포넌트 상수풀 인덱스. 리터럴 값($lit).
     Const(u16),
@@ -20,8 +20,8 @@ impl FieldValue {
     /// 바이트코드 u16으로. Scope는 인덱스 그대로, Const는 MSB를 세운다.
     pub fn encode(self) -> u16 {
         match self {
-            FieldValue::Scope(idx) => idx,
-            FieldValue::Const(idx) => idx | Self::CONST_BIT,
+            FieldValue::Scope(index) => index,
+            FieldValue::Const(index) => index | Self::CONST_BIT,
         }
     }
 
@@ -39,15 +39,15 @@ impl FieldValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Field {
     /// 필드명("title")의 컴포넌트 상수풀 인덱스.
-    pub name_const_idx: u16,
+    pub name_const_index: u16,
     pub value: FieldValue,
 }
 
-/// 컴포넌트가 선언한 이벤트 하나. `event_idx`는 이 항목이 CompDef.events에서 갖는 배열 인덱스
+/// 컴포넌트가 선언한 이벤트 하나. `event_index`는 이 항목이 CompDef.events에서 갖는 배열 인덱스
 /// (BIND_EVENT가 참조). fields는 함께 싣는 필드 명세 - 런타임이 이걸 read해서 payload를 build.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventDef {
-    pub name_const_idx: u16,
+    pub name_const_index: u16,
     pub fields: Vec<Field>,
 }
 
@@ -55,12 +55,12 @@ pub struct EventDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompDef {
     /// 상수풀에 든 컴포넌트명의 인덱스.
-    pub name_const_idx: u16,
+    pub name_const_index: u16,
     /// 코드 영역 내 시작 오프셋.
     pub code_off: u32,
     /// 코드 길이.
     pub code_len: u32,
-    /// 이 컴포넌트가 선언한 이벤트들. 선언 순서 = event_idx.
+    /// 이 컴포넌트가 선언한 이벤트들. 선언 순서 = event_index.
     pub events: Vec<EventDef>,
 }
 

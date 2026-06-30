@@ -21,7 +21,7 @@ pub struct Use {
 pub struct Component {
     pub name: String,
     pub props: Vec<String>,  // 선언 순서 = scope 인덱스
-    pub events: Vec<Event>,  // 선언 순서 = event_idx (BIND_EVENT가 참조)
+    pub events: Vec<Event>,  // 선언 순서 = event_index (BIND_EVENT가 참조)
     pub template: Vec<Node>, // 루트 노드들 (fragment 허용)
 }
 
@@ -65,7 +65,7 @@ pub enum Node {
 }
 
 /// 속성값: 정적 문자열(`class="card"`) 또는 변수 참조(`class={x}`).
-/// 변수는 텍스트 보간(`Node::Var`)과 같은 scope offset 공간을 쓴다.
+/// 변수는 텍스트 보간(`Node::Var`)과 같은 scope index 공간을 쓴다.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AttrValue {
     Static(String),

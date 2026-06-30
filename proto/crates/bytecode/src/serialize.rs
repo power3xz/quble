@@ -30,17 +30,17 @@ pub fn encode(m: &Module) -> Vec<u8> {
     // 컴포넌트 테이블
     put_u16(&mut out, m.defs.len() as u16);
     for d in &m.defs {
-        put_u16(&mut out, d.name_const_idx);
+        put_u16(&mut out, d.name_const_index);
         put_u32(&mut out, d.code_off);
         put_u32(&mut out, d.code_len);
-        // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(name_const_idx, field_count, [(name_const_idx, value)])]
+        // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(name_const_index, field_count, [(name_const_index, value)])]
         // value = FieldValue를 u16로 encode (MSB=const 여부).
         put_u16(&mut out, d.events.len() as u16);
         for e in &d.events {
-            put_u16(&mut out, e.name_const_idx);
+            put_u16(&mut out, e.name_const_index);
             put_u16(&mut out, e.fields.len() as u16);
             for f in &e.fields {
-                put_u16(&mut out, f.name_const_idx);
+                put_u16(&mut out, f.name_const_index);
                 put_u16(&mut out, f.value.encode());
             }
         }
@@ -91,23 +91,23 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
     let def_count = r.u16()?;
     let mut defs = Vec::with_capacity(def_count as usize);
     for _ in 0..def_count {
-        let name_const_idx = r.u16()?;
+        let name_const_index = r.u16()?;
         let code_off = r.u32()?;
         let code_len = r.u32()?;
         let event_count = r.u16()?;
         let mut events = Vec::with_capacity(event_count as usize);
         for _ in 0..event_count {
-            let name_const_idx = r.u16()?;
+            let name_const_index = r.u16()?;
             let field_count = r.u16()?;
             let mut fields = Vec::with_capacity(field_count as usize);
             for _ in 0..field_count {
-                let field_name_const_idx = r.u16()?;
+                let field_name_const_index = r.u16()?;
                 let value = FieldValue::decode(r.u16()?);
-                fields.push(Field { name_const_idx: field_name_const_idx, value });
+                fields.push(Field { name_const_index: field_name_const_index, value });
             }
-            events.push(EventDef { name_const_idx, fields });
+            events.push(EventDef { name_const_index, fields });
         }
-        defs.push(CompDef { name_const_idx, code_off, code_len, events });
+        defs.push(CompDef { name_const_index, code_off, code_len, events });
     }
 
     // 코드
