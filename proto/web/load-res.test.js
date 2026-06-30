@@ -24,8 +24,8 @@ const hrefs = () =>
   [...document.head.querySelectorAll("link[rel=stylesheet]")].map((l) => l.getAttribute("href"));
 
 test("LOAD_RES가 resId의 URL로 <link>를 head에 삽입한다", () => {
-  const ctx = createLeafStoreSubject({});
-  compile(qubb, ["/res/styled.abc.css"])(0)(ctx, []);
+  const store = createLeafStoreSubject({});
+  compile(qubb, ["/res/styled.abc.css"])(0)(store, []);
   assert.deepEqual(hrefs(), ["/res/styled.abc.css"]);
 });
 
@@ -50,11 +50,11 @@ test("@if 비활성 가지 안의 컴포넌트 CSS는 가지가 켜질 때 로�
   assert.equal(resmap.length, 1, "Styled의 CSS 하나가 resmap에 있다");
 
   // Outer = comp 0. props [show]. show=false로 시작 - @if 가지 비활성.
-  const ctx = createLeafStoreSubject({ show: false });
-  compile(outerQubb, resmap)(0)(ctx, ["show"]);
+  const store = createLeafStoreSubject({ show: false });
+  compile(outerQubb, resmap)(0)(store, ["show"]);
   assert.deepEqual(hrefs(), [], "가지가 꺼져 있으면 자식 CSS는 아직 로드되지 않는다");
 
   // show=true로 토글 → 가지 활성 → Styled RENDER → LOAD_RES 실행 → <link> 삽입.
-  ctx.setPath("show", true);
+  store.setPath("show", true);
   assert.deepEqual(hrefs(), resmap, "가지가 켜지면 그때 자식 CSS가 로드된다");
 });

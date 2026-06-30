@@ -15,8 +15,8 @@ before(() => {
 });
 
 const instantiate = (handlers) => {
-  const ctx = createLeafStoreSubject({ label: "X" });
-  const inst = compile(qubb)(0)(ctx, ["label"], handlers);
+  const store = createLeafStoreSubject({ label: "X" });
+  const inst = compile(qubb)(0)(store, ["label"], handlers);
   const host = mount(inst);
   return host.querySelector("button");
 };

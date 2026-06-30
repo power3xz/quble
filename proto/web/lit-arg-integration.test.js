@@ -16,8 +16,8 @@ before(() => {
 
 // 리터럴 인자가 클라 런타임에서 렌더된다 - 부모 scope가 비어도 자식이 상수값을 받아 출력.
 test("literal arg renders in client runtime", () => {
-  const ctx = createLeafStoreSubject({});
-  const inst = compile(qubb)(0)(ctx, []); // LitArg = comp 0, props 없음 → paths 빈 배열
+  const store = createLeafStoreSubject({});
+  const inst = compile(qubb)(0)(store, []); // LitArg = comp 0, props 없음 → paths 빈 배열
   const host = mount(inst);
   const spans = [...host.querySelectorAll("span")].map((s) => s.textContent);
   assert.deepEqual(spans, ["고정", "고정"]);
@@ -26,18 +26,18 @@ test("literal arg renders in client runtime", () => {
 // 같은 리터럴을 두 번 넘겨도 store에 leaf는 하나 - path가 pool 인덱스로 정해져 leafOf가
 // 같은 leafIndex를 돌려준다(module.pool 값이 store에 딱 한 번만 복사됨).
 test("same literal shares one leaf (copied once)", () => {
-  const ctx = createLeafStoreSubject({});
+  const store = createLeafStoreSubject({});
   // leafOf를 가로채 발급된 고유 leafIndex를 모은다($lit.* path만).
   const seen = new Set();
-  const realLeafOf = ctx.leafOf;
-  ctx.leafOf = (path) => {
+  const realLeafOf = store.leafOf;
+  store.leafOf = (path) => {
     const leafIndex = realLeafOf(path);
     if (typeof path === "string" && path.startsWith("$lit.")) {
       seen.add(leafIndex);
     }
     return leafIndex;
   };
-  compile(qubb)(0)(ctx, []);
+  compile(qubb)(0)(store, []);
   // 리터럴 "고정"은 두 자식에 전달되지만 leaf는 하나여야 한다.
   assert.equal(seen.size, 1);
 });

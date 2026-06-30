@@ -1,7 +1,7 @@
 // Quble 클라이언트 런타임 본체 - .qubb를 두 단계로 인스턴스화한다.
 //
 //   compile(bytes)        → blueprintOf(compId) => Blueprint  (def를 청사진으로)
-//   Blueprint(ctx, paths) → Instance                          (청사진 호출 = 인스턴스화. DOM·구독 생성)
+//   Blueprint(store, paths) → Instance                          (청사진 호출 = 인스턴스화. DOM·구독 생성)
 //
 // Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
 // 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 - 단순한 "호출 시 훑기"를 택했다.)
@@ -12,7 +12,7 @@
 // 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
 //
 // 인덱스 세 축 (REACTIVITY.md §1~§3):
-//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.leafOf가 lazy 발급).
+//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, store.leafOf가 lazy 발급).
 
 import {
   THEN_INDEX,
@@ -22,7 +22,7 @@ import {
   attachBranch,
 } from "./region.js";
 
-// 상태 저장소(ctx)는 leaf-store.js가 정의한다. blueprint가 받는 ctx가 이것 - 편의상 여기서 재공개한다.
+// 상태 저장소(store)는 leaf-store.js가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.
 export { createLeafStoreSubject } from "./leaf-store.js";
 
 const TAGS = [
@@ -273,7 +273,7 @@ const decode = (bytes) => {
 //
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
-// @returns      Blueprint: (ctx, rootPaths) => Instance { nodes, regions }
+// @returns      Blueprint: (store, rootPaths) => Instance { nodes, regions }
 const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
   const def = module.defs[compId];
   if (!def) {
@@ -282,7 +282,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def·자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
-  return (ctx, rootPaths, handlers = {}) => {
+  return (store, rootPaths, handlers = {}) => {
     // 인스턴스 불변 상태 - 모든 build(최초·lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
     // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
@@ -347,8 +347,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
         if (path === undefined) {
           throw new Error("no path for offset " + offset);
         }
-        const leafIndex = ctx.leafOf(path);
-        const initial = ctx.get(leafIndex) ?? "";
+        const leafIndex = store.leafOf(path);
+        const initial = store.get(leafIndex) ?? "";
         branch.leafIndices.push(leafIndex);
         branch.updateFns.push(update);
         return initial;
@@ -417,7 +417,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // props는 핸들러의 set/get 대상(set(props.name, v)), data는 발생 시점 현재값.
             const props = {};
             for (const p of event.payload) {
-              props[module.pool[p.fieldIdx]] = ctx.leafOf(paths[p.offset]);
+              props[module.pool[p.fieldIdx]] = store.leafOf(paths[p.offset]);
             }
             const el = pending;
             el.addEventListener(domEvent, (domEventObject) => {
@@ -426,12 +426,12 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               domEventObject.stopPropagation();
               const data = {};
               for (const name in props) {
-                data[name] = ctx.get(props[name]);
+                data[name] = store.get(props[name]);
               }
               handlers[fullName]?.(data, {
                 event: domEventObject,
-                set: ctx.set,
-                get: ctx.get,
+                set: store.set,
+                get: store.get,
                 props,
               });
             });
@@ -476,7 +476,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // pathCache로 처음만 발급하므로 module.pool 값이 store에 딱 한 번만 복사된다.
             const poolIndex = u16at();
             const path = "$lit." + poolIndex;
-            ctx.seed(path, module.pool[poolIndex]);
+            store.seed(path, module.pool[poolIndex]);
             args.push(path);
             break;
           }
@@ -515,7 +515,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
           }
           case OP.IF: {
             const condOffset = u16at();
-            const condLeafIndex = ctx.leafOf(paths[condOffset]);
+            const condLeafIndex = store.leafOf(paths[condOffset]);
             const regionIndex = appendRegion(regions, condLeafIndex);
             const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
@@ -565,9 +565,9 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             elseBranch.lazyBuild = buildElse;
 
             // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateBranch가 lazyBuild 호출.
-            ctx.subscribe(condLeafIndex, (condValue) => {
+            store.subscribe(condLeafIndex, (condValue) => {
               activateBranch(
-                ctx,
+                store,
                 regions,
                 regionIndex,
                 condValue ? THEN_INDEX : ELSE_INDEX,
@@ -577,7 +577,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachBranch가 일괄).
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-            const initialBranchIndex = ctx.get(condLeafIndex)
+            const initialBranchIndex = store.get(condLeafIndex)
               ? THEN_INDEX
               : ELSE_INDEX;
             const initialBranch = region.branches[initialBranchIndex];
@@ -611,7 +611,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     );
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
-    attachBranch(ctx, regions, rootRegion);
+    attachBranch(store, regions, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     return { nodes, regions };
@@ -622,7 +622,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
 // qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
 //
 // 사용: const blueprintOf = compile(bytes);
-//       const inst = blueprintOf(0)(ctx, paths);
+//       const inst = blueprintOf(0)(store, paths);
 //       root.append(...inst.nodes);
 //
 // @param bytes  qubb 바이트

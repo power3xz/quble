@@ -21,13 +21,13 @@ before(() => {
   }
 });
 
-// 한 인스턴스를 만들어 { ctx, inst, host, set } 묶음으로 - set은 path로 바로 쓰게.
+// 한 인스턴스를 만들어 { store, inst, host, set } 묶음으로 - set은 path로 바로 쓰게.
 const instantiate = (name, paths, values) => {
-  const ctx = createLeafStoreSubject(values);
-  const inst = compile(qubb[name])(0)(ctx, paths);
+  const store = createLeafStoreSubject(values);
+  const inst = compile(qubb[name])(0)(store, paths);
   const host = mount(inst);
-  const set = (path, value) => ctx.setPath(path, value);
-  return { ctx, inst, host, set };
+  const set = (path, value) => store.setPath(path, value);
+  return { store, inst, host, set };
 };
 
 // region 트리 탐색 - regions[regionIndex] 가지(branchIndex)의 nth 자식 region.
@@ -156,7 +156,7 @@ test("3단 중첩: 최하단까지 렌더, 최상단 swap이 전부 detach", () 
 });
 
 // ── 컴포넌트 합성 ─────────────────────────────────────────────────────
-// triple_if를 부모(바깥 c1) + 자식 InnerPair(c2/c3)로 쪼개 RENDER로 합성. 같은 ctx·path를 쓰므로
+// triple_if를 부모(바깥 c1) + 자식 InnerPair(c2/c3)로 쪼개 RENDER로 합성. 같은 store·path를 쓰므로
 // triple_if와 동일한 set/texts 시퀀스가 그대로 통과해야 한다(합성이 단일 컴포넌트와 동등).
 test("합성 3단: triple_if를 부모+자식으로 쪼개도 동일 동작", () => {
   const { host, set } = instantiate(
