@@ -1,4 +1,4 @@
-// PoC: *.handler.ts 에서 문자열 자동완성 시 fullname 이벤트명을 띄운다.
+// PoC: *.qubc.handlers.ts 에서 문자열 자동완성 시 fullname 이벤트명을 띄운다.
 // 지금은 fullname 목록을 하드코딩 - 컴파일러가 합성 트리를 걸어 산출하는 단계는 이후.
 
 const vscode = require("vscode");
@@ -14,7 +14,7 @@ const FULLNAMES = [
 
 const provider = {
   provideCompletionItems(document) {
-    if (!document.fileName.endsWith(".handler.ts")) {
+    if (!document.fileName.endsWith(".qubc.handlers.ts")) {
       return undefined;
     }
     return FULLNAMES.map((name) => {
