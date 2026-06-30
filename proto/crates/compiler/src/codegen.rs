@@ -86,10 +86,10 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 let fields = e
                     .payload
                     .iter()
-                    .map(|(field, prop)| {
+                    .map(|(field, value)| {
                         Ok(Field {
                             name_const_index: pool.intern(field),
-                            value: FieldValue::Scope(prop_name_to_scope_index(prop, &comp.props)?),
+                            value: arg_to_field_value(value, &comp.props, &mut pool)?,
                         })
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;

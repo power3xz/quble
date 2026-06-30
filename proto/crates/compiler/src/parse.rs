@@ -219,9 +219,9 @@ impl<'a> Parser<'a> {
         Ok(Event { name, payload })
     }
 
-    // RBrace 전까지 payload 필드를 모은다. 각 필드는 `field` 또는 `field: prop`.
-    // 단축형 `field`는 (field, field)로 푼다(필드명 = prop명). 콤마는 선택적 구분자.
-    fn payload(&mut self) -> Result<Vec<(String, String)>, ParseError> {
+    // RBrace 전까지 payload 필드를 모은다. 각 필드는 `field`, `field: prop`, 또는 `field: "lit"`.
+    // 단축형 `field`는 (field, Var(field))로 푼다(필드명 = prop명). 콤마는 선택적 구분자.
+    fn payload(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
         let mut payload = Vec::new();
         loop {
             match self.peek() {
@@ -231,14 +231,27 @@ impl<'a> Parser<'a> {
                 }
                 Some(Token::Ident(_)) => {
                     let field = self.ident()?;
-                    // `: prop` 매핑이 있으면 prop명을, 없으면 단축형(field = prop).
-                    let prop = if matches!(self.peek(), Some(Token::Colon)) {
+                    // `: 값` 매핑이 있으면 값은 prop명(Var) 또는 리터럴(Literal),
+                    // 없으면 단축형(field = prop, Var).
+                    let value = if matches!(self.peek(), Some(Token::Colon)) {
                         self.next()?; // :
-                        self.ident()?
+                        match self.peek() {
+                            Some(Token::Ident(_)) => ArgValue::Var(self.ident()?),
+                            Some(Token::Str(_)) => match self.next()? {
+                                Token::Str(s) => ArgValue::Literal(s.clone()),
+                                _ => unreachable!(),
+                            },
+                            got => {
+                                return Err(ParseError::Expected {
+                                    want: "payload field value (prop or \"lit\")".into(),
+                                    got: format!("{got:?}"),
+                                })
+                            }
+                        }
                     } else {
-                        field.clone()
+                        ArgValue::Var(field.clone())
                     };
-                    payload.push((field, prop));
+                    payload.push((field, value));
                 }
                 Some(t) => {
                     return Err(ParseError::Expected {

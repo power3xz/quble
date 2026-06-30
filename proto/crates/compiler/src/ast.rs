@@ -36,12 +36,12 @@ pub struct Context {
 }
 
 /// `events { TOGGLE({ label: title, on }) }` - 컴포넌트가 선언한 이벤트.
-/// payload 각 항목은 (이벤트필드명, prop명). `{ title }` 단축은 ("title","title")로 푼다.
-/// prop명은 props에 있어야 한다(codegen이 검증).
+/// payload 각 항목은 (이벤트필드명, 값). 값은 prop 참조(Var) 또는 리터럴(Literal).
+/// `{ title }` 단축은 ("title", Var("title"))로 푼다. Var의 prop명은 props에 있어야 한다(codegen이 검증).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Event {
     pub name: String,
-    pub payload: Vec<(String, String)>,
+    pub payload: Vec<(String, ArgValue)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
