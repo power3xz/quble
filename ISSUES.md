@@ -45,6 +45,19 @@
   인덱스 발급 지점(prop 인덱싱·`ConstPool::intern`) - 개수는 파서가 모르고 발급 시점에야
   늘어난다. 발급 전반에 15비트 상한 검사를 까는 별개 작업.
 
+- **핸들러 타입 공급이 d.ts 파일 방식 (LSP 아님)** - 확장이 `.qubc`를 컴파일해 짝
+  `x.qubc.d.ts`(`Handlers` 인터페이스)를 디스크에 쓰고, handlers.ts가 `import type { Handlers }
+  from './x.qubc'`로 받아 키·payload·context를 타입으로 강제한다(잘못된 fullname은 컴파일 에러,
+  리터럴은 literal type). 한계: (1) import 한 줄이 필요하다 - `.ts`<->`.d.ts` 같은 basename
+  자동 짝은 TS가 안 묶고(실험으로 확인), Svelte식 "옆에 두면 자동"은 비-TS 소스(`.svelte`)
+  모듈 해석이라 우리 `.ts` 핸들러엔 안 통한다. (2) d.ts가 디스크 부산물이다(gitignore). (3)
+  생성이 handlers.ts 열림·`.qubc` 저장 시 매번 풀 컴파일이고, 컴파일러/disasm 경로가 워크스페이스
+  루트 기준 하드코딩이다(다른 레포에서 쓰려면 못 씀). 더 깔끔한 길은 **TS Language Service
+  plugin(또는 LSP)** 으로 메모리상 가상 타입을 주입하는 것 - import도 파일도 없이 `handlers`에
+  타입이 붙는다(Svelte의 `svelte2tsx`+`svelte-language-server`가 이 층위). 비용이 커서
+  보류했다(별도 npm 패키지 + LanguageService 프록시 + 가상 SourceFile 주입). 타입 생성 알맹이
+  (`handlersDts`)는 어느 길이든 재사용되니, plugin은 그 위의 "주입 배관"만 얹으면 된다.
+
 - **지연 로드(lazy load) 미구현** - 지연 build는 하지만(비활성 `@if` 가지는 켜질 때 해석),
   그 가지의 자식 def는 이미 qubb에 통째로 들어있다. "가지 켜질 때 그 코드를 그제서야 받는" 진짜
   지연 로드가 없다. 걸림돌: 떼어낸 조각이 전역 인덱스(상수풀·def ID·resId·leafIndex)를 어떻게

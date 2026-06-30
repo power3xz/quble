@@ -484,8 +484,9 @@ const OPERAND_LEN = (op) => {
 //
 // @param module     decode된 모듈
 // @param rootCompId 프리뷰가 마운트하는 루트 컴포넌트 id
-// @returns          [{ fullname, payload: [{ field, source }], contexts: [name] }]
-//                   contexts: 발사 시점에 활성인 @with 컨텍스트 이름(바깥->안쪽, 같은 이름은 안쪽만).
+// @returns          [{ fullname, payload: [{ field, source }], contexts: [{ name, fields: [{ field, source }] }] }]
+//                   contexts: 이벤트 발생 시점에 활성인 @with 컨텍스트(바깥->안쪽, 같은 이름은 안쪽만).
+//                   fields는 payload와 같은 {field, source} 형태(같은 fields 인코딩에서 나온다).
 //                   source는 payload 값의 출처를 루트 기준으로 역추적한 것:
 //                     { kind: "arg", offset }   변수 경로 - 루트 scope의 arg{offset}
 //                     { kind: "lit", value }    리터럴 인자로 끊긴 경로 - 그 상수값
@@ -529,7 +530,16 @@ export const collectEventFullnames = (module, rootCompId) => {
         argParents.push({ kind: "lit", value: module.pool[code[pc] | (code[pc + 1] << 8)] });
         pc += 2;
       } else if (op === OP.ENTER_CONTEXT) {
-        contextStack.push(module.pool[def.contexts[code[pc] | (code[pc + 1] << 8)].nameConstIndex]);
+        // 활성화되는 컨텍스트의 이름 + 필드. 필드는 payload와 같은 {field, source} 형태로,
+        // Const는 리터럴값(literal type 가능), Scope는 변수 참조. def는 이 컨텍스트가 선언된 곳.
+        const ctxDef = def.contexts[code[pc] | (code[pc + 1] << 8)];
+        contextStack.push({
+          name: module.pool[ctxDef.nameConstIndex],
+          fields: ctxDef.fields.map((f) => ({
+            field: module.pool[f.nameConstIndex],
+            source: f.isConst ? { kind: "lit", value: module.pool[f.index] } : toRoot(f.index),
+          })),
+        });
         pc += 2;
       } else if (op === OP.EXIT_CONTEXT) {
         contextStack.pop();
@@ -554,8 +564,12 @@ export const collectEventFullnames = (module, rootCompId) => {
           field: module.pool[f.nameConstIndex],
           source: f.isConst ? { kind: "lit", value: module.pool[f.index] } : toRoot(f.index),
         }));
-        // 발사 시점 활성 컨텍스트. 같은 이름 겹치면 안쪽(뒤)이 이기므로 중복 제거(뒤 우선).
-        const contexts = [...new Set([...contextStack].reverse())].reverse();
+        // 발생 시점 활성 컨텍스트. 같은 이름 겹치면 안쪽(뒤)이 이기므로 이름 기준 중복 제거(뒤 우선).
+        const byName = new Map();
+        for (const ctx of contextStack) {
+          byName.set(ctx.name, ctx);
+        }
+        const contexts = [...byName.values()];
         add(pathPrefix ? pathPrefix + "." + localName : localName, payload, contexts);
       } else {
         pc += OPERAND_LEN(op);
@@ -565,6 +579,31 @@ export const collectEventFullnames = (module, rootCompId) => {
 
   walk(rootCompId, "", (offset) => ({ kind: "arg", offset }), []); // 루트 항등 = arg{offset}, 빈 컨텍스트 스택
   return events;
+};
+
+// 필드 출처 -> TS 타입. 리터럴은 그 값으로 좁히고(literal type), 변수는 string(소스에 타입 정보 없음).
+export const fieldType = (source) => (source.kind === "lit" ? JSON.stringify(source.value) : "string");
+
+// {field, source} 목록 -> `a: T; b: U` 객체 본문.
+export const fieldsType = (fields) => fields.map((f) => `${f.field}: ${fieldType(f.source)}`).join("; ");
+
+// 합성 트리의 모든 fullname 이벤트를 핸들러 타입(DESIGN §2.5)으로 묶은 `.d.ts` 텍스트를 낸다.
+// handlers.ts가 `import type { Handlers } from './x.qubc'`로 받아 키·payload·context를 타입으로 강제.
+// get/set/goTo는 미구현(§5.2)이라 params엔 context만, 반환은 지금 상황 그대로 void.
+//
+// @param module     decode된 모듈
+// @param rootCompId 루트 컴포넌트 id
+// @returns          "export interface Handlers { ... }" 텍스트
+export const handlersDts = (module, rootCompId) => {
+  const lines = collectEventFullnames(module, rootCompId).map((e) => {
+    const dataParam = `data: { ${fieldsType(e.payload)} }`;
+    if (e.contexts.length === 0) {
+      return `  '${e.fullname}': (${dataParam}) => void;`;
+    }
+    const ctx = e.contexts.map((c) => `${c.name}: { ${fieldsType(c.fields)} }`).join("; ");
+    return `  '${e.fullname}': (${dataParam}, params: { context: { ${ctx} } }) => void;`;
+  });
+  return `export interface Handlers {\n${lines.join("\n")}\n}\n`;
 };
 
 // qubb 바이트에서 컴포넌트 목록을 뽑는다([{ compId, name }]).
