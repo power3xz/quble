@@ -9,7 +9,7 @@ mod opcode;
 mod pool;
 mod serialize;
 
-pub use module::{CompDef, EventDef, Module};
+pub use module::{CompDef, EventDef, Field, FieldValue, Module};
 pub use opcode::Op;
 pub use pool::ConstPool;
 pub use serialize::{decode, encode, DecodeError};
@@ -52,7 +52,7 @@ mod tests {
         code.push(Op::Halt as u8);
 
         let defs = vec![CompDef {
-            name_idx: hello_name,
+            name_const_idx: hello_name,
             code_off: 0,
             code_len: code.len() as u32,
             events: vec![],
@@ -128,8 +128,8 @@ mod tests {
     #[test]
     fn def_lookup_by_id() {
         let m = hello_module();
-        let name_idx = m.def(0).unwrap().name_idx;
-        assert_eq!(m.pool.get(name_idx), Some("Hello"));
+        let name_const_idx = m.def(0).unwrap().name_const_idx;
+        assert_eq!(m.pool.get(name_const_idx), Some("Hello"));
         assert!(m.def(1).is_none());
     }
 }

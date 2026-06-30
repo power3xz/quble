@@ -174,7 +174,7 @@ mod tests {
         let expected = Module::new(
             pool,
             vec![CompDef {
-                name_idx: hello,
+                name_const_idx: hello,
                 code_off: 0,
                 code_len: code.len() as u32,
                 events: vec![],
@@ -318,7 +318,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_idx).unwrap().to_string());
+            names.push(module.pool.get(def.name_const_idx).unwrap().to_string());
             id += 1;
         }
         assert_eq!(names.len(), 3, "Card+Thumb+Badge 셋 다 들어가야 함");
@@ -442,7 +442,7 @@ mod tests {
         // 컴포넌트 ID로 이름을 확인해 매핑이 어긋나도 잡히게 한다.
         let id_of = |name: &str| {
             (0..)
-                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_idx).unwrap()) == Some(name))
+                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_const_idx).unwrap()) == Some(name))
                 .unwrap()
         };
         // 한 컴포넌트의 코드 앞머리 LOAD_RES들을 순서대로 모은다(연속한 LOAD_RES만).
@@ -534,7 +534,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_idx).unwrap().to_string());
+            names.push(module.pool.get(def.name_const_idx).unwrap().to_string());
             id += 1;
         }
         names

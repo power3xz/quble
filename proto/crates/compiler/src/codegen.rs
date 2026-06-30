@@ -2,7 +2,7 @@
 
 use crate::ast::{ArgValue, AttrValue, Event, Node};
 use crate::resolve::FlatComp;
-use bytecode::{encode, tags, CompDef, ConstPool, EventDef, Module, Op};
+use bytecode::{encode, tags, CompDef, ConstPool, EventDef, Field, FieldValue, Module, Op};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CodegenError {
@@ -54,7 +54,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
     for fc in comps {
         let comp = &fc.comp;
-        let name_idx = pool.intern(&comp.name);
+        let name_const_idx = pool.intern(&comp.name);
         let code_off = code.len() as u32;
         // 리소스 로드를 정의 앞머리에 깐다. lazy build에서 이 컴포넌트가 실제로 그려질 때만
         // 실행돼 리소스가 로드된다(같은 파일 컴포넌트가 같은 LOAD_RES를 내도 런타임이 URL dedup).
@@ -80,19 +80,24 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
             .events
             .iter()
             .map(|e| {
-                let payload = e
+                let fields = e
                     .payload
                     .iter()
-                    .map(|(field, prop)| Ok((pool.intern(field), prop_index(prop, &comp.props)?)))
+                    .map(|(field, prop)| {
+                        Ok(Field {
+                            name_const_idx: pool.intern(field),
+                            value: FieldValue::Scope(prop_name_to_scope_index(prop, &comp.props)?),
+                        })
+                    })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
-                    name_idx: pool.intern(&e.name),
-                    payload,
+                    name_const_idx: pool.intern(&e.name),
+                    fields,
                 })
             })
             .collect::<Result<Vec<_>, CodegenError>>()?;
         defs.push(CompDef {
-            name_idx,
+            name_const_idx,
             code_off,
             code_len: code.len() as u32 - code_off,
             events,
@@ -113,7 +118,7 @@ fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
 }
 
 /// 변수명을 scope 인덱스로. 선언 순서 = scope 인덱스. 미선언이면 에러.
-fn prop_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
+fn prop_name_to_scope_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
     props
         .iter()
         .position(|p| p == name)
@@ -136,7 +141,7 @@ fn emit_node(
             code.extend_from_slice(&idx.to_le_bytes());
         }
         Node::Var(name) => {
-            let idx = prop_index(name, props)?;
+            let idx = prop_name_to_scope_index(name, props)?;
             code.push(Op::TextVar as u8);
             code.extend_from_slice(&idx.to_le_bytes());
         }
@@ -181,7 +186,7 @@ fn emit_node(
                 };
                 let value_operand = match value {
                     AttrValue::Static(s) => pool.intern(s),
-                    AttrValue::Var(v) => prop_index(v, props)?,
+                    AttrValue::Var(v) => prop_name_to_scope_index(v, props)?,
                 };
                 code.push(op as u8);
                 code.extend_from_slice(&name_operand.to_le_bytes());
@@ -217,7 +222,7 @@ fn emit_node(
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
-                        let offset = prop_index(parent_var, props)?;
+                        let offset = prop_name_to_scope_index(parent_var, props)?;
                         code.push(Op::PushArg as u8);
                         code.extend_from_slice(&offset.to_le_bytes());
                     }
@@ -242,7 +247,7 @@ fn emit_node(
         }
         Node::If { cond, then, else_ } => {
             // cond는 불리언 prop - scope offset 하나. (표현식은 이후 단계)
-            let offset = prop_index(cond, props)?;
+            let offset = prop_name_to_scope_index(cond, props)?;
             code.push(Op::If as u8);
             code.extend_from_slice(&offset.to_le_bytes());
 
