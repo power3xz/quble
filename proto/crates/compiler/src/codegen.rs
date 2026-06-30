@@ -101,6 +101,8 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
             code_off,
             code_len: code.len() as u32 - code_off,
             events,
+            // @with 파싱이 아직 없어 컨텍스트는 비어 있다(다음 단계에서 ContextDef 생성).
+            contexts: vec![],
         });
     }
 

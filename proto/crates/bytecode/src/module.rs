@@ -51,6 +51,16 @@ pub struct EventDef {
     pub fields: Vec<Field>,
 }
 
+/// `@with`로 주입하는 컨텍스트 하나. EnterContext가 context_index로 이 테이블을 참조
+/// (BindEvent가 event_index로 EventDef를 참조하는 것과 동형). fields는 EventDef와 같은
+/// 인코딩(Field) - 런타임이 read해서 컨텍스트 값을 build. 단 이벤트 payload와 의미 축이 달라
+/// 별도 타입으로 둔다(이벤트는 핸들러 매칭, 컨텍스트는 활성 스택).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextDef {
+    pub name_const_index: u16,
+    pub fields: Vec<Field>,
+}
+
 /// 컴포넌트 테이블의 한 항목. ID = 이 항목의 배열 인덱스.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompDef {
@@ -62,6 +72,8 @@ pub struct CompDef {
     pub code_len: u32,
     /// 이 컴포넌트가 선언한 이벤트들. 선언 순서 = event_index.
     pub events: Vec<EventDef>,
+    /// 이 컴포넌트가 선언한 컨텍스트들. 선언 순서 = context_index.
+    pub contexts: Vec<ContextDef>,
 }
 
 /// 바이트코드 모듈 하나(= 하나의 컴파일 산출물/파일).

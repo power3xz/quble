@@ -9,7 +9,7 @@ mod opcode;
 mod pool;
 mod serialize;
 
-pub use module::{CompDef, EventDef, Field, FieldValue, Module};
+pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module};
 pub use opcode::Op;
 pub use pool::ConstPool;
 pub use serialize::{decode, encode, DecodeError};
@@ -56,6 +56,7 @@ mod tests {
             code_off: 0,
             code_len: code.len() as u32,
             events: vec![],
+            contexts: vec![],
         }];
         Module::new(pool, defs, code)
     }
