@@ -1,0 +1,10 @@
+component Child {
+  props { userId }
+  contexts { Area { tier: "gold", userId: userId } }
+  events { TOGGLE({ userId }) }
+  template {
+    @with Area {
+      button(@click:TOGGLE) { "x" }
+    }
+  }
+}
