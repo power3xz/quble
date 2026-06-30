@@ -7,7 +7,7 @@
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
-use crate::ast::{ArgValue, AttrValue, Component, Event, Node, SourceFile, Use};
+use crate::ast::{ArgValue, AttrValue, Component, Context, Event, Node, SourceFile, Use};
 use crate::lexer::{Directive, Token};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -150,7 +150,14 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
-        // events 블록도 선택적이며 props 다음, template 앞에 온다.
+        // contexts 블록도 선택적이며 props 다음, events 앞에 온다(SYNTAX.md §1).
+        let contexts = if matches!(self.peek(), Some(Token::Ident(s)) if s == "contexts") {
+            self.contexts()?
+        } else {
+            Vec::new()
+        };
+
+        // events 블록도 선택적이며 contexts 다음, template 앞에 온다.
         let events = if matches!(self.peek(), Some(Token::Ident(s)) if s == "events") {
             self.events()?
         } else {
@@ -162,7 +169,7 @@ impl<'a> Parser<'a> {
         let template = self.nodes()?;
         self.expect(&Token::RBrace)?; // template
         self.expect(&Token::RBrace)?; // component
-        Ok(Component { name, props, events, template })
+        Ok(Component { name, props, events, contexts, template })
     }
 
     // props { IDENT (, IDENT)* }
@@ -212,9 +219,9 @@ impl<'a> Parser<'a> {
         Ok(Event { name, payload })
     }
 
-    // RBrace 전까지 payload 필드를 모은다. 각 필드는 `field` 또는 `field: prop`.
-    // 단축형 `field`는 (field, field)로 푼다(필드명 = prop명). 콤마는 선택적 구분자.
-    fn payload(&mut self) -> Result<Vec<(String, String)>, ParseError> {
+    // RBrace 전까지 payload 필드를 모은다. 각 필드는 `field`, `field: prop`, 또는 `field: "lit"`.
+    // 단축형 `field`는 (field, Var(field))로 푼다(필드명 = prop명). 콤마는 선택적 구분자.
+    fn payload(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
         let mut payload = Vec::new();
         loop {
             match self.peek() {
@@ -224,14 +231,27 @@ impl<'a> Parser<'a> {
                 }
                 Some(Token::Ident(_)) => {
                     let field = self.ident()?;
-                    // `: prop` 매핑이 있으면 prop명을, 없으면 단축형(field = prop).
-                    let prop = if matches!(self.peek(), Some(Token::Colon)) {
+                    // `: 값` 매핑이 있으면 값은 prop명(Var) 또는 리터럴(Literal),
+                    // 없으면 단축형(field = prop, Var).
+                    let value = if matches!(self.peek(), Some(Token::Colon)) {
                         self.next()?; // :
-                        self.ident()?
+                        match self.peek() {
+                            Some(Token::Ident(_)) => ArgValue::Var(self.ident()?),
+                            Some(Token::Str(_)) => match self.next()? {
+                                Token::Str(s) => ArgValue::Literal(s.clone()),
+                                _ => unreachable!(),
+                            },
+                            got => {
+                                return Err(ParseError::Expected {
+                                    want: "payload field value (prop or \"lit\")".into(),
+                                    got: format!("{got:?}"),
+                                })
+                            }
+                        }
                     } else {
-                        field.clone()
+                        ArgValue::Var(field.clone())
                     };
-                    payload.push((field, prop));
+                    payload.push((field, value));
                 }
                 Some(t) => {
                     return Err(ParseError::Expected {
@@ -242,6 +262,72 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(payload)
+    }
+
+    // contexts { CONTEXT* }   - CONTEXT = NAME { FIELD* }
+    fn contexts(&mut self) -> Result<Vec<Context>, ParseError> {
+        self.keyword("contexts")?;
+        self.expect(&Token::LBrace)?;
+        let mut contexts = Vec::new();
+        while matches!(self.peek(), Some(Token::Ident(_))) {
+            contexts.push(self.context_decl()?);
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(contexts)
+    }
+
+    // NAME { key: 값, ... }   - ActionArea { section: "actions", userId: assignee }
+    fn context_decl(&mut self) -> Result<Context, ParseError> {
+        let name = self.ident()?;
+        self.expect(&Token::LBrace)?;
+        let fields = self.context_fields()?;
+        self.expect(&Token::RBrace)?;
+        Ok(Context { name, fields })
+    }
+
+    // RBrace 전까지 `key`, `key: prop`, 또는 `key: "lit"` 필드를 모은다. 값은 prop명(Var) 또는
+    // 리터럴 문자열(Literal). 단축형 `key`는 (key, Var(key))로 푼다. 콤마는 선택적 구분자.
+    fn context_fields(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
+        let mut fields = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::RBrace) | None => break,
+                Some(Token::Comma) => {
+                    self.next()?;
+                }
+                Some(Token::Ident(_)) => {
+                    let key = self.ident()?;
+                    // `: 값` 매핑이 있으면 값은 prop명(Var) 또는 리터럴(Literal),
+                    // 없으면 단축형(key = prop, Var).
+                    let value = if matches!(self.peek(), Some(Token::Colon)) {
+                        self.next()?; // :
+                        match self.peek() {
+                            Some(Token::Ident(_)) => ArgValue::Var(self.ident()?),
+                            Some(Token::Str(_)) => match self.next()? {
+                                Token::Str(s) => ArgValue::Literal(s.clone()),
+                                _ => unreachable!(),
+                            },
+                            got => {
+                                return Err(ParseError::Expected {
+                                    want: "context field value (prop or \"lit\")".into(),
+                                    got: format!("{got:?}"),
+                                })
+                            }
+                        }
+                    } else {
+                        ArgValue::Var(key.clone())
+                    };
+                    fields.push((key, value));
+                }
+                Some(t) => {
+                    return Err(ParseError::Expected {
+                        want: "context field or }".into(),
+                        got: format!("{t:?}"),
+                    })
+                }
+            }
+        }
+        Ok(fields)
     }
 
     // RBrace를 만날 때까지 노드를 모은다.
@@ -259,6 +345,8 @@ impl<'a> Parser<'a> {
                 Some(Token::LBrace) => nodes.push(self.var()?),
                 // @if 분기.
                 Some(Token::At(Directive::If)) => nodes.push(self.if_node()?),
+                // @with 컨텍스트.
+                Some(Token::At(Directive::With)) => nodes.push(self.with_node()?),
                 // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
                 Some(Token::Ident(s)) if starts_upper(s) => nodes.push(self.component_call()?),
                 Some(Token::Ident(_)) => nodes.push(self.element()?),
@@ -296,6 +384,16 @@ impl<'a> Parser<'a> {
         };
 
         Ok(Node::If { cond, then, else_ })
+    }
+
+    // @with CONTEXT { NODE* }   - context는 이 컴포넌트 contexts에 선언된 이름.
+    fn with_node(&mut self) -> Result<Node, ParseError> {
+        self.expect(&Token::At(Directive::With))?;
+        let context = self.ident()?;
+        self.expect(&Token::LBrace)?;
+        let children = self.nodes()?;
+        self.expect(&Token::RBrace)?;
+        Ok(Node::With { context, children })
     }
 
     // { IDENT }

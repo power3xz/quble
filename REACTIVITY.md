@@ -1,6 +1,6 @@
 # REACTIVITY
 
-Quble의 반응성·핸들러 모델. DESIGN.md §5.1(provided)·§5.2(reactivity)·events의 미결을
+Quble의 반응성·핸들러 모델. DESIGN.md §5.1(배열 요소 식별)·§5.2(reactivity)·events의 미결을
 **leafIndex**와 **fullname**으로 꿴 결론이다. 일부 세부(동적 인덱스 swap 등)는 아직 미결로
 표시했다.
 
@@ -117,11 +117,11 @@ store가 가벼워지고(set은 대입+통지뿐) 책임이 한 곳에 모인다
 |---|---|
 | 반응성 | `set(leafIndex, v)` → 구독 노드 갱신 |
 | store 조회 | `get()[leafIndex]` |
-| provided | leafIndex로 인스턴스 식별 (같은 fullname의 두 인스턴스는 leafIndex가 다름) |
+| 배열 요소 식별 | leafIndex로 인스턴스 식별 (같은 fullname의 두 인스턴스는 leafIndex가 다름) |
 | 이벤트 | 발생 인스턴스의 leafIndex를 페이로드에 실음 |
 
-DESIGN §5.1에서 provided가 식별해야 할 "인스턴스 구분"이 **leafIndex(인스턴스 베이스)**로 풀린다.
-컨텍스트 메타데이터는 별개(context, leafIndex와 무관).
+DESIGN §5.1의 배열 요소 식별 슬롯(이름 미정)이 식별해야 할 "인스턴스 구분"이
+**leafIndex(인스턴스 베이스)**로 풀린다. 컨텍스트 메타데이터는 별개(`context`, leafIndex와 무관).
 
 ## 7. 핸들러 = fullname에 묶인다
 

@@ -174,10 +174,11 @@ mod tests {
         let expected = Module::new(
             pool,
             vec![CompDef {
-                name_idx: hello,
+                name_const_index: hello,
                 code_off: 0,
                 code_len: code.len() as u32,
                 events: vec![],
+                contexts: vec![],
             }],
             code,
         );
@@ -186,8 +187,8 @@ mod tests {
         assert_eq!(&got[..], encode(&expected).as_slice());
     }
 
-    /// `class={c}`는 전역 name + 변수값 → AttrGVar(name=전역 ID, value=scope offset),
-    /// `data-x={d}`는 로컬 name + 변수값 → AttrLVar(name=상수풀 인덱스, value=scope offset).
+    /// `class={c}`는 전역 name + 변수값 → AttrGVar(name=전역 ID, value=scope index),
+    /// `data-x={d}`는 로컬 name + 변수값 → AttrLVar(name=상수풀 인덱스, value=scope index).
     #[test]
     fn compiles_attr_var_opcodes() {
         use bytecode::{decode, Op};
@@ -215,10 +216,10 @@ mod tests {
         push16(&mut want, bytecode::tags::tag_id("div").unwrap());
         want.push(Op::AttrGVar as u8);
         push16(&mut want, class_g);
-        push16(&mut want, 0); // c = scope offset 0
+        push16(&mut want, 0); // c = scope index 0
         want.push(Op::AttrLVar as u8);
         push16(&mut want, data_x);
-        push16(&mut want, 1); // d = scope offset 1
+        push16(&mut want, 1); // d = scope index 1
         want.push(Op::ElemCloseOpen as u8);
         want.push(Op::ElemEnd as u8);
         want.push(Op::Halt as u8);
@@ -253,15 +254,129 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // BIND_EVENT event_type=1(input) event_idx=0 가 코드에 있어야 한다.
+        // BIND_EVENT event_type=1(input) event_index=0 가 코드에 있어야 한다.
         let input_id = bytecode::dom_events::dom_event_id("input").unwrap();
         let mut bind = vec![Op::BindEvent as u8];
         bind.extend_from_slice(&input_id.to_le_bytes());
-        bind.extend_from_slice(&0u16.to_le_bytes()); // EDIT = event_idx 0
+        bind.extend_from_slice(&0u16.to_le_bytes()); // EDIT = event_index 0
         assert!(
             code.windows(bind.len()).any(|w| w == bind.as_slice()),
-            "BIND_EVENT input(1) idx 0 가 코드에 있어야",
+            "BIND_EVENT input(1) index 0 가 코드에 있어야",
         );
+    }
+
+    /// `@with`가 끝까지(렉서 -> 파서 -> codegen) 흐르는지. contexts 테이블에 fields가
+    /// Var(Scope)/Literal(Const)로 들어가고, 코드에 EnterContext/ExitContext가 나는지 직접 검사.
+    #[test]
+    fn compiles_with_context() {
+        use bytecode::{decode, FieldValue, Op};
+
+        let src = r#"
+            component C {
+              props { assignee }
+              contexts { Area { section: "actions", userId: assignee } }
+              template {
+                @with Area {
+                  div() { "x" }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+
+        // 컨텍스트 테이블: Area 하나, fields 2개(section=Const 리터럴, userId=Scope assignee).
+        assert_eq!(def.contexts.len(), 1);
+        let area = &def.contexts[0];
+        assert_eq!(module.pool.get(area.name_const_index), Some("Area"));
+        assert_eq!(area.fields.len(), 2);
+        // section: "actions" -> Const(상수풀 인덱스), 그 인덱스가 "actions"를 가리킨다.
+        assert_eq!(module.pool.get(area.fields[0].name_const_index), Some("section"));
+        match area.fields[0].value {
+            FieldValue::Const(actions_index) => {
+                assert_eq!(module.pool.get(actions_index), Some("actions"));
+            }
+            other => panic!("section은 리터럴이라 Const여야: {other:?}"),
+        }
+        // userId: assignee -> Scope(assignee의 scope 인덱스 0).
+        assert_eq!(module.pool.get(area.fields[1].name_const_index), Some("userId"));
+        assert_eq!(area.fields[1].value, FieldValue::Scope(0));
+
+        // 코드: EnterContext context_index=0 ... ExitContext.
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let mut enter = vec![Op::EnterContext as u8];
+        enter.extend_from_slice(&0u16.to_le_bytes());
+        assert!(
+            code.windows(enter.len()).any(|w| w == enter.as_slice()),
+            "EnterContext index 0 가 코드에 있어야",
+        );
+        assert!(
+            code.contains(&(Op::ExitContext as u8)),
+            "ExitContext가 코드에 있어야",
+        );
+    }
+
+    /// contexts 필드 단축형 `key`는 `key: key`(Scope)로 푼다 - payload 단축형과 같은 규칙.
+    #[test]
+    fn context_field_shorthand() {
+        use bytecode::{decode, FieldValue};
+
+        let src = r#"
+            component C {
+              props { tier }
+              contexts { Area { tier } }
+              template { @with Area { div() {} } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let area = &module.def(0).unwrap().contexts[0];
+        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0).
+        assert_eq!(module.pool.get(area.fields[0].name_const_index), Some("tier"));
+        assert_eq!(area.fields[0].value, FieldValue::Scope(0));
+    }
+
+    /// events 페이로드 값도 리터럴(Const)을 받는다 - contexts와 같은 arg_to_field_value 경로.
+    #[test]
+    fn event_payload_literal() {
+        use bytecode::{decode, FieldValue};
+
+        let src = r#"
+            component C {
+              props { count }
+              events { BUMP({ count, label: "clicks" }) }
+              template { button(@click:BUMP) { "x" } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let event = &module.def(0).unwrap().events[0];
+        // count: 단축형 -> Scope(0). label: "clicks" -> Const(상수풀이 "clicks"를 가리킴).
+        assert_eq!(module.pool.get(event.fields[0].name_const_index), Some("count"));
+        assert_eq!(event.fields[0].value, FieldValue::Scope(0));
+        assert_eq!(module.pool.get(event.fields[1].name_const_index), Some("label"));
+        match event.fields[1].value {
+            FieldValue::Const(clicks_index) => {
+                assert_eq!(module.pool.get(clicks_index), Some("clicks"));
+            }
+            other => panic!("label은 리터럴이라 Const여야: {other:?}"),
+        }
+    }
+
+    /// contexts 값이 props에 없는 prop을 참조하면 UnknownProp 에러(payload와 같은 검증 경로).
+    #[test]
+    fn context_unknown_prop_errors() {
+        let src = r#"
+            component C {
+              contexts { Area { userId: missing } }
+              template { @with Area { div() {} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::UnknownProp(_)))
+        ));
     }
 
     /// 닫힌 집합 밖 디렉티브(`@hover`)는 렉서가 그 자리에서 거부한다(확정적 검증).
@@ -318,7 +433,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_idx).unwrap().to_string());
+            names.push(module.pool.get(def.name_const_index).unwrap().to_string());
             id += 1;
         }
         assert_eq!(names.len(), 3, "Card+Thumb+Badge 셋 다 들어가야 함");
@@ -442,7 +557,7 @@ mod tests {
         // 컴포넌트 ID로 이름을 확인해 매핑이 어긋나도 잡히게 한다.
         let id_of = |name: &str| {
             (0..)
-                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_idx).unwrap()) == Some(name))
+                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_const_index).unwrap()) == Some(name))
                 .unwrap()
         };
         // 한 컴포넌트의 코드 앞머리 LOAD_RES들을 순서대로 모은다(연속한 LOAD_RES만).
@@ -534,7 +649,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_idx).unwrap().to_string());
+            names.push(module.pool.get(def.name_const_index).unwrap().to_string());
             id += 1;
         }
         names
@@ -616,8 +731,8 @@ mod tests {
             .expect("합성이 PUSH_PATH_SEGMENT를 내야 한다");
 
         // operand는 "Inner"를 가리킨다.
-        let seg_idx = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
-        assert_eq!(module.pool.get(seg_idx).unwrap(), "Inner");
+        let seg_index = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
+        assert_eq!(module.pool.get(seg_index).unwrap(), "Inner");
 
         // 바로 뒤에 RENDER가 온다 - 세그먼트를 소비하는 합성.
         assert_eq!(code[seg_pos + 3], Op::Render as u8);
@@ -670,8 +785,8 @@ mod tests {
             .expect("합성이 PUSH_PATH_SEGMENT를 내야 한다");
 
         // operand는 type-name "Inner"가 아니라 alias "Done".
-        let seg_idx = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
-        assert_eq!(module.pool.get(seg_idx).unwrap(), "Done");
+        let seg_index = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
+        assert_eq!(module.pool.get(seg_index).unwrap(), "Done");
     }
 
     /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 - alias 부여는 분리의 명시적 행위(§1.3).

@@ -1,8 +1,8 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{ArgValue, AttrValue, Event, Node};
+use crate::ast::{ArgValue, AttrValue, Context, Event, Node};
 use crate::resolve::FlatComp;
-use bytecode::{encode, tags, CompDef, ConstPool, EventDef, Module, Op};
+use bytecode::{encode, tags, CompDef, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CodegenError {
@@ -16,6 +16,8 @@ pub enum CodegenError {
     UnknownArg { comp: String, prop: String },
     /// `@click:EVENT`이 이 컴포넌트 events에 없는 이벤트명을 가리킴.
     UnknownEvent(String),
+    /// `@with Context`가 이 컴포넌트 contexts에 없는 컨텍스트명을 가리킴.
+    UnknownContext(String),
 }
 
 /// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
@@ -54,7 +56,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
     for fc in comps {
         let comp = &fc.comp;
-        let name_idx = pool.intern(&comp.name);
+        let name_const_index = pool.intern(&comp.name);
         let code_off = code.len() as u32;
         // 리소스 로드를 정의 앞머리에 깐다. lazy build에서 이 컴포넌트가 실제로 그려질 때만
         // 실행돼 리소스가 로드된다(같은 파일 컴포넌트가 같은 LOAD_RES를 내도 런타임이 URL dedup).
@@ -68,6 +70,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 node,
                 &comp.props,
                 &comp.events,
+                &comp.contexts,
                 &comp_lookup,
                 &mut pool,
                 &mut code,
@@ -75,27 +78,54 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
         }
         code.push(Op::Halt as u8);
         // events를 직렬화용 EventDef로 변환(코드와 무관 - 컴포넌트 테이블로 간다).
-        // payload의 prop명을 scope offset으로, 필드명을 상수풀 인덱스로.
+        // payload의 prop명을 scope index로, 필드명을 상수풀 인덱스로.
         let events = comp
             .events
             .iter()
             .map(|e| {
-                let payload = e
+                let fields = e
                     .payload
                     .iter()
-                    .map(|(field, prop)| Ok((pool.intern(field), prop_index(prop, &comp.props)?)))
+                    .map(|(field, value)| {
+                        Ok(Field {
+                            name_const_index: pool.intern(field),
+                            value: arg_to_field_value(value, &comp.props, &mut pool)?,
+                        })
+                    })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
-                    name_idx: pool.intern(&e.name),
-                    payload,
+                    name_const_index: pool.intern(&e.name),
+                    fields,
+                })
+            })
+            .collect::<Result<Vec<_>, CodegenError>>()?;
+        // contexts를 ContextDef로 변환(events와 같은 패턴). 값이 ArgValue라 Var/Literal로 갈린다.
+        let contexts = comp
+            .contexts
+            .iter()
+            .map(|c| {
+                let fields = c
+                    .fields
+                    .iter()
+                    .map(|(field, value)| {
+                        Ok(Field {
+                            name_const_index: pool.intern(field),
+                            value: arg_to_field_value(value, &comp.props, &mut pool)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, CodegenError>>()?;
+                Ok(ContextDef {
+                    name_const_index: pool.intern(&c.name),
+                    fields,
                 })
             })
             .collect::<Result<Vec<_>, CodegenError>>()?;
         defs.push(CompDef {
-            name_idx,
+            name_const_index,
             code_off,
             code_len: code.len() as u32 - code_off,
             events,
+            contexts,
         });
     }
 
@@ -113,7 +143,7 @@ fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
 }
 
 /// 변수명을 scope 인덱스로. 선언 순서 = scope 인덱스. 미선언이면 에러.
-fn prop_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
+fn prop_name_to_scope_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
     props
         .iter()
         .position(|p| p == name)
@@ -121,24 +151,37 @@ fn prop_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
         .ok_or_else(|| CodegenError::UnknownProp(name.to_string()))
 }
 
+/// ArgValue를 FieldValue로. Var는 prop을 scope 인덱스로, Literal은 상수풀에 intern해 Const로.
+fn arg_to_field_value(
+    value: &ArgValue,
+    props: &[String],
+    pool: &mut ConstPool,
+) -> Result<FieldValue, CodegenError> {
+    Ok(match value {
+        ArgValue::Var(prop) => FieldValue::Scope(prop_name_to_scope_index(prop, props)?),
+        ArgValue::Literal(s) => FieldValue::Const(pool.intern(s)),
+    })
+}
+
 fn emit_node(
     node: &Node,
     props: &[String],
     events: &[Event],
+    contexts: &[Context],
     comp_lookup: &CompLookup,
     pool: &mut ConstPool,
     code: &mut Vec<u8>,
 ) -> Result<(), CodegenError> {
     match node {
         Node::Text(s) => {
-            let idx = pool.intern(s);
+            let index = pool.intern(s);
             code.push(Op::Text as u8);
-            code.extend_from_slice(&idx.to_le_bytes());
+            code.extend_from_slice(&index.to_le_bytes());
         }
         Node::Var(name) => {
-            let idx = prop_index(name, props)?;
+            let index = prop_name_to_scope_index(name, props)?;
             code.push(Op::TextVar as u8);
-            code.extend_from_slice(&idx.to_le_bytes());
+            code.extend_from_slice(&index.to_le_bytes());
         }
         Node::Element {
             tag,
@@ -151,26 +194,26 @@ fn emit_node(
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
 
-            // 이벤트 바인딩 - 속성과 같은 자리(여는 태그 진행 중). event_idx는 이 컴포넌트
-            // events에서 이벤트명으로 찾는다(선언 순서 = idx).
+            // 이벤트 바인딩 - 속성과 같은 자리(여는 태그 진행 중). event_index는 이 컴포넌트
+            // events에서 이벤트명으로 찾는다(선언 순서 = index).
             for (dom_event, event_name) in event_bindings {
                 // 렉서가 닫힌 집합(Directive)으로 걸러 알려진 DOM 이벤트만 온다.
                 let event_type = bytecode::dom_events::dom_event_id(dom_event)
                     .expect("렉서가 거른 DOM 이벤트만 온다");
-                let event_idx = events
+                let event_index = events
                     .iter()
                     .position(|e| &e.name == event_name)
                     .ok_or_else(|| CodegenError::UnknownEvent(event_name.clone()))?
                     as u16;
                 code.push(Op::BindEvent as u8);
                 code.extend_from_slice(&event_type.to_le_bytes());
-                code.extend_from_slice(&event_idx.to_le_bytes());
+                code.extend_from_slice(&event_index.to_le_bytes());
             }
 
             for (name, value) in attrs {
                 // 두 축이 opcode를 가른다.
                 //   name : 전역 속성명 테이블에 있으면 G(전역 ID), 없으면 L(상수풀 인덱스)
-                //   value: 정적이면 상수풀 인덱스, 변수면 scope offset
+                //   value: 정적이면 상수풀 인덱스, 변수면 scope index
                 let is_var = matches!(value, AttrValue::Var(_));
                 let (op, name_operand) = match bytecode::attrs::attr_id(name) {
                     Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
@@ -181,7 +224,7 @@ fn emit_node(
                 };
                 let value_operand = match value {
                     AttrValue::Static(s) => pool.intern(s),
-                    AttrValue::Var(v) => prop_index(v, props)?,
+                    AttrValue::Var(v) => prop_name_to_scope_index(v, props)?,
                 };
                 code.push(op as u8);
                 code.extend_from_slice(&name_operand.to_le_bytes());
@@ -191,7 +234,7 @@ fn emit_node(
             code.push(Op::ElemCloseOpen as u8);
 
             for child in children {
-                emit_node(child, props, events, comp_lookup, pool, code)?;
+                emit_node(child, props, events, contexts, comp_lookup, pool, code)?;
             }
 
             // END는 operand 없음 - 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
@@ -203,7 +246,7 @@ fn emit_node(
                 .get(name)
                 .ok_or_else(|| CodegenError::UnknownComponent(name.clone()))?;
 
-            // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 offset을 싣는
+            // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 scope index을 싣는
             // PUSH_ARG, 리터럴(`prop="lit"`)은 상수풀 인덱스를 싣는 PUSH_ARG_LIT.
             // (지금은 전부 바인딩 가정 - 순서만으로 매핑.)
             for child_prop in child_props {
@@ -217,9 +260,9 @@ fn emit_node(
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
-                        let offset = prop_index(parent_var, props)?;
+                        let scope_index = prop_name_to_scope_index(parent_var, props)?;
                         code.push(Op::PushArg as u8);
-                        code.extend_from_slice(&offset.to_le_bytes());
+                        code.extend_from_slice(&scope_index.to_le_bytes());
                     }
                     ArgValue::Literal(literal) => {
                         let value_index = pool.intern(literal);
@@ -241,23 +284,41 @@ fn emit_node(
             code.extend_from_slice(&child_id.to_le_bytes());
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop - scope offset 하나. (표현식은 이후 단계)
-            let offset = prop_index(cond, props)?;
+            // cond는 불리언 prop - scope index 하나. (표현식은 이후 단계)
+            let scope_index = prop_name_to_scope_index(cond, props)?;
             code.push(Op::If as u8);
-            code.extend_from_slice(&offset.to_le_bytes());
+            code.extend_from_slice(&scope_index.to_le_bytes());
 
             for node in then {
-                emit_node(node, props, events, comp_lookup, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
             }
 
             if !else_.is_empty() {
                 code.push(Op::Else as u8);
                 for node in else_ {
-                    emit_node(node, props, events, comp_lookup, pool, code)?;
+                    emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
                 }
             }
 
             code.push(Op::IfEnd as u8);
+        }
+        Node::With { context, children } => {
+            // context_index는 이 컴포넌트 contexts에서 이름으로 찾는다(선언 순서 = index,
+            // event_index 찾기와 동형). 미선언 컨텍스트는 에러.
+            let context_index = contexts
+                .iter()
+                .position(|c| &c.name == context)
+                .ok_or_else(|| CodegenError::UnknownContext(context.clone()))?
+                as u16;
+            code.push(Op::EnterContext as u8);
+            code.extend_from_slice(&context_index.to_le_bytes());
+
+            for node in children {
+                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+            }
+
+            // ExitContext는 operand 없는 마커(IfEnd 동형).
+            code.push(Op::ExitContext as u8);
         }
     }
     Ok(())

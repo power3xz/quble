@@ -1,0 +1,10 @@
+component C {
+  props { userId }
+  contexts { Area { section: "actions", userId: userId } }
+  events { TOGGLE({ userId }) }
+  template {
+    @with Area {
+      button(@click:TOGGLE) { "x" }
+    }
+  }
+}

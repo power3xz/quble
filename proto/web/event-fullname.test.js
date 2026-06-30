@@ -16,8 +16,8 @@ before(() => {
 
 // Card(부모, props 없음) 인스턴스 - 내부에서 Toggle을 합성. 클릭할 button을 돌려준다.
 const instantiate = (handlers) => {
-  const ctx = createLeafStoreSubject({});
-  const inst = compile(qubb)(0)(ctx, [], handlers); // Card = comp 0, props 없음
+  const store = createLeafStoreSubject({});
+  const inst = compile(qubb)(0)(store, [], handlers); // Card = comp 0, props 없음
   const host = mount(inst);
   return host.querySelector("button");
 };

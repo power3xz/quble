@@ -7,7 +7,7 @@
 //   createLeafStore(values)        → { leafOf, get, set }                         (데이터만)
 //   createLeafStoreSubject(values) → 위 + { setPath, subscribe, unsubscribe }, set·setPath가 통지  (반응성)
 //
-// runtime.js의 blueprint가 받는 ctx가 곧 createLeafStoreSubject의 반환물이다.
+// runtime.js의 blueprint가 받는 store가 곧 createLeafStoreSubject의 반환물이다.
 
 // 점 표기 경로로 객체를 파고들어 값을 읽는다("a.b.c" → obj.a.b.c).
 //

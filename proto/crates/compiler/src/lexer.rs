@@ -21,6 +21,7 @@ pub enum Token {
 pub enum Directive {
     If,
     Else,
+    With,
     Click,
     Input,
     Change,
@@ -40,7 +41,7 @@ impl Directive {
     /// DOM 이벤트 디렉티브면 그 이벤트명, 구조 디렉티브(`@if`/`@else`)면 None.
     pub fn dom_event_name(&self) -> Option<&'static str> {
         match self {
-            Directive::If | Directive::Else => None,
+            Directive::If | Directive::Else | Directive::With => None,
             Directive::Click => Some("click"),
             Directive::Input => Some("input"),
             Directive::Change => Some("change"),
@@ -117,6 +118,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 let kw = match s.as_str() {
                     "if" => Directive::If,
                     "else" => Directive::Else,
+                    "with" => Directive::With,
                     "click" => Directive::Click,
                     "input" => Directive::Input,
                     "change" => Directive::Change,

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>quble — TicketCard (리터럴 + @with 컨텍스트)</title>
+    <link rel="stylesheet" href="/public/style.css" />
+    <style>
+      body { background: #eef2f7; }
+      #log {
+        margin-bottom: 16px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="log">버튼을 클릭하면 이벤트 data(리터럴 페이로드)와 @with로 주입된 context가 찍힙니다.</pre>
+    <div id="root"></div>
+
+    <script type="module">
+      import { compile, createLeafStoreSubject } from "/runtime.js";
+
+      // ticketcard.qubb + resmap(LOAD_RES가 CSS <link>를 클라에서 삽입).
+      const bytes = new Uint8Array(
+        await (await fetch("/components/ticketcard.qubb")).arrayBuffer(),
+      );
+      const resmap = await (await fetch("/resmap/ticketcard")).json();
+      const blueprintOf = compile(bytes, resmap);
+
+      const log = document.getElementById("log");
+      const show = (event, data, context) => {
+        log.textContent =
+          `${event}\n` +
+          `  data    = ${JSON.stringify(data)}\n` +
+          `  context = ${JSON.stringify(context)}`;
+      };
+
+      // 핸들러는 짧은 이름 키. (data, { context }) 시그니처.
+      const handlers = {
+        ASSIGN: (data, { context }) => show("ASSIGN", data, context),
+        CLOSE: (data, { context }) => show("CLOSE", data, context),
+      };
+
+      // props가 없는 컴포넌트 — 빈 store/paths로 인스턴스화한다. 값은 전부 qubc에 리터럴로 박혀 있다.
+      const store = createLeafStoreSubject({});
+      const inst = blueprintOf(0)(store, [], handlers);
+      document.getElementById("root").append(...inst.nodes);
+    </script>
+  </body>
+</html>

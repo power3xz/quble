@@ -1,0 +1,68 @@
+/* TicketCard - 리터럴 전용 데모 컴포넌트. @with(Header/Footer) 컨텍스트와 리터럴
+   이벤트 페이로드를 브라우저에서 확인하는 용도. BEM. */
+.ticket {
+  border: 1px solid #d7dde5;
+  border-radius: 10px;
+  padding: 16px;
+  max-width: 420px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.ticket__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ticket__title {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2328;
+}
+
+.ticket__body {
+  margin: 12px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #44505f;
+}
+
+.ticket__meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.ticket__chip {
+  font-size: 12px;
+  color: #5a6675;
+  background: #f1f4f8;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.ticket__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ticket__btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid #cdd5df;
+  border-radius: 6px;
+  background: #f6f8fa;
+  color: #34537a;
+  cursor: pointer;
+}
+
+.ticket__btn--danger {
+  border-color: #e3b4b4;
+  background: #fdeaea;
+  color: #c0392b;
+}

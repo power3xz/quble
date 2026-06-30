@@ -1,8 +1,8 @@
 # Quble 바이트코드 - 프로토타입 v0
 
-스코프: **여러 컴포넌트 정의·합성, 문자열/변수 속성값, props 변수 보간(텍스트·속성)과 스칼라
+스코프: **여러 컴포넌트 정의/합성, 문자열/변수 속성값, props 변수 보간(텍스트/속성)과 스칼라
 반응성, 외부 CSS 리소스 로드(`use "..."`).** 출력은 HTML 문자열(SSR)과 살아있는 DOM(클라).
-이 문서는 컴파일러(생성)와 렌더러·런타임(소비)의 계약이다.
+이 문서는 컴파일러(생성)와 렌더러/런타임(소비)의 계약이다.
 
 ---
 
@@ -31,11 +31,11 @@ component Greeting {
 }
 ```
 
-scope `["world"]` → `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
+scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
 `{expr}` 전체 표현식은 아직 아니다.)
 
-이 단계에서 없는 것: 합성/별칭, 슬롯, `@if/@for/@with`, 전체 `{expr}`, contexts, events,
-props 객체·반응성.
+이 첫 단계(props 보간)에서 없던 것 중 이후 추가됨: 합성/별칭, `@if`, events, `@with`/contexts.
+아직 없는 것: 슬롯, `@for`, 전체 `{expr}`, props 객체.
 
 ---
 
@@ -45,15 +45,15 @@ props 객체·반응성.
 | -------------------- | ------------------------------------------------------------ | ------------------------------------------ | --------------- |
 | **내장 태그 테이블** | 알려진 HTML **태그명만** (`div`, `h1`, `p`, …)               | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 예약 ID (u16)   |
 | **전역 상수풀**      | 흔한 **속성명만** (`class`, `id`, `src`, …)                  | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 전역 ID (u16)   |
-| **컴포넌트 상수풀**  | 텍스트·속성값·전역에 없는 속성명 등 컴포넌트마다 다른 문자열 | 파일의 상수풀 섹션                         | 풀 인덱스 (u16) |
+| **컴포넌트 상수풀**  | 텍스트/속성값/전역에 없는 속성명 등 컴포넌트마다 다른 문자열 | 파일의 상수풀 섹션                         | 풀 인덱스 (u16) |
 
-- 내장 태그 테이블·전역 상수풀은 컴파일러·런타임이 **같은 테이블을 코드로** 들고 있다. `div`/`class`는
-  어느 컴포넌트든 항상 같은 ID → 파일에 안 실린다. (DESIGN.md 요소 9)
+- 내장 태그 테이블/전역 상수풀은 컴파일러/런타임이 **같은 테이블을 코드로** 들고 있다. `div`/`class`는
+  어느 컴포넌트든 항상 같은 ID -> 파일에 안 실린다. (DESIGN.md 요소 9)
 - **속성명은 흔한 것만 전역 상수풀**에 두고, 전역에 없는 임의 속성명(`data-*`, `aria-*` 등)은
   **컴포넌트 상수풀**로 빠진다.
 - **속성값은 항상 컴포넌트 상수풀.** `"card"` 같은 값은 컴포넌트마다 달라 전역에 못 넣는다.
 - 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(§4). `ELEM_OPEN`의 operand는
-  내장 태그 ID, `ATTR_G`의 name은 전역 상수풀 ID, `ATTR_L`의 name과 모든 value·`TEXT`는
+  내장 태그 ID, `ATTR_G`의 name은 전역 상수풀 ID, `ATTR_L`의 name과 모든 value/`TEXT`는
   컴포넌트 상수풀 인덱스. (`ELEM_END`는 operand가 없다 - §5.)
 
 ### 내장 태그 테이블 (프로토타입 시작 집합)
@@ -93,12 +93,12 @@ props 객체·반응성.
 바이트코드 파일은 **컴포넌트 정의(들)** 를 담는다. 정의는 컴파일타임에 고정된 청사진으로,
 그 자체로는 그려지지 않는다. 실제 출력은 **컴포넌트를 RENDER** 할 때 일어난다.
 
-- `@if`/`@for` 같은 분기·반복도 모두 **정의 안에 표현**된다. 구조는 고정이고, 렌더 시점의
-  값에 따라 어느 가지를 타고 몇 번 도는지가 정해질 뿐이다. 그래서 정의는 **불변·재사용**이고,
+- `@if`/`@for` 같은 분기/반복도 모두 **정의 안에 표현**된다. 구조는 고정이고, 렌더 시점의
+  값에 따라 어느 가지를 타고 몇 번 도는지가 정해질 뿐이다. 그래서 정의는 **불변/재사용**이고,
   합성은 정의를 복사(인라이닝)하지 않고 **`RENDER`로 호출**한다.
 - **page도 결국 하나의 컴포넌트다.** "페이지 단위 렌더" = 최상위 컴포넌트를 RENDER 하는 것.
 - 무엇을 렌더할지는 **정의 파일이 정하지 않는다** - `RENDER comp_id` 호출이 정한다(진입점은
-  호출자/브라우저가 결정). 프로토타입은 props/state·합성이 없으므로 인자 없이 RENDER 한다.
+  호출자/브라우저가 결정). 프로토타입은 props/state/합성이 없으므로 인자 없이 RENDER 한다.
 
 ---
 
@@ -112,29 +112,40 @@ props 객체·반응성.
   version    : u16        (= 0)
 [ 컴포넌트 상수풀 ]
   count      : u16
-  entries    : count × ( len:u16, bytes:[u8;len] )
+  entries    : count x ( len:u16, bytes:[u8;len] )
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
   count      : u16
-  defs       : count × (
-                 name_idx   : u16        // 상수풀의 컴포넌트명
+  defs       : count x (
+                 name_const_index : u16  // 상수풀의 컴포넌트명
                  code_off   : u32        // 코드 영역 내 구획
                  code_len   : u32
                  event_count: u16        // 이 컴포넌트가 선언한 이벤트 수
-                 events     : event_count × (
-                   name_idx     : u16    // 이벤트명("CLICK") - 상수풀. 핸들러 키 매칭용
-                   payload_count: u16
-                   payload      : payload_count × ( field_idx:u16, offset:u16 )
-                                  // field_idx = 필드명("title") 상수풀. offset = 그 prop의 scope offset
+                 events     : event_count x (
+                   name_const_index : u16  // 이벤트명("CLICK") - 상수풀. 핸들러 키 매칭용
+                   fields           : <FIELDS>   // 아래 FIELDS 구조
+                 )
+                 context_count: u16      // 이 컴포넌트가 선언한 컨텍스트 수(@with)
+                 contexts   : context_count x (
+                   name_const_index : u16  // 컨텍스트명("Area") - 상수풀
+                   fields           : <FIELDS>   // 이벤트 payload와 같은 인코딩
                  )
                )
+
+  // FIELDS - 이벤트 payload와 컨텍스트가 공유하는 필드 목록 인코딩
+  <FIELDS> = field_count : u16
+             fields      : field_count x (
+               name_const_index : u16  // 필드명("title") 상수풀
+               value            : u16  // MSB=const 여부(1=상수풀 값, 0=scope index),
+                                       //   하위 15비트=index. const는 리터럴, scope는 그 prop scope index.
+             )
 [ 코드 ]
   len        : u32
   code       : [u8; len]   // 모든 정의의 코드가 이어짐. 테이블의 off/len으로 구획.
 ```
 
-- 내장 태그 테이블·전역 상수풀은 파일에 없다 - 헤더의 version이 이 테이블들의 버전을 함께
+- 내장 태그 테이블/전역 상수풀은 파일에 없다 - 헤더의 version이 이 테이블들의 버전을 함께
   결정한다고 본다.
-- **컴포넌트명은 상수풀에 둔다**(`name_idx`로 참조).
+- **컴포넌트명은 상수풀에 둔다**(`name_const_index`로 참조).
 - **컴포넌트 ID = 테이블 배열 인덱스.** `RENDER`/합성은 이 ID로 정의를 직접 인덱싱한다.
 - 진입점(엔트리포인트) 정보는 파일에 없다 - `RENDER comp_id` 호출이 지정.
 
@@ -154,15 +165,19 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ELEM_END`        | 0x05 | -                     | -                         | 가장 최근에 연 태그를 닫는다(`</TAG>`). 닫을 태그는 스택 top으로 안다.   |
 | `RENDER`          | 0x06 | comp_id: u16          | -                         | 쌓인 인자를 자식 scope로 넘겨 comp_id 정의를 렌더(호출). 인자 버퍼를 비운다. |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
-| `TEXT_VAR`        | 0x08 | idx: u16              | scope                     | `scope[idx]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).          |
-| `ATTR_G_VAR`      | 0x09 | name: u16, idx: u16   | name=전역, idx=scope      | ` name="scope[idx]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
-| `ATTR_L_VAR`      | 0x0a | name: u16, idx: u16   | name=컴포넌트, idx=scope  | ` name="scope[idx]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수.        |
-| `PUSH_ARG`        | 0x0b | offset: u16           | scope                     | 부모 `scope[offset]`을 자식 인자 버퍼에 push. 뒤따르는 `RENDER`가 소비.     |
-| `IF`              | 0x0c | cond: u16             | scope                     | `scope[cond]`(불리언)으로 분기 시작. then 가지 코드가 이어진다.            |
+| `TEXT_VAR`        | 0x08 | scope_index: u16      | scope                     | `scope[scope_index]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).  |
+| `ATTR_G_VAR`      | 0x09 | name: u16, scope_index: u16 | name=전역, value=scope | ` name="scope[scope_index]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
+| `ATTR_L_VAR`      | 0x0a | name: u16, scope_index: u16 | name=컴포넌트, value=scope | ` name="scope[scope_index]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수. |
+| `PUSH_ARG`        | 0x0b | scope_index: u16      | scope                     | 부모 `scope[scope_index]`을 자식 인자 버퍼에 push. 뒤따르는 `RENDER`가 소비. |
+| `IF`              | 0x0c | cond_scope_index: u16 | scope                     | `scope[cond_scope_index]`(불리언)으로 분기 시작. then 가지 코드가 이어진다. |
 | `ELSE`            | 0x0d | -                     | -                         | then 가지 끝, else 가지 시작. (else 있을 때만)                            |
 | `IF_END`          | 0x0e | -                     | -                         | if 블록 끝.                                                              |
 | `LOAD_RES`        | 0x0f | res: u16              | 모듈 전역 리소스          | `res`(resId)의 외부 리소스(CSS 등)를 로드. resId->URL은 런타임이 주입.    |
-| `BIND_EVENT`      | 0x10 | event_type:u16, event_idx:u16 | type=전역 DOM 이벤트, idx=컴포넌트 이벤트 | 지금 여는 요소에 리스너를 묶는다. `event_type` DOM 이벤트가 일어나면 컴포넌트 이벤트 `event_idx`를 발생시킨다. |
+| `BIND_EVENT`      | 0x10 | event_type:u16, event_index:u16 | type=전역 DOM 이벤트, index=컴포넌트 이벤트 | 지금 여는 요소에 리스너를 묶는다. `event_type` DOM 이벤트가 일어나면 컴포넌트 이벤트 `event_index`를 발생시킨다. |
+| `PUSH_ARG_LIT`    | 0x11 | const_index: u16      | 컴포넌트 상수풀           | 리터럴 값을 자식 인자 버퍼에 push. 부모 슬롯과 분리된 독립 leaf(use-site `Comp(prop="lit")`). |
+| `PUSH_PATH_SEGMENT` | 0x12 | seg_index: u16      | 컴포넌트 상수풀           | 합성 경로(fullname)에 세그먼트 하나를 민다(자식 type-name/alias). 뒤따르는 `RENDER`가 소비. |
+| `ENTER_CONTEXT`   | 0x13 | context_index: u16    | 컴포넌트 컨텍스트 테이블   | `@with` 진입. `ContextDef.fields`를 읽어 활성 컨텍스트 스택에 push. 이후 코드가 그 범위. |
+| `EXIT_CONTEXT`    | 0x14 | -                     | -                         | `@with` 블록 끝(IF_END 동형 마커). 활성 컨텍스트 스택 pop.                 |
 
 설계 메모:
 
@@ -171,30 +186,30 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   스택으로 안다: SSR 렌더러는 `</TAG>`를 써야 해 **태그 이름 스택**을, JS 런타임은 부모로
   복귀만 하면 돼 **DOM 노드 스택**을 유지한다. (이전엔 END가 tag ID를 들었으나 잉여라 제거.
   요소당 2B 절감 - grid raw −8.7% 실측.)
-- 빈 요소 `h1() {}`도 OPEN → CLOSE_OPEN → END (`<h1></h1>`). void element 최적화는 나중.
+- 빈 요소 `h1() {}`도 OPEN -> CLOSE_OPEN -> END (`<h1></h1>`). void element 최적화는 나중.
 - **합성 - `PUSH_ARG` + `RENDER`.** 부모가 자식을 호출할 때, use-site 바인딩
-  (`Comp(name={b})` - `b`는 부모 offset)을 `PUSH_ARG offset`으로 **자식 offset 순서대로** 쌓고
+  (`Comp(name={b})` - `b`는 부모 scope index)을 `PUSH_ARG scope_index`로 **자식 scope index 순서대로** 쌓고
   `RENDER comp_id`가 그 인자 버퍼를 **자식 scope**로 넘긴다(그리고 비운다). `ATTR`이 `ELEM` 앞에
   쌓이고 `CLOSE_OPEN`이 닫는 것과 같은 패턴 - 인자가 `RENDER` 앞에 쌓이고 `RENDER`가 흡수한다.
-  - `PUSH_ARG`가 싣는 건 **값이 아니라 부모 offset**이다. 부모 `scope[offset]`(SSR) /
-    `paths[offset]`(클라 반응성)을 **한 단계 풀어** 자식에게 준다. 그래서 leafIndex 같은 전역
+  - `PUSH_ARG`가 싣는 건 **값이 아니라 부모 scope index**다. 부모 `scope[scope_index]`(SSR) /
+    `paths[scope_index]`(클라 반응성)을 **한 단계 풀어** 자식에게 준다. 그래서 leafIndex 같은 전역
     인덱스를 넘기지 않는다 - 같은 컴포넌트가 use-site마다 다른 값을 받을 수 있기 때문(§ 정의 vs 사용).
-  - 인자는 **자식 offset 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부** 바인딩한다고
-    보고 순서만으로 매핑한다. 일부 생략을 허용할 때 `PUSH_ARG`에 offset을 명시하거나 빈 자리용 opcode를
+  - 인자는 **자식 scope index 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부** 바인딩한다고
+    보고 순서만으로 매핑한다. 일부 생략을 허용할 때 `PUSH_ARG`에 scope index를 명시하거나 빈 자리용 opcode를
     더한다(미정).
   - 진입점(최상위)은 외부에서 `render(qubb, comp_id, scope)`로 scope를 직접 준다. 인자 버퍼는
     `RENDER`로 합성할 때만 쓰인다.
 - `TEXT_VAR`는 런타임 주입 값을 가리킨다. 렌더 시 `render(qubb, comp_id, scope)`로 **scope**
-  (값 배열)를 넘기고, `TEXT_VAR idx`가 `scope[idx]`를 출력한다. 심볼 이름은 바이트코드에 없다
+  (값 배열)를 넘기고, `TEXT_VAR scope_index`가 `scope[scope_index]`를 출력한다. 심볼 이름은 바이트코드에 없다
   - 컴파일타임에 **scope 인덱스로 확정**되므로(정적 분석), 런타임은 배열 인덱스로 O(1) 접근한다.
-  (1단계: 값은 문자열. 객체·반응성은 이후 단계.)
-- 속성은 **두 축**으로 갈린다 - name(전역 `G` / 컴포넌트 `L`) × value(정적 / 변수 `_VAR`).
-  네 조합이 `ATTR_G`·`ATTR_L`·`ATTR_G_VAR`·`ATTR_L_VAR`. 변수 속성값의 idx는 **`TEXT_VAR`와
-  같은 scope offset 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 값 배열).
+  (1단계: 값은 문자열. 객체/반응성은 이후 단계.)
+- 속성은 **두 축**으로 갈린다 - name(전역 `G` / 컴포넌트 `L`) x value(정적 / 변수 `_VAR`).
+  네 조합이 `ATTR_G`/`ATTR_L`/`ATTR_G_VAR`/`ATTR_L_VAR`. 변수 속성값의 scope index는 **`TEXT_VAR`와
+  같은 scope index 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 값 배열).
 - **분기 - `IF`/`ELSE`/`IF_END` (마커).** `@if`/`@else`를 세 마커로 감싼다. 형태와 "왜 점프가
   없어야 하는가"는 §5.1에서 따로 설명한다.
 - 반복(`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다. 방향만 - 점프 없이 **해석단이
-  본문 구간을 N회 반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계 표기·leafIndex 회수
+  본문 구간을 N회 반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계 표기/leafIndex 회수
   (REACTIVITY.md §3)가 엮여 별도 작업.
 - **외부 리소스 - `LOAD_RES res`.** 파일이 `use "./style.css"`로 CSS를 참조하면, 그 파일의
   **모든 컴포넌트** 정의 앞머리에 `LOAD_RES resId`를 하나씩 낸다. 런타임이 resId를 URL로 풀어
@@ -203,28 +218,39 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     쓰는지 특정할 수 없다 - 전부 후보다. 게다가 **lazy build**에서 `@if` 비활성 가지나 RENDER되지
     않는 컴포넌트는 build되지 않아 그 안의 `LOAD_RES`도 실행되지 않는다. 즉 리소스는 **컴포넌트가
     실제로 그려질 때만** 로드된다 - 정의 앞머리에 두는 것이 안전장치가 아니라 lazy 로딩의 메커니즘이다.
-  - **URL은 바이트코드에 없다** - 빌드/배포마다 바뀌므로(해시 파일명·CDN 경로) 런타임이
+  - **URL은 바이트코드에 없다** - 빌드/배포마다 바뀌므로(해시 파일명/CDN 경로) 런타임이
     `{resId: url}` 맵을 주입한다. 컴파일러는 CSS를 산출물(`dist/res/<basename>.<내용해시>.css`)로
     복사하고 `resId -> 산출 경로` 사이드맵(`<name>.resmap.json`, 인덱스가 resId)을 qubb 밖으로
     낸다. 산출물이 자립적이도록 CSS 파일도 함께 둔다. URL prefix(CDN 등)는 이후 빌드/배포가 붙인다.
   - **내용 해시 파일명**은 평탄화 시 동명 충돌을 막고 캐시 버스팅도 겸한다(FNV-1a 64bit). 파일명을
-    `<basename>.<hash>`로 두면 충돌하려면 basename·내용 해시가 둘 다 같아야 해 사실상 0.
-  - **resId는 모듈 전역 인덱스**다. scope offset·comp_id가 모듈 로컬인 것과 같은 결 - 한 모듈
-    안에서만 유효한 0,1,2…. 같은 정규화 경로는 같은 resId로 합친다(컴파일타임 정규화·중복 제거).
+    `<basename>.<hash>`로 두면 충돌하려면 basename/내용 해시가 둘 다 같아야 해 사실상 0.
+  - **resId는 모듈 전역 인덱스**다. scope index/comp_id가 모듈 로컬인 것과 같은 결 - 한 모듈
+    안에서만 유효한 0,1,2…. 같은 정규화 경로는 같은 resId로 합친다(컴파일타임 정규화/중복 제거).
   - **qubb 안에 리소스 테이블은 두지 않는다.** 빌드가 이미 resId->경로를 알아 qubb에 또 담는 건
     잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
 - **이벤트 - `BIND_EVENT` + 컴포넌트 이벤트 테이블.** 정의와 발생이 나뉜다.
   - **정의**는 컴포넌트 테이블(§4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
-    이벤트명·payload(필드명 + 그 prop의 offset)가 그 컴포넌트의 이벤트 배열에 들어간다.
-    `event_idx`는 이 배열의 인덱스(0,1,2…).
+    이벤트명/fields(필드명 + 값 출처)가 그 컴포넌트의 이벤트 배열에 들어간다. `event_index`는
+    이 배열의 인덱스(0,1,2…). **fields의 값(`FieldValue`)은 MSB로 갈린다** - scope(그 prop의
+    scope index) 또는 const(리터럴, 상수풀 인덱스). 컨텍스트와 같은 인코딩(<FIELDS>, §4).
   - **발생 배선**은 코드의 `BIND_EVENT`다. `button(@click:TOGGLE)`은 그 요소에
     `BIND_EVENT click, 0`(click이 일어나면 0번 이벤트)을 낸다. 속성처럼 `ELEM_OPEN`과
     `ELEM_CLOSE_OPEN` 사이에 온다.
-  - **발생 시 런타임**: 0번 이벤트 정의를 보고 payload offset들의 현재값을 모아
-    `data = { title: … }`를 만들고, 핸들러(이벤트명으로 찾음)에 넘긴다. 핸들러는 JS로 런타임에
-    주입된다(`{ TOGGLE: (data) => … }`). 같은 이벤트명 = 같은 핸들러.
-  - 핸들러 본문·`set`은 바이트코드에 없다 - 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
+  - **발생 시 런타임**: 0번 이벤트 정의를 보고 fields를 풀어 현재값을 모아 `data = { title: … }`를
+    만들고, 핸들러(fullname으로 찾음)에 넘긴다. 핸들러는 JS로 런타임에 주입된다. 같은 fullname = 같은 핸들러.
+  - 핸들러 본문/`set`은 바이트코드에 없다 - 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
     낸다. 본문은 호스트 JS에 위임(DESIGN §5.4 방향).
+- **컨텍스트 - `ENTER_CONTEXT`/`EXIT_CONTEXT` + 컴포넌트 컨텍스트 테이블.** `@with`로 주입하는
+  메타데이터. 이벤트와 같은 결로 정의와 활성화가 나뉜다.
+  - **정의**는 컴포넌트 테이블(§4)에 둔다. `contexts { Area { userId: assignee } }`가 컨텍스트명/
+    fields(이벤트와 같은 인코딩)로 컨텍스트 배열에 들어간다. `context_index`는 이 배열의 인덱스.
+  - **활성화**는 코드의 `ENTER_CONTEXT context_index` … `EXIT_CONTEXT`다. `@with Area { … }`가
+    이 짝으로 감싼다(IF/IF_END와 동형 - 점프 없는 마커, 중첩 보장).
+  - **런타임**: ENTER가 그 컨텍스트를 활성 스택에 올리고(fields를 leafIndex로 풀어), 그 범위 안의
+    `BIND_EVENT`가 활성 컨텍스트를 핸들러의 `context`로 전달한다(`context.Area.userId` = 발생 시점
+    현재값, `data`와 같은 처리). EXIT가 스택에서 내린다. 컨텍스트는 DOM 출력엔 영향 없다(SSR은 skip).
+  - 같은 컨텍스트명 중첩은 비정상이나(맥락은 중복이 없는 게 맞다), 합성 경계 너머 중첩은 컴파일타임에
+    못 봐 런타임이 안쪽 우선으로 덮고 경고한다(ISSUES.md).
 
 ## 5.1 분기 - `IF`/`ELSE`/`IF_END`
 
@@ -233,9 +259,9 @@ if-only :  IF cond  [then]            IF_END
 if-else :  IF cond  [then]  ELSE  [else]  IF_END
 ```
 
-`cond`는 불리언 scope offset 하나(truthy면 then, falsy면 else). 표현식 조건은 `{expr}`에서 확장.
+`cond`는 불리언 scope index 하나(truthy면 then, falsy면 else). 표현식 조건은 `{expr}`에서 확장.
 
-양쪽 가지를 다 해석해 두 청사진을 모두 들고 있되, **활성 가지만 build**(DOM·구독 생성)한다.
+양쪽 가지를 다 해석해 두 청사진을 모두 들고 있되, **활성 가지만 build**(DOM/구독 생성)한다.
 비활성 가지는 청사진으로만 보관 - 구독이 없어 `set`이 와도 갱신 대상이 아니다. `cond`가 바뀌면
 현재 가지를 버리고 반대 청사진을 build 한다.
 
@@ -248,7 +274,7 @@ if-else :  IF cond  [then]  ELSE  [else]  IF_END
   성립하는 건 *연 만큼 닫는다*는 전제 덕이다. 점프는 그 짝을 깬다 - 열고 안 닫거나, 안 열고 닫게
   된다. 분기도 중첩 블록이라 통째로 들어가거나 안 들어가거나 둘 뿐, 블록 중간으로 뛰어들 일이 없다.
 - **선언이지 명령이 아니다.** 템플릿은 "이 트리를 그려라"는 선언이다. 블록 경계를 무시하고 임의
-  위치로 가는 흐름(break·goto류)은 이 모델에 속하지 않는다. 점프는 우리가 갖지 않기로 한 의미다.
+  위치로 가는 흐름(break/goto류)은 이 모델에 속하지 않는다. 점프는 우리가 갖지 않기로 한 의미다.
 
 ### 이스케이프 규칙
 
@@ -256,10 +282,10 @@ if-else :  IF cond  [then]  ELSE  [else]  IF_END
 
 | 위치                                | 이스케이프 대상                     |
 | ----------------------------------- | ----------------------------------- |
-| `TEXT` (텍스트 노드)                | `&`→`&amp;`, `<`→`&lt;`, `>`→`&gt;` |
-| `ATTR_G`/`ATTR_L` 의 value (속성값) | 텍스트 규칙 + `"`→`&quot;`          |
+| `TEXT` (텍스트 노드)                | `&`->`&amp;`, `<`->`&lt;`, `>`->`&gt;` |
+| `ATTR_G`/`ATTR_L` 의 value (속성값) | 텍스트 규칙 + `"`->`&quot;`          |
 
-태그명·속성명은 신뢰된 식별자라 이스케이프하지 않는다.
+태그명/속성명은 신뢰된 식별자라 이스케이프하지 않는다.
 
 ---
 
@@ -273,7 +299,7 @@ if-else :  IF cond  [then]  ELSE  [else]  IF_END
 0:"greeting" 1:"Hello" 2:"sub" 3:"world"
 ```
 
-컴포넌트 테이블: `[ id 0: name_idx=1("Hello"), code_off=0, code_len=… ]`
+컴포넌트 테이블: `[ id 0: name_const_index=1("Hello"), code_off=0, code_len=… ]`
 진입: 런타임이 `RENDER 0` 으로 시작.
 
 코드 (들여쓰기는 가독성용, 실제는 평탄):
@@ -303,14 +329,14 @@ HALT
 proto/
   Cargo.toml            # workspace
   crates/
-    bytecode/   # opcode, 내장 태그 테이블, 전역 상수풀(속성명), 컴포넌트 상수풀, 직렬화/역직렬화 (컴파일러·렌더러 공용)
-    compiler/   # .qubc 소스 → bytecode. 프론트엔드(lexer/parse→ast) + 백엔드(codegen)
-    renderer/   # bytecode → HTML 문자열 (SSR, render_to_string)
+    bytecode/   # opcode, 내장 태그 테이블, 전역 상수풀(속성명), 컴포넌트 상수풀, 직렬화/역직렬화 (컴파일러/렌더러 공용)
+    compiler/   # .qubc 소스 -> bytecode. 프론트엔드(lexer/parse->ast) + 백엔드(codegen)
+    renderer/   # bytecode -> HTML 문자열 (SSR, render_to_string)
   examples/hello.qubc
-  src/main.rs           # .qubc → 컴파일 → 실행 → stdout
+  src/main.rs           # .qubc -> 컴파일 -> 실행 -> stdout
 ```
 
-`bytecode` 크레이트가 포맷의 단일 정의처(내장 태그 테이블 포함). 컴파일러·렌더러가 공유해 계약
+`bytecode` 크레이트가 포맷의 단일 정의처(내장 태그 테이블 포함). 컴파일러/렌더러가 공유해 계약
 불일치를 컴파일타임에 막는다.
 
 ---
@@ -318,9 +344,9 @@ proto/
 ## 8. 진행 순서
 
 1. `bytecode` - opcode enum, 내장 태그 테이블, ConstPool, 컴포넌트 테이블, 직렬화/역직렬화 + 라운드트립 테스트.
-2. `renderer` - 손으로 만든 바이트코드 → HTML. (컴파일러 없이 먼저 검증)
-3. `compiler` - `.qubc` → bytecode.
-4. `main` - end-to-end: hello.qubc → HTML. 출력 일치 테스트.
+2. `renderer` - 손으로 만든 바이트코드 -> HTML. (컴파일러 없이 먼저 검증)
+3. `compiler` - `.qubc` -> bytecode.
+4. `main` - end-to-end: hello.qubc -> HTML. 출력 일치 테스트.
 
 각 단계는 다음으로 넘어가기 전 테스트로 검증한다.
 

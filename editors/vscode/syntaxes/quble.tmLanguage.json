@@ -36,11 +36,11 @@
       }
     },
     "block-keyword": {
-      "match": "\\b(props|events|template)\\b",
+      "match": "\\b(props|contexts|events|template)\\b",
       "name": "keyword.other.block.quble"
     },
     "directive": {
-      "match": "(@)(if|else|click)\\b",
+      "match": "(@)(with|if|else|click|input|change|submit|focus|blur|keydown|keyup|mousedown|mouseup|mouseenter|mouseleave|scroll)\\b",
       "name": "keyword.control.directive.quble"
     },
     "composition": {

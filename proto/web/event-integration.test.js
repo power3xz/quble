@@ -14,13 +14,13 @@ before(() => {
   qubb = buildFixture("event_toggle");
 });
 
-// Toggle 인스턴스 하나 - { ctx, host, button }. props [label, on].
+// Toggle 인스턴스 하나 - { store, host, button }. props [label, on].
 const instantiate = (values, handlers) => {
-  const ctx = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(ctx, ["label", "on"], handlers);
+  const store = createLeafStoreSubject(values);
+  const inst = compile(qubb)(0)(store, ["label", "on"], handlers);
   const host = mount(inst);
   const button = host.querySelector("button");
-  return { ctx, host, button };
+  return { store, host, button };
 };
 
 test("클릭하면 이벤트명으로 등록한 핸들러가 호출된다", () => {
@@ -46,9 +46,9 @@ test("핸들러 data에 payload 필드의 현재값이 필드명 키로 담긴�
 });
 
 test("핸들러의 set이 DOM을 갱신한다(클릭 → set → 텍스트 변경)", () => {
-  const { ctx, button } = instantiate({ label: "켜기", on: false }, {
+  const { store, button } = instantiate({ label: "켜기", on: false }, {
     TOGGLE: (data) => {
-      ctx.setPath("label", data.on ? "켜기" : "끄기"); // on=false면 "끄기"로
+      store.setPath("label", data.on ? "켜기" : "끄기"); // on=false면 "끄기"로
     },
   });
   assert.equal(button.textContent, "켜기", "초기 label");

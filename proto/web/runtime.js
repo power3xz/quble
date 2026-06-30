@@ -1,7 +1,7 @@
 // Quble 클라이언트 런타임 본체 - .qubb를 두 단계로 인스턴스화한다.
 //
 //   compile(bytes)        → blueprintOf(compId) => Blueprint  (def를 청사진으로)
-//   Blueprint(ctx, paths) → Instance                          (청사진 호출 = 인스턴스화. DOM·구독 생성)
+//   Blueprint(store, paths) → Instance                          (청사진 호출 = 인스턴스화. DOM·구독 생성)
 //
 // Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
 // 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 - 단순한 "호출 시 훑기"를 택했다.)
@@ -12,7 +12,7 @@
 // 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
 //
 // 인덱스 세 축 (REACTIVITY.md §1~§3):
-//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, ctx.leafOf가 lazy 발급).
+//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, store.leafOf가 lazy 발급).
 
 import {
   THEN_INDEX,
@@ -22,7 +22,7 @@ import {
   attachBranch,
 } from "./region.js";
 
-// 상태 저장소(ctx)는 leaf-store.js가 정의한다. blueprint가 받는 ctx가 이것 - 편의상 여기서 재공개한다.
+// 상태 저장소(store)는 leaf-store.js가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.
 export { createLeafStoreSubject } from "./leaf-store.js";
 
 const TAGS = [
@@ -97,6 +97,8 @@ const OP = {
   BIND_EVENT: 0x10,
   PUSH_ARG_LIT: 0x11,
   PUSH_PATH_SEGMENT: 0x12,
+  ENTER_CONTEXT: 0x13,
+  EXIT_CONTEXT: 0x14,
 };
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -211,6 +213,50 @@ class Reader {
   }
 }
 
+// field 값의 const 표지 비트(MSB). Rust FieldValue::encode와 대칭 - 이 비트와 마스킹은
+// readFields 한 곳에만 둔다(소비부는 isConst/index만 본다).
+const FIELD_CONST_BIT = 0x8000;
+
+// 필드 목록을 읽는다 - field_count, [(nameConstIndex, value)]. value는 MSB=const 여부,
+// 하위 15비트=index. 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다(Rust read_fields 대칭).
+//
+// @param r Reader
+// @returns [{ nameConstIndex, isConst, index }]
+const readFields = (r) => {
+  const count = r.u16();
+  const fields = [];
+  for (let f = 0; f < count; f++) {
+    const nameConstIndex = r.u16();
+    const raw = r.u16();
+    fields.push({ nameConstIndex, isConst: (raw & FIELD_CONST_BIT) !== 0, index: raw & ~FIELD_CONST_BIT });
+  }
+  return fields;
+};
+
+// 리터럴 상수를 store에 leaf로 심고 그 path를 돌려준다. path를 pool 인덱스로 지어 같은
+// 리터럴은 같은 path=같은 leaf로 모인다(seed가 pathCache로 처음만 발급). PushArgLit과
+// Const 필드가 공유하는 리터럴 leaf 규칙.
+//
+// @param store     leafStoreSubject
+// @param module    { pool }
+// @param constIndex 상수풀 인덱스
+// @returns         "$lit.<constIndex>" path
+const seedLitPath = (store, module, constIndex) => {
+  const path = "$lit." + constIndex;
+  store.seed(path, module.pool[constIndex]);
+  return path;
+};
+
+// 필드 하나를 leafIndex로 푼다. Scope는 paths[index](인스턴스 슬롯), Const는 리터럴 leaf.
+//
+// @param field { isConst, index }
+// @param paths scope index -> store path 매핑
+// @returns     leafIndex
+const fieldLeafIndex = (field, paths, store, module) => {
+  const path = field.isConst ? seedLitPath(store, module, field.index) : paths[field.index];
+  return store.leafOf(path);
+};
+
 // qubb 바이트를 모듈로 디코드한다(상수풀·def 테이블·코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
@@ -242,22 +288,22 @@ const decode = (bytes) => {
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
-    const nameIdx = r.u16();
+    const nameConstIndex = r.u16();
     const codeOff = r.u32();
     const codeLen = r.u32();
-    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameIdx, payload_count, [(fieldIdx, offset)])]
+    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameConstIndex, fields)]
     const eventCount = r.u16();
     const events = [];
     for (let e = 0; e < eventCount; e++) {
-      const evNameIdx = r.u16();
-      const payloadCount = r.u16();
-      const payload = [];
-      for (let p = 0; p < payloadCount; p++) {
-        payload.push({ fieldIdx: r.u16(), offset: r.u16() });
-      }
-      events.push({ nameIdx: evNameIdx, payload });
+      events.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
-    defs.push({ nameIdx, codeOff, codeLen, events });
+    // 컨텍스트 테이블 - context_count, [(nameConstIndex, fields)]. fields는 이벤트와 같은 인코딩.
+    const contextCount = r.u16();
+    const contexts = [];
+    for (let c = 0; c < contextCount; c++) {
+      contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
+    }
+    defs.push({ nameConstIndex, codeOff, codeLen, events, contexts });
   }
 
   const codeLen = r.u32();
@@ -273,7 +319,7 @@ const decode = (bytes) => {
 //
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
-// @returns      Blueprint: (ctx, rootPaths) => Instance { nodes, regions }
+// @returns      Blueprint: (store, rootPaths) => Instance { nodes, regions }
 const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
   const def = module.defs[compId];
   if (!def) {
@@ -282,11 +328,15 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def·자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
-  return (ctx, rootPaths, handlers = {}) => {
+  return (store, rootPaths, handlers = {}) => {
     // 인스턴스 불변 상태 - 모든 build(최초·lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
     // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
     const regions = []; // append만, 인덱스 영구 안정. appendRegion이 새 region을 더한다.
+    // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
+    // activeContexts에 싣는다. fields는 그 시점 paths로 푼 leafIndex라 인스턴스마다 달라 공유
+    // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
+    const createdContexts = [];
     const rootRegion = regions[appendRegion(regions, -1)]; // 루트도 region(인덱스 0)
     rootRegion.branches[THEN_INDEX].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
@@ -301,6 +351,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     // @param code             해석할 바이트코드(자식은 자식 def 구간)
     // @param paths            offset → store 경로 매핑(자식은 자식 paths)
     // @param events           현재 def의 이벤트 테이블(BIND_EVENT가 event_idx로 참조. 자식은 자식 def의 것)
+    // @param contexts         현재 def의 컨텍스트 테이블(ENTER_CONTEXT가 context_index로 참조. 자식은 자식 def의 것)
+    // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
     // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
     // @param startRegionIndex 구독을 쌓을 region
     // @param startBranchIndex 구독을 쌓을 가지(THEN/ELSE)
@@ -310,6 +362,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
       code,
       paths,
       events,
+      contexts,
+      activeContexts,
       startPc,
       endPc,
       startRegionIndex,
@@ -347,8 +401,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
         if (path === undefined) {
           throw new Error("no path for offset " + offset);
         }
-        const leafIndex = ctx.leafOf(path);
-        const initial = ctx.get(leafIndex) ?? "";
+        const leafIndex = store.leafOf(path);
+        const initial = store.get(leafIndex) ?? "";
         branch.leafIndices.push(leafIndex);
         branch.updateFns.push(update);
         return initial;
@@ -408,16 +462,23 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
             const domEvent = DOM_EVENTS[u16at()];
             const event = events[u16at()];
-            const eventName = module.pool[event.nameIdx];
+            const eventName = module.pool[event.nameConstIndex];
             // fullname = 합성 경로 + 로컬 이벤트명(누가 쐈나). 바인딩 시점에 불변이라 콜백 밖에서
             // 한 번 짓는다(루트는 prefix가 비어 로컬명 그대로 - 기존 동작과 호환).
             const fullName = pathPrefix ? pathPrefix + "." + eventName : eventName;
-            // payload offset들을 leafIndex로 풀어 props 맵(필드명 -> leafIndex)을 짓는다.
-            // offset->leafIndex는 발생 때가 아니라 지금(바인딩 때) 한 번 푼다(paths는 인스턴스 불변).
+            // fields를 leafIndex로 풀어 props 맵(필드명 -> leafIndex)을 짓는다.
+            // 풀이는 발생 때가 아니라 지금(바인딩 때) 한 번 한다(paths는 인스턴스 불변).
             // props는 핸들러의 set/get 대상(set(props.name, v)), data는 발생 시점 현재값.
             const props = {};
-            for (const p of event.payload) {
-              props[module.pool[p.fieldIdx]] = ctx.leafOf(paths[p.offset]);
+            for (const field of event.fields) {
+              props[module.pool[field.nameConstIndex]] = fieldLeafIndex(field, paths, store, module);
+            }
+            // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
+            // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
+            const contextLeaves = {};
+            for (const i of activeContexts) {
+              const created = createdContexts[i];
+              contextLeaves[created.name] = created.fields;
             }
             const el = pending;
             el.addEventListener(domEvent, (domEventObject) => {
@@ -426,13 +487,24 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               domEventObject.stopPropagation();
               const data = {};
               for (const name in props) {
-                data[name] = ctx.get(props[name]);
+                data[name] = store.get(props[name]);
+              }
+              // context: 발생 시점 현재값. context.<이름>.<필드> = store.get(leafIndex).
+              const context = {};
+              for (const ctxName in contextLeaves) {
+                const fields = contextLeaves[ctxName];
+                const values = {};
+                for (const fieldName in fields) {
+                  values[fieldName] = store.get(fields[fieldName]);
+                }
+                context[ctxName] = values;
               }
               handlers[fullName]?.(data, {
                 event: domEventObject,
-                set: ctx.set,
-                get: ctx.get,
+                set: store.set,
+                get: store.get,
                 props,
+                context,
               });
             });
             break;
@@ -474,16 +546,36 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // 슬롯이 아니라 이 리터럴만의 leaf라 불변이다(set 경로는 컴파일타임 거부 예정).
             // path를 pool 인덱스로 지어 같은 리터럴은 같은 path=같은 leaf로 모인다 - leafOf가
             // pathCache로 처음만 발급하므로 module.pool 값이 store에 딱 한 번만 복사된다.
-            const poolIndex = u16at();
-            const path = "$lit." + poolIndex;
-            ctx.seed(path, module.pool[poolIndex]);
-            args.push(path);
+            args.push(seedLitPath(store, module, u16at()));
             break;
           }
           case OP.PUSH_PATH_SEGMENT: {
             // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
             // 단일 변수로 적재 - args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
             segment = module.pool[u16at()];
+            break;
+          }
+          case OP.ENTER_CONTEXT: {
+            // @with 진입: 컨텍스트 def의 fields를 지금 paths로 leafIndex로 풀어 createdContexts에
+            // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
+            const contextDef = contexts[u16at()];
+            const name = module.pool[contextDef.nameConstIndex];
+            const fields = {};
+            for (const field of contextDef.fields) {
+              fields[module.pool[field.nameConstIndex]] = fieldLeafIndex(field, paths, store, module);
+            }
+            // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
+            // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
+            if (activeContexts.some((i) => createdContexts[i].name === name)) {
+              console.warn("quble: 컨텍스트 '" + name + "'가 중복 활성화됐습니다(안쪽이 우선).");
+            }
+            activeContexts.push(createdContexts.length);
+            createdContexts.push({ name, fields });
+            break;
+          }
+          case OP.EXIT_CONTEXT: {
+            // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
+            activeContexts.pop();
             break;
           }
           case OP.RENDER: {
@@ -502,6 +594,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               module.code,
               childPaths,
               childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
+              childDef.contexts, // 자식 ENTER_CONTEXT는 자식 def의 컨텍스트 테이블을 본다
+              [...activeContexts], // 부모 활성 컨텍스트를 물려준다(자식이 부모 배열을 안 건드리게 복사)
               childDef.codeOff,
               childDef.codeOff + childDef.codeLen,
               startRegionIndex,
@@ -515,7 +609,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
           }
           case OP.IF: {
             const condOffset = u16at();
-            const condLeafIndex = ctx.leafOf(paths[condOffset]);
+            const condLeafIndex = store.leafOf(paths[condOffset]);
             const regionIndex = appendRegion(regions, condLeafIndex);
             const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
@@ -537,6 +631,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
                 code,
                 paths,
                 events,
+                contexts,
+                activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
                 thenStart,
                 thenEnd,
                 regionIndex,
@@ -553,6 +649,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
                       code,
                       paths,
                       events,
+                      contexts,
+                      activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
                       elseStart,
                       ifEndPc,
                       regionIndex,
@@ -565,9 +663,9 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             elseBranch.lazyBuild = buildElse;
 
             // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateBranch가 lazyBuild 호출.
-            ctx.subscribe(condLeafIndex, (condValue) => {
+            store.subscribe(condLeafIndex, (condValue) => {
               activateBranch(
-                ctx,
+                store,
                 regions,
                 regionIndex,
                 condValue ? THEN_INDEX : ELSE_INDEX,
@@ -577,7 +675,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachBranch가 일괄).
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-            const initialBranchIndex = ctx.get(condLeafIndex)
+            const initialBranchIndex = store.get(condLeafIndex)
               ? THEN_INDEX
               : ELSE_INDEX;
             const initialBranch = region.branches[initialBranchIndex];
@@ -603,6 +701,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
       module.code,
       rootPaths,
       def.events, // 루트 def의 이벤트 테이블
+      def.contexts, // 루트 def의 컨텍스트 테이블
+      [], // 루트는 활성 컨텍스트 없음
       def.codeOff,
       def.codeOff + def.codeLen,
       0,
@@ -611,7 +711,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     );
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
-    attachBranch(ctx, regions, rootRegion);
+    attachBranch(store, regions, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     return { nodes, regions };
@@ -622,7 +722,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
 // qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
 //
 // 사용: const blueprintOf = compile(bytes);
-//       const inst = blueprintOf(0)(ctx, paths);
+//       const inst = blueprintOf(0)(store, paths);
 //       root.append(...inst.nodes);
 //
 // @param bytes  qubb 바이트

@@ -16,6 +16,10 @@ component LitProfileCard {
     act1Text, act1Time, act2Text, act2Time, act3Text, act3Time,
     tag1, tag2, tag3, tag4
   }
+  contexts {
+    HoverArea { title: "dude", twitter }
+    PremiumStat { adId: "AD-001", type: "Twinkle" }
+  }
   events {
     HOVER({ name })
     LEAVE({ name })
@@ -23,41 +27,45 @@ component LitProfileCard {
     BIO_SCROLL({ name })
   }
   template {
-    article(class="light" @mouseenter:HOVER @mouseleave:LEAVE) {
-      div(class="header") {
-        MainThumb: Thumbnail(avatar={avatar} name={name}) {}
-        div(class="ident") {
-          h3(class="name") { {name} }
-          Badge(role={role} theme="light") {}
+    @with HoverArea {
+      article(class="light" @mouseenter:HOVER @mouseleave:LEAVE) {
+        div(class="header") {
+          MainThumb: Thumbnail(avatar={avatar} name={name}) {}
+          div(class="ident") {
+            h3(class="name") { {name} }
+            Badge(role={role} theme="light") {}
+          }
         }
+        p(class="bio" @scroll:BIO_SCROLL) { {bio} }
+        div(class="stats") {
+          @with PremiumStat {
+            FirstStat: Stat(label={followersLabel} value={followers}) {}
+          }
+          SecondStat: Stat(label={followingLabel} value={following}) {}
+          ThirdStat: Stat(label={postsLabel} value={posts}) {}
+        }
+        div(class="meta") {
+          MetaRow(icon="📍" text={location}) {}
+          MetaRow(icon="🏢" text={company}) {}
+        }
+        div(class="activity") {
+          Activity(icon="✏️" text={act1Text} time={act1Time}) {}
+          Activity(icon="⭐" text={act2Text} time={act2Time}) {}
+          Activity(icon="🔔" text={act3Text} time={act3Time}) {}
+        }
+        div(class="tags") {
+          Tag(text={tag1} theme="light") {}
+          Tag(text={tag2} theme="light") {}
+          Tag(text={tag3} theme="light") {}
+          Tag(text={tag4} theme="light") {}
+        }
+        div(class="links") {
+          LinkButton(link={site} theme="light") {}
+          LinkButton(link={github} theme="light") {}
+          LinkButton(link={twitter} theme="light") {}
+        }
+        a(class="profile" href={link} @click:OPEN_PROFILE) { "전체 프로필 보기" }
       }
-      p(class="bio" @scroll:BIO_SCROLL) { {bio} }
-      div(class="stats") {
-        FirstStat: Stat(label={followersLabel} value={followers}) {}
-        SecondStat: Stat(label={followingLabel} value={following}) {}
-        ThirdStat: Stat(label={postsLabel} value={posts}) {}
-      }
-      div(class="meta") {
-        MetaRow(icon="📍" text={location}) {}
-        MetaRow(icon="🏢" text={company}) {}
-      }
-      div(class="activity") {
-        Activity(icon="✏️" text={act1Text} time={act1Time}) {}
-        Activity(icon="⭐" text={act2Text} time={act2Time}) {}
-        Activity(icon="🔔" text={act3Text} time={act3Time}) {}
-      }
-      div(class="tags") {
-        Tag(text={tag1} theme="light") {}
-        Tag(text={tag2} theme="light") {}
-        Tag(text={tag3} theme="light") {}
-        Tag(text={tag4} theme="light") {}
-      }
-      div(class="links") {
-        LinkButton(link={site} theme="light") {}
-        LinkButton(link={github} theme="light") {}
-        LinkButton(link={twitter} theme="light") {}
-      }
-      a(class="profile" href={link} @click:OPEN_PROFILE) { "전체 프로필 보기" }
     }
   }
 }

@@ -25,9 +25,10 @@ test("리터럴 인자로 합성하면 payload 출처가 그 상수값으로 끊
     {
       fullname: "Toggle.TOGGLE",
       payload: [
-        { field: "label", source: { kind: "literal", value: "A" } },
-        { field: "on", source: { kind: "literal", value: "off" } },
+        { field: "label", source: { kind: "lit", value: "A" } },
+        { field: "on", source: { kind: "lit", value: "off" } },
       ],
+      contexts: [],
     },
   ]);
 });
@@ -42,6 +43,7 @@ test("루트 컴포넌트 자신의 이벤트는 payload 출처가 자기 prop a
         { field: "label", source: { kind: "arg", offset: 0 } },
         { field: "on", source: { kind: "arg", offset: 1 } },
       ],
+      contexts: [],
     },
   ]);
 });

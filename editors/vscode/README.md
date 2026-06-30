@@ -4,8 +4,9 @@ Quble 컴포넌트 언어(`.qubc`) 신택스 하이라이팅.
 
 ## 지원 문법
 
-- 키워드 `component` `props` `events` `template` `use` `from`
-- 디렉티브 `@if` `@else` `@click`
+- 키워드 `component` `props` `contexts` `events` `template` `use` `from`
+- 디렉티브 `@with` `@if` `@else`
+- DOM 이벤트 위임 `@click` `@input` `@change` `@submit` `@focus` `@blur` `@keydown` `@keyup` `@mousedown` `@mouseup` `@mouseenter` `@mouseleave` `@scroll`
 - 합성·별칭 `Alias: Comp(...)`, 이벤트명(대문자 스네이크), 태그(소문자), 속성, 문자열, `{var}` 보간
 
 ## 로컬 설치

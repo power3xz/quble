@@ -1,0 +1,15 @@
+component C {
+  props { userId }
+  contexts {
+    Outer { area: "outer", userId: userId }
+    Inner { area: "inner", tier: "gold" }
+  }
+  events { TOGGLE({ userId }) }
+  template {
+    @with Outer {
+      @with Inner {
+        button(@click:TOGGLE) { "x" }
+      }
+    }
+  }
+}

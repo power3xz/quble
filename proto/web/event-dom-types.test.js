@@ -15,11 +15,11 @@ before(() => {
 
 // Field 인스턴스 하나 - props [value].
 const instantiate = (values, handlers) => {
-  const ctx = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(ctx, ["value"], handlers);
+  const store = createLeafStoreSubject(values);
+  const inst = compile(qubb)(0)(store, ["value"], handlers);
   const host = mount(inst);
   const input = host.querySelector("input");
-  return { ctx, host, input };
+  return { store, host, input };
 };
 
 test("@input은 input 이벤트에 리스너를 달아 핸들러를 부른다", () => {

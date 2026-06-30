@@ -35,7 +35,7 @@ impl From<DecodeError> for RenderError {
 }
 
 /// 바이트코드를 디코드하고 comp_id를 진입점으로 렌더해 HTML 문자열을 만든다.
-/// scope는 런타임 주입 값 배열 - `TEXT_VAR idx`가 `scope[idx]`를 참조한다.
+/// scope는 런타임 주입 값 배열 - `TEXT_VAR index`가 `scope[index]`를 참조한다.
 /// res_paths는 resId -> 리소스 경로(resmap) - `LOAD_RES resId`를 `<link href>`로 인라인한다.
 pub fn render_to_string(
     bytes: &[u8],
@@ -68,7 +68,7 @@ fn exec(
 
     // 연 태그를 쌓아둔다. END는 operand 없이 top을 닫는다(중첩 보장).
     let mut tag_stack: Vec<&str> = Vec::new();
-    // 자식에게 넘길 인자 버퍼. PUSH_ARG가 부모 scope[offset] 값을 쌓고, RENDER가 소비.
+    // 자식에게 넘길 인자 버퍼. PUSH_ARG가 부모 scope[scope_index] 값을 쌓고, RENDER가 소비.
     let mut args: Vec<String> = Vec::new();
     let mut pc = 0usize;
     while pc < code.len() {
@@ -85,36 +85,36 @@ fn exec(
             }
             Op::AttrG => {
                 let name = read_u16(code, &mut pc)?;
-                let value = read_u16(code, &mut pc)?;
+                let value_const_index = read_u16(code, &mut pc)?;
                 let name = bytecode::attrs::attr_name(name).ok_or(RenderError::BadAttr(name))?;
-                emit_attr(name, get_const(module, value)?, out);
+                emit_attr(name, get_const(module, value_const_index)?, out);
             }
             Op::AttrL => {
-                let name = read_u16(code, &mut pc)?;
-                let value = read_u16(code, &mut pc)?;
-                emit_attr(get_const(module, name)?, get_const(module, value)?, out);
+                let name_const_index = read_u16(code, &mut pc)?;
+                let value_const_index = read_u16(code, &mut pc)?;
+                emit_attr(get_const(module, name_const_index)?, get_const(module, value_const_index)?, out);
             }
             Op::AttrGVar => {
                 let name = read_u16(code, &mut pc)?;
-                let idx = read_u16(code, &mut pc)?;
+                let scope_index = read_u16(code, &mut pc)?;
                 let name = bytecode::attrs::attr_name(name).ok_or(RenderError::BadAttr(name))?;
-                let val = scope.get(idx as usize).ok_or(RenderError::BadScope(idx))?;
+                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
                 emit_attr(name, val, out);
             }
             Op::AttrLVar => {
-                let name = read_u16(code, &mut pc)?;
-                let idx = read_u16(code, &mut pc)?;
-                let val = scope.get(idx as usize).ok_or(RenderError::BadScope(idx))?;
-                emit_attr(get_const(module, name)?, val, out);
+                let name_const_index = read_u16(code, &mut pc)?;
+                let scope_index = read_u16(code, &mut pc)?;
+                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
+                emit_attr(get_const(module, name_const_index)?, val, out);
             }
             Op::ElemCloseOpen => out.push('>'),
             Op::Text => {
-                let text = read_u16(code, &mut pc)?;
-                escape_text(get_const(module, text)?, out);
+                let text_const_index = read_u16(code, &mut pc)?;
+                escape_text(get_const(module, text_const_index)?, out);
             }
             Op::TextVar => {
-                let idx = read_u16(code, &mut pc)?;
-                let val = scope.get(idx as usize).ok_or(RenderError::BadScope(idx))?;
+                let scope_index = read_u16(code, &mut pc)?;
+                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
                 escape_text(val, out);
             }
             Op::ElemEnd => {
@@ -124,15 +124,15 @@ fn exec(
                 out.push('>');
             }
             Op::PushArg => {
-                let offset = read_u16(code, &mut pc)?;
-                let val = scope.get(offset as usize).ok_or(RenderError::BadScope(offset))?;
+                let scope_index = read_u16(code, &mut pc)?;
+                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
                 args.push(val.clone());
             }
             // 리터럴 인자: 상수풀 값을 그대로 자식 scope로 넘긴다. SSR은 정적 렌더라 자식이
             // 수정하든 말든 상관없어(leaf·반응성 없음) 변수 인자와 같은 문자열로 취급한다.
             Op::PushArgLit => {
-                let val_idx = read_u16(code, &mut pc)?;
-                args.push(get_const(module, val_idx)?.to_string());
+                let value_const_index = read_u16(code, &mut pc)?;
+                args.push(get_const(module, value_const_index)?.to_string());
             }
             Op::Render => {
                 let child_comp_id = read_u16(code, &mut pc)?;
@@ -141,8 +141,8 @@ fn exec(
                 exec(module, child_comp_id, &child_scope, res_paths, emitted, out)?;
             }
             Op::If => {
-                let cond = read_u16(code, &mut pc)?;
-                let val = scope.get(cond as usize).ok_or(RenderError::BadScope(cond))?;
+                let cond_scope_index = read_u16(code, &mut pc)?;
+                let val = scope.get(cond_scope_index as usize).ok_or(RenderError::BadScope(cond_scope_index))?;
                 if !truthy(val) {
                     // then을 통 스킵. pc는 매칭 ELSE 다음(else 본문 시작)이나 IF_END 다음에 선다.
                     skip_branch(code, &mut pc)?;
@@ -168,7 +168,7 @@ fn exec(
                 }
             }
             // 이벤트 배선. SSR은 정적 HTML이라 리스너가 없다 - operand만 소비하고 무시한다
-            // (이벤트는 클라 런타임이 단다). event_type·event_idx 4바이트.
+            // (이벤트는 클라 런타임이 단다). event_type·event_index 4바이트.
             Op::BindEvent => {
                 read_u16(code, &mut pc)?;
                 read_u16(code, &mut pc)?;
@@ -178,6 +178,12 @@ fn exec(
             Op::PushPathSegment => {
                 read_u16(code, &mut pc)?;
             }
+            // 컨텍스트는 핸들러로 가는 메타데이터(클라 전용)라 DOM 출력엔 영향 없다 -
+            // ENTER는 context_index만 소비하고, EXIT는 operand 없이 무시한다.
+            Op::EnterContext => {
+                read_u16(code, &mut pc)?;
+            }
+            Op::ExitContext => {}
         }
     }
     Ok(())
@@ -190,7 +196,7 @@ fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, RenderError> {
 }
 
 /// 불리언 scope 값의 truthy 판정. 빈 문자열·"false"·"0"은 falsy, 그 외 truthy.
-/// (cond는 불리언 scope offset 하나 - BYTECODE.md §5.1)
+/// (cond는 불리언 scope index 하나 - BYTECODE.md §5.1)
 fn truthy(val: &str) -> bool {
     !(val.is_empty() || val == "false" || val == "0")
 }
@@ -199,8 +205,8 @@ fn truthy(val: &str) -> bool {
 /// 혼동하지 않게 한다.
 fn operand_len(op: Op) -> usize {
     match op {
-        Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd => 0,
-        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes => 2,
+        Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd | Op::ExitContext => 0,
+        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes | Op::EnterContext => 2,
         Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar | Op::BindEvent => 4,
     }
 }
@@ -237,8 +243,8 @@ fn emit_attr(name: &str, value: &str, out: &mut String) {
     out.push('"');
 }
 
-fn get_const(module: &Module, idx: u16) -> Result<&str, RenderError> {
-    module.pool.get(idx).ok_or(RenderError::BadConst(idx))
+fn get_const(module: &Module, index: u16) -> Result<&str, RenderError> {
+    module.pool.get(index).ok_or(RenderError::BadConst(index))
 }
 
 /// 텍스트 노드 이스케이프: `& < >`.
@@ -299,23 +305,23 @@ mod tests {
             self.code.extend_from_slice(&t.to_le_bytes());
             self
         }
-        fn text_var(&mut self, idx: u16) -> &mut Self {
+        fn text_var(&mut self, index: u16) -> &mut Self {
             self.code.push(Op::TextVar as u8);
-            self.code.extend_from_slice(&idx.to_le_bytes());
+            self.code.extend_from_slice(&index.to_le_bytes());
             self
         }
-        /// 전역 속성명 ID + scope offset.
-        fn attr_g_var(&mut self, name: u16, idx: u16) -> &mut Self {
+        /// 전역 속성명 ID + scope index.
+        fn attr_g_var(&mut self, name: u16, index: u16) -> &mut Self {
             self.code.push(Op::AttrGVar as u8);
             self.code.extend_from_slice(&name.to_le_bytes());
-            self.code.extend_from_slice(&idx.to_le_bytes());
+            self.code.extend_from_slice(&index.to_le_bytes());
             self
         }
-        /// 컴포넌트 상수풀 속성명 인덱스 + scope offset.
-        fn attr_l_var(&mut self, name: u16, idx: u16) -> &mut Self {
+        /// 컴포넌트 상수풀 속성명 인덱스 + scope index.
+        fn attr_l_var(&mut self, name: u16, index: u16) -> &mut Self {
             self.code.push(Op::AttrLVar as u8);
             self.code.extend_from_slice(&name.to_le_bytes());
-            self.code.extend_from_slice(&idx.to_le_bytes());
+            self.code.extend_from_slice(&index.to_le_bytes());
             self
         }
         fn end(&mut self) -> &mut Self {
@@ -327,10 +333,10 @@ mod tests {
             self.code.extend_from_slice(&id.to_le_bytes());
             self
         }
-        /// 부모 offset을 자식 인자로 push.
-        fn push_arg(&mut self, offset: u16) -> &mut Self {
+        /// 부모 scope index를 자식 인자로 push.
+        fn push_arg(&mut self, scope_index: u16) -> &mut Self {
             self.code.push(Op::PushArg as u8);
-            self.code.extend_from_slice(&offset.to_le_bytes());
+            self.code.extend_from_slice(&scope_index.to_le_bytes());
             self
         }
         fn halt(&mut self) -> &mut Self {
@@ -389,10 +395,11 @@ mod tests {
 
         let code = a.code;
         let defs = vec![CompDef {
-            name_idx: hello,
+            name_const_index: hello,
             code_off: 0,
             code_len: code.len() as u32,
             events: vec![],
+            contexts: vec![],
         }];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -419,7 +426,7 @@ mod tests {
             .halt();
 
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(
@@ -448,8 +455,8 @@ mod tests {
         code.extend_from_slice(&p.code);
 
         let defs = vec![
-            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len, events: vec![] },
-            CompDef { name_idx: child, code_off: 0, code_len: child_len, events: vec![] },
+            CompDef { name_const_index: parent, code_off: child_len, code_len: parent_len, events: vec![], contexts: vec![] },
+            CompDef { name_const_index: child, code_off: 0, code_len: child_len, events: vec![], contexts: vec![] },
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -466,7 +473,7 @@ mod tests {
         let mut a = Asm::new();
         a.load_res(0).open(t("span")).close_open().end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         let res_paths = vec!["/res/styled.abc.css".to_string()];
@@ -495,8 +502,8 @@ mod tests {
         let mut code = c.code;
         code.extend_from_slice(&p.code);
         let defs = vec![
-            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len, events: vec![] },
-            CompDef { name_idx: child, code_off: 0, code_len: child_len, events: vec![] },
+            CompDef { name_const_index: parent, code_off: child_len, code_len: parent_len, events: vec![], contexts: vec![] },
+            CompDef { name_const_index: child, code_off: 0, code_len: child_len, events: vec![], contexts: vec![] },
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -516,7 +523,7 @@ mod tests {
         let mut a = Asm::new();
         a.load_res(5).open(t("span")).close_open().end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadResource(5)));
@@ -549,8 +556,8 @@ mod tests {
         code.extend_from_slice(&p.code);
 
         let defs = vec![
-            CompDef { name_idx: parent, code_off: child_len, code_len: parent_len, events: vec![] },
-            CompDef { name_idx: child, code_off: 0, code_len: child_len, events: vec![] },
+            CompDef { name_const_index: parent, code_off: child_len, code_len: parent_len, events: vec![], contexts: vec![] },
+            CompDef { name_const_index: child, code_off: 0, code_len: child_len, events: vec![], contexts: vec![] },
         ];
         let bytes = encode(&Module::new(pool, defs, code));
 
@@ -561,7 +568,7 @@ mod tests {
         );
     }
 
-    /// TEXT_VAR가 scope[idx] 값을 출력하고, 텍스트 이스케이프를 적용한다.
+    /// TEXT_VAR가 scope[index] 값을 출력하고, 텍스트 이스케이프를 적용한다.
     #[test]
     fn renders_text_var_from_scope() {
         let mut pool = ConstPool::new();
@@ -571,7 +578,7 @@ mod tests {
         a.open(t("h1")).close_open().text_var(0).end().halt();
 
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         let scope = vec!["세계 <b>".to_string()];
@@ -598,7 +605,7 @@ mod tests {
             .halt();
 
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         let scope = vec!["card".to_string(), r#"a"b"#.to_string()];
@@ -617,7 +624,7 @@ mod tests {
         let mut a = Asm::new();
         a.open(t("div")).attr_g_var(class_g, 0).close_open().end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
@@ -631,7 +638,7 @@ mod tests {
         let mut a = Asm::new();
         a.open(t("p")).close_open().text_var(0).end().halt();
         let code = a.code;
-        let defs = vec![CompDef { name_idx: name, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
 
         assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
@@ -639,7 +646,7 @@ mod tests {
 
     /// 한 컴포넌트 정의를 인코딩해 렌더 (단일 def, scope 주입). if 테스트 공용.
     fn render_one(pool: ConstPool, code: Vec<u8>, scope: &[String]) -> String {
-        let defs = vec![CompDef { name_idx: 0, code_off: 0, code_len: code.len() as u32, events: vec![] }];
+        let defs = vec![CompDef { name_const_index: 0, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
         let bytes = encode(&Module::new(pool, defs, code));
         render_to_string(&bytes, 0, scope, &[]).unwrap()
     }
