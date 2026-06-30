@@ -484,24 +484,27 @@ const OPERAND_LEN = (op) => {
 //
 // @param module     decode된 모듈
 // @param rootCompId 프리뷰가 마운트하는 루트 컴포넌트 id
-// @returns          [{ fullname, payload: [{ field, source }] }]
+// @returns          [{ fullname, payload: [{ field, source }], contexts: [name] }]
+//                   contexts: 발사 시점에 활성인 @with 컨텍스트 이름(바깥->안쪽, 같은 이름은 안쪽만).
 //                   source는 payload 값의 출처를 루트 기준으로 역추적한 것:
-//                     { kind: "arg", offset }     변수 경로 - 루트 scope의 arg{offset}
-//                     { kind: "literal", value }  리터럴 인자로 끊긴 경로 - 그 상수값
+//                     { kind: "arg", offset }   변수 경로 - 루트 scope의 arg{offset}
+//                     { kind: "lit", value }    리터럴 인자로 끊긴 경로 - 그 상수값
 //                   합성 시 PushArg는 자식 offset을 부모 offset으로 잇고, PushArgLit은 상수로 끊는다.
 export const collectEventFullnames = (module, rootCompId) => {
   const events = [];
   const seen = new Set();
-  const add = (fullname, payload) => {
+  const add = (fullname, payload, contexts) => {
     if (!seen.has(fullname)) {
       seen.add(fullname);
-      events.push({ fullname, payload });
+      events.push({ fullname, payload, contexts });
     }
   };
 
   // toRoot: 이 컴포넌트의 로컬 offset을 출처 source로 환산한다. 루트는 그대로 arg{offset}.
   // 합성 자식은 RENDER에서 만든 환산기(자식 offset -> 부모 출처 -> 상위 toRoot)를 받는다.
-  const walk = (compId, pathPrefix, toRoot) => {
+  // contextStack: 발사 시점에 활성인 @with 컨텍스트 이름(바깥->안쪽). RENDER가 자식에 물려준다
+  //               (runtime의 activeContexts 상속과 동일). 같은 이름 겹침은 안쪽이 이긴다.
+  const walk = (compId, pathPrefix, toRoot, contextStack) => {
     const def = module.defs[compId];
     if (!def) {
       return;
@@ -523,8 +526,13 @@ export const collectEventFullnames = (module, rootCompId) => {
         pc += 2;
       } else if (op === OP.PUSH_ARG_LIT) {
         // 리터럴 인자 - 부모 scope 값이 아니라 상수. 여기서 체인이 끊긴다.
-        argParents.push({ kind: "literal", value: module.pool[code[pc] | (code[pc + 1] << 8)] });
+        argParents.push({ kind: "lit", value: module.pool[code[pc] | (code[pc + 1] << 8)] });
         pc += 2;
+      } else if (op === OP.ENTER_CONTEXT) {
+        contextStack.push(module.pool[def.contexts[code[pc] | (code[pc + 1] << 8)].nameConstIndex]);
+        pc += 2;
+      } else if (op === OP.EXIT_CONTEXT) {
+        contextStack.pop();
       } else if (op === OP.RENDER) {
         const childId = code[pc] | (code[pc + 1] << 8);
         pc += 2;
@@ -534,7 +542,8 @@ export const collectEventFullnames = (module, rootCompId) => {
         const childToRoot = (childOffset) => parents[childOffset];
         segment = null;
         argParents = [];
-        walk(childId, childPrefix, childToRoot);
+        // 자식은 현재 활성 컨텍스트를 물려받는다(부모 스택 복사 - 자식 EnterContext가 부모 걸 안 건드리게).
+        walk(childId, childPrefix, childToRoot, [...contextStack]);
       } else if (op === OP.BIND_EVENT) {
         pc += 2; // event_type 스킵
         const event = def.events[code[pc] | (code[pc + 1] << 8)];
@@ -545,14 +554,16 @@ export const collectEventFullnames = (module, rootCompId) => {
           field: module.pool[f.nameConstIndex],
           source: f.isConst ? { kind: "lit", value: module.pool[f.index] } : toRoot(f.index),
         }));
-        add(pathPrefix ? pathPrefix + "." + localName : localName, payload);
+        // 발사 시점 활성 컨텍스트. 같은 이름 겹치면 안쪽(뒤)이 이기므로 중복 제거(뒤 우선).
+        const contexts = [...new Set([...contextStack].reverse())].reverse();
+        add(pathPrefix ? pathPrefix + "." + localName : localName, payload, contexts);
       } else {
         pc += OPERAND_LEN(op);
       }
     }
   };
 
-  walk(rootCompId, "", (offset) => ({ kind: "arg", offset })); // 루트 항등 = arg{offset}
+  walk(rootCompId, "", (offset) => ({ kind: "arg", offset }), []); // 루트 항등 = arg{offset}, 빈 컨텍스트 스택
   return events;
 };
 
