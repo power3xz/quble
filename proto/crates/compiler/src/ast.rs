@@ -20,9 +20,19 @@ pub struct Use {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Component {
     pub name: String,
-    pub props: Vec<String>,  // 선언 순서 = scope 인덱스
-    pub events: Vec<Event>,  // 선언 순서 = event_index (BIND_EVENT가 참조)
-    pub template: Vec<Node>, // 루트 노드들 (fragment 허용)
+    pub props: Vec<String>,      // 선언 순서 = scope 인덱스
+    pub events: Vec<Event>,      // 선언 순서 = event_index (BIND_EVENT가 참조)
+    pub contexts: Vec<Context>,  // 선언 순서 = context_index (EnterContext가 참조)
+    pub template: Vec<Node>,     // 루트 노드들 (fragment 허용)
+}
+
+/// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.
+/// fields 각 항목은 (필드명, 값). 값은 prop 참조(Var) 또는 리터럴(Literal) - 합성 인자와
+/// 같은 두 갈래라 ArgValue를 공유한다. 표현식 값은 아직 미지원.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Context {
+    pub name: String,
+    pub fields: Vec<(String, ArgValue)>,
 }
 
 /// `events { TOGGLE({ label: title, on }) }` - 컴포넌트가 선언한 이벤트.
@@ -61,6 +71,12 @@ pub enum Node {
         cond: String,
         then: Vec<Node>,
         else_: Vec<Node>,
+    },
+    /// `@with Context { children }` - 자식들을 그 컨텍스트 범위로 감싼다. context는 이 컴포넌트
+    /// contexts에 선언된 이름(codegen이 context_index로 해석). codegen이 EnterContext/ExitContext로 감싼다.
+    With {
+        context: String,
+        children: Vec<Node>,
     },
 }
 

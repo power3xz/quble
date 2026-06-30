@@ -265,6 +265,73 @@ mod tests {
         );
     }
 
+    /// `@with`가 끝까지(렉서 -> 파서 -> codegen) 흐르는지. contexts 테이블에 fields가
+    /// Var(Scope)/Literal(Const)로 들어가고, 코드에 EnterContext/ExitContext가 나는지 직접 검사.
+    #[test]
+    fn compiles_with_context() {
+        use bytecode::{decode, FieldValue, Op};
+
+        let src = r#"
+            component C {
+              props { assignee }
+              contexts { Area { section: "actions", userId: assignee } }
+              template {
+                @with Area {
+                  div() { "x" }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+
+        // 컨텍스트 테이블: Area 하나, fields 2개(section=Const 리터럴, userId=Scope assignee).
+        assert_eq!(def.contexts.len(), 1);
+        let area = &def.contexts[0];
+        assert_eq!(module.pool.get(area.name_const_index), Some("Area"));
+        assert_eq!(area.fields.len(), 2);
+        // section: "actions" -> Const(상수풀 인덱스), 그 인덱스가 "actions"를 가리킨다.
+        assert_eq!(module.pool.get(area.fields[0].name_const_index), Some("section"));
+        match area.fields[0].value {
+            FieldValue::Const(actions_index) => {
+                assert_eq!(module.pool.get(actions_index), Some("actions"));
+            }
+            other => panic!("section은 리터럴이라 Const여야: {other:?}"),
+        }
+        // userId: assignee -> Scope(assignee의 scope 인덱스 0).
+        assert_eq!(module.pool.get(area.fields[1].name_const_index), Some("userId"));
+        assert_eq!(area.fields[1].value, FieldValue::Scope(0));
+
+        // 코드: EnterContext context_index=0 ... ExitContext.
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let mut enter = vec![Op::EnterContext as u8];
+        enter.extend_from_slice(&0u16.to_le_bytes());
+        assert!(
+            code.windows(enter.len()).any(|w| w == enter.as_slice()),
+            "EnterContext index 0 가 코드에 있어야",
+        );
+        assert!(
+            code.contains(&(Op::ExitContext as u8)),
+            "ExitContext가 코드에 있어야",
+        );
+    }
+
+    /// contexts 값이 props에 없는 prop을 참조하면 UnknownProp 에러(payload와 같은 검증 경로).
+    #[test]
+    fn context_unknown_prop_errors() {
+        let src = r#"
+            component C {
+              contexts { Area { userId: missing } }
+              template { @with Area { div() {} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::UnknownProp(_)))
+        ));
+    }
+
     /// 닫힌 집합 밖 디렉티브(`@hover`)는 렉서가 그 자리에서 거부한다(확정적 검증).
     #[test]
     fn unknown_dom_event_directive_errors() {
