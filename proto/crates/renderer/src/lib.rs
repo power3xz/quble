@@ -178,6 +178,12 @@ fn exec(
             Op::PushPathSegment => {
                 read_u16(code, &mut pc)?;
             }
+            // 컨텍스트는 핸들러로 가는 메타데이터(클라 전용)라 DOM 출력엔 영향 없다 -
+            // ENTER는 context_idx만 소비하고, EXIT는 operand 없이 무시한다.
+            Op::EnterContext => {
+                read_u16(code, &mut pc)?;
+            }
+            Op::ExitContext => {}
         }
     }
     Ok(())
@@ -199,8 +205,8 @@ fn truthy(val: &str) -> bool {
 /// 혼동하지 않게 한다.
 fn operand_len(op: Op) -> usize {
     match op {
-        Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd => 0,
-        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes => 2,
+        Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd | Op::ExitContext => 0,
+        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes | Op::EnterContext => 2,
         Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar | Op::BindEvent => 4,
     }
 }

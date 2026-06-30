@@ -42,6 +42,11 @@ pub enum Op {
     /// 합성 경로(fullname)에 세그먼트 하나를 민다. operand: 상수풀 세그먼트 인덱스(자식 type-name).
     /// 뒤따르는 RENDER가 소비. 이벤트 fullname의 path 축을 누적한다(context 축 `@with`와 무관).
     PushPathSegment = 0x12,
+    /// `@with Context` 블록 진입. operand: context_idx(이 def의 CompDef.contexts 인덱스).
+    /// 런타임이 ContextDef.fields를 읽어 컨텍스트를 활성 스택에 push. 이후 코드가 그 범위.
+    EnterContext = 0x13,
+    /// `@with` 블록 끝. operand 없는 마커(IfEnd와 동형). 활성 컨텍스트 스택 pop.
+    ExitContext = 0x14,
 }
 
 impl Op {
@@ -67,6 +72,8 @@ impl Op {
             0x10 => Op::BindEvent,
             0x11 => Op::PushArgLit,
             0x12 => Op::PushPathSegment,
+            0x13 => Op::EnterContext,
+            0x14 => Op::ExitContext,
             _ => return None,
         })
     }
