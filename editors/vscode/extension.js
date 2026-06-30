@@ -35,6 +35,8 @@ const provider = {
       const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Event);
       // 따옴표 안에서 트리거되므로 이름만 삽입한다.
       item.insertText = name;
+      // "0_" 접두사로 TS 기본 제안보다 위로 끌어온다(우리끼린 fullname 순서 유지).
+      item.sortText = "0_" + name;
       return item;
     });
   },
