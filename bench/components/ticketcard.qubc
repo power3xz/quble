@@ -1,0 +1,34 @@
+use "./ticketcard.css"
+use Badge from "./badge.qubc"
+
+component TicketCard {
+  contexts {
+    Header { area: "header", ticketId: "QBL-142", channel: "web" }
+    Footer { area: "footer", ticketId: "QBL-142", actor: "김에이" }
+  }
+  events {
+    ASSIGN({ ticketId: "QBL-142", to: "이비" })
+    CLOSE({ ticketId: "QBL-142", reason: "resolved" })
+  }
+  template {
+    article(class="ticket") {
+      @with Header {
+        div(class="ticket__head") {
+          h3(class="ticket__title") { "로그인 후 리다이렉트 깨짐" }
+          Badge(role="긴급" theme="dark") {}
+        }
+      }
+      p(class="ticket__body") { "OAuth 콜백에서 state 불일치로 401이 발생합니다. 재현 100%." }
+      div(class="ticket__meta") {
+        span(class="ticket__chip") { "담당: 김에이" }
+        span(class="ticket__chip") { "마감: 내일" }
+      }
+      @with Footer {
+        div(class="ticket__actions") {
+          button(class="ticket__btn" @click:ASSIGN) { "재배정" }
+          button(class="ticket__btn ticket__btn--danger" @click:CLOSE) { "닫기" }
+        }
+      }
+    }
+  }
+}
