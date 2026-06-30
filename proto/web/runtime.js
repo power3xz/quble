@@ -97,6 +97,8 @@ const OP = {
   BIND_EVENT: 0x10,
   PUSH_ARG_LIT: 0x11,
   PUSH_PATH_SEGMENT: 0x12,
+  ENTER_CONTEXT: 0x13,
+  EXIT_CONTEXT: 0x14,
 };
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -331,6 +333,10 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
     // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
     const regions = []; // append만, 인덱스 영구 안정. appendRegion이 새 region을 더한다.
+    // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
+    // activeContexts에 싣는다. fields는 그 시점 paths로 푼 leafIndex라 인스턴스마다 달라 공유
+    // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
+    const createdContexts = [];
     const rootRegion = regions[appendRegion(regions, -1)]; // 루트도 region(인덱스 0)
     rootRegion.branches[THEN_INDEX].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
@@ -345,6 +351,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
     // @param code             해석할 바이트코드(자식은 자식 def 구간)
     // @param paths            offset → store 경로 매핑(자식은 자식 paths)
     // @param events           현재 def의 이벤트 테이블(BIND_EVENT가 event_idx로 참조. 자식은 자식 def의 것)
+    // @param contexts         현재 def의 컨텍스트 테이블(ENTER_CONTEXT가 context_index로 참조. 자식은 자식 def의 것)
+    // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
     // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
     // @param startRegionIndex 구독을 쌓을 region
     // @param startBranchIndex 구독을 쌓을 가지(THEN/ELSE)
@@ -354,6 +362,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
       code,
       paths,
       events,
+      contexts,
+      activeContexts,
       startPc,
       endPc,
       startRegionIndex,
@@ -463,6 +473,13 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             for (const field of event.fields) {
               props[module.pool[field.nameConstIndex]] = fieldLeafIndex(field, paths, store, module);
             }
+            // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
+            // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
+            const contextLeaves = {};
+            for (const i of activeContexts) {
+              const created = createdContexts[i];
+              contextLeaves[created.name] = created.fields;
+            }
             const el = pending;
             el.addEventListener(domEvent, (domEventObject) => {
               // 위임 리스너는 자기 선에서 버블을 끊는다(디폴트). fullname은 박힌 위치 하나로
@@ -472,11 +489,22 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               for (const name in props) {
                 data[name] = store.get(props[name]);
               }
+              // context: 발생 시점 현재값. context.<이름>.<필드> = store.get(leafIndex).
+              const context = {};
+              for (const ctxName in contextLeaves) {
+                const fields = contextLeaves[ctxName];
+                const values = {};
+                for (const fieldName in fields) {
+                  values[fieldName] = store.get(fields[fieldName]);
+                }
+                context[ctxName] = values;
+              }
               handlers[fullName]?.(data, {
                 event: domEventObject,
                 set: store.set,
                 get: store.get,
                 props,
+                context,
               });
             });
             break;
@@ -527,6 +555,29 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             segment = module.pool[u16at()];
             break;
           }
+          case OP.ENTER_CONTEXT: {
+            // @with 진입: 컨텍스트 def의 fields를 지금 paths로 leafIndex로 풀어 createdContexts에
+            // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
+            const contextDef = contexts[u16at()];
+            const name = module.pool[contextDef.nameConstIndex];
+            const fields = {};
+            for (const field of contextDef.fields) {
+              fields[module.pool[field.nameConstIndex]] = fieldLeafIndex(field, paths, store, module);
+            }
+            // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
+            // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
+            if (activeContexts.some((i) => createdContexts[i].name === name)) {
+              console.warn("quble: 컨텍스트 '" + name + "'가 중복 활성화됐습니다(안쪽이 우선).");
+            }
+            activeContexts.push(createdContexts.length);
+            createdContexts.push({ name, fields });
+            break;
+          }
+          case OP.EXIT_CONTEXT: {
+            // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
+            activeContexts.pop();
+            break;
+          }
           case OP.RENDER: {
             const childCompId = u16at();
             const childPaths = args;
@@ -543,6 +594,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
               module.code,
               childPaths,
               childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
+              childDef.contexts, // 자식 ENTER_CONTEXT는 자식 def의 컨텍스트 테이블을 본다
+              [...activeContexts], // 부모 활성 컨텍스트를 물려준다(자식이 부모 배열을 안 건드리게 복사)
               childDef.codeOff,
               childDef.codeOff + childDef.codeLen,
               startRegionIndex,
@@ -578,6 +631,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
                 code,
                 paths,
                 events,
+                contexts,
+                activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
                 thenStart,
                 thenEnd,
                 regionIndex,
@@ -594,6 +649,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
                       code,
                       paths,
                       events,
+                      contexts,
+                      activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
                       elseStart,
                       ifEndPc,
                       regionIndex,
@@ -644,6 +701,8 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
       module.code,
       rootPaths,
       def.events, // 루트 def의 이벤트 테이블
+      def.contexts, // 루트 def의 컨텍스트 테이블
+      [], // 루트는 활성 컨텍스트 없음
       def.codeOff,
       def.codeOff + def.codeLen,
       0,

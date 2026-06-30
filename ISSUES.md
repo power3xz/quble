@@ -17,6 +17,20 @@
   끊는다(runtime.js). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
   필요가 구체화되면 그 모양에 맞춰 설계한다.
 
+- **createdContexts 회수 미구현 (@for 들어올 때)** - 런타임은 EnterContext마다 컨텍스트를
+  createdContexts에 append하고 contextIndex로 참조한다. 컨텍스트 fields는 그 시점
+  paths로 푼 leafIndex라 인스턴스마다 달라 공유·캐시가 안 되고, 매번 새로 만든다. 지금은 정적
+  구조라 회수가 불필요해 append만 한다. `@for`가 들어와 항목이 동적으로 생기고 사라지면 그 안의
+  컨텍스트도 회수돼야 한다 - leafIndex 회수(REACTIVITY.md §3)와 같은 메커니즘으로 풀 문제라
+  그때 함께 정한다.
+
+- **같은 컨텍스트명 중첩** - 방향성: 맥락(컨텍스트)이라는 정보는 그 성격상 같은 이름이 중복으로
+  쌓이지 않는 게 맞다. `@with Area`가 합성 경계를 넘어 중첩되면(`Outer`의 `@with Area` 안에 합성된
+  `Inner`가 또 `@with Area`) 활성 스택에 같은 이름이 쌓인다. **지금 처리:** `context.Area`는 가장
+  안쪽 것으로 통째 덮어쓰고(필드 머지·바깥 보존 안 함), 런타임이 push 시 같은 이름을 발견하면
+  console.warn으로 알린다. 컴파일타임 금지는 불가 - 독립 컴파일/머지하면 합성 경계 너머 중첩을
+  codegen이 못 본다. 더 나은 방법(안정적 식별·중복 방지 메커니즘)은 나중에 고민한다.
+
 - **DOM 입력값을 이벤트 payload로 못 보냄** - `@input:INPUT`으로 이벤트는 걸 수 있지만,
   그 입력 요소의 현재 값(React의 `e.target.value`)을 payload에 실을 문법이 없다. payload 식은
   props 변수·리터럴·표현식만 참조한다(SYNTAX.md §2.3). (재현: `TextInput`이 입력값을 핸들러로
