@@ -330,23 +330,34 @@ const decompileBody = (module, def) => {
         // `Alias: Comp(...)`로 복원한다. (이벤트 fullname 산출은 별도: collectEventFullnames.)
         pendingSegment = module.pool[u16()];
         break;
-      // @with 컨텍스트는 본문 복원에 아직 반영하지 않는다(A: 깨짐만 막음). EnterContext는
-      // context_index 2바이트를 소비하고, ExitContext는 마커라 그냥 넘어간다. @with 블록
-      // 복원은 후속(ISSUES).
-      case OP.ENTER_CONTEXT:
-        u16();
+      // @with 블록. IF와 같은 패턴 - 열고 depth++, ExitContext가 depth-- 하고 닫는다.
+      // context_index로 def.contexts에서 컨텍스트명을 복원한다.
+      case OP.ENTER_CONTEXT: {
+        const ctxName = module.pool[def.contexts[u16()].nameConstIndex];
+        lines.push(pad() + "@with " + ctxName + " {");
+        depth += 1;
         break;
+      }
       case OP.EXIT_CONTEXT:
+        depth -= 1;
+        lines.push(pad() + "}");
         break;
       default:
         throw new Error("bad opcode 0x" + op.toString(16));
     }
   }
-  // events fields가 참조하는 scope index도 props 복원 범위에 포함한다 - fields만 쓰고 본문엔
-  // 안 쓰인 prop(arg1 등)이 props 블록에 빠지면 디컴파일 qubc가 불완전해진다. Const 필드는
-  // 상수풀 값이라 props와 무관 - Scope(변수)만 집계한다.
+  // events·contexts fields가 참조하는 scope index도 props 복원 범위에 포함한다 - fields만 쓰고
+  // 본문엔 안 쓰인 prop(arg1 등)이 props 블록에 빠지면 디컴파일 qubc가 불완전해진다. Const
+  // 필드는 상수풀 값이라 props와 무관 - Scope(변수)만 집계한다.
   for (const event of def.events) {
     for (const field of event.fields) {
+      if (!field.isConst) {
+        seenArg(field.index, "string");
+      }
+    }
+  }
+  for (const ctx of def.contexts) {
+    for (const field of ctx.fields) {
       if (!field.isConst) {
         seenArg(field.index, "string");
       }
@@ -393,6 +404,15 @@ export const decompileComponent = (module, compId, resmap = []) => {
       args.push("arg" + i);
     }
     out.push("  props { " + args.join(", ") + " }");
+  }
+  // contexts 블록 복원. `ContextName { 필드 }` - 필드는 events와 같은 인코딩이라 fieldDecl 공유.
+  if (def.contexts.length > 0) {
+    const decls = def.contexts.map((ctx) => {
+      const ctxName = module.pool[ctx.nameConstIndex];
+      const fields = ctx.fields.map((f) => fieldDecl(module, f));
+      return ctxName + " { " + fields.join(", ") + " }";
+    });
+    out.push("  contexts { " + decls.join(", ") + " }");
   }
   // events 블록 복원. 각 필드는 (필드명, 값) - 값은 Scope(변수 argN) 또는 Const(리터럴).
   // Scope: 필드명이 argN과 같으면 shorthand({ field }), 다르면 매핑({ field: argN }).
