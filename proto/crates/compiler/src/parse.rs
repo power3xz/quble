@@ -285,8 +285,8 @@ impl<'a> Parser<'a> {
         Ok(Context { name, fields })
     }
 
-    // RBrace 전까지 `key: 값` 필드를 모은다. 값은 prop명(Var) 또는 리터럴 문자열(Literal).
-    // 콤마는 선택적 구분자. (payload와 달리 단축형 없음 - 키와 값이 다른 이름공간이라 항상 명시.)
+    // RBrace 전까지 `key`, `key: prop`, 또는 `key: "lit"` 필드를 모은다. 값은 prop명(Var) 또는
+    // 리터럴 문자열(Literal). 단축형 `key`는 (key, Var(key))로 푼다. 콤마는 선택적 구분자.
     fn context_fields(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
         let mut fields = Vec::new();
         loop {
@@ -297,20 +297,25 @@ impl<'a> Parser<'a> {
                 }
                 Some(Token::Ident(_)) => {
                     let key = self.ident()?;
-                    self.expect(&Token::Colon)?;
-                    // 값: prop명(Var, 슬롯 참조) 또는 "lit"(Literal, 독립 값).
-                    let value = match self.peek() {
-                        Some(Token::Ident(_)) => ArgValue::Var(self.ident()?),
-                        Some(Token::Str(_)) => match self.next()? {
-                            Token::Str(s) => ArgValue::Literal(s.clone()),
-                            _ => unreachable!(),
-                        },
-                        got => {
-                            return Err(ParseError::Expected {
-                                want: "context field value (prop or \"lit\")".into(),
-                                got: format!("{got:?}"),
-                            })
+                    // `: 값` 매핑이 있으면 값은 prop명(Var) 또는 리터럴(Literal),
+                    // 없으면 단축형(key = prop, Var).
+                    let value = if matches!(self.peek(), Some(Token::Colon)) {
+                        self.next()?; // :
+                        match self.peek() {
+                            Some(Token::Ident(_)) => ArgValue::Var(self.ident()?),
+                            Some(Token::Str(_)) => match self.next()? {
+                                Token::Str(s) => ArgValue::Literal(s.clone()),
+                                _ => unreachable!(),
+                            },
+                            got => {
+                                return Err(ParseError::Expected {
+                                    want: "context field value (prop or \"lit\")".into(),
+                                    got: format!("{got:?}"),
+                                })
+                            }
                         }
+                    } else {
+                        ArgValue::Var(key.clone())
                     };
                     fields.push((key, value));
                 }

@@ -317,6 +317,53 @@ mod tests {
         );
     }
 
+    /// contexts 필드 단축형 `key`는 `key: key`(Scope)로 푼다 - payload 단축형과 같은 규칙.
+    #[test]
+    fn context_field_shorthand() {
+        use bytecode::{decode, FieldValue};
+
+        let src = r#"
+            component C {
+              props { tier }
+              contexts { Area { tier } }
+              template { @with Area { div() {} } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let area = &module.def(0).unwrap().contexts[0];
+        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0).
+        assert_eq!(module.pool.get(area.fields[0].name_const_index), Some("tier"));
+        assert_eq!(area.fields[0].value, FieldValue::Scope(0));
+    }
+
+    /// events 페이로드 값도 리터럴(Const)을 받는다 - contexts와 같은 arg_to_field_value 경로.
+    #[test]
+    fn event_payload_literal() {
+        use bytecode::{decode, FieldValue};
+
+        let src = r#"
+            component C {
+              props { count }
+              events { BUMP({ count, label: "clicks" }) }
+              template { button(@click:BUMP) { "x" } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let event = &module.def(0).unwrap().events[0];
+        // count: 단축형 -> Scope(0). label: "clicks" -> Const(상수풀이 "clicks"를 가리킴).
+        assert_eq!(module.pool.get(event.fields[0].name_const_index), Some("count"));
+        assert_eq!(event.fields[0].value, FieldValue::Scope(0));
+        assert_eq!(module.pool.get(event.fields[1].name_const_index), Some("label"));
+        match event.fields[1].value {
+            FieldValue::Const(clicks_index) => {
+                assert_eq!(module.pool.get(clicks_index), Some("clicks"));
+            }
+            other => panic!("label은 리터럴이라 Const여야: {other:?}"),
+        }
+    }
+
     /// contexts 값이 props에 없는 prop을 참조하면 UnknownProp 에러(payload와 같은 검증 경로).
     #[test]
     fn context_unknown_prop_errors() {
