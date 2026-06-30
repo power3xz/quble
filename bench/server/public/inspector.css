@@ -374,20 +374,22 @@ body {
   overflow: auto;
 }
 
-/* 상수풀 — qubc 위 독립 패널(접이식). 제목(summary) + 인덱스·값 그리드. 패널 폭을 써서 값이 안 깨진다. */
-.inspector__pool-summary {
+/* 접이식 패널 제목(summary). 상수풀·contexts가 공유한다. 접혀 있을 땐 제목만, 펼치면 아래 여백. */
+summary.inspector__panel-title {
   cursor: pointer;
-  margin-bottom: 0; /* 접혀 있을 땐 제목만 */
+  margin-bottom: 0;
 }
 
-.inspector__pool-summary:hover {
+summary.inspector__panel-title:hover {
   color: var(--text);
 }
 
+details.inspector__panel[open] > summary.inspector__panel-title,
 .inspector__pool[open] .inspector__pool-summary {
   margin-bottom: 12px;
 }
 
+/* 상수풀 — qubc 위 독립 패널(접이식). 제목(summary) + 인덱스·값 그리드. 패널 폭을 써서 값이 안 깨진다. */
 .inspector__pool-body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
