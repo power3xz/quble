@@ -433,7 +433,8 @@ body {
 }
 
 /* 이벤트 패널 — 이 컴포넌트를 루트로 쓸 때 발사되는 fullname + payload. */
-.inspector__events {
+.inspector__events,
+.inspector__contexts {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -452,6 +453,13 @@ body {
   font: 12px "SF Mono", Menlo, Consolas, monospace;
   color: var(--accent);
   font-weight: 600;
+}
+
+/* 이벤트 발사 시점에 활성인 @with 컨텍스트. 이름 옆에 작게, dim하게. */
+.inspector__event-with {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--text-dim);
 }
 
 .inspector__event-fields {
@@ -538,5 +546,10 @@ body {
 
 .inspector__log-data {
   color: #98c379;
+  word-break: break-all;
+}
+
+.inspector__log-context {
+  color: #61afef;
   word-break: break-all;
 }

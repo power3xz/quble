@@ -42,6 +42,12 @@
             <pre class="inspector__source inspector__source--empty" id="src">왼쪽에서 컴포넌트를 선택하세요.</pre>
           </div>
           <div class="inspector__panel">
+            <div class="inspector__panel-title">contexts</div>
+            <div class="inspector__contexts" id="contexts">
+              <p class="inspector__placeholder">컴포넌트를 선택하면 @with 컨텍스트가 표시됩니다.</p>
+            </div>
+          </div>
+          <div class="inspector__panel">
             <div class="inspector__panel-title">events</div>
             <div class="inspector__events" id="events">
               <p class="inspector__placeholder">컴포넌트를 선택하면 발사 이벤트가 표시됩니다.</p>
@@ -88,6 +94,7 @@
     const poolBody = document.getElementById("pool-body");
     const poolSummary = document.getElementById("pool-summary");
     const compmeta = document.getElementById("compmeta");
+    const contextsPanel = document.getElementById("contexts");
     const eventsPanel = document.getElementById("events");
     const log = document.getElementById("log");
     const logClear = document.getElementById("log-clear");
@@ -265,8 +272,41 @@
       ].join("");
     };
 
+    // 필드 한 줄: 이름 + 출처. 출처는 리터럴이면 그 상수값(따옴표+강조), 변수면 루트 arg{N}(중립).
+    // events·contexts가 공유한다(둘 다 같은 fields 인코딩).
+    const fieldRow = (name, isLit, text) => {
+      const source = isLit
+        ? `<span class="inspector__event-field-source inspector__event-field-source--literal">"${esc(text)}"</span>`
+        : `<span class="inspector__event-field-source inspector__event-field-source--arg">${esc(text)}</span>`;
+      return `<li class="inspector__event-field"><span class="inspector__event-field-name">${esc(name)}</span>${source}</li>`;
+    };
+
+    // 컨텍스트 패널 — 이 컴포넌트가 선언한 @with 컨텍스트를 이름별로, 필드 출처와 함께 보여준다.
+    // 필드 값은 리터럴("값") 또는 이 컴포넌트 prop 참조(arg{index}).
+    const renderContexts = (compId) => {
+      const contexts = module.defs[compId].contexts;
+      if (contexts.length === 0) {
+        contextsPanel.innerHTML = '<p class="inspector__placeholder">이 컴포넌트는 컨텍스트가 없습니다.</p>';
+        return;
+      }
+      contextsPanel.innerHTML = contexts
+        .map((ctx) => {
+          const fields = ctx.fields
+            .map((f) => fieldRow(module.pool[f.nameConstIndex], f.isConst, f.isConst ? module.pool[f.index] : `arg${f.index}`))
+            .join("");
+          return (
+            `<div class="inspector__event">` +
+            `<div class="inspector__event-name">${esc(module.pool[ctx.nameConstIndex])}</div>` +
+            (fields ? `<ul class="inspector__event-fields">${fields}</ul>` : "") +
+            `</div>`
+          );
+        })
+        .join("");
+    };
+
     // 이벤트 패널 — 이 컴포넌트를 루트로 쓸 때 합성 트리에서 발사되는 이벤트를 fullname으로 보여준다.
     // 합성 자식의 이벤트는 type-name이 누적된 fullname(Toggle.TOGGLE)으로, payload 필드와 참조 offset도.
+    // 이벤트 이름 옆에 발사 시점 활성 @with 컨텍스트(누적, 안쪽 우선)를 배지로 표시한다.
     const renderEvents = (compId) => {
       const events = collectEventFullnames(module, compId);
       if (events.length === 0) {
@@ -276,17 +316,14 @@
       eventsPanel.innerHTML = events
         .map((event) => {
           const fields = event.payload
-            .map((p) => {
-              // 출처: 변수면 루트 arg{N}(중립), 리터럴이면 그 상수값(따옴표 + 강조).
-              const source = p.source.kind === "literal"
-                ? `<span class="inspector__event-field-source inspector__event-field-source--literal">"${esc(p.source.value)}"</span>`
-                : `<span class="inspector__event-field-source inspector__event-field-source--arg">arg${p.source.offset}</span>`;
-              return `<li class="inspector__event-field"><span class="inspector__event-field-name">${esc(p.field)}</span>${source}</li>`;
-            })
+            .map((p) => fieldRow(p.field, p.source.kind === "lit", p.source.kind === "lit" ? p.source.value : `arg${p.source.offset}`))
             .join("");
+          const withTags = event.contexts.length > 0
+            ? `<span class="inspector__event-with">@with ${event.contexts.map(esc).join(", ")}</span>`
+            : "";
           return (
             `<div class="inspector__event">` +
-            `<div class="inspector__event-name">${esc(event.fullname)}</div>` +
+            `<div class="inspector__event-name">${esc(event.fullname)}${withTags}</div>` +
             (fields ? `<ul class="inspector__event-fields">${fields}</ul>` : "") +
             `</div>`
           );
@@ -308,6 +345,7 @@
       src.classList.remove("inspector__source--empty");
       src.innerHTML = highlightQubc(decompileComponent(module, compId, currentResmap));
       renderCompMeta(compId);
+      renderContexts(compId);
       renderEvents(compId);
 
       currentArgs = componentArgs(module, compId);
@@ -355,8 +393,8 @@
       }
     };
 
-    // 이벤트 로그 — 발생 시각·이벤트명·data를 로그 패널에 한 줄씩 쌓는다(위->아래, 최신이 맨 아래).
-    const logEvent = (eventName, data) => {
+    // 이벤트 로그 — 발생 시각·이벤트명·data·context를 로그 패널에 한 줄씩 쌓는다(위->아래, 최신이 맨 아래).
+    const logEvent = (eventName, data, context) => {
       if (log.querySelector(".inspector__placeholder")) {
         log.replaceChildren();
       }
@@ -366,7 +404,8 @@
       row.innerHTML =
         `<span class="inspector__log-time">${time}</span>` +
         `<span class="inspector__log-name">${esc(eventName)}</span>` +
-        `<span class="inspector__log-data">${esc(JSON.stringify(data))}</span>`;
+        `<span class="inspector__log-data">${esc(JSON.stringify(data))}</span>` +
+        `<span class="inspector__log-context">${esc(JSON.stringify(context))}</span>`;
       log.appendChild(row);
       log.scrollTop = log.scrollHeight; // 최신 줄이 보이게 바닥으로
     };
@@ -376,7 +415,7 @@
     const buildLogHandlers = (compId) => {
       const handlers = {};
       for (const event of collectEventFullnames(module, compId)) {
-        handlers[event.fullname] = (data) => logEvent(event.fullname, data);
+        handlers[event.fullname] = (data, { context }) => logEvent(event.fullname, data, context);
       }
       return handlers;
     };
