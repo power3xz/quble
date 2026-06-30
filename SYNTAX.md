@@ -183,14 +183,15 @@ const handlers: TEventHandlers<
   | "MyTodoCard.TodoItem.TagBadge.TAG_CLICK",
   TStore
 > = {
-  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { provided, get, set }) => {
+  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { context, get, set }) => {
     set((s) => ({ todos: toggle(s.todos, data.id) }));
   },
 };
 ```
 
-- 키는 **풀네임**(use-site에서 바깥→안쪽 경로 누적, 컨텍스트는 경로에 안 낌).
-- `(data, { provided, get, set })` 시그니처. 반환 `{ goTo, newPage? } | void | Promise`.
+- 키는 **풀네임**(use-site에서 바깥->안쪽 경로 누적, 컨텍스트는 경로에 안 낌).
+- `(data, { context, get, set })` 시그니처. `context`는 `@with`로 주입된 컨텍스트(`context.Area.userId`).
+  배열 요소 식별 슬롯은 미결(DESIGN.md §5.1). 반환 `{ goTo, newPage? } | void | Promise`.
 - 핸들러 본문은 **클라이언트 전용** - 호스트 JS에 위임 가능.
 
 ---
