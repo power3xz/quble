@@ -8,6 +8,8 @@
     "vscode": "^1.75.0"
   },
   "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:typescript"],
   "contributes": {
     "languages": [
       {
