@@ -50,7 +50,7 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] fullname - 합성 경로를 누적한 이벤트 식별자(`Toggle.TOGGLE`). 별칭 없으면 타입명이 마디.
 - [x] 별칭 - `Alias: Comp(...)`로 경로 마디를 별칭으로(분리), 생략 시 타입명 공유.
 - [ ] 슬롯 - `{}` 자식 콘텐츠 주입.
-- [ ] contexts / events - 핸들러(fullname에 묶임), 이벤트 위임 (`action(EVENT, data)`). 모델: [REACTIVITY.md](REACTIVITY.md) §6·§7.
+- [x] contexts / events - 핸들러(fullname에 묶임), 이벤트 위임 (`@click:EVENT`), `@with` 컨텍스트 주입(`provided`/`context`). 모델: [REACTIVITY.md](REACTIVITY.md) §6·§7.
 
 ## 전송 / 보안
 
@@ -68,3 +68,6 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] bench 비교 환경 (qubb vs React lazy chunk 네트워크 비용)
 - [x] qubb 인스펙터 - qubb를 qubc로 디컴파일 + 컴포넌트 선택·arg 입력으로 실시간 렌더 (IDEAS.md 컴포넌트 뷰어). 임의 qubb url 로드 지원.
 - [x] VSCode `.qubc` 신택스 하이라이팅 (`editors/vscode/`) - 현행 문법만 칠한다.
+- [x] 핸들러 타입 생성 - `.qubc` -> 짝 `.qubc.d.ts`(`Handlers`)를 확장이 생성, handlers.ts가
+  `import type`으로 받아 이벤트별 payload/context를 타입 강제(잘못된 fullname은 컴파일 에러).
+  d.ts 파일 방식의 한계·LSP 전환 방향은 ISSUES.md.
