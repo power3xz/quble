@@ -9,7 +9,7 @@
   },
   "categories": ["Programming Languages"],
   "main": "./extension.js",
-  "activationEvents": ["onLanguage:typescript"],
+  "activationEvents": ["onLanguage:typescript", "onLanguage:quble"],
   "contributes": {
     "languages": [
       {

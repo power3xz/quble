@@ -1,82 +1,51 @@
-// *.qubc.handlers.ts 에서 자동완성 시 짝 .qubc의 이벤트 fullname을 띄우고,
-// 선택하면 핸들러 시그니처(payload/context 타입)까지 펼친다.
-// 짝 .qubc를 컴파일러(quble-bytecode)로 qubb 바이트로 만들고, disasm.js로 산출한다.
+// .qubc 컴포넌트의 핸들러 타입을 짝 `.qubc.d.ts`(Handlers)로 생성한다. handlers.ts가
+// `import type { Handlers } from './x.qubc'`로 받아 키·payload·context를 타입으로 강제한다.
+// 생성 시점(둘 다): handlers.ts를 열 때 + .qubc를 저장할 때(소스 변경 반영).
+// 짝 .qubc를 컴파일러(quble-bytecode)로 qubb로 만들고 disasm.js로 .d.ts 텍스트를 낸다.
 
 const vscode = require("vscode");
 const path = require("node:path");
+const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
 
 // 레포 내 고정 위치 - 워크스페이스 루트 기준 상대경로(PoC. 나중에 설정으로 뺀다).
 const COMPILER_REL = "proto/target/debug/quble-bytecode";
 const DISASM_REL = "proto/web/disasm.js";
 
-/** handlers.ts 문서 -> 짝 .qubc 절대경로. `foo.qubc.handlers.ts` -> `foo.qubc`. */
-const pairedQubc = (document) => document.fileName.replace(/\.handlers\.ts$/, "");
-
-/** 짝 .qubc를 컴파일+디코드해 이벤트 목록(fullname/payload/contexts)을 낸다. 실패 시 빈 배열. */
-const eventsFor = async (document) => {
+/** 짝 .qubc -> `x.qubc.d.ts`를 생성/갱신한다. 컴파일/디코드 실패는 무시(소스가 미완성일 수 있음). */
+const writeDts = async (qubcPath) => {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
-    return [];
+    return;
   }
-  const qubcPath = pairedQubc(document);
-  const qubb = execFileSync(path.join(root, COMPILER_REL), [qubcPath]);
-  const { inspect, collectEventFullnames } = await import(path.join(root, DISASM_REL));
-  const { module } = inspect(qubb);
-  return collectEventFullnames(module, 0);
-};
-
-/** 필드 출처 -> TS 타입. 리터럴은 그 값으로 좁히고(literal type), 변수는 string. */
-const fieldType = (source) => (source.kind === "lit" ? JSON.stringify(source.value) : "string");
-
-/** {field, source} 목록 -> `a: T; b: U` 객체 본문. */
-const fieldsType = (fields) => fields.map((f) => `${f.field}: ${fieldType(f.source)}`).join("; ");
-
-/** 이벤트 -> 핸들러 시그니처 스니펫. 여는·닫는 따옴표를 스니펫이 통째로 책임진다(provider가
- *  기존 따옴표를 range로 덮어쓴다). payload·context 필드 타입은 같은 규칙(리터럴은 좁힘). */
-const signatureSnippet = (event) => {
-  const dataParam = `data: { ${fieldsType(event.payload)} }`;
-  if (event.contexts.length === 0) {
-    return `'${event.fullname}': (${dataParam}) => {\n\t$0\n}`;
+  try {
+    const qubb = execFileSync(path.join(root, COMPILER_REL), [qubcPath]);
+    const { inspect, handlersDts } = await import(path.join(root, DISASM_REL));
+    const { module } = inspect(qubb);
+    fs.writeFileSync(qubcPath + ".d.ts", handlersDts(module, 0));
+  } catch {
+    // 미완성 소스 등 - 조용히 넘긴다(다음 저장 때 다시 시도).
   }
-  const ctx = event.contexts.map((c) => `${c.name}: { ${fieldsType(c.fields)} }`).join("; ");
-  return `'${event.fullname}': (${dataParam}, { context }: { context: { ${ctx} } }) => {\n\t$0\n}`;
-};
-
-const provider = {
-  async provideCompletionItems(document, position) {
-    if (!document.fileName.endsWith(".qubc.handlers.ts")) {
-      return undefined;
-    }
-    // 스니펫이 따옴표를 통째로 넣으므로, 이미 입력된 따옴표(앞/뒤)는 교체 범위에 넣어 덮어쓴다.
-    // 이러면 `'` 입력 후 선택과 Trigger Suggest(따옴표 없음)가 같은 결과를 낸다.
-    const isQuote = (s) => s === "'" || s === '"';
-    const before = position.character > 0
-      ? document.getText(new vscode.Range(position.translate(0, -1), position))
-      : "";
-    const after = document.getText(new vscode.Range(position, position.translate(0, 1)));
-    const start = isQuote(before) ? position.translate(0, -1) : position;
-    const end = isQuote(after) ? position.translate(0, 1) : position;
-    const replace = new vscode.Range(start, end);
-
-    const events = await eventsFor(document);
-    return events.map((event) => {
-      const item = new vscode.CompletionItem(event.fullname, vscode.CompletionItemKind.Event);
-      // 선택하면 핸들러 시그니처(따옴표 포함)까지 펼친다.
-      item.insertText = new vscode.SnippetString(signatureSnippet(event));
-      item.range = replace;
-      // "0_" 접두사로 TS 기본 제안보다 위로 끌어온다(우리끼린 fullname 순서 유지).
-      item.sortText = "0_" + event.fullname;
-      return item;
-    });
-  },
 };
 
 const activate = (context) => {
+  const onDocument = (document) => {
+    const file = document.fileName;
+    if (file.endsWith(".qubc.handlers.ts")) {
+      // 핸들러 파일을 열면 짝 .qubc로 d.ts를 준비한다.
+      writeDts(file.replace(/\.handlers\.ts$/, ""));
+    } else if (file.endsWith(".qubc")) {
+      // 소스를 저장하면 짝 d.ts를 갱신한다.
+      writeDts(file);
+    }
+  };
+
   context.subscriptions.push(
-    // 따옴표(' ")를 치면 트리거 - 문자열 키 자리에서 후보가 뜬다.
-    vscode.languages.registerCompletionItemProvider("typescript", provider, "'", "\"")
+    vscode.workspace.onDidOpenTextDocument(onDocument),
+    vscode.workspace.onDidSaveTextDocument(onDocument)
   );
+  // 활성화 시 이미 열려 있는 핸들러 파일도 한 번 처리한다.
+  vscode.workspace.textDocuments.forEach(onDocument);
 };
 
 module.exports = { activate };
