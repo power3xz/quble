@@ -85,14 +85,14 @@ fn exec(
             }
             Op::AttrG => {
                 let name = read_u16(code, &mut pc)?;
-                let value = read_u16(code, &mut pc)?;
+                let value_const_index = read_u16(code, &mut pc)?;
                 let name = bytecode::attrs::attr_name(name).ok_or(RenderError::BadAttr(name))?;
-                emit_attr(name, get_const(module, value)?, out);
+                emit_attr(name, get_const(module, value_const_index)?, out);
             }
             Op::AttrL => {
-                let name = read_u16(code, &mut pc)?;
-                let value = read_u16(code, &mut pc)?;
-                emit_attr(get_const(module, name)?, get_const(module, value)?, out);
+                let name_const_index = read_u16(code, &mut pc)?;
+                let value_const_index = read_u16(code, &mut pc)?;
+                emit_attr(get_const(module, name_const_index)?, get_const(module, value_const_index)?, out);
             }
             Op::AttrGVar => {
                 let name = read_u16(code, &mut pc)?;
@@ -102,15 +102,15 @@ fn exec(
                 emit_attr(name, val, out);
             }
             Op::AttrLVar => {
-                let name = read_u16(code, &mut pc)?;
+                let name_const_index = read_u16(code, &mut pc)?;
                 let scope_index = read_u16(code, &mut pc)?;
                 let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
-                emit_attr(get_const(module, name)?, val, out);
+                emit_attr(get_const(module, name_const_index)?, val, out);
             }
             Op::ElemCloseOpen => out.push('>'),
             Op::Text => {
-                let text = read_u16(code, &mut pc)?;
-                escape_text(get_const(module, text)?, out);
+                let text_const_index = read_u16(code, &mut pc)?;
+                escape_text(get_const(module, text_const_index)?, out);
             }
             Op::TextVar => {
                 let scope_index = read_u16(code, &mut pc)?;
@@ -131,8 +131,8 @@ fn exec(
             // 리터럴 인자: 상수풀 값을 그대로 자식 scope로 넘긴다. SSR은 정적 렌더라 자식이
             // 수정하든 말든 상관없어(leaf·반응성 없음) 변수 인자와 같은 문자열로 취급한다.
             Op::PushArgLit => {
-                let val_index = read_u16(code, &mut pc)?;
-                args.push(get_const(module, val_index)?.to_string());
+                let value_const_index = read_u16(code, &mut pc)?;
+                args.push(get_const(module, value_const_index)?.to_string());
             }
             Op::Render => {
                 let child_comp_id = read_u16(code, &mut pc)?;
