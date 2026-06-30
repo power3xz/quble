@@ -30,6 +30,8 @@ const OP = {
   BIND_EVENT: 0x10,
   PUSH_ARG_LIT: 0x11,
   PUSH_PATH_SEGMENT: 0x12,
+  ENTER_CONTEXT: 0x13,
+  EXIT_CONTEXT: 0x14,
 };
 
 // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
@@ -77,6 +79,25 @@ class Reader {
   }
 }
 
+// field 값의 const 표지 비트(MSB). 이 비트와 마스킹은 readFields 한 곳에만 둔다.
+const FIELD_CONST_BIT = 0x8000;
+
+// 필드 목록을 읽는다 - field_count, [(nameConstIndex, value)]. value는 MSB=const 여부,
+// 하위 15비트=index. 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+//
+// @param r Reader
+// @returns [{ nameConstIndex, isConst, index }]
+const readFields = (r) => {
+  const count = r.u16();
+  const fields = [];
+  for (let f = 0; f < count; f++) {
+    const nameConstIndex = r.u16();
+    const raw = r.u16();
+    fields.push({ nameConstIndex, isConst: (raw & FIELD_CONST_BIT) !== 0, index: raw & ~FIELD_CONST_BIT });
+  }
+  return fields;
+};
+
 // qubb 바이트를 모듈로 디코드한다(상수풀·def 테이블·코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
@@ -103,22 +124,22 @@ const decode = (bytes) => {
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
-    const nameIdx = r.u16();
+    const nameConstIndex = r.u16();
     const codeOff = r.u32();
     const codeLen = r.u32();
-    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameIdx, payload_count, [(fieldIdx, offset)])]
+    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameConstIndex, fields)]
     const eventCount = r.u16();
     const events = [];
     for (let e = 0; e < eventCount; e++) {
-      const evNameIdx = r.u16();
-      const payloadCount = r.u16();
-      const payload = [];
-      for (let p = 0; p < payloadCount; p++) {
-        payload.push({ fieldIdx: r.u16(), offset: r.u16() });
-      }
-      events.push({ nameIdx: evNameIdx, payload });
+      events.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
-    defs.push({ nameIdx, codeOff, codeLen, events });
+    // 컨텍스트 테이블 - context_count, [(nameConstIndex, fields)]. fields는 이벤트와 같은 인코딩.
+    const contextCount = r.u16();
+    const contexts = [];
+    for (let c = 0; c < contextCount; c++) {
+      contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
+    }
+    defs.push({ nameConstIndex, codeOff, codeLen, events, contexts });
   }
 
   const codeLen = r.u32();
@@ -128,6 +149,21 @@ const decode = (bytes) => {
 
 // 속성값 안의 따옴표를 이스케이프해 qubc 문자열 리터럴로 만든다.
 const quote = (s) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+
+// 필드 하나를 qubc 선언 조각으로 복원. Scope(변수)는 argN - 필드명과 같으면 shorthand,
+// 다르면 `field: argN`. Const(리터럴)는 `field: "값"`.
+//
+// @param module { pool }
+// @param field  { nameConstIndex, isConst, index }
+// @returns      "field" | "field: argN" | 'field: "값"'
+const fieldDecl = (module, field) => {
+  const name = module.pool[field.nameConstIndex];
+  if (field.isConst) {
+    return name + ": " + quote(module.pool[field.index]);
+  }
+  const prop = "arg" + field.index;
+  return name === prop ? name : name + ": " + prop;
+};
 
 // 한 def의 코드를 qubc template 본문(들여쓴 줄 배열)으로 디컴파일한다.
 //
@@ -169,7 +205,7 @@ const decompileBody = (module, def) => {
   // 자식 def명 복원(별칭 미구현 -> 일반 컴포넌트명).
   const compName = (compId) => {
     const childDef = module.defs[compId];
-    return childDef ? module.pool[childDef.nameIdx] : "Comp" + compId;
+    return childDef ? module.pool[childDef.nameConstIndex] : "Comp" + compId;
   };
 
   // 여는 태그를 누적하는 상태. ELEM_OPEN이 열고 ATTR_*가 채우고 CLOSE_OPEN/END가 닫는다.
@@ -286,7 +322,7 @@ const decompileBody = (module, def) => {
         // 여는 태그에 리스너를 묶는다 -> 속성처럼 한 줄에 합친다. `@click:EVENT`.
         const domEvent = DOM_EVENTS[u16()];
         const event = def.events[u16()];
-        attrs.push("@" + domEvent + ":" + module.pool[event.nameIdx]);
+        attrs.push("@" + domEvent + ":" + module.pool[event.nameConstIndex]);
         break;
       }
       case OP.PUSH_PATH_SEGMENT:
@@ -294,15 +330,26 @@ const decompileBody = (module, def) => {
         // `Alias: Comp(...)`로 복원한다. (이벤트 fullname 산출은 별도: collectEventFullnames.)
         pendingSegment = module.pool[u16()];
         break;
+      // @with 컨텍스트는 본문 복원에 아직 반영하지 않는다(A: 깨짐만 막음). EnterContext는
+      // context_index 2바이트를 소비하고, ExitContext는 마커라 그냥 넘어간다. @with 블록
+      // 복원은 후속(ISSUES).
+      case OP.ENTER_CONTEXT:
+        u16();
+        break;
+      case OP.EXIT_CONTEXT:
+        break;
       default:
         throw new Error("bad opcode 0x" + op.toString(16));
     }
   }
-  // events payload가 참조하는 offset도 props 복원 범위에 포함한다 - payload만 쓰고 본문엔
-  // 안 쓰인 prop(arg1 등)이 props 블록에 빠지면 디컴파일 qubc가 불완전해진다.
+  // events fields가 참조하는 scope index도 props 복원 범위에 포함한다 - fields만 쓰고 본문엔
+  // 안 쓰인 prop(arg1 등)이 props 블록에 빠지면 디컴파일 qubc가 불완전해진다. Const 필드는
+  // 상수풀 값이라 props와 무관 - Scope(변수)만 집계한다.
   for (const event of def.events) {
-    for (const p of event.payload) {
-      seenArg(p.offset, "string");
+    for (const field of event.fields) {
+      if (!field.isConst) {
+        seenArg(field.index, "string");
+      }
     }
   }
   return { lines, maxArg, uses, resIds, argTypes };
@@ -323,7 +370,7 @@ export const decompileComponent = (module, compId, resmap = []) => {
   if (!def) {
     throw new Error("bad component " + compId);
   }
-  const name = module.pool[def.nameIdx];
+  const name = module.pool[def.nameConstIndex];
   const { lines, maxArg, uses, resIds } = decompileBody(module, def);
 
   const out = [];
@@ -347,16 +394,13 @@ export const decompileComponent = (module, compId, resmap = []) => {
     }
     out.push("  props { " + args.join(", ") + " }");
   }
-  // events 블록 복원. payload는 (필드명, offset) - 필드명은 pool, prop은 offset->argN.
-  // 필드명이 argN과 같으면 shorthand({ field }), 다르면 매핑({ field: argN }).
+  // events 블록 복원. 각 필드는 (필드명, 값) - 값은 Scope(변수 argN) 또는 Const(리터럴).
+  // Scope: 필드명이 argN과 같으면 shorthand({ field }), 다르면 매핑({ field: argN }).
+  // Const: 리터럴 문자열({ field: "값" }).
   if (def.events.length > 0) {
     const decls = def.events.map((event) => {
-      const eventName = module.pool[event.nameIdx];
-      const fields = event.payload.map((p) => {
-        const field = module.pool[p.fieldIdx];
-        const prop = "arg" + p.offset;
-        return field === prop ? field : field + ": " + prop;
-      });
+      const eventName = module.pool[event.nameConstIndex];
+      const fields = event.fields.map((f) => fieldDecl(module, f));
       return eventName + "({ " + fields.join(", ") + " })";
     });
     out.push("  events { " + decls.join(", ") + " }");
@@ -400,6 +444,7 @@ const OPERAND_LEN = (op) => {
     case OP.ELEM_END:
     case OP.ELSE:
     case OP.IF_END:
+    case OP.EXIT_CONTEXT:
       return 0;
     case OP.ATTR_G:
     case OP.ATTR_L:
@@ -474,10 +519,11 @@ export const collectEventFullnames = (module, rootCompId) => {
         pc += 2; // event_type 스킵
         const event = def.events[code[pc] | (code[pc + 1] << 8)];
         pc += 2;
-        const localName = module.pool[event.nameIdx];
-        const payload = event.payload.map((p) => ({
-          field: module.pool[p.fieldIdx],
-          source: toRoot(p.offset), // payload 값의 출처를 루트 기준으로
+        const localName = module.pool[event.nameConstIndex];
+        // 필드 값 출처: Scope(변수)는 루트 기준으로 추적, Const(리터럴)는 상수값 자체가 출처.
+        const payload = event.fields.map((f) => ({
+          field: module.pool[f.nameConstIndex],
+          source: f.isConst ? { kind: "lit", value: module.pool[f.index] } : toRoot(f.index),
         }));
         add(pathPrefix ? pathPrefix + "." + localName : localName, payload);
       } else {
@@ -498,7 +544,7 @@ export const inspect = (bytes) => {
   const module = decode(bytes);
   const components = module.defs.map((def, compId) => ({
     compId,
-    name: module.pool[def.nameIdx],
+    name: module.pool[def.nameConstIndex],
   }));
   return { module, components };
 };

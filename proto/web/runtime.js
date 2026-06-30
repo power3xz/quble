@@ -211,6 +211,50 @@ class Reader {
   }
 }
 
+// field 값의 const 표지 비트(MSB). Rust FieldValue::encode와 대칭 - 이 비트와 마스킹은
+// readFields 한 곳에만 둔다(소비부는 isConst/index만 본다).
+const FIELD_CONST_BIT = 0x8000;
+
+// 필드 목록을 읽는다 - field_count, [(nameConstIndex, value)]. value는 MSB=const 여부,
+// 하위 15비트=index. 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다(Rust read_fields 대칭).
+//
+// @param r Reader
+// @returns [{ nameConstIndex, isConst, index }]
+const readFields = (r) => {
+  const count = r.u16();
+  const fields = [];
+  for (let f = 0; f < count; f++) {
+    const nameConstIndex = r.u16();
+    const raw = r.u16();
+    fields.push({ nameConstIndex, isConst: (raw & FIELD_CONST_BIT) !== 0, index: raw & ~FIELD_CONST_BIT });
+  }
+  return fields;
+};
+
+// 리터럴 상수를 store에 leaf로 심고 그 path를 돌려준다. path를 pool 인덱스로 지어 같은
+// 리터럴은 같은 path=같은 leaf로 모인다(seed가 pathCache로 처음만 발급). PushArgLit과
+// Const 필드가 공유하는 리터럴 leaf 규칙.
+//
+// @param store     leafStoreSubject
+// @param module    { pool }
+// @param constIndex 상수풀 인덱스
+// @returns         "$lit.<constIndex>" path
+const seedLitPath = (store, module, constIndex) => {
+  const path = "$lit." + constIndex;
+  store.seed(path, module.pool[constIndex]);
+  return path;
+};
+
+// 필드 하나를 leafIndex로 푼다. Scope는 paths[index](인스턴스 슬롯), Const는 리터럴 leaf.
+//
+// @param field { isConst, index }
+// @param paths scope index -> store path 매핑
+// @returns     leafIndex
+const fieldLeafIndex = (field, paths, store, module) => {
+  const path = field.isConst ? seedLitPath(store, module, field.index) : paths[field.index];
+  return store.leafOf(path);
+};
+
 // qubb 바이트를 모듈로 디코드한다(상수풀·def 테이블·코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
@@ -242,22 +286,22 @@ const decode = (bytes) => {
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
-    const nameIdx = r.u16();
+    const nameConstIndex = r.u16();
     const codeOff = r.u32();
     const codeLen = r.u32();
-    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameIdx, payload_count, [(fieldIdx, offset)])]
+    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameConstIndex, fields)]
     const eventCount = r.u16();
     const events = [];
     for (let e = 0; e < eventCount; e++) {
-      const evNameIdx = r.u16();
-      const payloadCount = r.u16();
-      const payload = [];
-      for (let p = 0; p < payloadCount; p++) {
-        payload.push({ fieldIdx: r.u16(), offset: r.u16() });
-      }
-      events.push({ nameIdx: evNameIdx, payload });
+      events.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
-    defs.push({ nameIdx, codeOff, codeLen, events });
+    // 컨텍스트 테이블 - context_count, [(nameConstIndex, fields)]. fields는 이벤트와 같은 인코딩.
+    const contextCount = r.u16();
+    const contexts = [];
+    for (let c = 0; c < contextCount; c++) {
+      contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
+    }
+    defs.push({ nameConstIndex, codeOff, codeLen, events, contexts });
   }
 
   const codeLen = r.u32();
@@ -408,16 +452,16 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
             const domEvent = DOM_EVENTS[u16at()];
             const event = events[u16at()];
-            const eventName = module.pool[event.nameIdx];
+            const eventName = module.pool[event.nameConstIndex];
             // fullname = 합성 경로 + 로컬 이벤트명(누가 쐈나). 바인딩 시점에 불변이라 콜백 밖에서
             // 한 번 짓는다(루트는 prefix가 비어 로컬명 그대로 - 기존 동작과 호환).
             const fullName = pathPrefix ? pathPrefix + "." + eventName : eventName;
-            // payload offset들을 leafIndex로 풀어 props 맵(필드명 -> leafIndex)을 짓는다.
-            // offset->leafIndex는 발생 때가 아니라 지금(바인딩 때) 한 번 푼다(paths는 인스턴스 불변).
+            // fields를 leafIndex로 풀어 props 맵(필드명 -> leafIndex)을 짓는다.
+            // 풀이는 발생 때가 아니라 지금(바인딩 때) 한 번 한다(paths는 인스턴스 불변).
             // props는 핸들러의 set/get 대상(set(props.name, v)), data는 발생 시점 현재값.
             const props = {};
-            for (const p of event.payload) {
-              props[module.pool[p.fieldIdx]] = store.leafOf(paths[p.offset]);
+            for (const field of event.fields) {
+              props[module.pool[field.nameConstIndex]] = fieldLeafIndex(field, paths, store, module);
             }
             const el = pending;
             el.addEventListener(domEvent, (domEventObject) => {
@@ -474,10 +518,7 @@ const compileDef = (module, compId, resmap = [], loadedHrefs = new Set()) => {
             // 슬롯이 아니라 이 리터럴만의 leaf라 불변이다(set 경로는 컴파일타임 거부 예정).
             // path를 pool 인덱스로 지어 같은 리터럴은 같은 path=같은 leaf로 모인다 - leafOf가
             // pathCache로 처음만 발급하므로 module.pool 값이 store에 딱 한 번만 복사된다.
-            const poolIndex = u16at();
-            const path = "$lit." + poolIndex;
-            store.seed(path, module.pool[poolIndex]);
-            args.push(path);
+            args.push(seedLitPath(store, module, u16at()));
             break;
           }
           case OP.PUSH_PATH_SEGMENT: {
