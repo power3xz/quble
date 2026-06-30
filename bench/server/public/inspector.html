@@ -319,7 +319,7 @@
             .map((p) => fieldRow(p.field, p.source.kind === "lit", p.source.kind === "lit" ? p.source.value : `arg${p.source.offset}`))
             .join("");
           const withTags = event.contexts.length > 0
-            ? `<span class="inspector__event-with">@with ${event.contexts.map(esc).join(", ")}</span>`
+            ? `<span class="inspector__event-with">@with ${event.contexts.map((c) => esc(c.name)).join(", ")}</span>`
             : "";
           return (
             `<div class="inspector__event">` +
