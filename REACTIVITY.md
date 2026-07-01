@@ -171,6 +171,11 @@ handler(data, { props, store, get, set }) {
 구독자가 갱신된다 - props는 읽기전용이 아니라 쓰기가 반응성에 닿는다. 값 변경이 다른 로직을 촉발하지
 않으므로(도입부 단방향) props 쓰기도 안전하다.
 
+**구현 순서: props가 먼저.** `props`·payload·context는 소스(AST)에 이름이 그대로 있어 d.ts로
+바로 나온다. `store`는 루트 전체 상태 트리인데 소스에 그 선언 개념이 아직 없다 - 타입 표기(ROADMAP)와
+상태 트리 구조(DESIGN §5.1)가 정해진 뒤라야 소스에서 뽑을 수 있다. 그래서 지금은 `props`까지 내고,
+`store`/`get`/`set` 타입은 그 뒤에 얹는다.
+
 **두 스텝으로 나눈다.**
 
 - **스텝 1 (지금) - 명시적 get/set, 핸들러는 순수 JS.** `.qubc.handlers.ts`에 TS로 쓰되
