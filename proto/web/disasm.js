@@ -581,31 +581,6 @@ export const collectEventFullnames = (module, rootCompId) => {
   return events;
 };
 
-// 필드 출처 -> TS 타입. 리터럴은 그 값으로 좁히고(literal type), 변수는 string(소스에 타입 정보 없음).
-export const fieldType = (source) => (source.kind === "lit" ? JSON.stringify(source.value) : "string");
-
-// {field, source} 목록 -> `a: T; b: U` 객체 본문.
-export const fieldsType = (fields) => fields.map((f) => `${f.field}: ${fieldType(f.source)}`).join("; ");
-
-// 합성 트리의 모든 fullname 이벤트를 핸들러 타입(DESIGN §2.5)으로 묶은 `.d.ts` 텍스트를 낸다.
-// handlers.ts가 `import type { Handlers } from './x.qubc'`로 받아 키·payload·context를 타입으로 강제.
-// get/set/goTo는 미구현(§5.2)이라 params엔 context만, 반환은 지금 상황 그대로 void.
-//
-// @param module     decode된 모듈
-// @param rootCompId 루트 컴포넌트 id
-// @returns          "export interface Handlers { ... }" 텍스트
-export const handlersDts = (module, rootCompId) => {
-  const lines = collectEventFullnames(module, rootCompId).map((e) => {
-    const dataParam = `data: { ${fieldsType(e.payload)} }`;
-    if (e.contexts.length === 0) {
-      return `  '${e.fullname}': (${dataParam}) => void;`;
-    }
-    const ctx = e.contexts.map((c) => `${c.name}: { ${fieldsType(c.fields)} }`).join("; ");
-    return `  '${e.fullname}': (${dataParam}, params: { context: { ${ctx} } }) => void;`;
-  });
-  return `export interface Handlers {\n${lines.join("\n")}\n}\n`;
-};
-
 // qubb 바이트에서 컴포넌트 목록을 뽑는다([{ compId, name }]).
 //
 // @param bytes qubb 바이트
