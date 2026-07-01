@@ -1,0 +1,36 @@
+use "./settings.css"
+use SettingRow from "./settingrow.qubc"
+
+component Section {
+  props {
+    title, open,
+    aLabel, aDesc, aBadge, aEnabled,
+    bLabel, bDesc, bBadge, bEnabled
+  }
+  contexts {
+    SectionMeta { section: title }
+  }
+  events {
+    TOGGLE_SECTION({ title, open })
+  }
+  template {
+    section(class="section") {
+      header(class="section__head" @click:TOGGLE_SECTION) {
+        h2(class="section__title") { {title} }
+        @if (open) {
+          span(class="section__chevron section__chevron--open") { "접기" }
+        } @else {
+          span(class="section__chevron") { "펼치기" }
+        }
+      }
+      @if (open) {
+        @with SectionMeta {
+          div(class="section__body") {
+            FirstRow: SettingRow(label={aLabel} desc={aDesc} badge={aBadge} enabled={aEnabled}) {}
+            SecondRow: SettingRow(label={bLabel} desc={bDesc} badge={bBadge} enabled={bEnabled}) {}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+use "./settings.css"
+use Section from "./section.qubc"
+use Badge from "./badge.qubc"
+use LinkButton from "./linkbutton.qubc"
+
+component SettingsPanel {
+  props {
+    heading, dirty, plan, docsLink,
+    genOpen, genATitle, genADesc, genABadge, genAOn, genBTitle, genBDesc, genBBadge, genBOn,
+    privOpen, privATitle, privADesc, privABadge, privAOn, privBTitle, privBDesc, privBBadge, privBOn,
+    proOpen, proATitle, proADesc, proABadge, proAOn, proBTitle, proBDesc, proBBadge, proBOn
+  }
+  contexts {
+    PlanContext { plan }
+  }
+  events {
+    SAVE({ heading })
+    DISCARD({ heading })
+  }
+  template {
+    div(class="panel") {
+      header(class="panel__head") {
+        h1(class="panel__title") { {heading} }
+        div(class="panel__actions") {
+          @if (dirty) {
+            button(class="btn btn--ghost" @click:DISCARD) { "되돌리기" }
+            button(class="btn btn--primary" @click:SAVE) { "저장" }
+          } @else {
+            span(class="panel__saved") { "저장됨" }
+          }
+        }
+      }
+
+      General: Section(
+        title="일반" open={genOpen}
+        aLabel={genATitle} aDesc={genADesc} aBadge={genABadge} aEnabled={genAOn}
+        bLabel={genBTitle} bDesc={genBDesc} bBadge={genBBadge} bEnabled={genBOn}
+      ) {}
+
+      Privacy: Section(
+        title="개인정보" open={privOpen}
+        aLabel={privATitle} aDesc={privADesc} aBadge={privABadge} aEnabled={privAOn}
+        bLabel={privBTitle} bDesc={privBDesc} bBadge={privBBadge} bEnabled={privBOn}
+      ) {}
+
+      @with PlanContext {
+        div(class="panel__premium") {
+          div(class="panel__premium-head") {
+            h2(class="panel__premium-title") { "프리미엄" }
+            Badge(role={plan} theme="badge--pro") {}
+          }
+          Premium: Section(
+            title="프리미엄 기능" open={proOpen}
+            aLabel={proATitle} aDesc={proADesc} aBadge={proABadge} aEnabled={proAOn}
+            bLabel={proBTitle} bDesc={proBDesc} bBadge={proBBadge} bEnabled={proBOn}
+          ) {}
+        }
+      }
+
+      footer(class="panel__foot") {
+        LinkButton(link={docsLink} theme="btn--link") {}
+      }
+    }
+  }
+}

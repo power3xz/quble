@@ -1,0 +1,25 @@
+use "./settings.css"
+use Badge from "./badge.qubc"
+
+component SettingRow {
+  props { label, desc, badge, enabled }
+  events {
+    TOGGLE({ label, enabled })
+  }
+  template {
+    div(class="row") {
+      div(class="row__text") {
+        div(class="row__label") { {label} }
+        p(class="row__desc") { {desc} }
+      }
+      div(class="row__control") {
+        @if (enabled) {
+          Badge(role={badge} theme="badge--on") {}
+          button(class="switch switch--on" @click:TOGGLE) { "켜짐" }
+        } @else {
+          button(class="switch switch--off" @click:TOGGLE) { "꺼짐" }
+        }
+      }
+    }
+  }
+}
