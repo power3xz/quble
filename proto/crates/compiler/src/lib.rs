@@ -4,10 +4,12 @@
 
 mod ast;
 mod codegen;
+mod dts;
 mod lexer;
 mod parse;
 mod resolve;
 
+pub use dts::handlers_dts_file;
 pub use resolve::{ResolveError, Resolver};
 
 use std::path::Path;
