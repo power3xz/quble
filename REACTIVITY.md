@@ -9,6 +9,11 @@ Quble의 반응성·핸들러 모델. DESIGN.md §5.1(배열 요소 식별)·§5
 둘이 만나는 건 **렌더 시점**이므로, leafIndex 수치는 컴파일타임에 박을 수 없다. 컴파일타임
 산출물은 **offset + 바인딩 식**뿐이고, 실제 leafIndex는 렌더 시 할당기가 정한다.
 
+**실행은 단방향이다: event -> set -> render.** 값 변경(`set`)은 그 리프의 구독자(DOM)만 깨우고
+다른 로직을 촉발하지 않는다. 로직이 도는 유일한 진입점은 event(핸들러)다. 값 변경이 또 다른 값
+변경을 연쇄시키는 경로가 없어 실행이 예측 가능하다. props/store/get/set/context로 표면은 여럿이나
+실행 모델은 이 단선이다 - 이후 절들은 모두 이 한 방향의 표현이다.
+
 ## 1. pub/sub, 리프 = 토픽
 
 반응성의 단위는 **원시 리프값**(문자열·숫자·불리언)뿐이다. 객체·배열 자체는 **추적하지 않는다**
@@ -152,11 +157,19 @@ handler { "PrivateData.TOGGLE": (data) => privateData.visible = !data.isOn }
 반응성(§2 `set(leafIndex, v)`)에 닿는다.
 
 ```
-handler(data, { store, get, set }) {
-  get(store.a.b)        // 경로 -> leafIndex -> 현재 값
-  set(store.a.b, v)     // 경로 -> leafIndex -> set -> 구독자 -> DOM
+handler(data, { props, store, get, set }) {
+  get(props.isOn)       // 로컬 이름 -> leafIndex -> 현재 값
+  set(props.isOn, v)    // 로컬 이름 -> leafIndex -> set -> 구독자 -> DOM
+  set(store.a.b, v)     // 루트 경로 -> leafIndex -> ...
 }
 ```
+
+**props / store - 두 주소기.** 둘 다 leafIndex 주소기다(값이 아니라 `get`/`set`의 키). `props`는
+이 핸들러가 묶인 컴포넌트가 **받은 입력을 로컬 이름으로** 가리킨다 - 부모 트리 구조를 몰라도 되므로
+핸들러가 격리·재사용된다(컴포넌트가 자기 위치를 모르는 fullname 원리를 데이터로 확장한 것). `store`는
+루트(전체) 상태를 경로로 가리킨다. `props.isOn`을 set하면 use-site에서 연결된 상태가 실제로 바뀌고
+구독자가 갱신된다 - props는 읽기전용이 아니라 쓰기가 반응성에 닿는다. 값 변경이 다른 로직을 촉발하지
+않으므로(도입부 단방향) props 쓰기도 안전하다.
 
 **두 스텝으로 나눈다.**
 
@@ -191,8 +204,8 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
   지금 방식). 핸들러가 화면에 안 뿌리고 처음 건드리는 경로나 `@for` 항목은 런타임 발급이 필요할
   수 있다(동적). 이 구분은 leafIndex 할당기(ROADMAP - `@for`에서 회수)와 한 몸이다. **지금은
   정적만, 동적은 필요해질 때.** 런타임이 어느 index가 어느 종류인지 구분해야 할 수 있다.
-- **`store`가 가리키는 scope.** 핸들러는 fullname(트리 깊은 자식)에 묶이는데 `store`가 그 자식
-  것인지 루트(페이지) 것인지. §5.1(provided 구조)과 닿는 지점이라 여기서 확정하지 않는다.
+- **props 로컬 이름 -> 부모 leafIndex 연결.** `props.isOn`이 use-site에서 부모의 어느 상태로
+  이어지는지 - 그 바인딩을 렌더 시 어떻게 거는지. §5.1(provided 구조)과 닿는 지점이다.
 
 ## 8. `@if` = Region + 재진입 `interpret` + lazy build
 
