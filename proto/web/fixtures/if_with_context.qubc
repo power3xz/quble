@@ -1,0 +1,16 @@
+component IfWithContext {
+  props { cond, a, b }
+  contexts { Area { label: a } }
+  template {
+    div() {
+      @if (cond) {
+        @with Area {
+          p() { {a} }
+        }
+      }
+      @else {
+        p() { {b} }
+      }
+    }
+  }
+}

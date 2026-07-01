@@ -16,7 +16,7 @@ const { compile, createLeafStoreSubject } = await import("./runtime.js");
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb = {};
 before(() => {
-  for (const name of ["single_if", "nested_if", "no_else_if", "sibling_if", "triple_if", "composed_triple"]) {
+  for (const name of ["single_if", "nested_if", "no_else_if", "sibling_if", "triple_if", "composed_triple", "if_with_context"]) {
     qubb[name] = buildFixture(name);
   }
 });
@@ -153,6 +153,20 @@ test("3단 중첩: 최하단까지 렌더, 최상단 swap이 전부 detach", () 
   assert.deepEqual(texts(host), ["D"], "최상단 else(d) - 2·3단 통째 사라짐");
   set("c1", true);
   assert.deepEqual(texts(host), ["B"], "복귀 시 안쪽 상태(c3=false) 유지 → b");
+});
+
+// ── @if 가지 안의 @with ──────────────────────────────────────────────
+// 회귀: runtime.js operandLen에 ENTER/EXIT_CONTEXT가 빠져, @with를 품은 가지를 lazy build하며
+// 스캔할 때 "bad opcode 0x13"으로 죽었다. then(@with) 가지가 build·swap될 때 터지지 않아야 한다.
+test("@if 가지 안 @with: lazy build 시 context opcode를 건너뛴다", () => {
+  // 초기 else 활성 - then(@with 가지)은 미build 상태로 둔다.
+  const { host, set } = instantiate("if_with_context", ["cond", "a", "b"], { cond: false, a: "A", b: "B" });
+  assert.deepEqual(texts(host), ["B"], "초기 else(b)");
+  // then 활성화 → @with 가지 첫 build. 여기서 operandLen이 ENTER/EXIT_CONTEXT를 넘겨야 한다.
+  set("cond", true);
+  assert.deepEqual(texts(host), ["A"], "@with 품은 then 가지가 bad opcode 없이 렌더");
+  set("cond", false);
+  assert.deepEqual(texts(host), ["B"], "다시 else로 swap");
 });
 
 // ── 컴포넌트 합성 ─────────────────────────────────────────────────────
