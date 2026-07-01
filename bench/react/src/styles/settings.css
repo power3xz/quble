@@ -1,0 +1,203 @@
+/* 설정 패널 - SettingsPanel > Section > SettingRow. BEM. */
+
+.panel {
+  max-width: 640px;
+  margin: 32px auto;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(17, 24, 39, 0.06);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #111827;
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.panel__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel__saved {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.panel__premium {
+  margin-top: 16px;
+  padding: 16px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-radius: 12px;
+}
+
+.panel__premium-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.panel__premium-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #92400e;
+}
+
+.panel__foot {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #f3f4f6;
+  text-align: center;
+}
+
+.section {
+  margin-top: 12px;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+  background: #fafafa;
+}
+
+.section__head:hover {
+  background: #f3f4f6;
+}
+
+.section__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section__chevron {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.section__chevron--open {
+  color: #2563eb;
+}
+
+.section__body {
+  padding: 4px 16px 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row__label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.row__desc {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.row__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.switch {
+  min-width: 56px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.switch--on {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.switch--off {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+
+.btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn--primary {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: #6b7280;
+}
+
+.btn--link {
+  display: inline-block;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.badge--on {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.badge--pro {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  background: #92400e;
+  color: #fef3c7;
+}
