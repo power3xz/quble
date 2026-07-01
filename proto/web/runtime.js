@@ -115,6 +115,7 @@ const operandLen = (op) => {
     case OP.ELEM_END:
     case OP.ELSE:
     case OP.IF_END:
+    case OP.EXIT_CONTEXT:
       return 0;
     case OP.ELEM_OPEN:
     case OP.TEXT:
@@ -125,6 +126,7 @@ const operandLen = (op) => {
     case OP.PUSH_PATH_SEGMENT:
     case OP.IF:
     case OP.LOAD_RES:
+    case OP.ENTER_CONTEXT:
       return 2;
     case OP.ATTR_G:
     case OP.ATTR_L:
