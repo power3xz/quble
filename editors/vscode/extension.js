@@ -12,19 +12,25 @@ const { execFileSync } = require("node:child_process");
 const COMPILER_REL = "proto/target/debug/quble-bytecode";
 const DISASM_REL = "proto/web/disasm.js";
 
-/** 짝 .qubc -> `x.qubc.d.ts`를 생성/갱신한다. 컴파일/디코드 실패는 무시(소스가 미완성일 수 있음). */
+// 진단용 출력 채널 - "출력" 패널에서 Quble 선택. 실패 원인을 여기에 찍는다.
+const log = vscode.window.createOutputChannel("Quble");
+
+/** 짝 .qubc -> `x.qubc.d.ts`를 생성/갱신한다. 컴파일/디코드 실패는 로그로 남긴다(소스가 미완성일 수 있음). */
 const writeDts = async (qubcPath) => {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
+    log.appendLine("workspaceFolders 없음 - 워크스페이스로 폴더를 열었는지 확인");
     return;
   }
+  const compiler = path.join(root, COMPILER_REL);
+  const disasm = path.join(root, DISASM_REL);
   try {
-    const qubb = execFileSync(path.join(root, COMPILER_REL), [qubcPath]);
-    const { inspect, handlersDts } = await import(path.join(root, DISASM_REL));
+    const qubb = execFileSync(compiler, [qubcPath]);
+    const { inspect, handlersDts } = await import(disasm);
     const { module } = inspect(qubb);
     fs.writeFileSync(qubcPath + ".d.ts", handlersDts(module, 0));
-  } catch {
-    // 미완성 소스 등 - 조용히 넘긴다(다음 저장 때 다시 시도).
+  } catch (e) {
+    log.appendLine(`${qubcPath}: ${e && e.message ? e.message : e}`);
   }
 };
 
