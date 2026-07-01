@@ -172,11 +172,11 @@
     // 서버 적재 컴포넌트(select)를 연다 — /components/<name>.qubb + /resmap/<name>.
     const loadByName = (name) => loadQubb("/components/" + name + ".qubb", "/resmap/" + name);
 
-    // 임의 qubb URL을 연다. resmap은 같은 경로에서 확장자만 바꾼다(우리 산출물 규칙):
-    // ".../card.qubb" -> ".../card.resmap.json". (다른 확장자면 뒤에 그냥 붙인다.)
+    // 임의 qubb URL을 연다. manifest는 같은 경로에서 확장자만 바꾼다(우리 산출물 규칙):
+    // ".../card.qubb" -> ".../card.manifest.json". (다른 확장자면 뒤에 그냥 붙인다.)
     const loadByUrl = (qubbUrl) => {
-      const resmapUrl = qubbUrl.replace(/\.qubb$/, "") + ".resmap.json";
-      return loadQubb(qubbUrl, resmapUrl);
+      const manifestUrl = qubbUrl.replace(/\.qubb$/, "") + ".manifest.json";
+      return loadQubb(qubbUrl, manifestUrl);
     };
 
     // qubbUrl·resmapUrl로 fetch해 디코드하고, 안에 든 컴포넌트들을 목록으로 그린다.
@@ -189,7 +189,10 @@
       // 리소스맵(resId -> 경로)을 받는다. 표시·디컴파일엔 원본 경로(`res/...`)를 그대로 쓰고,
       // runtime <link>·fetch엔 qubb URL을 base로 절대화한 것을 쓴다 — custom url로 로드한 경우
       // 리소스도 그 origin에서 받아와야 하기 때문.
-      currentResmap = await fetch(resmapUrl).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+      // 두 경로가 형태가 다르다: bench-server /resmap/은 배열, dist manifest.json은 { resources }.
+      // 배열이면 그대로, manifest 객체면 resources를 꺼내 resId 배열로 정규화한다.
+      const loaded = await fetch(resmapUrl).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+      currentResmap = Array.isArray(loaded) ? loaded : (loaded.resources ?? []);
       const qubbBase = new URL(qubbUrl, location.href);
       currentResolvedResmap = currentResmap.map((path) => new URL(path, qubbBase).href);
       blueprintOf = compile(bytes, currentResolvedResmap);

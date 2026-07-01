@@ -30,22 +30,40 @@ pub fn asset_path(origin: &Path, content: &[u8]) -> String {
 
 /// 문자열 배열을 JSON 배열 문자열로(의존 없이 직접 조립). 따옴표·백슬래시만 이스케이프 -
 /// 경로엔 제어문자가 없다고 본다.
+/// 문자열 하나를 JSON 문자열 리터럴(`"..."`)로. `"`·`\`만 이스케이프(경로엔 이 둘이면 충분).
+fn json_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in s.chars() {
+        if ch == '"' || ch == '\\' {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.push('"');
+    out
+}
+
 pub fn json_array(items: &[String]) -> String {
     let mut out = String::from("[");
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
-        out.push('"');
-        for ch in item.chars() {
-            if ch == '"' || ch == '\\' {
-                out.push('\\');
-            }
-            out.push(ch);
-        }
-        out.push('"');
+        out.push_str(&json_string(item));
     }
     out.push(']');
+    out
+}
+
+/// 루트 컴포넌트 실행 명세(manifest) JSON. `resources`는 LOAD_RES가 인덱스로 참조하는 CSS 경로.
+/// `handlers`는 짝 핸들러 JS 경로 - 없으면 필드를 생략한다(바이트 절약).
+pub fn manifest_json(resources: &[String], handlers: Option<&str>) -> String {
+    let mut out = format!("{{\"resources\":{}", json_array(resources));
+    if let Some(h) = handlers {
+        out.push_str(",\"handlers\":");
+        out.push_str(&json_string(h));
+    }
+    out.push('}');
     out
 }
 
@@ -77,6 +95,20 @@ pub fn render_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// manifest: 핸들러 없으면 resources만, 있으면 handlers 필드 추가.
+    #[test]
+    fn manifest_omits_handlers_when_none() {
+        let res = vec!["res/a.css".to_string(), "res/b.css".to_string()];
+        assert_eq!(
+            manifest_json(&res, None),
+            r#"{"resources":["res/a.css","res/b.css"]}"#
+        );
+        assert_eq!(
+            manifest_json(&res, Some("res/x.handlers.js")),
+            r#"{"resources":["res/a.css","res/b.css"],"handlers":"res/x.handlers.js"}"#
+        );
+    }
 
     /// 합성 end-to-end: 부모(Card)가 자식(Label)을 호출하며 자기 scope의 값을 바인딩한다.
     /// Label(text={title}) - title은 부모 offset1. 자식은 그 값을 받아 출력.

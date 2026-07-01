@@ -376,7 +376,7 @@ const decompileBody = (module, def) => {
 // @param compId 컴포넌트 def 인덱스
 // @param resmap (선택) resId -> href. 있으면 use에 실제 href를, 없으면 res<id> placeholder를 낸다.
 // @returns      qubc 소스 문자열
-export const decompileComponent = (module, compId, resmap = []) => {
+export const decompileComponent = (module, compId, resources = []) => {
   const def = module.defs[compId];
   if (!def) {
     throw new Error("bad component " + compId);
@@ -385,10 +385,10 @@ export const decompileComponent = (module, compId, resmap = []) => {
   const { lines, maxArg, uses, resIds } = decompileBody(module, def);
 
   const out = [];
-  // 리소스 use. resmap이 있으면 href로, 없으면 resId placeholder(경로는 qubb에 없음).
+  // 리소스 use. resources(manifest.resources)가 있으면 href로, 없으면 resId placeholder(경로는 qubb에 없음).
   // 컴포넌트 import보다 위에 둔다.
   for (const resId of resIds) {
-    const href = resmap[resId];
+    const href = resources[resId];
     out.push('use "' + (href !== undefined ? href : "res" + resId) + '"');
   }
   for (const childName of uses) {

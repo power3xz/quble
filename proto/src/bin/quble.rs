@@ -33,9 +33,10 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // 리소스를 dist/res/로 복사(해시 파일명)하고, resId -> 산출 상대경로 사이드맵을 JSON 배열로 낸다.
-    // 산출물이 자립적이도록 CSS 파일도 함께 둔다. URL prefix(CDN 등)는 이후 빌드/배포가 붙인다
-    // (BYTECODE.md §5 LOAD_RES 메모). 리소스가 없으면 res/도 resmap도 만들지 않는다.
+    // 리소스를 dist/res/로 복사(해시 파일명)하고, 루트 실행 명세(manifest)를 낸다. resources는
+    // resId -> 산출 상대경로. 산출물이 자립적이도록 CSS 파일도 함께 둔다. URL prefix(CDN 등)는
+    // 이후 빌드/배포가 붙인다(BYTECODE.md §5 LOAD_RES 메모). 핸들러(짝 .qubc.handlers.ts) 트랜스파일은
+    // 빌드 파이프라인의 몫 - 여기선 아직 CSS 리소스가 있을 때만 manifest를 낸다.
     if !output.resources.is_empty() {
         let emitted = match emit_resources(out_dir, &output.resources) {
             Ok(paths) => paths,
@@ -44,12 +45,12 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        let resmap_path = out_dir.join(format!("{name}.resmap.json"));
-        if let Err(e) = std::fs::write(&resmap_path, quble::json_array(&emitted)) {
-            eprintln!("리소스맵 쓰기 실패 {}: {e}", resmap_path.display());
+        let manifest_path = out_dir.join(format!("{name}.manifest.json"));
+        if let Err(e) = std::fs::write(&manifest_path, quble::manifest_json(&emitted, None)) {
+            eprintln!("manifest 쓰기 실패 {}: {e}", manifest_path.display());
             return ExitCode::FAILURE;
         }
-        println!("{} ({} resources)", resmap_path.display(), emitted.len());
+        println!("{} ({} resources)", manifest_path.display(), emitted.len());
     }
 
     println!("{} ({} bytes)", out_path.display(), bytes.len());
