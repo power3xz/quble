@@ -41,6 +41,10 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [ ] 데이터 흐름 - provided/props, 반응성. 다른 피처의 전제. 모델: [REACTIVITY.md](REACTIVITY.md) (leafIndex·fullname으로 §5.1·§5.2·events를 꿴 결론).
   - [x] props 변수 보간 - 텍스트(`{name}` -> `TEXT_VAR`)·속성(`class={x}` -> `ATTR_*_VAR`). 같은 scope offset 공간.
   - [x] 반응성 (값 변경 시 DOM 갱신) - pub/sub, `set(leafIndex, v)`, 구독자=함수, Proxy 없음. 텍스트·속성·공유 검증.
+  - [ ] 타입 표기 - props/payload가 스칼라를 넘어 객체·배열을 담으려면 그 형태를 적을
+    타입 표기가 필요하다. `{expr}`(필드 접근·경로)과 `props 객체`의 공통 전제 - 값의 형태를
+    알아야 접근할 수 있다. 최종적으로는 보간·합성에서의 타입 검사까지. 전제 미결: props에
+    타입 단서가 없고(IDEAS.md), qubb 포맷에 타입을 싣는지. 방법 미정.
   - [ ] props 객체 (여러 필드 - store 객체를 path로 lazy resolve, 부분 적용)
   - [ ] leafIndex 할당기 / free list (지금은 증가만 - `@for`에서 회수 필요)
 
