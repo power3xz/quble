@@ -144,6 +144,53 @@ handler { "PrivateData.TOGGLE": (data) => privateData.visible = !data.isOn }
   브라우저가 보는 건 페이지 컴포넌트이고 거기서 로직이 처리된다.
 - 데이터 변경은 `set(leafIndex, v)`, 식별은 fullname + leafIndex.
 
+## 7.1. 핸들러 실행 계약 - store 경로로 상태를 읽고 쓴다
+
+핸들러가 실제로 실행되려면 몸통에서 상태를 읽고 써야 한다. 상태 접근은 **store 경로**로 한다:
+핸들러가 받는 `store`는 값을 담은 객체가 아니라 **경로를 leafIndex로 해석하는 주소기**다.
+`store.a.b`를 언급하면 그 경로에 대응하는 leafIndex가 정해지고, `get`/`set`이 그 index로
+반응성(§2 `set(leafIndex, v)`)에 닿는다.
+
+```
+handler(data, { store, get, set }) {
+  get(store.a.b)        // 경로 -> leafIndex -> 현재 값
+  set(store.a.b, v)     // 경로 -> leafIndex -> set -> 구독자 -> DOM
+}
+```
+
+**두 스텝으로 나눈다.**
+
+- **스텝 1 (지금) - 명시적 get/set, 핸들러는 순수 JS.** `.qubc.handlers.ts`에 TS로 쓰되
+  `get(store.a.b)`/`set(store.a.b, v)`처럼 함수 호출로 접근한다. `store`는 런타임 주소기
+  (경로 -> leafIndex). 핸들러 몸통은 그냥 JS라 컴파일러가 **분석하지 않고 트랜스파일만** 해
+  리소스화하고, 런타임이 fullname으로 물려 실행한다.
+- **스텝 2 (최종, qubh) - 자연 대입.** 핸들러 전용 파일에서 `store.a.b = v`처럼 직접 대입하면
+  컴파일러가 이를 `set($i, v)`로 낮춘다(대입을 set 호출로 변환하므로 이때는 몸통을 분석한다).
+  스텝 1의 런타임 주소기가 그대로 기반이 되고, qubh는 그 위의 문법 층이다.
+
+**왜 proxy를 반응성 엔진으로 쓰지 않나.** store 주소기는 hot path에 없다. 값이 바뀌고 구독자가
+DOM을 갱신하는 반응성 루프는 leafIndex(정수) 기반 pub/sub이고 proxy가 끼지 않는다. 주소기는
+핸들러가 경로를 지목하는 순간 경로 -> index 해석에만 쓰이고(이벤트당 저빈도), 스텝 2에선 그마저
+컴파일타임에 `$i`로 낮춰져 사라진다. 값 흐름(빠른 index)과 주소 지정(저빈도 주소기)을 갈라 둔 것이다.
+
+**store 경로는 키별 타입을 실는다.** `store.title`은 string, `store.isOn`은 boolean -
+`store: string | boolean`으로 뭉치지 않고 **키마다 정확한 타입**이어야 `set(store.isOn, "x")`가
+에러로 잡힌다. `get(k)`가 내주는 값·`set(k, v)`가 받는 값이 그 키의 타입으로 강제된다. 지금
+범위는 스칼라(string·boolean) - props/payload가 스칼라뿐이므로 컴파일러가 키별 타입을 이미 안다.
+중첩·객체 경로(`store.a.b`)는 타입 표기(ROADMAP)가 온 뒤다. `store` 타입은 `handlersDts`가
+payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**한다(새 메커니즘 아님).
+
+**미결.**
+
+- **경로 -> leafIndex 결정론.** SSR이 그린 것을 클라가 이어받으려면 같은 경로가 SSR·클라에서
+  같은 index여야 한다. §3의 렌더 시 할당 규칙을 핸들러가 지목하는 경로에도 일관되게 적용해야 한다.
+- **정적 / 동적 leafIndex 구분.** 보간·props에 나오는 상태는 컴파일타임에 index가 정해진다(정적,
+  지금 방식). 핸들러가 화면에 안 뿌리고 처음 건드리는 경로나 `@for` 항목은 런타임 발급이 필요할
+  수 있다(동적). 이 구분은 leafIndex 할당기(ROADMAP - `@for`에서 회수)와 한 몸이다. **지금은
+  정적만, 동적은 필요해질 때.** 런타임이 어느 index가 어느 종류인지 구분해야 할 수 있다.
+- **`store`가 가리키는 scope.** 핸들러는 fullname(트리 깊은 자식)에 묶이는데 `store`가 그 자식
+  것인지 루트(페이지) 것인지. §5.1(provided 구조)과 닿는 지점이라 여기서 확정하지 않는다.
+
 ## 8. `@if` = Region + 재진입 `interpret` + lazy build
 
 클라 런타임에서 `@if`는 한 자리(**Region**)에서 두 가지(then/else) 중 하나만 보인다. @if의 본질은
