@@ -50,7 +50,10 @@ fn main() -> ExitCode {
         }
     };
     let manifest_path = out_dir.join(format!("{name}.manifest.json"));
-    if let Err(e) = std::fs::write(&manifest_path, quble::manifest_json(&emitted, None)) {
+    if let Err(e) = std::fs::write(
+        &manifest_path,
+        quble::manifest_json(&emitted, &output.props, None),
+    ) {
         eprintln!("manifest 쓰기 실패 {}: {e}", manifest_path.display());
         return ExitCode::FAILURE;
     }

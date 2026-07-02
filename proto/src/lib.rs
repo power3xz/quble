@@ -56,9 +56,14 @@ pub fn json_array(items: &[String]) -> String {
 }
 
 /// 루트 컴포넌트 실행 명세(manifest) JSON. `resources`는 LOAD_RES가 인덱스로 참조하는 CSS 경로.
+/// `props`는 루트 props 이름(선언 순서 = scope index) - mount가 이름 data를 index에 매핑한다.
 /// `handlers`는 짝 핸들러 JS 경로 - 없으면 필드를 생략한다(바이트 절약).
-pub fn manifest_json(resources: &[String], handlers: Option<&str>) -> String {
-    let mut out = format!("{{\"resources\":{}", json_array(resources));
+pub fn manifest_json(resources: &[String], props: &[String], handlers: Option<&str>) -> String {
+    let mut out = format!(
+        "{{\"resources\":{},\"props\":{}",
+        json_array(resources),
+        json_array(props)
+    );
     if let Some(h) = handlers {
         out.push_str(",\"handlers\":");
         out.push_str(&json_string(h));
@@ -96,17 +101,18 @@ pub fn render_with(
 mod tests {
     use super::*;
 
-    /// manifest: 핸들러 없으면 resources만, 있으면 handlers 필드 추가.
+    /// manifest: resources·props는 항상, handlers는 없으면 생략.
     #[test]
     fn manifest_omits_handlers_when_none() {
         let res = vec!["res/a.css".to_string(), "res/b.css".to_string()];
+        let props = vec!["heading".to_string(), "title".to_string()];
         assert_eq!(
-            manifest_json(&res, None),
-            r#"{"resources":["res/a.css","res/b.css"]}"#
+            manifest_json(&res, &props, None),
+            r#"{"resources":["res/a.css","res/b.css"],"props":["heading","title"]}"#
         );
         assert_eq!(
-            manifest_json(&res, Some("res/x.handlers.js")),
-            r#"{"resources":["res/a.css","res/b.css"],"handlers":"res/x.handlers.js"}"#
+            manifest_json(&res, &props, Some("res/x.handlers.js")),
+            r#"{"resources":["res/a.css","res/b.css"],"props":["heading","title"],"handlers":"res/x.handlers.js"}"#
         );
     }
 
