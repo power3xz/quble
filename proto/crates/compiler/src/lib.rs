@@ -26,6 +26,9 @@ pub struct CompileOutput {
     pub bytecode: Box<[u8]>,
     /// 인덱스 = 모듈 전역 resId, 값 = 리소스 정규화 경로.
     pub resources: Vec<String>,
+    /// 루트(comp 0) props 이름, 선언 순서 = scope 인덱스. manifest로 실어 mount가
+    /// 이름 data({heading, title})를 scope index에 매핑한다. 지금은 flat(string/bool 전제).
+    pub props: Vec<String>,
 }
 
 /// 엔트리 소스를 직렬화된 바이트코드로 컴파일. use 그래프를 resolver로 따라가
@@ -37,8 +40,13 @@ pub fn compile_src(
     resolver: &impl Resolver,
 ) -> Result<CompileOutput, CompileError> {
     let comps = resolve::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
+    let props = comps[0].comp.props.clone();
     let (bytecode, resources) = codegen::generate(&comps).map_err(CompileError::Codegen)?;
-    Ok(CompileOutput { bytecode, resources })
+    Ok(CompileOutput {
+        bytecode,
+        resources,
+        props,
+    })
 }
 
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를

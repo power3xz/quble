@@ -23,8 +23,10 @@ const RUNTIME_JS: &str = "../../proto/web/runtime.js";
 const REGION_JS: &str = "../../proto/web/region.js";
 const LEAF_STORE_JS: &str = "../../proto/web/leaf-store.js";
 const DISASM_JS: &str = "../../proto/web/disasm.js";
+const MOUNT_JS: &str = "../../proto/web/mount.js";
 const REACT_DIST: &str = "../react/dist";
 const SVELTE_DIST: &str = "../svelte/dist";
+const QUBB_DIST: &str = "../dist";
 
 fn main() {
     let loaded = build_components();
@@ -59,6 +61,11 @@ fn main() {
             }
         } else if path == "/disasm.js" {
             match fs::read(DISASM_JS) {
+                Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
+                Err(_) => not_found(req),
+            }
+        } else if path == "/mount.js" {
+            match fs::read(MOUNT_JS) {
                 Ok(b) => respond(req, b, "text/javascript; charset=utf-8"),
                 Err(_) => not_found(req),
             }
@@ -147,6 +154,10 @@ fn main() {
                 boot_page("/svelte/assets/_boot.js", name).into_bytes(),
                 "text/html; charset=utf-8",
             );
+        } else if path.starts_with("/dist/") {
+            // build.mjs 산출물(qubb + manifest.json + res/*handlers.js)을 그대로 서빙.
+            // inspector URL 입력에 /dist/<name>.qubb를 넣으면 manifest.handlers까지 로드된다.
+            serve_qubb_dist(req, &path);
         } else if path.starts_with("/img/") {
             // 예제 상품 이미지는 전부 플레이스홀더 한 장으로.
             serve_public(req, "placeholder.svg");
@@ -371,6 +382,32 @@ fn serve_svelte_asset(req: Request, url: &str) {
             respond(req, bytes, ct);
         }
         Err(_) => server_error_status(req, "svelte asset not found (빌드했나요?)", 404),
+    }
+}
+
+/// build.mjs 산출물(../dist)을 /dist/ 아래로 서빙. qubb·manifest.json·핸들러 JS·CSS를 그대로.
+/// inspector가 /dist/<name>.qubb를 열면 manifest.handlers까지 로드해 실제 핸들러를 확인할 수 있다.
+fn serve_qubb_dist(req: Request, url: &str) {
+    let rel = url.trim_start_matches("/dist/");
+    if rel.contains("..") {
+        let _ = req.respond(Response::from_string("bad path").with_status_code(400));
+        return;
+    }
+    let path = format!("{QUBB_DIST}/{rel}");
+    match fs::read(&path) {
+        Ok(bytes) => {
+            let ct = if rel.ends_with(".js") {
+                "text/javascript; charset=utf-8"
+            } else if rel.ends_with(".json") {
+                "application/json; charset=utf-8"
+            } else if rel.ends_with(".css") {
+                "text/css; charset=utf-8"
+            } else {
+                "application/octet-stream"
+            };
+            respond(req, bytes, ct);
+        }
+        Err(_) => server_error_status(req, "dist asset not found (build.mjs 돌렸나요?)", 404),
     }
 }
 

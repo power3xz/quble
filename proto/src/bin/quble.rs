@@ -36,22 +36,28 @@ fn main() -> ExitCode {
     // 리소스를 dist/res/로 복사(해시 파일명)하고, 루트 실행 명세(manifest)를 낸다. resources는
     // resId -> 산출 상대경로. 산출물이 자립적이도록 CSS 파일도 함께 둔다. URL prefix(CDN 등)는
     // 이후 빌드/배포가 붙인다(BYTECODE.md §5 LOAD_RES 메모). 핸들러(짝 .qubc.handlers.ts) 트랜스파일은
-    // 빌드 파이프라인의 몫 - 여기선 아직 CSS 리소스가 있을 때만 manifest를 낸다.
-    if !output.resources.is_empty() {
-        let emitted = match emit_resources(out_dir, &output.resources) {
+    // esbuild 위임 빌드 스크립트의 몫 - 그 스크립트가 이 manifest를 읽어 handlers 필드를 덧쓴다.
+    // 리소스가 없어도 manifest는 항상 낸다({"resources":[]}) - 스크립트가 늘 읽을 파일이 있도록.
+    let emitted = if output.resources.is_empty() {
+        Vec::new()
+    } else {
+        match emit_resources(out_dir, &output.resources) {
             Ok(paths) => paths,
             Err(e) => {
                 eprintln!("리소스 복사 실패: {e}");
                 return ExitCode::FAILURE;
             }
-        };
-        let manifest_path = out_dir.join(format!("{name}.manifest.json"));
-        if let Err(e) = std::fs::write(&manifest_path, quble::manifest_json(&emitted, None)) {
-            eprintln!("manifest 쓰기 실패 {}: {e}", manifest_path.display());
-            return ExitCode::FAILURE;
         }
-        println!("{} ({} resources)", manifest_path.display(), emitted.len());
+    };
+    let manifest_path = out_dir.join(format!("{name}.manifest.json"));
+    if let Err(e) = std::fs::write(
+        &manifest_path,
+        quble::manifest_json(&emitted, &output.props, None),
+    ) {
+        eprintln!("manifest 쓰기 실패 {}: {e}", manifest_path.display());
+        return ExitCode::FAILURE;
     }
+    println!("{} ({} resources)", manifest_path.display(), emitted.len());
 
     println!("{} ({} bytes)", out_path.display(), bytes.len());
     ExitCode::SUCCESS

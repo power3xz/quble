@@ -1,25 +1,25 @@
 import SettingsPanel from "../SettingsPanel.jsx";
 
-// 자기완결 뷰 — 데이터를 들고 props 받는 SettingsPanel을 렌더. (Svelte SettingsPanel.svelte와 동일 데이터)
+// 자기완결 뷰 - settingspanel.data.json(quble)과 동일 데이터. Section title은 quble에서 리터럴이고
+// aLabel/bLabel 등은 gen*/priv*/pro* props에 대응한다.
 const data = {
   heading: "설정",
-  dirty: true,
   plan: "PRO",
-  docsLink: "/docs",
+  docsLink: "#",
   general: {
-    title: "일반", open: true,
-    aLabel: "다크 모드", aDesc: "어두운 테마를 사용합니다", aBadge: "ON", aEnabled: true,
-    bLabel: "자동 저장", bDesc: "변경 사항을 자동으로 저장합니다", bBadge: "ON", bEnabled: false,
+    title: "일반",
+    aLabel: "알림", aDesc: "푸시 알림 받기", aBadge: "새 기능",
+    bLabel: "소리", bDesc: "효과음 재생", bBadge: "기본",
   },
   privacy: {
-    title: "개인정보", open: true,
-    aLabel: "활동 표시", aDesc: "다른 사용자에게 활동을 공개합니다", aBadge: "공개", aEnabled: false,
-    bLabel: "검색 허용", bDesc: "검색 결과에 프로필을 노출합니다", bBadge: "ON", bEnabled: true,
+    title: "개인정보",
+    aLabel: "위치", aDesc: "위치 공유", aBadge: "권장",
+    bLabel: "추적", bDesc: "활동 기록", bBadge: "주의",
   },
   premium: {
-    title: "프리미엄 기능", open: false,
-    aLabel: "우선 지원", aDesc: "24시간 우선 응대를 받습니다", aBadge: "PRO", aEnabled: true,
-    bLabel: "고급 분석", bDesc: "상세 통계 대시보드를 엽니다", bBadge: "PRO", bEnabled: true,
+    title: "프리미엄 기능",
+    aLabel: "고급 분석", aDesc: "상세 리포트", aBadge: "PRO",
+    bLabel: "우선 지원", bDesc: "빠른 응답", bBadge: "PRO",
   },
 };
 

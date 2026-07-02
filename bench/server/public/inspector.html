@@ -80,6 +80,7 @@
   <script type="module">
     import { inspect, decompileComponent, componentArgs, collectEventFullnames } from "/disasm.js";
     import { compile, createLeafStoreSubject } from "/runtime.js";
+    import { loadHandlers } from "/mount.js";
 
     const qubbSelect = document.getElementById("qubb");
     const urlInput = document.getElementById("url");
@@ -168,6 +169,7 @@
     let leafOf = {}; // argName -> leafIndex. set 대상(string·bool만 의미 있음).
     let currentResmap = []; // 현재 qubb의 resId -> 원본 경로(res/...). 디컴파일 use·사이드바 표시용.
     let currentResolvedResmap = []; // resId -> qubb origin 기준 절대 URL. runtime <link>·fetch용.
+    let realHandlers = {}; // manifest.handlers에서 로드한 실제 핸들러 맵(없으면 {}). 실행 모드에서 쓴다.
 
     // 서버 적재 컴포넌트(select)를 연다 — /components/<name>.qubb + /resmap/<name>.
     const loadByName = (name) => loadQubb("/components/" + name + ".qubb", "/resmap/" + name);
@@ -195,6 +197,9 @@
       currentResmap = Array.isArray(loaded) ? loaded : (loaded.resources ?? []);
       const qubbBase = new URL(qubbUrl, location.href);
       currentResolvedResmap = currentResmap.map((path) => new URL(path, qubbBase).href);
+      // manifest에 handlers가 있으면(dist 산출물) 실제 핸들러를 로드한다. bench-server /resmap/은
+      // 배열이라 handlers가 없어 {}로 폴백 - 그 경우 프리뷰는 로그 핸들러만 쓴다.
+      realHandlers = await loadHandlers(loaded, qubbBase).catch(() => ({}));
       blueprintOf = compile(bytes, currentResolvedResmap);
       meta.textContent = `${result.components.length}개 컴포넌트 · ${module.pool.length} pool · ${bytes.length} bytes`;
       renderPool(module.pool, module.poolBytes);
@@ -413,12 +418,18 @@
       log.scrollTop = log.scrollHeight; // 최신 줄이 보이게 바닥으로
     };
 
-    // 루트 컴포넌트에서 합성 트리를 걸어 발사 가능한 fullname마다 로그 핸들러를 건다. runtime이
+    // 루트 컴포넌트에서 합성 트리를 걸어 발사 가능한 fullname마다 핸들러를 건다. runtime이
     // 이벤트를 fullname("Toggle.TOGGLE")으로 디스패치하므로 핸들러도 fullname으로 걸어야 잡힌다.
-    const buildLogHandlers = (compId) => {
+    // 모든 fullname은 로그를 찍고, manifest에 실제 핸들러가 있는 fullname은 로그에 이어 실행도 한다
+    // - inspector가 이벤트 관찰과 실제 동작을 동시에 확인하는 도구가 되게.
+    const buildHandlers = (compId) => {
       const handlers = {};
       for (const event of collectEventFullnames(module, compId)) {
-        handlers[event.fullname] = (data, { context }) => logEvent(event.fullname, data, context);
+        const real = realHandlers[event.fullname];
+        handlers[event.fullname] = (data, api) => {
+          logEvent(event.fullname, data, api.context);
+          real?.(data, api);
+        };
       }
       return handlers;
     };
@@ -434,12 +445,24 @@
         paths.push(arg.name);
       }
       ctx = createLeafStoreSubject(values);
-      const inst = blueprintOf(compId)(ctx, paths, buildLogHandlers(compId));
+      const inst = blueprintOf(compId)(ctx, paths, buildHandlers(compId));
       stage.replaceChildren(...inst.nodes);
       // 인스턴스화 중 쓰인 arg는 pathCache에 leafIndex가 잡혔다. resolve로 그 인덱스를 받아둔다.
       leafOf = {};
       for (const arg of currentArgs) {
-        leafOf[arg.name] = ctx.leafOf(arg.name);
+        const leaf = ctx.leafOf(arg.name);
+        leafOf[arg.name] = leaf;
+        // 핸들러가 set으로 leaf를 바꾸면 속성 패널 input에도 되쓴다 - 버튼 클릭이 패널에 반영되게.
+        const input = argsBox.querySelector(`[data-arg="${arg.name}"]`);
+        if (input) {
+          ctx.subscribe(leaf, (v) => {
+            if (arg.type === "bool") {
+              input.checked = !!v;
+            } else {
+              input.value = v;
+            }
+          });
+        }
       }
     };
 
