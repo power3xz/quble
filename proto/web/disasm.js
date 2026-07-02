@@ -65,6 +65,9 @@ class Reader {
     this.pos += n;
     return s;
   }
+  u8() {
+    return this.take(1)[0];
+  }
   u16() {
     const s = this.take(2);
     return s[0] | (s[1] << 8);
@@ -73,9 +76,27 @@ class Reader {
     const s = this.take(4);
     return (s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24)) >>> 0;
   }
+  f64() {
+    const s = this.take(8);
+    return new DataView(s.buffer, s.byteOffset, 8).getFloat64(0, true);
+  }
   str() {
     const len = this.u16();
     return new TextDecoder().decode(this.take(len));
+  }
+  // 상수풀 엔트리: 태그 1바이트 + payload(Rust put_const의 역). runtime.js와 같은 규칙.
+  constant() {
+    const tag = this.u8();
+    if (tag === 0) {
+      return this.str();
+    }
+    if (tag === 1) {
+      return this.f64();
+    }
+    if (tag === 2) {
+      return this.u8() !== 0;
+    }
+    throw new Error("bad const tag " + tag);
   }
 }
 
@@ -117,9 +138,9 @@ const decode = (bytes) => {
   const poolStart = r.pos; // count 헤더 직후 - 풀 항목들의 직렬화 바이트 시작
   const pool = [];
   for (let i = 0; i < poolCount; i++) {
-    pool.push(r.str());
+    pool.push(r.constant());
   }
-  const poolBytes = r.pos - poolStart; // 항목들(각 u16 길이 + UTF-8)의 총 바이트
+  const poolBytes = r.pos - poolStart; // 항목들(각 태그 + 타입별 payload)의 총 바이트
 
   const defCount = r.u16();
   const defs = [];

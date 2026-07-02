@@ -1,5 +1,5 @@
 component C {
-  props { count }
+  props { count: string }
   events { BUMP({ count, label: "clicks" }) }
   template {
     button(@click:BUMP) { "x" }

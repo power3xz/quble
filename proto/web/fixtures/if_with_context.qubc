@@ -1,5 +1,5 @@
 component IfWithContext {
-  props { cond, a, b }
+  props { cond: bool, a: string, b: string }
   contexts { Area { label: a } }
   template {
     div() {

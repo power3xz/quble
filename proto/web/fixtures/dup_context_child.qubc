@@ -1,5 +1,5 @@
 component Child {
-  props { userId }
+  props { userId: string }
   contexts { Area { tier: "gold", userId: userId } }
   events { TOGGLE({ userId }) }
   template {

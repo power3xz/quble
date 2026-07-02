@@ -1,5 +1,5 @@
 component InnerPair {
-  props { c2, c3, a, b, c }
+  props { c2: bool, c3: bool, a: string, b: string, c: string }
   template {
     @if (c2) {
       @if (c3) {

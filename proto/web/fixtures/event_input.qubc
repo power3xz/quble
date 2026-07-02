@@ -1,5 +1,5 @@
 component Field {
-  props { value }
+  props { value: string }
   events { EDIT({ value }) }
   template {
     input(@input:EDIT) { {value} }

@@ -1,5 +1,5 @@
 component C {
-  props { userId }
+  props { userId: string }
   contexts {
     Outer { area: "outer", userId: userId }
     Inner { area: "inner", tier: "gold" }

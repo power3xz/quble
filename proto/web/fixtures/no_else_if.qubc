@@ -1,5 +1,5 @@
 component NoElseIf {
-  props { cond, a }
+  props { cond: bool, a: string }
   template {
     div() {
       @if (cond) {

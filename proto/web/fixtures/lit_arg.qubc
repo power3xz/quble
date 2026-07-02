@@ -8,6 +8,6 @@ component LitArg {
 }
 
 component Label {
-  props { text }
+  props { text: string }
   template { span() { {text} } }
 }

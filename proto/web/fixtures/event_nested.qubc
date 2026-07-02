@@ -1,5 +1,5 @@
 component Nested {
-  props { label }
+  props { label: string }
   events {
     OUTER({ label })
     INNER({ label })

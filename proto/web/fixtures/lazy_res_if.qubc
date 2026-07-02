@@ -1,7 +1,7 @@
 use Styled from "./lazy_res_child.qubc"
 
 component Outer {
-  props { show }
+  props { show: bool }
   template {
     div() {
       @if (show) {

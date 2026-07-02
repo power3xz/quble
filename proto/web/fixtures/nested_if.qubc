@@ -1,5 +1,5 @@
 component NestedIf {
-  props { outer, inner, a, b, c }
+  props { outer: bool, inner: bool, a: string, b: string, c: string }
   template {
     div() {
       @if (outer) {

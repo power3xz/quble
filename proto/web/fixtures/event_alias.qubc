@@ -9,7 +9,7 @@ component Bar {
 }
 
 component Button {
-  props { label }
+  props { label: string }
   events { CLICK({ label }) }
   template {
     button(@click:CLICK) { {label} }

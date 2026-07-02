@@ -1,5 +1,5 @@
 component C {
-  props { userId }
+  props { userId: string }
   contexts { Area { section: "actions", userId: userId } }
   events { TOGGLE({ userId }) }
   template {

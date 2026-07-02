@@ -201,6 +201,9 @@ class Reader {
     this.pos += n;
     return s;
   }
+  u8() {
+    return this.take(1)[0];
+  }
   u16() {
     const s = this.take(2);
     return s[0] | (s[1] << 8);
@@ -209,9 +212,28 @@ class Reader {
     const s = this.take(4);
     return (s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24)) >>> 0;
   }
+  f64() {
+    const s = this.take(8);
+    return new DataView(s.buffer, s.byteOffset, 8).getFloat64(0, true);
+  }
   str() {
     const len = this.u16();
     return new TextDecoder().decode(this.take(len));
+  }
+  // 상수풀 엔트리: 태그 1바이트로 타입을 정해 payload를 읽는다(Rust put_const의 역).
+  // 런타임 값이 그대로 JS 값(string/number/boolean)이라 소비 지점은 타입을 다시 안 본다.
+  constant() {
+    const tag = this.u8();
+    if (tag === 0) {
+      return this.str();
+    }
+    if (tag === 1) {
+      return this.f64();
+    }
+    if (tag === 2) {
+      return this.u8() !== 0;
+    }
+    throw new Error("bad const tag " + tag);
   }
 }
 
@@ -284,7 +306,7 @@ const decode = (bytes) => {
   const poolCount = r.u16();
   const pool = [];
   for (let i = 0; i < poolCount; i++) {
-    pool.push(r.str());
+    pool.push(r.constant());
   }
 
   const defCount = r.u16();

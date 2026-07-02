@@ -7,7 +7,7 @@ component Card {
 }
 
 component Toggle {
-  props { label, on }
+  props { label: string, on: string }
   events { TOGGLE({ label, on }) }
   template {
     button(@click:TOGGLE) { {label} }

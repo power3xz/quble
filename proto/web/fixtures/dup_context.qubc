@@ -1,7 +1,7 @@
 use Child from "./dup_context_child.qubc"
 
 component Parent {
-  props { userId }
+  props { userId: string }
   contexts { Area { tier: "silver", scope: "page" } }
   template {
     @with Area {
