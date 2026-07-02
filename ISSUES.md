@@ -10,6 +10,18 @@
   워크스페이스 members에서 빼고 exclude로 뒀다(크레이트 파일은 복구용으로 남김). quble 크레이트의
   render_source/render_with와 tests/end_to_end.rs(SSR 통합 테스트)도 제거했다.
 
+- **핸들러가 set/get할 수 있는 prop이 이벤트 payload에 선언한 것뿐** - 핸들러의 `set`/`get`은
+  `props.<이름>`으로 prop을 가리키는데, 런타임(runtime.js BIND_EVENT)이 그 `props` 맵을 이벤트
+  payload 필드로만 채운다. 그래서 payload에 없는 prop은 핸들러에서 못 바꾼다. (재현:
+  `TOGGLE_SECTION({ title, open })`처럼 payload에 `dirty`가 없으면, 컴포넌트가 `dirty`를 prop으로
+  받아도 `set(props.dirty, ...)`가 undefined를 건드려 아무 일도 안 일어난다.) d.ts는 이와 어긋나게
+  컴포넌트 **전체 prop**을 `props`로 타이핑해, TS는 통과하고 런타임에서만 조용히 깨진다.
+  - **엮인 결정**: "무엇을 담느냐"(payload만 vs 전체 prop)와 "어떻게 담느냐"(지금은 이름->leafIndex
+    맵을 미리 짓는데, 자식 컴포넌트는 prop 이름이 바이트코드에 없어 이름 맵을 못 짓는다)가
+    store/reactivity 모델(DESIGN §5.2)과 얽혀 있다. store가 자리잡은 뒤 함께 정한다 - 지금 방향을
+    못박지 않는다. (검토된 갈래: `data`에 값 대신 leafIndex를 담아 `set(data.x, v)`로 통합, prop
+    이름을 manifest 사이드카/바이트코드에 두기, scope index+paths 폐기하고 이름 기반으로 복귀.)
+
 - **안 쓰는 `use`가 트리셰이킹 안 됨** - `use`로 import했지만 template에서 합성(RENDER)하지
   않는 컴포넌트가 qubb에 def로 포함된다. (재현: `bench/components/profilecard.qubc`의 `Tag`는
   use만 하고 미사용인데, 컴파일 결과 qubb에 def로 들어간다.) 컴파일러가 도달성 분석 없이 use된
