@@ -1,13 +1,17 @@
 //! 재귀하강 파서: 토큰 → AST. MVP 문법.
 //!
 //! component IDENT { [PROPS] template { NODE* } }
-//! PROPS   = props { IDENT (, IDENT)* }       (선택)
+//! PROPS   = props { IDENT : TYPE (, IDENT : TYPE)* }   (선택)
+//! TYPE    = ("bool"|"number"|"string"|OBJECT) "[]"*     (재귀; []는 후위 반복)
+//! OBJECT  = { (IDENT : TYPE (, IDENT : TYPE)*)? }
 //! NODE    = ELEMENT | STRING | VAR
 //! VAR     = { IDENT }                         (props 보간)
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
-use crate::ast::{ArgValue, AttrValue, Component, Context, Event, Node, SourceFile, Use};
+use crate::ast::{
+    ArgValue, AttrValue, Component, Context, Event, Node, Prop, SourceFile, Type, Use,
+};
 use crate::lexer::{Directive, Token};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -172,8 +176,8 @@ impl<'a> Parser<'a> {
         Ok(Component { name, props, events, contexts, template })
     }
 
-    // props { IDENT (, IDENT)* }
-    fn props(&mut self) -> Result<Vec<String>, ParseError> {
+    // props { IDENT : TYPE (, IDENT : TYPE)* }
+    fn props(&mut self) -> Result<Vec<Prop>, ParseError> {
         self.keyword("props")?;
         self.expect(&Token::LBrace)?;
         let mut props = Vec::new();
@@ -183,7 +187,12 @@ impl<'a> Parser<'a> {
                 Some(Token::Comma) => {
                     self.next()?;
                 }
-                Some(Token::Ident(_)) => props.push(self.ident()?),
+                Some(Token::Ident(_)) => {
+                    let name = self.ident()?;
+                    self.expect(&Token::Colon)?;
+                    let ty = self.type_expr()?;
+                    props.push(Prop { name, ty });
+                }
                 Some(t) => {
                     return Err(ParseError::Expected {
                         want: "prop name or }".into(),
@@ -194,6 +203,69 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Token::RBrace)?;
         Ok(props)
+    }
+
+    // TYPE = (PRIM | OBJECT) "[]"*  - base 타입 파싱 후 후위 []를 배열로 흡수(bool[][] 등).
+    fn type_expr(&mut self) -> Result<Type, ParseError> {
+        let mut ty = match self.peek() {
+            Some(Token::LBrace) => self.object_type()?,
+            Some(Token::Ident(s)) => {
+                let ty = match s.as_str() {
+                    "bool" => Type::Bool,
+                    "number" => Type::Number,
+                    "string" => Type::String,
+                    other => {
+                        return Err(ParseError::Expected {
+                            want: "bool, number, string, or {".into(),
+                            got: other.into(),
+                        })
+                    }
+                };
+                self.next()?;
+                ty
+            }
+            other => {
+                return Err(ParseError::Expected {
+                    want: "type".into(),
+                    got: format!("{other:?}"),
+                })
+            }
+        };
+        // 후위 [] 반복: string[] -> Array(String), number[][] -> Array(Array(Number)).
+        while matches!(self.peek(), Some(Token::LBracket)) {
+            self.next()?;
+            self.expect(&Token::RBracket)?;
+            ty = Type::Array(Box::new(ty));
+        }
+        Ok(ty)
+    }
+
+    // OBJECT = { (IDENT : TYPE (, IDENT : TYPE)*)? }  - 필드 선언 순서 보존.
+    fn object_type(&mut self) -> Result<Type, ParseError> {
+        self.expect(&Token::LBrace)?;
+        let mut fields = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::RBrace) | None => break,
+                Some(Token::Comma) => {
+                    self.next()?;
+                }
+                Some(Token::Ident(_)) => {
+                    let name = self.ident()?;
+                    self.expect(&Token::Colon)?;
+                    let ty = self.type_expr()?;
+                    fields.push((name, ty));
+                }
+                Some(t) => {
+                    return Err(ParseError::Expected {
+                        want: "field name or }".into(),
+                        got: format!("{t:?}"),
+                    })
+                }
+            }
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(Type::Object(fields))
     }
 
     // events { EVENT* }   - EVENT = NAME ( { PAYLOAD } )

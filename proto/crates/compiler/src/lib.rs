@@ -40,7 +40,7 @@ pub fn compile_src(
     resolver: &impl Resolver,
 ) -> Result<CompileOutput, CompileError> {
     let comps = resolve::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
-    let props = comps[0].comp.props.clone();
+    let props = comps[0].comp.props.iter().map(|p| p.name.clone()).collect();
     let (bytecode, resources) = codegen::generate(&comps).map_err(CompileError::Codegen)?;
     Ok(CompileOutput {
         bytecode,
@@ -205,7 +205,7 @@ mod tests {
 
         let src = r#"
             component C {
-              props { c, d }
+              props { c: string, d: string }
               template { div(class={c} data-x={d}) {} }
             }
         "#;
@@ -254,7 +254,7 @@ mod tests {
 
         let src = r#"
             component C {
-              props { value }
+              props { value: string }
               events { EDIT({ value }) }
               template { input(@input:EDIT) {} }
             }
@@ -283,7 +283,7 @@ mod tests {
 
         let src = r#"
             component C {
-              props { assignee }
+              props { assignee: string }
               contexts { Area { section: "actions", userId: assignee } }
               template {
                 @with Area {
@@ -334,7 +334,7 @@ mod tests {
 
         let src = r#"
             component C {
-              props { tier }
+              props { tier: string }
               contexts { Area { tier } }
               template { @with Area { div() {} } }
             }
@@ -354,7 +354,7 @@ mod tests {
 
         let src = r#"
             component C {
-              props { count }
+              props { count: string }
               events { BUMP({ count, label: "clicks" }) }
               template { button(@click:BUMP) { "x" } }
             }
@@ -422,17 +422,17 @@ mod tests {
         let entry = r#"
             use Thumb, Badge from "./parts.qubc"
             component Card {
-              props { img, role }
+              props { img: string, role: string }
               template { div() { Thumb(src={img}) {} Badge(text={role}) {} } }
             }
         "#;
         let parts = r#"
             component Thumb {
-              props { src }
+              props { src: string }
               template { img(src={src}) {} }
             }
             component Badge {
-              props { text }
+              props { text: string }
               template { span() { {text} } }
             }
         "#;

@@ -4,10 +4,12 @@
 pub enum Token {
     Ident(String),
     Str(String),
-    LBrace, // {
-    RBrace, // }
-    LParen, // (
-    RParen, // )
+    LBrace,   // {
+    RBrace,   // }
+    LParen,   // (
+    RParen,   // )
+    LBracket, // [
+    RBracket, // ]
     Eq,     // =
     Comma,  // ,
     Colon,  // :
@@ -91,6 +93,14 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             ')' => {
                 chars.next();
                 toks.push(Token::RParen);
+            }
+            '[' => {
+                chars.next();
+                toks.push(Token::LBracket);
+            }
+            ']' => {
+                chars.next();
+                toks.push(Token::RBracket);
             }
             '=' => {
                 chars.next();

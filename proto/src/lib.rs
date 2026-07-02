@@ -122,7 +122,7 @@ mod tests {
     fn composition_passes_parent_value_to_child() {
         let src = r#"
             component Card {
-              props { heading, title }
+              props { heading: string, title: string }
               template {
                 div(class="card") {
                   h2() { {heading} }
@@ -131,7 +131,7 @@ mod tests {
               }
             }
             component Label {
-              props { text }
+              props { text: string }
               template { span(class="label") { {text} } }
             }
         "#;
@@ -156,7 +156,7 @@ mod tests {
               }
             }
             component Label {
-              props { text }
+              props { text: string }
               template { span(class="label") { {text} } }
             }
         "#;
@@ -173,11 +173,11 @@ mod tests {
     fn composition_mixes_literal_and_var_args() {
         let src = r#"
             component Parent {
-              props { name }
+              props { name: string }
               template { Child(label="이름:" value={name}) {} }
             }
             component Child {
-              props { label, value }
+              props { label: string, value: string }
               template { div() { {label} " " {value} } }
             }
         "#;
@@ -190,11 +190,11 @@ mod tests {
     fn composition_reorders_args_to_child_prop_order() {
         let src = r#"
             component Parent {
-              props { a, b }
+              props { a: string, b: string }
               template { Child(second={b} first={a}) {} }
             }
             component Child {
-              props { first, second }
+              props { first: string, second: string }
               template { div() { {first} "-" {second} } }
             }
         "#;
@@ -209,7 +209,7 @@ mod tests {
         let entry = r#"
             use Label from "./label.qubc"
             component Card {
-              props { heading, title }
+              props { heading: string, title: string }
               template {
                 div(class="card") {
                   h2() { {heading} }
@@ -220,7 +220,7 @@ mod tests {
         "#;
         let label = r#"
             component Label {
-              props { text }
+              props { text: string }
               template { span(class="label") { {text} } }
             }
         "#;
@@ -249,7 +249,7 @@ mod tests {
         let entry = r#"
             use Thumb, Badge from "./parts.qubc"
             component Card {
-              props { img, role }
+              props { img: string, role: string }
               template {
                 div(class="card") {
                   Thumb(src={img}) {}
@@ -260,11 +260,11 @@ mod tests {
         "#;
         let parts = r#"
             component Thumb {
-              props { src }
+              props { src: string }
               template { img(src={src}) {} }
             }
             component Badge {
-              props { text }
+              props { text: string }
               template { span(class="badge") { {text} } }
             }
         "#;

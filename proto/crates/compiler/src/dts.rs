@@ -4,9 +4,9 @@
 //!
 //! props는 값이 아니라 leafIndex(주소기)라 `LeafIndex<T>`로 낸다 - `get(k)`가 T를 내주고
 //! `set(k, v)`가 T를 받는다(REACTIVITY.md §7.1). store/get의 대상 트리는 아직 미정이라 store는
-//! 뺀다. props의 T는 지금 전부 string(props에 타입 표기가 없다).
+//! 뺀다. props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 
-use crate::ast::{ArgValue, Component, Node};
+use crate::ast::{ArgValue, Component, Node, Prop, Type};
 use crate::resolve::{flatten, FlatComp, Resolver};
 use crate::CompileError;
 
@@ -39,8 +39,8 @@ struct Handler {
     fullname: String,
     /// event payload 필드: (필드명, 값 출처). data는 값이라 리터럴/변수로 타입이 갈린다.
     data: Vec<(String, ArgValue)>,
-    /// 이벤트가 묶인 컴포넌트의 props 이름(leafIndex 주소기). 지금 T는 전부 string.
-    props: Vec<String>,
+    /// 이벤트가 묶인 컴포넌트의 props(leafIndex 주소기). T는 선언 타입을 TS로 매핑한다.
+    props: Vec<Prop>,
     /// 발생 시점 활성 @with 컨텍스트: (컨텍스트명, 필드들). 안쪽 우선(뒤가 이김).
     contexts: Vec<(String, Vec<(String, ArgValue)>)>,
 }
@@ -78,7 +78,11 @@ fn signature(h: &Handler) -> String {
     let data = format!("{{ {} }}", fields_type(&h.data, value_type));
     let props = format!(
         "{{ {} }}",
-        join(h.props.iter().map(|p| format!("{p}: LeafIndex<string>")))
+        join(
+            h.props
+                .iter()
+                .map(|p| format!("{}: LeafIndex<{}>", p.name, type_to_ts(&p.ty)))
+        )
     );
     let ctx = if h.contexts.is_empty() {
         "{}".to_string()
@@ -89,6 +93,20 @@ fn signature(h: &Handler) -> String {
         format!("{{ {fields} }}")
     };
     format!("Handler<{data}, {props}, {ctx}>")
+}
+
+/// prop 선언 타입 -> TS 타입 문자열. 원시는 이름 매핑, 배열은 `T[]`, 객체는 `{ k: T; ... }`.
+fn type_to_ts(ty: &Type) -> String {
+    match ty {
+        Type::Bool => "boolean".to_string(),
+        Type::Number => "number".to_string(),
+        Type::String => "string".to_string(),
+        Type::Array(inner) => format!("{}[]", type_to_ts(inner)),
+        Type::Object(fields) => {
+            let body = join(fields.iter().map(|(k, t)| format!("{k}: {}", type_to_ts(t))));
+            format!("{{ {body} }}")
+        }
+    }
 }
 
 /// 값 필드(payload/context)의 TS 타입. 리터럴은 그 값으로 좁히고, 변수는 string(소스에 타입 없음).
@@ -236,17 +254,33 @@ mod tests {
     }
 
     /// 단순 event - data(값)·props(leafIndex). context 없으면 Ctx는 {}.
+    /// props 타입이 leafIndex의 T로 매핑된다(string/number/bool 각각).
     #[test]
     fn single_event_props_and_leafindex() {
         let out = dts(r#"
             component Thumb {
-              props { avatar, name }
-              events { CLICK({ name, avatar }) }
+              props { avatar: string, size: number, active: bool }
+              events { CLICK({ avatar }) }
               template { img(@click:CLICK) {} }
             }
         "#);
         assert!(out.contains(
-            "'CLICK': Handler<{ name: string; avatar: string }, { avatar: LeafIndex<string>; name: LeafIndex<string> }, {}>;"
+            "'CLICK': Handler<{ avatar: string }, { avatar: LeafIndex<string>; size: LeafIndex<number>; active: LeafIndex<boolean> }, {}>;"
+        ), "실제 출력:\n{out}");
+    }
+
+    /// 배열·객체 prop 타입이 재귀적으로 TS 타입으로 매핑된다(T[], { k: T }).
+    #[test]
+    fn array_and_object_prop_types() {
+        let out = dts(r#"
+            component C {
+              props { tags: string[], owner: { name: string, id: number } }
+              events { GO({ tags }) }
+              template { button(@click:GO) {} }
+            }
+        "#);
+        assert!(out.contains(
+            "{ tags: LeafIndex<string[]>; owner: LeafIndex<{ name: string; id: number }> }"
         ), "실제 출력:\n{out}");
     }
 
@@ -281,7 +315,7 @@ mod tests {
     fn with_context_and_literal_field() {
         let out = dts(r#"
             component C {
-              props { userId }
+              props { userId: string }
               contexts { Area { section: "actions", user: userId } }
               events { GO({ userId }) }
               template {
@@ -299,7 +333,7 @@ mod tests {
     fn literal_payload_narrowed() {
         let out = dts(r#"
             component C {
-              props { count }
+              props { count: number }
               events { BUMP({ count, label: "clicks" }) }
               template { button(@click:BUMP) {} }
             }
@@ -312,7 +346,7 @@ mod tests {
     fn if_visits_both_branches() {
         let out = dts(r#"
             component Outer {
-              props { flag }
+              props { flag: bool }
               template {
                 @if (flag) { A: Inner() {} } @else { B: Inner() {} }
               }

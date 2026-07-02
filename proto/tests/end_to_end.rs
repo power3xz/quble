@@ -45,7 +45,7 @@ fn unknown_tag_is_error() {
 fn props_var_interpolated_from_scope() {
     let src = r#"
         component Greeting {
-          props { name }
+          props { name: string }
           template {
             h1() { "Hello, " {name} "!" }
           }
@@ -72,7 +72,7 @@ fn undeclared_prop_is_error() {
 fn if_else_renders_active_branch() {
     let src = r#"
         component C {
-          props { ok }
+          props { ok: bool }
           template {
             div() {
               @if (ok) { p() { "yes" } }
@@ -95,7 +95,7 @@ fn if_else_renders_active_branch() {
 fn if_only_skips_when_false() {
     let src = r#"
         component C {
-          props { show }
+          props { show: bool }
           template {
             div() {
               @if (show) { span() { "x" } }

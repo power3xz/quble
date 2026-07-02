@@ -20,10 +20,28 @@ pub struct Use {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Component {
     pub name: String,
-    pub props: Vec<String>,      // 선언 순서 = scope 인덱스
+    pub props: Vec<Prop>,        // 선언 순서 = scope 인덱스
     pub events: Vec<Event>,      // 선언 순서 = event_index (BIND_EVENT가 참조)
     pub contexts: Vec<Context>,  // 선언 순서 = context_index (EnterContext가 참조)
     pub template: Vec<Node>,     // 루트 노드들 (fragment 허용)
+}
+
+/// `props { name: type }` 한 항목. 타입은 필수(표기 강제). 선언 순서가 scope 인덱스.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Prop {
+    pub name: String,
+    pub ty: Type,
+}
+
+/// prop 타입. quble이 온전히 소유하는 재귀 구조 - 원시 3종을 잎으로 배열·객체를 조합한다.
+/// d.ts가 TS 타입으로 매핑한다(bool->boolean, T[]->T[], 객체->{...}). 명명 타입은 아직 없다.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Type {
+    Bool,
+    Number,
+    String,
+    Array(Box<Type>),
+    Object(Vec<(String, Type)>),  // 필드 선언 순서 보존(d.ts 방출 안정성)
 }
 
 /// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.

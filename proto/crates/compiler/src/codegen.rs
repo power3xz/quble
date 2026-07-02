@@ -1,6 +1,6 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{ArgValue, AttrValue, Context, Event, Node};
+use crate::ast::{ArgValue, AttrValue, Context, Event, Node, Prop};
 use crate::resolve::FlatComp;
 use bytecode::{encode, tags, CompDef, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op};
 
@@ -23,7 +23,7 @@ pub enum CodegenError {
 /// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
 /// 찾고, PUSH_ARG를 자식 props 순서로 정렬하려고 props 선언도 같이 돌려준다. 컴포넌트 ID = 정의 순서.
 struct CompLookup<'a> {
-    by_name: std::collections::HashMap<&'a str, (u16, &'a [String])>,
+    by_name: std::collections::HashMap<&'a str, (u16, &'a [Prop])>,
 }
 
 impl<'a> CompLookup<'a> {
@@ -37,7 +37,7 @@ impl<'a> CompLookup<'a> {
     }
 
     /// 이름으로 (컴포넌트 ID, 자식 props 선언)을 찾는다.
-    fn get(&self, name: &str) -> Option<(u16, &'a [String])> {
+    fn get(&self, name: &str) -> Option<(u16, &'a [Prop])> {
         self.by_name.get(name).copied()
     }
 }
@@ -143,10 +143,10 @@ fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
 }
 
 /// 변수명을 scope 인덱스로. 선언 순서 = scope 인덱스. 미선언이면 에러.
-fn prop_name_to_scope_index(name: &str, props: &[String]) -> Result<u16, CodegenError> {
+fn prop_name_to_scope_index(name: &str, props: &[Prop]) -> Result<u16, CodegenError> {
     props
         .iter()
-        .position(|p| p == name)
+        .position(|p| p.name == name)
         .map(|i| i as u16)
         .ok_or_else(|| CodegenError::UnknownProp(name.to_string()))
 }
@@ -154,7 +154,7 @@ fn prop_name_to_scope_index(name: &str, props: &[String]) -> Result<u16, Codegen
 /// ArgValue를 FieldValue로. Var는 prop을 scope 인덱스로, Literal은 상수풀에 intern해 Const로.
 fn arg_to_field_value(
     value: &ArgValue,
-    props: &[String],
+    props: &[Prop],
     pool: &mut ConstPool,
 ) -> Result<FieldValue, CodegenError> {
     Ok(match value {
@@ -165,7 +165,7 @@ fn arg_to_field_value(
 
 fn emit_node(
     node: &Node,
-    props: &[String],
+    props: &[Prop],
     events: &[Event],
     contexts: &[Context],
     comp_lookup: &CompLookup,
@@ -252,11 +252,11 @@ fn emit_node(
             for child_prop in child_props {
                 let arg_value = args
                     .iter()
-                    .find(|(p, _)| p == child_prop)
+                    .find(|(p, _)| *p == child_prop.name)
                     .map(|(_, v)| v)
                     .ok_or_else(|| CodegenError::UnknownArg {
                         comp: name.clone(),
-                        prop: child_prop.clone(),
+                        prop: child_prop.name.clone(),
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
