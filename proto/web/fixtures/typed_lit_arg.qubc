@@ -1,0 +1,12 @@
+component TypedLitArg {
+  template {
+    div() {
+      Field(count=42 active=true label="s") {}
+    }
+  }
+}
+
+component Field {
+  props { count: number, active: bool, label: string }
+  template { span() { {count} {active} {label} } }
+}
