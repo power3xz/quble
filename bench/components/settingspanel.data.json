@@ -1,9 +1,9 @@
 {
-  "heading": "설정", "dirty": "false", "plan": "PRO", "docsLink": "#",
-  "genOpen": "true", "genATitle": "알림", "genADesc": "푸시 알림 받기", "genABadge": "새 기능", "genAOn": "true",
-  "genBTitle": "소리", "genBDesc": "효과음 재생", "genBBadge": "기본", "genBOn": "false",
-  "privOpen": "true", "privATitle": "위치", "privADesc": "위치 공유", "privABadge": "권장", "privAOn": "false",
-  "privBTitle": "추적", "privBDesc": "활동 기록", "privBBadge": "주의", "privBOn": "true",
-  "proOpen": "true", "proATitle": "고급 분석", "proADesc": "상세 리포트", "proABadge": "PRO", "proAOn": "true",
-  "proBTitle": "우선 지원", "proBDesc": "빠른 응답", "proBBadge": "PRO", "proBOn": "false"
+  "heading": "설정", "dirty": false, "plan": "PRO", "docsLink": "#",
+  "genOpen": true, "genATitle": "알림", "genADesc": "푸시 알림 받기", "genABadge": "새 기능", "genAOn": true,
+  "genBTitle": "소리", "genBDesc": "효과음 재생", "genBBadge": "기본", "genBOn": false,
+  "privOpen": true, "privATitle": "위치", "privADesc": "위치 공유", "privABadge": "권장", "privAOn": false,
+  "privBTitle": "추적", "privBDesc": "활동 기록", "privBBadge": "주의", "privBOn": true,
+  "proOpen": true, "proATitle": "고급 분석", "proADesc": "상세 리포트", "proABadge": "PRO", "proAOn": true,
+  "proBTitle": "우선 지원", "proBDesc": "빠른 응답", "proBBadge": "PRO", "proBOn": false
 }
