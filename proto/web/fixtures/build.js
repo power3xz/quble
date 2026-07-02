@@ -19,11 +19,13 @@ export const buildFixture = (name) => {
   return new Uint8Array(readFileSync(join(PROTO, "dist", `${name}.qubb`)));
 };
 
-// 위와 같이 빌드하되 { qubb, resmap }를 돌려준다. resmap은 dist/<name>.resmap.json
-// (use한 리소스가 있을 때만 생성됨 - 없으면 빈 배열).
+// 위와 같이 빌드하되 { qubb, resmap }를 돌려준다. resmap은 manifest의 resources 배열
+// (dist/<name>.manifest.json). manifest는 항상 생성되고, 리소스 없으면 resources는 빈 배열.
 export const buildFixtureWithResmap = (name) => {
   const qubb = buildFixture(name);
-  const resmapPath = join(PROTO, "dist", `${name}.resmap.json`);
-  const resmap = existsSync(resmapPath) ? JSON.parse(readFileSync(resmapPath, "utf8")) : [];
+  const manifestPath = join(PROTO, "dist", `${name}.manifest.json`);
+  const resmap = existsSync(manifestPath)
+    ? JSON.parse(readFileSync(manifestPath, "utf8")).resources
+    : [];
   return { qubb, resmap };
 };
