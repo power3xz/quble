@@ -5,7 +5,7 @@
 // 사용: node build.mjs <path/to/component.qubc> [--data <data.json>]
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { build } from "esbuild";
 
@@ -57,10 +57,19 @@ if (existsSync(handlersTs)) {
     format: "esm",
     platform: "browser",
     target: "es2020",
+    minify: true,
     write: false,
   });
   const js = result.outputFiles[0].text;
   const handlerPath = `res/${stem}.${fnv1a(Buffer.from(js))}.handlers.js`;
+  // 내용이 바뀌면 해시(파일명)가 바뀌어 새 파일이 생긴다 - 같은 stem의 구 핸들러를 먼저 지운다.
+  const resDir = join(distDir, "res");
+  const oldRe = new RegExp(`^${stem}\\.[0-9a-f]{16}\\.handlers\\.js$`);
+  for (const f of readdirSync(resDir)) {
+    if (oldRe.test(f)) {
+      rmSync(join(resDir, f));
+    }
+  }
   writeFileSync(join(distDir, handlerPath), js);
 
   const manifestPath = join(distDir, `${stem}.manifest.json`);
@@ -71,12 +80,14 @@ if (existsSync(handlersTs)) {
 }
 
 // 3. 런타임 번들 - mount.js(runtime/region/leaf-store 포함)를 한 파일로. 매 빌드 생성.
+//    배포 산출물이라 minify - 디버깅은 소스(proto/web/*.js)를 본다.
 const runtimeBundle = await build({
   entryPoints: [join(buildDir, "..", "web", "mount.js")],
   bundle: true,
   format: "esm",
   platform: "browser",
   target: "es2020",
+  minify: true,
   write: false,
 });
 writeFileSync(join(distDir, "quble-runtime.js"), runtimeBundle.outputFiles[0].text);
