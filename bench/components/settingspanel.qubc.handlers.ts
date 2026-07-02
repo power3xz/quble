@@ -1,65 +1,43 @@
 import type { Handlers } from "./settingspanel.qubc";
 
-// 설정 패널 핸들러. props는 지금 전부 LeafIndex<string>이라(타입 표기 미구현) boolean 상태는
-// "true"/"false" 문자열로 다룬다. get/set은 leafIndex로 반응성에 닿는다(REACTIVITY.md §7.1).
+// 설정 패널 핸들러. open/enabled는 bool prop이라 get/set이 boolean으로 오간다.
+// @if가 실제 boolean에 반응하므로 토글이 화면(섹션 접힘/펼침, 스위치 on/off)에 그대로 보인다.
 //
-// 확인용: open/enabled(boolean)는 @if로 렌더되는데 @if가 문자열 "false"를 truthy로 봐서(타입
-// 표기 미구현) 화면 토글이 안 보인다. 그래서 눈에 보이는 텍스트(title/label - {title}/{label}로
-// 보간)에 상태 표시를 붙여, 버튼 클릭이 화면과 속성 패널에 반영되는 걸 확인할 수 있게 한다.
-const flip = (v: string): string => (v === "true" ? "false" : "true");
-
-// "제목" <-> "제목 (접힘)" 처럼 상태를 텍스트 뒤에 토글해 붙인다(화면에 티나게).
-const mark = (text: string, suffix: string): string =>
-  text.endsWith(suffix) ? text.slice(0, -suffix.length) : text + suffix;
+// dirty(저장 필요 표시)는 아직 못 켠다: 핸들러가 자기 컴포넌트 prop만 set할 수 있는데
+// dirty는 부모(SettingsPanel)의 prop이라 자식 토글에서 닿지 않는다(ISSUES 참고). 그래서
+// SAVE/DISCARD 버튼은 dirty=false 고정이라 뜨지 않고, 두 핸들러는 store/reactivity 모델이
+// 정해진 뒤 채운다.
 
 const handlers: Partial<Handlers> = {
-  // 섹션 헤더 클릭 - 펼침/접힘 토글. open 상태를 바꾸고, 제목 텍스트에도 표시해 화면에 보이게.
+  // 섹션 헤더 클릭 - open을 반전해 펼침/접힘.
   "General.TOGGLE_SECTION": (data, { props, get, set }) => {
-    set(props.open, flip(get(props.open)));
-    set(props.title, mark(get(props.title), " (접힘)"));
+    set(props.open, !get(props.open));
   },
   "Privacy.TOGGLE_SECTION": (data, { props, get, set }) => {
-    set(props.open, flip(get(props.open)));
-    set(props.title, mark(get(props.title), " (접힘)"));
+    set(props.open, !get(props.open));
   },
   "Premium.TOGGLE_SECTION": (data, { props, get, set }) => {
-    set(props.open, flip(get(props.open)));
-    set(props.title, mark(get(props.title), " (접힘)"));
+    set(props.open, !get(props.open));
   },
 
-  // 행 스위치 클릭 - on/off 토글. enabled 상태를 바꾸고, 라벨 텍스트에도 표시해 화면에 보이게.
+  // 행 스위치 클릭 - enabled를 반전해 on/off.
   "General.FirstRow.TOGGLE": (data, { props, get, set }) => {
-    set(props.enabled, flip(get(props.enabled)));
-    set(props.label, mark(get(props.label), " [ON]"));
+    set(props.enabled, !get(props.enabled));
   },
   "General.SecondRow.TOGGLE": (data, { props, get, set }) => {
-    set(props.enabled, flip(get(props.enabled)));
-    set(props.label, mark(get(props.label), " [ON]"));
+    set(props.enabled, !get(props.enabled));
   },
   "Privacy.FirstRow.TOGGLE": (data, { props, get, set }) => {
-    set(props.enabled, flip(get(props.enabled)));
-    set(props.label, mark(get(props.label), " [ON]"));
+    set(props.enabled, !get(props.enabled));
   },
   "Privacy.SecondRow.TOGGLE": (data, { props, get, set }) => {
-    set(props.enabled, flip(get(props.enabled)));
-    set(props.label, mark(get(props.label), " [ON]"));
+    set(props.enabled, !get(props.enabled));
   },
   "Premium.FirstRow.TOGGLE": (data, { props, get, set }) => {
-    set(props.enabled, flip(get(props.enabled)));
-    set(props.label, mark(get(props.label), " [ON]"));
+    set(props.enabled, !get(props.enabled));
   },
   "Premium.SecondRow.TOGGLE": (data, { props, get, set }) => {
-    set(props.enabled, flip(get(props.enabled)));
-    set(props.label, mark(get(props.label), " [ON]"));
-  },
-
-  // 헤더 저장 - 제목에 저장 표시를 붙여 화면에 보이게.
-  SAVE: (data, { props, get, set }) => {
-    set(props.heading, mark(get(props.heading), " (저장됨)"));
-  },
-  // 되돌리기 - 제목에 되돌림 표시를 붙여 화면에 보이게.
-  DISCARD: (data, { props, get, set }) => {
-    set(props.heading, mark(get(props.heading), " (되돌림)"));
+    set(props.enabled, !get(props.enabled));
   },
 };
 
