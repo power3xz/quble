@@ -1,0 +1,14 @@
+component LitBoolIf {
+  template {
+    div() {
+      Gate(cond=false a="A" b="B") {}
+    }
+  }
+}
+
+component Gate {
+  props { cond: bool, a: string, b: string }
+  template {
+    @if (cond) { p() { {a} } } @else { p() { {b} } }
+  }
+}

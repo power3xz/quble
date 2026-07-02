@@ -16,7 +16,7 @@ const { compile, createLeafStoreSubject } = await import("./runtime.js");
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb = {};
 before(() => {
-  for (const name of ["single_if", "nested_if", "no_else_if", "sibling_if", "triple_if", "composed_triple", "if_with_context"]) {
+  for (const name of ["single_if", "nested_if", "no_else_if", "sibling_if", "triple_if", "composed_triple", "if_with_context", "lit_bool_if"]) {
     qubb[name] = buildFixture(name);
   }
 });
@@ -167,6 +167,15 @@ test("@if 가지 안 @with: lazy build 시 context opcode를 건너뛴다", () =
   assert.deepEqual(texts(host), ["A"], "@with 품은 then 가지가 bad opcode 없이 렌더");
   set("cond", false);
   assert.deepEqual(texts(host), ["B"], "다시 else로 swap");
+});
+
+// ── 리터럴 bool을 @if 조건으로 ────────────────────────────────────────
+// 부모가 자식에 리터럴 `cond=false`를 넘기고 자식이 @if(cond)로 분기. 상수풀 타입 태그가
+// 없던 시절엔 리터럴이 문자열 "false"라 truthy -> THEN(A)로 오판했다. 이제 실제 boolean
+// false라 ELSE(B)로 가야 한다(리터럴 타입화의 핵심 시나리오).
+test("리터럴 bool @if: cond=false가 실제 boolean이라 else로 간다", () => {
+  const { host } = instantiate("lit_bool_if", [], {});
+  assert.deepEqual(texts(host), ["B"], "리터럴 false -> else(b). 문자열이면 truthy로 A가 됐을 것");
 });
 
 // ── 컴포넌트 합성 ─────────────────────────────────────────────────────
