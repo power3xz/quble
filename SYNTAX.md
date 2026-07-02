@@ -30,10 +30,29 @@ component IDENT {
 ### 2.1 `props`
 
 ```
-props { id, title, description, completed, priority, tags, dueDate, assignee }
+props {
+  title: string,
+  completed: bool,
+  priority: number,
+  tags: string[],
+  assignee: { name: string, id: number }
+}
 ```
 
-쉼표로 구분된 이름 목록. (현재 타입 표기는 없음 - A-3 미결.)
+쉼표로 구분된 `이름: 타입` 목록. 타입은 **필수**(표기 강제).
+
+타입은 quble이 온전히 소유하는 재귀 문법이다:
+
+```
+Type   = Prim | Array | Object
+Prim   = "bool" | "number" | "string"
+Array  = Type "[]"                              // string[], number[][]
+Object = "{" (이름 ":" Type ("," 이름 ":" Type)*)? "}"
+```
+
+원시 3종(`bool`/`number`/`string`)이 잎이고, 배열·객체로 재귀 조합한다. d.ts가 TS
+타입으로 매핑한다(`bool`->`boolean`, `T[]`->`T[]`, 객체->`{...}`). 명명 타입(재사용
+가능한 이름 붙은 타입)은 아직 없다 - 인라인만.
 
 ### 2.2 `contexts`
 
@@ -198,7 +217,8 @@ const handlers: TEventHandlers<
 
 ## 미정 (문법에 영향)
 
-- **타입 표기** - props/events 페이로드에 타입 문법이 없음 (A-3).
+- **타입 표기** - props는 타입 필수(§2.1). events 페이로드 타입 표기와 명명 타입(재사용
+  이름 붙은 타입)은 아직 없음 (A-3).
 - **표현식 부분집합** - 허용 식 범위 (A-2).
 - **`@for` key** - 안정적 key 문법 필요 여부 (DESIGN.md §5.1).
 - 그 외 `@with` 외 디렉티브, 주석 문법, 이벤트명/별칭 명명 규칙 등 미관찰.
