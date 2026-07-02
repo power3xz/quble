@@ -1,29 +1,30 @@
 <script>
-  // 자기완결 뷰 — 설정 패널. props 표시 + @if 분기(상태관리 없음, quble settingspanel.qubc와 동일 UI).
+  // 자기완결 뷰 - settingspanel.qubc와 동일 UI·동작. quble 핸들러는 heading/title/label 텍스트
+  // 마킹만 하므로(문자열 boolean이라 @if 불변) Svelte도 그에 맞춘다. data는 settingspanel.data.json.
   import Section from "../components/Section.svelte";
   import Badge from "../components/Badge.svelte";
   import LinkButton from "../components/LinkButton.svelte";
   import "../settings.css";
 
-  const heading = "설정";
-  let dirty = $state(true);
+  let heading = $state("설정");
   const plan = "PRO";
-  const docsLink = "/docs";
+  const docsLink = "#";
+  const mark = (text, suffix) => (text.endsWith(suffix) ? text.slice(0, -suffix.length) : text + suffix);
 
   const general = {
-    title: "일반", open: true,
-    aLabel: "다크 모드", aDesc: "어두운 테마를 사용합니다", aBadge: "ON", aEnabled: true,
-    bLabel: "자동 저장", bDesc: "변경 사항을 자동으로 저장합니다", bBadge: "ON", bEnabled: false,
+    title: "일반",
+    aLabel: "알림", aDesc: "푸시 알림 받기", aBadge: "새 기능",
+    bLabel: "소리", bDesc: "효과음 재생", bBadge: "기본",
   };
   const privacy = {
-    title: "개인정보", open: true,
-    aLabel: "활동 표시", aDesc: "다른 사용자에게 활동을 공개합니다", aBadge: "공개", aEnabled: false,
-    bLabel: "검색 허용", bDesc: "검색 결과에 프로필을 노출합니다", bBadge: "ON", bEnabled: true,
+    title: "개인정보",
+    aLabel: "위치", aDesc: "위치 공유", aBadge: "권장",
+    bLabel: "추적", bDesc: "활동 기록", bBadge: "주의",
   };
   const premium = {
-    title: "프리미엄 기능", open: false,
-    aLabel: "우선 지원", aDesc: "24시간 우선 응대를 받습니다", aBadge: "PRO", aEnabled: true,
-    bLabel: "고급 분석", bDesc: "상세 통계 대시보드를 엽니다", bBadge: "PRO", bEnabled: true,
+    title: "프리미엄 기능",
+    aLabel: "고급 분석", aDesc: "상세 리포트", aBadge: "PRO",
+    bLabel: "우선 지원", bDesc: "빠른 응답", bBadge: "PRO",
   };
 </script>
 
@@ -31,12 +32,8 @@
   <header class="panel__head">
     <h1 class="panel__title">{heading}</h1>
     <div class="panel__actions">
-      {#if dirty}
-        <button class="btn btn--ghost" onclick={() => (dirty = false)}>되돌리기</button>
-        <button class="btn btn--primary" onclick={() => (dirty = false)}>저장</button>
-      {:else}
-        <span class="panel__saved">저장됨</span>
-      {/if}
+      <button class="btn btn--ghost" onclick={() => (heading = mark(heading, " (되돌림)"))}>되돌리기</button>
+      <button class="btn btn--primary" onclick={() => (heading = mark(heading, " (저장됨)"))}>저장</button>
     </div>
   </header>
 
