@@ -5,10 +5,10 @@ use LinkButton from "./linkbutton.qubc"
 
 component SettingsPanel {
   props {
-    heading, dirty, plan, docsLink,
-    genOpen, genATitle, genADesc, genABadge, genAOn, genBTitle, genBDesc, genBBadge, genBOn,
-    privOpen, privATitle, privADesc, privABadge, privAOn, privBTitle, privBDesc, privBBadge, privBOn,
-    proOpen, proATitle, proADesc, proABadge, proAOn, proBTitle, proBDesc, proBBadge, proBOn
+    heading: string, dirty: bool, plan: string, docsLink: string,
+    genOpen: bool, genATitle: string, genADesc: string, genABadge: string, genAOn: bool, genBTitle: string, genBDesc: string, genBBadge: string, genBOn: bool,
+    privOpen: bool, privATitle: string, privADesc: string, privABadge: string, privAOn: bool, privBTitle: string, privBDesc: string, privBBadge: string, privBOn: bool,
+    proOpen: bool, proATitle: string, proADesc: string, proABadge: string, proAOn: bool, proBTitle: string, proBDesc: string, proBBadge: string, proBOn: bool
   }
   contexts {
     PlanContext { plan }

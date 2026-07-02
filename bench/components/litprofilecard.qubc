@@ -9,12 +9,12 @@ use LinkButton from "./linkbutton.qubc"
 
 component LitProfileCard {
   props {
-    name, role, bio, avatar, link,
-    followersLabel, followers, followingLabel, following, postsLabel, posts,
-    location, company,
-    site, github, twitter,
-    act1Text, act1Time, act2Text, act2Time, act3Text, act3Time,
-    tag1, tag2, tag3, tag4
+    name: string, role: string, bio: string, avatar: string, link: string,
+    followersLabel: string, followers: string, followingLabel: string, following: string, postsLabel: string, posts: string,
+    location: string, company: string,
+    site: string, github: string, twitter: string,
+    act1Text: string, act1Time: string, act2Text: string, act2Time: string, act3Text: string, act3Time: string,
+    tag1: string, tag2: string, tag3: string, tag4: string
   }
   contexts {
     HoverArea { title: "dude", twitter }

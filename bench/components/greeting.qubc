@@ -1,5 +1,5 @@
 component Greeting {
-  props { name }
+  props { name: string }
   template {
     div(class="card") {
       h3(class="name") { "안녕하세요, " {name} "님" }

@@ -1,7 +1,7 @@
 use "./metarow.css"
 
 component MetaRow {
-  props { icon, text }
+  props { icon: string, text: string }
   template {
     p(class="metarow") {
       span(class="icon") { {icon} }

@@ -1,7 +1,7 @@
 use "./badge.css"
 
 component Badge {
-  props { role, theme }
+  props { role: string, theme: string }
   template {
     span(class={theme}) { {role} }
   }

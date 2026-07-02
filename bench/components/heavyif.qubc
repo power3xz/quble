@@ -1,5 +1,5 @@
 component HeavyIf {
-  props { show, sharedA, sharedB }
+  props { show: bool, sharedA: string, sharedB: string }
   template {
     div(class="heavy") {
       @if (show) {

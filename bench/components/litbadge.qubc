@@ -1,7 +1,7 @@
 use Badge from "./badge.qubc"
 
 component LitBadge {
-  props { primaryRole, secondaryRole }
+  props { primaryRole: string, secondaryRole: string }
   template {
     div(class="litbadge") {
       Badge(role={primaryRole} theme="light") {}

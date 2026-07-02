@@ -2,7 +2,7 @@ use "./settings.css"
 use Badge from "./badge.qubc"
 
 component SettingRow {
-  props { label, desc, badge, enabled }
+  props { label: string, desc: string, badge: string, enabled: bool }
   events {
     TOGGLE({ label, enabled })
   }

@@ -1,7 +1,7 @@
 use "./activity.css"
 
 component Activity {
-  props { icon, text, time }
+  props { icon: string, text: string, time: string }
   template {
     div(class="act") {
       span(class="icon") { {icon} }

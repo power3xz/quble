@@ -1,7 +1,7 @@
 use "./tag.css"
 
 component Tag {
-  props { text, theme }
+  props { text: string, theme: string }
   template {
     span(class={theme}) { "#" {text} }
   }

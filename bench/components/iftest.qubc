@@ -1,5 +1,5 @@
 component IfTest {
-  props { loggedIn, name }
+  props { loggedIn: bool, name: string }
   template {
     div(class="if-demo") {
       h2() { "분기 데모" }

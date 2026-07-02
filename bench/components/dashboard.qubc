@@ -1,5 +1,5 @@
 component Dashboard {
-  props { loggedIn, isPremium, hasNotifications, name, plan, notifCount }
+  props { loggedIn: bool, isPremium: bool, hasNotifications: bool, name: string, plan: string, notifCount: string }
   template {
     div(class="dashboard") {
       h2() { "계정 대시보드" }

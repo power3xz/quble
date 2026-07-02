@@ -3,9 +3,9 @@ use SettingRow from "./settingrow.qubc"
 
 component Section {
   props {
-    title, open,
-    aLabel, aDesc, aBadge, aEnabled,
-    bLabel, bDesc, bBadge, bEnabled
+    title: string, open: bool,
+    aLabel: string, aDesc: string, aBadge: string, aEnabled: bool,
+    bLabel: string, bDesc: string, bBadge: string, bEnabled: bool
   }
   contexts {
     SectionMeta { section: title }

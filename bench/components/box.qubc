@@ -1,5 +1,5 @@
 component Box {
-  props { tone, label }
+  props { tone: string, label: string }
   template {
     div(class={tone}) {
       "상태: " {label}

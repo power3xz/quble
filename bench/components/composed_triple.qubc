@@ -1,7 +1,7 @@
 use InnerPair from "./inner_pair.qubc"
 
 component ComposedTriple {
-  props { c1, c2, c3, a, b, c, d }
+  props { c1: bool, c2: bool, c3: bool, a: string, b: string, c: string, d: string }
   template {
     div() {
       @if (c1) {

@@ -1,5 +1,5 @@
 component ProductCard {
-  props { name, price }
+  props { name: string, price: string }
   template {
     div(class="card") {
       h3(class="name") { {name} }
@@ -10,14 +10,14 @@ component ProductCard {
 }
 
 component PriceTag {
-  props { price }
+  props { price: string }
   template {
     span(class="badge") { {price} "원" }
   }
 }
 
 component BuyButton {
-  props { price }
+  props { price: string }
   template {
     button(class="buy") { {price} "원 담기" }
   }

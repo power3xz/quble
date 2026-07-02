@@ -1,7 +1,7 @@
 use "./linkbutton.css"
 
 component LinkButton {
-  props { link, theme }
+  props { link: string, theme: string }
   template {
     a(class={theme} href={link}) { "프로필 보기" }
   }

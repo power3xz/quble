@@ -1,7 +1,7 @@
 use "./stat.css"
 
 component Stat {
-  props { label, value }
+  props { label: string, value: string }
   events {
     CLICK_STAT({ label: value })
   }
