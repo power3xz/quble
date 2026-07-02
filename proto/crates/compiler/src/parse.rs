@@ -10,7 +10,7 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, Node, Prop, SourceFile, Type, Use,
+    ArgValue, AttrValue, Component, Context, Event, LitValue, Node, Prop, SourceFile, Type, Use,
 };
 use crate::lexer::{Directive, Token};
 
@@ -93,6 +93,40 @@ impl<'a> Parser<'a> {
             Token::Ident(s) => Ok(s.clone()),
             got => Err(ParseError::Expected {
                 want: "identifier".into(),
+                got: format!("{got:?}"),
+            }),
+        }
+    }
+
+    /// 값 자리(payload/context/합성 인자)의 값 하나: Ident면 prop 참조(Var), 그 외 리터럴 토큰
+    /// (Str/Num/Bool)이면 타입대로 Literal.
+    fn field_value(&mut self) -> Result<ArgValue, ParseError> {
+        match self.peek() {
+            Some(Token::Ident(_)) => Ok(ArgValue::Var(self.ident()?)),
+            Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
+                Ok(ArgValue::Literal(self.lit_value()?))
+            }
+            got => Err(ParseError::Expected {
+                want: "value (prop, \"str\", 42, true)".into(),
+                got: format!("{got:?}"),
+            }),
+        }
+    }
+
+    /// 리터럴 토큰 하나를 LitValue로 소비. 숫자는 f64로 파싱한다(원문이 렉서를 통과해도
+    /// 형태가 어긋나면 여기서 잡힌다). 호출부가 리터럴 토큰임을 확인한 뒤 부른다.
+    fn lit_value(&mut self) -> Result<LitValue, ParseError> {
+        match self.next()? {
+            Token::Str(s) => Ok(LitValue::Str(s.clone())),
+            Token::Bool(b) => Ok(LitValue::Bool(*b)),
+            Token::Num(n) => n.parse::<f64>().map(LitValue::Number).map_err(|_| {
+                ParseError::Expected {
+                    want: "number literal".into(),
+                    got: n.clone(),
+                }
+            }),
+            got => Err(ParseError::Expected {
+                want: "literal (\"str\", 42, true)".into(),
                 got: format!("{got:?}"),
             }),
         }
@@ -209,24 +243,21 @@ impl<'a> Parser<'a> {
     fn type_expr(&mut self) -> Result<Type, ParseError> {
         let mut ty = match self.peek() {
             Some(Token::LBrace) => self.object_type()?,
-            Some(Token::Ident(s)) => {
-                let ty = match s.as_str() {
-                    "bool" => Type::Bool,
-                    "number" => Type::Number,
-                    "string" => Type::String,
-                    other => {
-                        return Err(ParseError::Expected {
-                            want: "bool, number, string, or {".into(),
-                            got: other.into(),
-                        })
-                    }
-                };
+            Some(Token::KwBool) => {
                 self.next()?;
-                ty
+                Type::Bool
+            }
+            Some(Token::KwNumber) => {
+                self.next()?;
+                Type::Number
+            }
+            Some(Token::KwString) => {
+                self.next()?;
+                Type::String
             }
             other => {
                 return Err(ParseError::Expected {
-                    want: "type".into(),
+                    want: "bool, number, string, or {".into(),
                     got: format!("{other:?}"),
                 })
             }
@@ -307,19 +338,7 @@ impl<'a> Parser<'a> {
                     // 없으면 단축형(field = prop, Var).
                     let value = if matches!(self.peek(), Some(Token::Colon)) {
                         self.next()?; // :
-                        match self.peek() {
-                            Some(Token::Ident(_)) => ArgValue::Var(self.ident()?),
-                            Some(Token::Str(_)) => match self.next()? {
-                                Token::Str(s) => ArgValue::Literal(s.clone()),
-                                _ => unreachable!(),
-                            },
-                            got => {
-                                return Err(ParseError::Expected {
-                                    want: "payload field value (prop or \"lit\")".into(),
-                                    got: format!("{got:?}"),
-                                })
-                            }
-                        }
+                        self.field_value()?
                     } else {
                         ArgValue::Var(field.clone())
                     };
@@ -373,19 +392,7 @@ impl<'a> Parser<'a> {
                     // 없으면 단축형(key = prop, Var).
                     let value = if matches!(self.peek(), Some(Token::Colon)) {
                         self.next()?; // :
-                        match self.peek() {
-                            Some(Token::Ident(_)) => ArgValue::Var(self.ident()?),
-                            Some(Token::Str(_)) => match self.next()? {
-                                Token::Str(s) => ArgValue::Literal(s.clone()),
-                                _ => unreachable!(),
-                            },
-                            got => {
-                                return Err(ParseError::Expected {
-                                    want: "context field value (prop or \"lit\")".into(),
-                                    got: format!("{got:?}"),
-                                })
-                            }
-                        }
+                        self.field_value()?
                     } else {
                         ArgValue::Var(key.clone())
                     };
@@ -514,7 +521,7 @@ impl<'a> Parser<'a> {
                 Some(Token::Ident(_)) => {
                     let prop = self.ident()?;
                     self.expect(&Token::Eq)?;
-                    // 값은 `{var}`(부모 변수, 슬롯 공유) 또는 `"lit"`(리터럴, 독립 값).
+                    // 값은 `{var}`(부모 변수, 슬롯 공유) 또는 리터럴(`"str"`, `42`, `true` - 독립 값).
                     let value = match self.peek() {
                         Some(Token::LBrace) => {
                             self.next()?; // {
@@ -522,13 +529,12 @@ impl<'a> Parser<'a> {
                             self.expect(&Token::RBrace)?;
                             ArgValue::Var(var)
                         }
-                        Some(Token::Str(_)) => match self.next()? {
-                            Token::Str(s) => ArgValue::Literal(s.clone()),
-                            _ => unreachable!(),
-                        },
+                        Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
+                            ArgValue::Literal(self.lit_value()?)
+                        }
                         got => {
                             return Err(ParseError::Expected {
-                                want: "component arg value ({var} or \"lit\")".into(),
+                                want: "component arg value ({var}, \"str\", 42, true)".into(),
                                 got: format!("{got:?}"),
                             })
                         }

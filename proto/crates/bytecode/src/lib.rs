@@ -11,7 +11,7 @@ mod serialize;
 
 pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module};
 pub use opcode::Op;
-pub use pool::ConstPool;
+pub use pool::{Const, ConstPool};
 pub use serialize::{decode, encode, DecodeError};
 
 #[cfg(test)]
@@ -21,12 +21,12 @@ mod tests {
     /// BYTECODE.md §6의 hello 예시를 손으로 만들어 라운드트립.
     fn hello_module() -> Module {
         let mut pool = ConstPool::new();
-        let class = pool.intern("class");
-        let greeting = pool.intern("greeting");
-        let hello_name = pool.intern("Hello"); // 컴포넌트명
-        let hello_txt = pool.intern("Hello");
-        let sub = pool.intern("sub");
-        let world = pool.intern("world");
+        let class = pool.intern_str("class");
+        let greeting = pool.intern_str("greeting");
+        let hello_name = pool.intern_str("Hello"); // 컴포넌트명
+        let hello_txt = pool.intern_str("Hello");
+        let sub = pool.intern_str("sub");
+        let world = pool.intern_str("world");
 
         // "Hello"가 컴포넌트명이자 텍스트라 intern이 같은 인덱스를 줘야 한다.
         assert_eq!(hello_name, hello_txt);
@@ -89,10 +89,53 @@ mod tests {
     #[test]
     fn pool_interns_duplicates() {
         let mut pool = ConstPool::new();
-        let a = pool.intern("x");
-        let b = pool.intern("x");
+        let a = pool.intern_str("x");
+        let b = pool.intern_str("x");
         assert_eq!(a, b);
         assert_eq!(pool.len(), 1);
+    }
+
+    /// 상수풀 dedup은 값·타입 둘 다 같아야 동일 엔트리 - 문자열 "1"과 숫자 1은 다르다.
+    #[test]
+    fn pool_dedup_distinguishes_type() {
+        let mut pool = ConstPool::new();
+        let s = pool.intern(Const::Str("1".into()));
+        let n = pool.intern(Const::Num(1.0));
+        let b = pool.intern(Const::Bool(true));
+        assert_ne!(s, n);
+        assert_ne!(n, b);
+        assert_eq!(pool.len(), 3);
+        // 같은 값·타입은 같은 인덱스.
+        assert_eq!(pool.intern(Const::Num(1.0)), n);
+        assert_eq!(pool.len(), 3);
+    }
+
+    /// 타입 있는 상수풀(Str/Num/Bool)이 encode->decode로 정확히 복원된다.
+    #[test]
+    fn roundtrip_typed_pool() {
+        let mut pool = ConstPool::new();
+        pool.intern(Const::Str("hi".into()));
+        pool.intern(Const::Num(42.5));
+        pool.intern(Const::Bool(false));
+        pool.intern(Const::Bool(true));
+        let m = Module::new(pool, vec![], vec![]);
+        let back = decode(&encode(&m)).unwrap();
+        assert_eq!(m, back);
+        assert_eq!(back.pool.get(0), Some(&Const::Str("hi".into())));
+        assert_eq!(back.pool.get(1), Some(&Const::Num(42.5)));
+        assert_eq!(back.pool.get(2), Some(&Const::Bool(false)));
+        assert_eq!(back.pool.get(3), Some(&Const::Bool(true)));
+    }
+
+    /// 알 수 없는 상수 태그는 BadConstTag로 거부한다(첫 엔트리 태그 바이트를 오염).
+    #[test]
+    fn decode_rejects_bad_const_tag() {
+        let mut pool = ConstPool::new();
+        pool.intern_str("x");
+        let mut bytes = encode(&Module::new(pool, vec![], vec![]));
+        // MAGIC(4) + VERSION(2) + pool_count(2) 다음이 첫 엔트리 태그.
+        bytes[8] = 0x7f;
+        assert_eq!(decode(&bytes), Err(DecodeError::BadConstTag(0x7f)));
     }
 
     #[test]
@@ -130,7 +173,7 @@ mod tests {
     fn def_lookup_by_id() {
         let m = hello_module();
         let name_const_index = m.def(0).unwrap().name_const_index;
-        assert_eq!(m.pool.get(name_const_index), Some("Hello"));
+        assert_eq!(m.pool.get(name_const_index), Some(&Const::Str("Hello".into())));
         assert!(m.def(1).is_none());
     }
 }

@@ -4,6 +4,10 @@
 
 ## 미해결
 
+- **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
+  실패한다(`get_const`가 `&str` 대신 `&Const` 반환). renderer는 바이트코드로 렌더 가능한지 보는
+  POC였고 그 역할은 끝났다 - 언어가 어느 정도 완성된 뒤 다시 본다. 당분간 처리하지 않는다.
+
 - **안 쓰는 `use`가 트리셰이킹 안 됨** - `use`로 import했지만 template에서 합성(RENDER)하지
   않는 컴포넌트가 qubb에 def로 포함된다. (재현: `bench/components/profilecard.qubc`의 `Tag`는
   use만 하고 미사용인데, 컴파일 결과 qubb에 def로 들어간다.) 컴파일러가 도달성 분석 없이 use된

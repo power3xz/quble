@@ -1,8 +1,10 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{ArgValue, AttrValue, Context, Event, Node, Prop};
+use crate::ast::{ArgValue, AttrValue, Context, Event, LitValue, Node, Prop};
 use crate::resolve::FlatComp;
-use bytecode::{encode, tags, CompDef, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op};
+use bytecode::{
+    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CodegenError {
@@ -56,7 +58,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
     for fc in comps {
         let comp = &fc.comp;
-        let name_const_index = pool.intern(&comp.name);
+        let name_const_index = pool.intern_str(&comp.name);
         let code_off = code.len() as u32;
         // 리소스 로드를 정의 앞머리에 깐다. lazy build에서 이 컴포넌트가 실제로 그려질 때만
         // 실행돼 리소스가 로드된다(같은 파일 컴포넌트가 같은 LOAD_RES를 내도 런타임이 URL dedup).
@@ -88,13 +90,13 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                     .iter()
                     .map(|(field, value)| {
                         Ok(Field {
-                            name_const_index: pool.intern(field),
+                            name_const_index: pool.intern_str(field),
                             value: arg_to_field_value(value, &comp.props, &mut pool)?,
                         })
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
-                    name_const_index: pool.intern(&e.name),
+                    name_const_index: pool.intern_str(&e.name),
                     fields,
                 })
             })
@@ -109,13 +111,13 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                     .iter()
                     .map(|(field, value)| {
                         Ok(Field {
-                            name_const_index: pool.intern(field),
+                            name_const_index: pool.intern_str(field),
                             value: arg_to_field_value(value, &comp.props, &mut pool)?,
                         })
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(ContextDef {
-                    name_const_index: pool.intern(&c.name),
+                    name_const_index: pool.intern_str(&c.name),
                     fields,
                 })
             })
@@ -159,8 +161,17 @@ fn arg_to_field_value(
 ) -> Result<FieldValue, CodegenError> {
     Ok(match value {
         ArgValue::Var(prop) => FieldValue::Scope(prop_name_to_scope_index(prop, props)?),
-        ArgValue::Literal(s) => FieldValue::Const(pool.intern(s)),
+        ArgValue::Literal(lit) => FieldValue::Const(pool.intern(lit_to_const(lit))),
     })
+}
+
+/// 리터럴을 상수풀 엔트리로. 소스의 타입을 그대로 실어 런타임이 올바른 JS 값으로 복원한다.
+fn lit_to_const(lit: &LitValue) -> Const {
+    match lit {
+        LitValue::Str(s) => Const::Str(s.clone()),
+        LitValue::Number(n) => Const::Num(*n),
+        LitValue::Bool(b) => Const::Bool(*b),
+    }
 }
 
 fn emit_node(
@@ -174,7 +185,7 @@ fn emit_node(
 ) -> Result<(), CodegenError> {
     match node {
         Node::Text(s) => {
-            let index = pool.intern(s);
+            let index = pool.intern_str(s);
             code.push(Op::Text as u8);
             code.extend_from_slice(&index.to_le_bytes());
         }
@@ -219,11 +230,11 @@ fn emit_node(
                     Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
                     None => (
                         if is_var { Op::AttrLVar } else { Op::AttrL },
-                        pool.intern(name),
+                        pool.intern_str(name),
                     ),
                 };
                 let value_operand = match value {
-                    AttrValue::Static(s) => pool.intern(s),
+                    AttrValue::Static(s) => pool.intern_str(s),
                     AttrValue::Var(v) => prop_name_to_scope_index(v, props)?,
                 };
                 code.push(op as u8);
@@ -265,7 +276,7 @@ fn emit_node(
                         code.extend_from_slice(&scope_index.to_le_bytes());
                     }
                     ArgValue::Literal(literal) => {
-                        let value_index = pool.intern(literal);
+                        let value_index = pool.intern(lit_to_const(literal));
                         code.push(Op::PushArgLit as u8);
                         code.extend_from_slice(&value_index.to_le_bytes());
                     }
@@ -276,7 +287,7 @@ fn emit_node(
             // 뒤따르는 RENDER가 소비해 자식 경로 prefix에 잇는다 - 이벤트 fullname의 path 축.
             // (alias 생략 = 동일 type-name 공유, alias 부여 = 분리. §1.3)
             let segment = alias.as_deref().unwrap_or(name);
-            let segment_index = pool.intern(segment);
+            let segment_index = pool.intern_str(segment);
             code.push(Op::PushPathSegment as u8);
             code.extend_from_slice(&segment_index.to_le_bytes());
 

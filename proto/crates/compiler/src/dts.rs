@@ -6,7 +6,7 @@
 //! `set(k, v)`가 T를 받는다(REACTIVITY.md §7.1). store/get의 대상 트리는 아직 미정이라 store는
 //! 뺀다. props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 
-use crate::ast::{ArgValue, Component, Node, Prop, Type};
+use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
 use crate::resolve::{flatten, FlatComp, Resolver};
 use crate::CompileError;
 
@@ -109,10 +109,13 @@ fn type_to_ts(ty: &Type) -> String {
     }
 }
 
-/// 값 필드(payload/context)의 TS 타입. 리터럴은 그 값으로 좁히고, 변수는 string(소스에 타입 없음).
+/// 값 필드(payload/context)의 TS 타입. 리터럴은 그 값으로 좁히고(문자열은 "..", 숫자·불리언은
+/// 값 그대로), 변수는 string(소스에 타입 없음 - Var 타입은 다음 스텝).
 fn value_type(v: &ArgValue) -> String {
     match v {
-        ArgValue::Literal(s) => format!("{s:?}"),
+        ArgValue::Literal(LitValue::Str(s)) => format!("{s:?}"),
+        ArgValue::Literal(LitValue::Number(n)) => n.to_string(),
+        ArgValue::Literal(LitValue::Bool(b)) => b.to_string(),
         ArgValue::Var(_) => "string".to_string(),
     }
 }
@@ -339,6 +342,18 @@ mod tests {
             }
         "#);
         assert!(out.contains(r#"Handler<{ count: string; label: "clicks" }"#), "실제 출력:\n{out}");
+    }
+
+    /// payload 리터럴은 타입대로 좁혀진다 - 숫자는 그 값, 불리언은 true/false, 문자열은 "..".
+    #[test]
+    fn typed_literal_payload_narrowed() {
+        let out = dts(r#"
+            component C {
+              events { E({ n: 42, b: true, s: "hi" }) }
+              template { button(@click:E) {} }
+            }
+        "#);
+        assert!(out.contains(r#"Handler<{ n: 42; b: true; s: "hi" }"#), "실제 출력:\n{out}");
     }
 
     /// @if 양가지를 다 순회한다 - then·else 안의 이벤트가 둘 다 나온다.

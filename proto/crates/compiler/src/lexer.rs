@@ -4,6 +4,11 @@
 pub enum Token {
     Ident(String),
     Str(String),
+    Num(String),  // 숫자 리터럴 원문. 값 파싱(f64)은 parse 단계.
+    Bool(bool),   // true / false 값 리터럴.
+    KwBool,       // 타입 키워드 bool
+    KwNumber,     // 타입 키워드 number
+    KwString,     // 타입 키워드 string
     LBrace,   // {
     RBrace,   // }
     LParen,   // (
@@ -168,7 +173,30 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                         break;
                     }
                 }
-                toks.push(Token::Ident(s));
+                // 예약어는 Ident와 분리해 토큰화한다 - prop명/참조로 못 쓰게(뒤늦게 막으면
+                // 하위호환이 깨지므로 지금 전부 잠근다). 값(true/false)과 타입(bool/number/string) 모두.
+                toks.push(match s.as_str() {
+                    "true" => Token::Bool(true),
+                    "false" => Token::Bool(false),
+                    "bool" => Token::KwBool,
+                    "number" => Token::KwNumber,
+                    "string" => Token::KwString,
+                    _ => Token::Ident(s),
+                });
+            }
+            // 숫자 리터럴. 원문을 그대로 담고 값 파싱은 이후 단계(parse). 정수·소수만, 음수·지수는
+            // 표현식 영역이라 지금은 다루지 않는다(SYNTAX.md 미결).
+            c if c.is_ascii_digit() => {
+                let mut s = String::new();
+                while let Some(&ch) = chars.peek() {
+                    if ch.is_ascii_digit() || ch == '.' {
+                        s.push(ch);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                toks.push(Token::Num(s));
             }
             other => return Err(LexError::UnexpectedChar(other)),
         }

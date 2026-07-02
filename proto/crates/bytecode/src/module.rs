@@ -77,7 +77,7 @@ pub struct CompDef {
 }
 
 /// 바이트코드 모듈 하나(= 하나의 컴파일 산출물/파일).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Module {
     pub pool: ConstPool,
     pub(crate) defs: Vec<CompDef>,

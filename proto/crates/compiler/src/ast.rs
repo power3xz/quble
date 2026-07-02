@@ -1,7 +1,7 @@
 //! AST. 한 파일에 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간(텍스트·속성).
 
 /// 한 소스 파일(.qubc 하나)의 파싱 결과: 최상위 use 문들 + 컴포넌트 정의들.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct SourceFile {
     pub uses: Vec<Use>,
     /// `use './x.css'` - 이 파일이 참조하는 외부 리소스 경로(등장 순서). 이 파일의 모든
@@ -17,7 +17,7 @@ pub struct Use {
     pub path: String,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct Component {
     pub name: String,
     pub props: Vec<Prop>,        // 선언 순서 = scope 인덱스
@@ -47,7 +47,7 @@ pub enum Type {
 /// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.
 /// fields 각 항목은 (필드명, 값). 값은 prop 참조(Var) 또는 리터럴(Literal) - 합성 인자와
 /// 같은 두 갈래라 ArgValue를 공유한다. 표현식 값은 아직 미지원.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct Context {
     pub name: String,
     pub fields: Vec<(String, ArgValue)>,
@@ -56,13 +56,13 @@ pub struct Context {
 /// `events { TOGGLE({ label: title, on }) }` - 컴포넌트가 선언한 이벤트.
 /// payload 각 항목은 (이벤트필드명, 값). 값은 prop 참조(Var) 또는 리터럴(Literal).
 /// `{ title }` 단축은 ("title", Var("title"))로 푼다. Var의 prop명은 props에 있어야 한다(codegen이 검증).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct Event {
     pub name: String,
     pub payload: Vec<(String, ArgValue)>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Node {
     Element {
         tag: String,
@@ -106,11 +106,20 @@ pub enum AttrValue {
     Var(String),
 }
 
-/// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`).
+/// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`, `prop=42`, `prop=true`).
 /// 변수는 부모 store 슬롯을 자식과 공유한다(자식 수정이 부모에 반영). 리터럴은 부모와 무관한
 /// 독립 값으로, 런타임이 자식 인스턴스에 고유 leaf로 심는다(원본과 분리, 자식이 독립 수정).
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ArgValue {
     Var(String),
-    Literal(String),
+    Literal(LitValue),
+}
+
+/// 리터럴 값. quble이 타입을 소유하므로 리터럴도 종류를 갖는다 - 상수풀에 타입대로 실려
+/// 런타임이 올바른 JS 값(string/number/boolean)으로 복원한다. Number 원문은 f64로 파싱해 담는다.
+#[derive(Debug, PartialEq, Clone)]
+pub enum LitValue {
+    Str(String),
+    Number(f64),
+    Bool(bool),
 }

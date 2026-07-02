@@ -1,10 +1,15 @@
 //! 모듈 ↔ 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
 
 use crate::module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module};
-use crate::pool::ConstPool;
+use crate::pool::{Const, ConstPool};
 
 const MAGIC: &[u8; 4] = b"QBL\0";
 const VERSION: u16 = 0;
+
+// 상수풀 엔트리 타입 태그(BYTECODE.md §4). 엔트리마다 앞에 1바이트.
+const TAG_STR: u8 = 0;
+const TAG_NUM: u8 = 1;
+const TAG_BOOL: u8 = 2;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -12,6 +17,7 @@ pub enum DecodeError {
     BadVersion(u16),
     UnexpectedEof,
     BadUtf8,
+    BadConstTag(u8),
 }
 
 // ---- 인코딩 ----
@@ -21,10 +27,10 @@ pub fn encode(m: &Module) -> Vec<u8> {
     out.extend_from_slice(MAGIC);
     put_u16(&mut out, VERSION);
 
-    // 상수풀
+    // 상수풀 - 엔트리마다 타입 태그 1바이트 + 타입별 payload.
     put_u16(&mut out, m.pool.len() as u16);
-    for s in m.pool.entries() {
-        put_str(&mut out, s);
+    for c in m.pool.entries() {
+        put_const(&mut out, c);
     }
 
     // 컴포넌트 테이블
@@ -67,6 +73,25 @@ fn put_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
 }
 
+/// 상수풀 엔트리: 타입 태그 1바이트 + payload. Str=u16 길이+UTF-8, Num=f64 8바이트(LE),
+/// Bool=u8(0/1). 런타임은 태그로 뒤 바이트 해석을 정한다.
+fn put_const(out: &mut Vec<u8>, c: &Const) {
+    match c {
+        Const::Str(s) => {
+            out.push(TAG_STR);
+            put_str(out, s);
+        }
+        Const::Num(n) => {
+            out.push(TAG_NUM);
+            out.extend_from_slice(&n.to_le_bytes());
+        }
+        Const::Bool(b) => {
+            out.push(TAG_BOOL);
+            out.push(*b as u8);
+        }
+    }
+}
+
 /// 필드 목록을 쓴다 - field_count, [(name_const_index, value)]. value는 FieldValue를 u16로
 /// encode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
 fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
@@ -94,7 +119,7 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
     let pool_count = r.u16()?;
     let mut entries = Vec::with_capacity(pool_count as usize);
     for _ in 0..pool_count {
-        entries.push(r.string()?);
+        entries.push(r.constant()?);
     }
     let pool = ConstPool::from_entries(entries);
 
@@ -163,11 +188,32 @@ impl<'a> Reader<'a> {
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
+    fn u8(&mut self) -> Result<u8, DecodeError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn f64(&mut self) -> Result<f64, DecodeError> {
+        let b = self.take(8)?;
+        Ok(f64::from_le_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
+    }
+
     fn string(&mut self) -> Result<String, DecodeError> {
         let len = self.u16()? as usize;
         let b = self.take(len)?;
         std::str::from_utf8(b)
             .map(|s| s.to_string())
             .map_err(|_| DecodeError::BadUtf8)
+    }
+
+    /// 상수풀 엔트리: 태그 1바이트로 타입을 정하고 payload를 읽는다(put_const의 역).
+    fn constant(&mut self) -> Result<Const, DecodeError> {
+        match self.u8()? {
+            TAG_STR => Ok(Const::Str(self.string()?)),
+            TAG_NUM => Ok(Const::Num(self.f64()?)),
+            TAG_BOOL => Ok(Const::Bool(self.u8()? != 0)),
+            other => Err(DecodeError::BadConstTag(other)),
+        }
     }
 }

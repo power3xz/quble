@@ -75,6 +75,16 @@ fn fs_resolver(base_canonical_path: &str, target_path: &str) -> Option<(String, 
 mod tests {
     use super::*;
     use crate::ast::{AttrValue, Node};
+    use bytecode::Const;
+
+    /// 상수풀 인덱스의 문자열 값(테스트용). 이름·속성명 등 문자열 상수 검사에 쓴다.
+    /// 문자열이 아닌 엔트리(Num/Bool)면 None.
+    fn str_at(module: &bytecode::Module, index: u16) -> Option<&str> {
+        match module.pool.get(index) {
+            Some(Const::Str(s)) => Some(s),
+            _ => None,
+        }
+    }
 
     /// use 없는 단일 소스를 컴파일(테스트용). resolver는 호출되지 않으므로 항상 None.
     fn compile(src: &str) -> Result<Box<[u8]>, CompileError> {
@@ -143,11 +153,11 @@ mod tests {
         use bytecode::{encode, tags, CompDef, ConstPool, Module, Op};
 
         let mut pool = ConstPool::new();
-        let hello = pool.intern("Hello"); // 컴포넌트명
-        let greeting = pool.intern("greeting");
-        let _hello_txt = pool.intern("Hello"); // 텍스트, 같은 인덱스
-        let sub = pool.intern("sub");
-        let world = pool.intern("world");
+        let hello = pool.intern_str("Hello"); // 컴포넌트명
+        let greeting = pool.intern_str("greeting");
+        let _hello_txt = pool.intern_str("Hello"); // 텍스트, 같은 인덱스
+        let sub = pool.intern_str("sub");
+        let world = pool.intern_str("world");
         // "class"는 전역 속성명 → 컴포넌트 상수풀이 아니라 전역 ID로 참조.
         let class_g = bytecode::attrs::attr_id("class").unwrap();
 
@@ -218,7 +228,7 @@ mod tests {
         let class_g = bytecode::attrs::attr_id("class").unwrap();
         // data-x 상수풀 인덱스를 선형 탐색으로 찾는다(테스트 전용).
         let data_x = (0..u16::MAX)
-            .find(|&i| module.pool.get(i) == Some("data-x"))
+            .find(|&i| str_at(&module, i) == Some("data-x"))
             .unwrap();
         let mut want = Vec::new();
         let push16 = |c: &mut Vec<u8>, v: u16| c.extend_from_slice(&v.to_le_bytes());
@@ -299,18 +309,18 @@ mod tests {
         // 컨텍스트 테이블: Area 하나, fields 2개(section=Const 리터럴, userId=Scope assignee).
         assert_eq!(def.contexts.len(), 1);
         let area = &def.contexts[0];
-        assert_eq!(module.pool.get(area.name_const_index), Some("Area"));
+        assert_eq!(str_at(&module, area.name_const_index), Some("Area"));
         assert_eq!(area.fields.len(), 2);
         // section: "actions" -> Const(상수풀 인덱스), 그 인덱스가 "actions"를 가리킨다.
-        assert_eq!(module.pool.get(area.fields[0].name_const_index), Some("section"));
+        assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("section"));
         match area.fields[0].value {
             FieldValue::Const(actions_index) => {
-                assert_eq!(module.pool.get(actions_index), Some("actions"));
+                assert_eq!(str_at(&module, actions_index), Some("actions"));
             }
             other => panic!("section은 리터럴이라 Const여야: {other:?}"),
         }
         // userId: assignee -> Scope(assignee의 scope 인덱스 0).
-        assert_eq!(module.pool.get(area.fields[1].name_const_index), Some("userId"));
+        assert_eq!(str_at(&module, area.fields[1].name_const_index), Some("userId"));
         assert_eq!(area.fields[1].value, FieldValue::Scope(0));
 
         // 코드: EnterContext context_index=0 ... ExitContext.
@@ -343,7 +353,7 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let area = &module.def(0).unwrap().contexts[0];
         // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0).
-        assert_eq!(module.pool.get(area.fields[0].name_const_index), Some("tier"));
+        assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("tier"));
         assert_eq!(area.fields[0].value, FieldValue::Scope(0));
     }
 
@@ -363,15 +373,54 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let event = &module.def(0).unwrap().events[0];
         // count: 단축형 -> Scope(0). label: "clicks" -> Const(상수풀이 "clicks"를 가리킴).
-        assert_eq!(module.pool.get(event.fields[0].name_const_index), Some("count"));
+        assert_eq!(str_at(&module, event.fields[0].name_const_index), Some("count"));
         assert_eq!(event.fields[0].value, FieldValue::Scope(0));
-        assert_eq!(module.pool.get(event.fields[1].name_const_index), Some("label"));
+        assert_eq!(str_at(&module, event.fields[1].name_const_index), Some("label"));
         match event.fields[1].value {
             FieldValue::Const(clicks_index) => {
-                assert_eq!(module.pool.get(clicks_index), Some("clicks"));
+                assert_eq!(str_at(&module, clicks_index), Some("clicks"));
             }
             other => panic!("label은 리터럴이라 Const여야: {other:?}"),
         }
+    }
+
+    /// 리터럴은 소스의 타입대로 상수풀에 들어간다 - 숫자는 Const::Num, 불리언은 Const::Bool,
+    /// 문자열은 Const::Str. 런타임이 인덱스로 꺼내면 이미 올바른 값이 되도록.
+    #[test]
+    fn literal_types_in_pool() {
+        use bytecode::{decode, Const, FieldValue};
+
+        let src = r#"
+            component C {
+              events { E({ n: 42, ratio: 3.5, b: true, s: "hi" }) }
+              template { button(@click:E) { "x" } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let fields = &module.def(0).unwrap().events[0].fields;
+        // 각 필드값이 Const를 가리키고, 그 상수가 타입대로다.
+        let const_of = |i: usize| match fields[i].value {
+            FieldValue::Const(idx) => module.pool.get(idx).cloned(),
+            ref other => panic!("리터럴은 Const여야: {other:?}"),
+        };
+        assert_eq!(const_of(0), Some(Const::Num(42.0)));
+        assert_eq!(const_of(1), Some(Const::Num(3.5)));
+        assert_eq!(const_of(2), Some(Const::Bool(true)));
+        assert_eq!(const_of(3), Some(Const::Str("hi".into())));
+    }
+
+    /// 예약어(true/false/bool/number/string)는 prop 이름으로 못 쓴다 - 렉서가 토큰을 분리해
+    /// props 자리에서 Ident가 아니라 예약 토큰이 와 파싱이 거부한다.
+    #[test]
+    fn reserved_word_as_prop_name_errors() {
+        let src = r#"
+            component C {
+              props { true: bool }
+              template { div() {} }
+            }
+        "#;
+        assert!(compile(src).is_err());
     }
 
     /// contexts 값이 props에 없는 prop을 참조하면 UnknownProp 에러(payload와 같은 검증 경로).
@@ -443,7 +492,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_const_index).unwrap().to_string());
+            names.push(str_at(&module, def.name_const_index).unwrap().to_string());
             id += 1;
         }
         assert_eq!(names.len(), 3, "Card+Thumb+Badge 셋 다 들어가야 함");
@@ -567,7 +616,7 @@ mod tests {
         // 컴포넌트 ID로 이름을 확인해 매핑이 어긋나도 잡히게 한다.
         let id_of = |name: &str| {
             (0..)
-                .find(|&i| module.def(i).map(|d| module.pool.get(d.name_const_index).unwrap()) == Some(name))
+                .find(|&i| module.def(i).map(|d| str_at(&module, d.name_const_index).unwrap()) == Some(name))
                 .unwrap()
         };
         // 한 컴포넌트의 코드 앞머리 LOAD_RES들을 순서대로 모은다(연속한 LOAD_RES만).
@@ -659,7 +708,7 @@ mod tests {
         let mut names = Vec::new();
         let mut id = 0;
         while let Some(def) = module.def(id) {
-            names.push(module.pool.get(def.name_const_index).unwrap().to_string());
+            names.push(str_at(&module, def.name_const_index).unwrap().to_string());
             id += 1;
         }
         names
@@ -742,7 +791,7 @@ mod tests {
 
         // operand는 "Inner"를 가리킨다.
         let seg_index = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
-        assert_eq!(module.pool.get(seg_index).unwrap(), "Inner");
+        assert_eq!(str_at(&module, seg_index).unwrap(), "Inner");
 
         // 바로 뒤에 RENDER가 온다 - 세그먼트를 소비하는 합성.
         assert_eq!(code[seg_pos + 3], Op::Render as u8);
@@ -772,7 +821,7 @@ mod tests {
 
         assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 → 세그먼트 둘");
         assert_eq!(seg_indices[0], seg_indices[1], "같은 type-name은 같은 상수풀 인덱스");
-        assert_eq!(module.pool.get(seg_indices[0]).unwrap(), "Inner");
+        assert_eq!(str_at(&module, seg_indices[0]).unwrap(), "Inner");
     }
 
     /// `Alias: Comp(...)` - alias가 있으면 세그먼트는 type-name이 아니라 alias다.
@@ -796,7 +845,7 @@ mod tests {
 
         // operand는 type-name "Inner"가 아니라 alias "Done".
         let seg_index = u16::from_le_bytes([code[seg_pos + 1], code[seg_pos + 2]]);
-        assert_eq!(module.pool.get(seg_index).unwrap(), "Done");
+        assert_eq!(str_at(&module, seg_index).unwrap(), "Done");
     }
 
     /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 - alias 부여는 분리의 명시적 행위(§1.3).
@@ -822,8 +871,8 @@ mod tests {
 
         assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 → 세그먼트 둘");
         assert_ne!(seg_indices[0], seg_indices[1], "다른 alias는 다른 세그먼트");
-        assert_eq!(module.pool.get(seg_indices[0]).unwrap(), "Save");
-        assert_eq!(module.pool.get(seg_indices[1]).unwrap(), "Cancel");
+        assert_eq!(str_at(&module, seg_indices[0]).unwrap(), "Save");
+        assert_eq!(str_at(&module, seg_indices[1]).unwrap(), "Cancel");
     }
 
     /// 요소 속성은 공백 구분 - 속성 사이 콤마는 우리 문법이 아니라 ParseError로 거부한다.
