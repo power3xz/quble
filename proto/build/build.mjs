@@ -57,7 +57,7 @@ if (existsSync(handlersTs)) {
     format: "esm",
     platform: "browser",
     target: "es2020",
-    minify: true,
+    minify: false,
     write: false,
   });
   const js = result.outputFiles[0].text;
@@ -80,26 +80,38 @@ if (existsSync(handlersTs)) {
 }
 
 // 3. 런타임 번들 - mount.js(runtime/region/leaf-store 포함)를 한 파일로. 매 빌드 생성.
-//    배포 산출물이라 minify - 디버깅은 소스(proto/web/*.js)를 본다.
 const runtimeBundle = await build({
   entryPoints: [join(buildDir, "..", "web", "mount.js")],
   bundle: true,
   format: "esm",
   platform: "browser",
   target: "es2020",
-  minify: true,
+  minify: false,
   write: false,
 });
 writeFileSync(join(distDir, "quble-runtime.js"), runtimeBundle.outputFiles[0].text);
 
 // 4. 진입 페이지 - quble-runtime.js를 로드해 <stem>.qubb를 #quble-app에 마운트한다.
 //    초기 data는 --data 파일 내용을 인라인(없으면 {}). store/provided 구조가 정해지면 교체(DESIGN §5.1).
+//    구동 크리티컬 체인(runtime -> manifest -> qubb -> handlers)은 순차 발견이라 폭포수가 된다.
+//    빌드가 그 경로들을 알므로 preload로 심어 HTML 파싱 시점에 병렬로 받게 한다(CSS는 렌더 중
+//    LOAD_RES가 삽입하니 크리티컬 패스 아님 - 제외).
 const data = dataFile ? readFileSync(dataFile, "utf8") : "{}";
+const finalManifest = JSON.parse(readFileSync(join(distDir, `${stem}.manifest.json`), "utf8"));
+const preloads = [
+  `  <link rel="modulepreload" href="./quble-runtime.js">`,
+  `  <link rel="preload" href="./${stem}.qubb" as="fetch" crossorigin>`,
+  `  <link rel="preload" href="./${stem}.manifest.json" as="fetch" crossorigin>`,
+];
+if (finalManifest.handlers) {
+  preloads.push(`  <link rel="modulepreload" href="./${finalManifest.handlers}">`);
+}
 const indexHtml = `<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <title>${stem}</title>
+${preloads.join("\n")}
 </head>
 <body>
   <div id="quble-app"></div>
