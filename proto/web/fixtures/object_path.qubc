@@ -1,0 +1,13 @@
+component C {
+  props {
+    title: string,
+    user: { name: string, contact: { email: string } }
+  }
+  template {
+    div() {
+      h1() { {title} }
+      span() { {user.name} }
+      span() { {user.contact.email} }
+    }
+  }
+}
