@@ -18,9 +18,10 @@
   컴포넌트 **전체 prop**을 `props`로 타이핑해, TS는 통과하고 런타임에서만 조용히 깨진다.
   - **엮인 결정**: "무엇을 담느냐"(payload만 vs 전체 prop)와 "어떻게 담느냐"(지금은 이름->leafIndex
     맵을 미리 짓는데, 자식 컴포넌트는 prop 이름이 바이트코드에 없어 이름 맵을 못 짓는다)가
-    store/reactivity 모델(DESIGN §5.2)과 얽혀 있다. store가 자리잡은 뒤 함께 정한다 - 지금 방향을
-    못박지 않는다. (검토된 갈래: `data`에 값 대신 leafIndex를 담아 `set(data.x, v)`로 통합, prop
-    이름을 manifest 사이드카/바이트코드에 두기, scope index+paths 폐기하고 이름 기반으로 복귀.)
+    prop 이름을 런타임에 어떻게 공급하느냐(지금은 바이트코드에 이름이 없어 scope index만)에 달려
+    있다 - 이건 바이트코드/manifest 포맷 결정이라 신중히 정한다. (검토된 갈래: `data`에 값 대신
+    leafIndex를 담아 `set(data.x, v)`로 통합, prop 이름을 manifest 사이드카/바이트코드에 두기,
+    scope index+paths 폐기하고 이름 기반으로 복귀.)
 
 - **안 쓰는 `use`가 트리셰이킹 안 됨** - `use`로 import했지만 template에서 합성(RENDER)하지
   않는 컴포넌트가 qubb에 def로 포함된다. (재현: `bench/components/profilecard.qubc`의 `Tag`는

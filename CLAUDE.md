@@ -14,7 +14,7 @@ remembered claim (a past summary once mislabeled DESIGN §5.1 - verify, don't in
   tradeoff first.
 - **SYNTAX.md** - surface-syntax reference. The single source for grammar/directives; do not
   re-document syntax elsewhere.
-- **REACTIVITY.md** - reactivity + handler model (store, `get`/`set`, DESIGN §5.2 territory).
+- **REACTIVITY.md** - reactivity + handler model (store, `get`/`set`) - the settled conclusion.
 - **ROADMAP.md** - feature progress by domain (what is done / in-flight / not started).
 - **ISSUES.md** - known problems (symptom + repro; fix filled in once decided).
 - **proto/BYTECODE.md** - bytecode (qubb) format and opcode contract.
