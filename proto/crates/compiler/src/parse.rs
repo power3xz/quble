@@ -11,6 +11,7 @@
 
 use crate::ast::{
     ArgValue, AttrValue, Component, Context, Event, LitValue, Node, Prop, SourceFile, Type, Use,
+    VarRef,
 };
 use crate::lexer::{Directive, Token};
 
@@ -98,11 +99,24 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // prop 참조 하나: `root` 또는 `root.field.field…`. root는 prop 이름, 뒤는 객체 필드 경로.
+    // leaf 여부(경로 끝이 원시냐)는 여기서 안 본다 - 타입을 모르는 파서의 몫이 아니라 codegen이
+    // props 타입과 대조해 판단한다.
+    fn var_ref(&mut self) -> Result<VarRef, ParseError> {
+        let root = self.ident()?;
+        let mut path = Vec::new();
+        while matches!(self.peek(), Some(Token::Dot)) {
+            self.next()?;
+            path.push(self.ident()?);
+        }
+        Ok(VarRef { root, path })
+    }
+
     /// 값 자리(payload/context/합성 인자)의 값 하나: Ident면 prop 참조(Var), 그 외 리터럴 토큰
     /// (Str/Num/Bool)이면 타입대로 Literal.
     fn field_value(&mut self) -> Result<ArgValue, ParseError> {
         match self.peek() {
-            Some(Token::Ident(_)) => Ok(ArgValue::Var(self.ident()?)),
+            Some(Token::Ident(_)) => Ok(ArgValue::Var(self.var_ref()?)),
             Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
                 Ok(ArgValue::Literal(self.lit_value()?))
             }
@@ -340,7 +354,7 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
-                        ArgValue::Var(field.clone())
+                        ArgValue::Var(VarRef { root: field.clone(), path: Vec::new() })
                     };
                     payload.push((field, value));
                 }
@@ -394,7 +408,7 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
-                        ArgValue::Var(key.clone())
+                        ArgValue::Var(VarRef { root: key.clone(), path: Vec::new() })
                     };
                     fields.push((key, value));
                 }
@@ -475,12 +489,12 @@ impl<'a> Parser<'a> {
         Ok(Node::With { context, children })
     }
 
-    // { IDENT }
+    // { IDENT(.IDENT)* }
     fn var(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::LBrace)?;
-        let name = self.ident()?;
+        let var = self.var_ref()?;
         self.expect(&Token::RBrace)?;
-        Ok(Node::Var(name))
+        Ok(Node::Var(var))
     }
 
     // [ALIAS :] COMP ( ARG* ) { }   - 대문자 컴포넌트 호출. ARG = prop = { var }.
@@ -525,7 +539,7 @@ impl<'a> Parser<'a> {
                     let value = match self.peek() {
                         Some(Token::LBrace) => {
                             self.next()?; // {
-                            let var = self.ident()?;
+                            let var = self.var_ref()?;
                             self.expect(&Token::RBrace)?;
                             ArgValue::Var(var)
                         }
@@ -607,7 +621,7 @@ impl<'a> Parser<'a> {
                         },
                         Some(Token::LBrace) => {
                             self.next()?; // {
-                            let var = self.ident()?;
+                            let var = self.var_ref()?;
                             self.expect(&Token::RBrace)?;
                             AttrValue::Var(var)
                         }

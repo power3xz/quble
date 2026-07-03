@@ -147,6 +147,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn lex_dot_between_idents() {
+        use lexer::Token;
+        // `.`은 식별자 사이에서 Dot 토큰. `assignee.name` -> Ident Dot Ident.
+        let toks = lexer::lex("assignee.name").unwrap();
+        assert_eq!(
+            toks,
+            vec![
+                Token::Ident("assignee".to_string()),
+                Token::Dot,
+                Token::Ident("name".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_number_dot_is_decimal_not_dot() {
+        use lexer::Token;
+        // 숫자 안의 `.`은 소수점으로 먹어 Dot 토큰이 생기지 않는다(숫자 분기가 먼저 소비).
+        let toks = lexer::lex("3.14").unwrap();
+        assert_eq!(toks, vec![Token::Num("3.14".to_string())]);
+    }
+
     /// 컴파일 산출물이 손으로 구성한 기대 바이트와 일치하는지.
     #[test]
     fn compile_hello_matches_expected_bytes() {
@@ -882,6 +905,91 @@ mod tests {
         assert!(matches!(
             compile(src),
             Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// 객체 경로 보간 `{user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
+    /// title=0, user{name=1, contact{email=2}}, done=3. 경로가 앞 형제 필드를 건너뛴 offset을 준다.
+    #[test]
+    fn object_path_flat_scope_index() {
+        use bytecode::{decode, Op};
+        let src = r#"
+            component C {
+              props {
+                title: string,
+                user: { name: string, contact: { email: string } },
+                done: bool
+              }
+              template {
+                div() { {title} {user.name} {user.contact.email} }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // TEXT_VAR의 scope index만 순서대로 뽑아 검증한다.
+        let mut vars = Vec::new();
+        let mut i = 0;
+        while i < code.len() {
+            let op = code[i];
+            if op == Op::TextVar as u8 {
+                vars.push(u16::from_le_bytes([code[i + 1], code[i + 2]]));
+                i += 3;
+            } else if op == Op::ElemOpen as u8 {
+                i += 3;
+            } else {
+                i += 1;
+            }
+        }
+        // title=0, user.name=1, user.contact.email=2
+        assert_eq!(vars, vec![0, 1, 2]);
+    }
+
+    /// 값 자리(보간)에 leaf가 아닌 객체 경로가 오면 NotLeaf 에러. 객체 통째는 안 넘긴다.
+    #[test]
+    fn object_whole_in_value_slot_rejected() {
+        let src = r#"
+            component C {
+              props { user: { name: string } }
+              template { div() { {user} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::NotLeaf(_)))
+        ));
+    }
+
+    /// 없는 필드 경로는 UnknownField 에러.
+    #[test]
+    fn unknown_object_field_rejected() {
+        let src = r#"
+            component C {
+              props { user: { name: string } }
+              template { div() { {user.age} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::UnknownField { .. }))
+        ));
+    }
+
+    /// 원시 prop에 `.field`로 파고들면 UnknownField(객체 아닌데 접근).
+    #[test]
+    fn dot_into_primitive_rejected() {
+        let src = r#"
+            component C {
+              props { title: string }
+              template { div() { {title.x} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::UnknownField { .. }))
         ));
     }
 }

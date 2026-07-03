@@ -1,6 +1,6 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{ArgValue, AttrValue, Context, Event, LitValue, Node, Prop};
+use crate::ast::{ArgValue, AttrValue, Context, Event, LitValue, Node, Prop, Type, VarRef};
 use crate::resolve::FlatComp;
 use bytecode::{
     encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
@@ -20,6 +20,11 @@ pub enum CodegenError {
     UnknownEvent(String),
     /// `@with Context`가 이 컴포넌트 contexts에 없는 컨텍스트명을 가리킴.
     UnknownContext(String),
+    /// prop 경로가 존재하지 않는 필드를 가리킴(객체 아닌 값에 `.field`, 또는 없는 필드명).
+    UnknownField { root: String, field: String },
+    /// 값 자리(보간·속성·payload·context)에 leaf(원시)가 아닌 객체/배열 경로가 왔다.
+    /// 반응성·값 자리엔 leaf만 올 수 있다 - 객체 통째는 안 넘긴다.
+    NotLeaf(String),
 }
 
 /// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
@@ -144,13 +149,72 @@ fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
     (res_ids.len() - 1) as u16
 }
 
-/// 변수명을 scope 인덱스로. 선언 순서 = scope 인덱스. 미선언이면 에러.
-fn prop_name_to_scope_index(name: &str, props: &[Prop]) -> Result<u16, CodegenError> {
-    props
-        .iter()
-        .position(|p| p.name == name)
-        .map(|i| i as u16)
-        .ok_or_else(|| CodegenError::UnknownProp(name.to_string()))
+/// 타입의 leaf(원시) 개수. 객체·배열은 펼친 leaf 수의 합. 원시는 1.
+/// scope 인덱스는 props를 선언 순서로 펼친 평탄 leaf 번호라, 앞 prop들이 차지하는 칸을
+/// 세려면 타입별 leaf 수가 필요하다. (배열은 요소 타입 leaf 수 - `@for` 회수 전까지 요소 1벌.)
+fn leaf_count(ty: &Type) -> u16 {
+    match ty {
+        Type::Bool | Type::Number | Type::String => 1,
+        Type::Array(inner) => leaf_count(inner),
+        Type::Object(fields) => fields.iter().map(|(_, t)| leaf_count(t)).sum(),
+    }
+}
+
+/// prop 참조(root + 객체 경로)를 평탄 scope 인덱스로. props를 선언 순서로 펼친 leaf 번호를
+/// 매기되, 경로는 root prop 타입을 필드로 파고들어 도달한 leaf의 offset을 더한다. 경로가
+/// leaf(원시)에서 끝나지 않으면(객체/배열) 에러 - 값 자리엔 leaf만 온다.
+fn var_ref_to_scope_index(var: &VarRef, props: &[Prop]) -> Result<u16, CodegenError> {
+    // root prop까지의 평탄 offset(앞 prop들의 leaf 수 합)을 세며 root prop을 찾는다.
+    let mut base = 0u16;
+    let mut ty = None;
+    for p in props {
+        if p.name == var.root {
+            ty = Some(&p.ty);
+            break;
+        }
+        base += leaf_count(&p.ty);
+    }
+    let mut ty = ty.ok_or_else(|| CodegenError::UnknownProp(var.root.clone()))?;
+
+    // 경로를 타입 따라 내려가며 offset을 누적한다. 각 단계에서 앞 형제 필드의 leaf 수를 더한다.
+    for key in &var.path {
+        let fields = match ty {
+            Type::Object(fields) => fields,
+            _ => {
+                return Err(CodegenError::UnknownField {
+                    root: var.root.clone(),
+                    field: key.clone(),
+                })
+            }
+        };
+        let mut found = None;
+        for (name, field_ty) in fields {
+            if name == key {
+                found = Some(field_ty);
+                break;
+            }
+            base += leaf_count(field_ty);
+        }
+        ty = found.ok_or_else(|| CodegenError::UnknownField {
+            root: var.root.clone(),
+            field: key.clone(),
+        })?;
+    }
+
+    // 도달 타입이 leaf(원시)여야 한다.
+    match ty {
+        Type::Bool | Type::Number | Type::String => Ok(base),
+        _ => Err(CodegenError::NotLeaf(var_ref_display(var))),
+    }
+}
+
+/// 에러 메시지용 경로 표기: `root.a.b`.
+fn var_ref_display(var: &VarRef) -> String {
+    if var.path.is_empty() {
+        var.root.clone()
+    } else {
+        format!("{}.{}", var.root, var.path.join("."))
+    }
 }
 
 /// ArgValue를 FieldValue로. Var는 prop을 scope 인덱스로, Literal은 상수풀에 intern해 Const로.
@@ -160,7 +224,7 @@ fn arg_to_field_value(
     pool: &mut ConstPool,
 ) -> Result<FieldValue, CodegenError> {
     Ok(match value {
-        ArgValue::Var(prop) => FieldValue::Scope(prop_name_to_scope_index(prop, props)?),
+        ArgValue::Var(var) => FieldValue::Scope(var_ref_to_scope_index(var, props)?),
         ArgValue::Literal(lit) => FieldValue::Const(pool.intern(lit_to_const(lit))),
     })
 }
@@ -189,8 +253,8 @@ fn emit_node(
             code.push(Op::Text as u8);
             code.extend_from_slice(&index.to_le_bytes());
         }
-        Node::Var(name) => {
-            let index = prop_name_to_scope_index(name, props)?;
+        Node::Var(var) => {
+            let index = var_ref_to_scope_index(var, props)?;
             code.push(Op::TextVar as u8);
             code.extend_from_slice(&index.to_le_bytes());
         }
@@ -235,7 +299,7 @@ fn emit_node(
                 };
                 let value_operand = match value {
                     AttrValue::Static(s) => pool.intern_str(s),
-                    AttrValue::Var(v) => prop_name_to_scope_index(v, props)?,
+                    AttrValue::Var(v) => var_ref_to_scope_index(v, props)?,
                 };
                 code.push(op as u8);
                 code.extend_from_slice(&name_operand.to_le_bytes());
@@ -271,7 +335,7 @@ fn emit_node(
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
-                        let scope_index = prop_name_to_scope_index(parent_var, props)?;
+                        let scope_index = var_ref_to_scope_index(parent_var, props)?;
                         code.push(Op::PushArg as u8);
                         code.extend_from_slice(&scope_index.to_le_bytes());
                     }
@@ -295,8 +359,9 @@ fn emit_node(
             code.extend_from_slice(&child_id.to_le_bytes());
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop - scope index 하나. (표현식은 이후 단계)
-            let scope_index = prop_name_to_scope_index(cond, props)?;
+            // cond는 불리언 prop - scope index 하나. (경로/표현식은 이후 단계 - 지금은 이름 하나)
+            let cond_ref = VarRef { root: cond.clone(), path: Vec::new() };
+            let scope_index = var_ref_to_scope_index(&cond_ref, props)?;
             code.push(Op::If as u8);
             code.extend_from_slice(&scope_index.to_le_bytes());
 

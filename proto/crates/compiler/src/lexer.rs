@@ -18,6 +18,7 @@ pub enum Token {
     Eq,     // =
     Comma,  // ,
     Colon,  // :
+    Dot,    // . (객체 필드 접근 `assignee.name`)
     /// `@` 뒤에 오는 디렉티브. `@if` -> `At(Directive::If)`.
     At(Directive),
 }
@@ -118,6 +119,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             ':' => {
                 chars.next();
                 toks.push(Token::Colon);
+            }
+            '.' => {
+                chars.next();
+                toks.push(Token::Dot);
             }
             '@' => {
                 chars.next(); // @

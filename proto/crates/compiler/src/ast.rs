@@ -72,8 +72,8 @@ pub enum Node {
         children: Vec<Node>,
     },
     Text(String),
-    /// `{name}` 보간 - props 이름 참조. codegen이 scope 인덱스로 해석.
-    Var(String),
+    /// `{name}`·`{assignee.name}` 보간 - prop 참조. codegen이 scope 인덱스로 해석.
+    Var(VarRef),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
     /// alias = use-site 별칭(`Alias: Comp(...)`). 있으면 이게 fullname path 세그먼트가 되고,
@@ -103,7 +103,17 @@ pub enum Node {
 #[derive(Debug, PartialEq, Eq)]
 pub enum AttrValue {
     Static(String),
-    Var(String),
+    Var(VarRef),
+}
+
+/// prop 참조 - 어느 prop(root)의 어느 경로(path)인가. 텍스트 보간·속성값·합성 인자·
+/// payload/context 값이 공유한다. 스칼라는 path 빈 벡터(`title` -> root="title", path=[]),
+/// 객체 접근은 필드들(`assignee.name` -> root="assignee", path=["name"]). root/path 분리:
+/// 나중에 AST에서 객체 단위 처리(root 통째)가 필요할 수 있어 root를 분리해 둔다.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct VarRef {
+    pub root: String,
+    pub path: Vec<String>,
 }
 
 /// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`, `prop=42`, `prop=true`).
@@ -111,7 +121,7 @@ pub enum AttrValue {
 /// 독립 값으로, 런타임이 자식 인스턴스에 고유 leaf로 심는다(원본과 분리, 자식이 독립 수정).
 #[derive(Debug, PartialEq, Clone)]
 pub enum ArgValue {
-    Var(String),
+    Var(VarRef),
     Literal(LitValue),
 }
 
