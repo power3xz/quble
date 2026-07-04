@@ -279,6 +279,14 @@ type TEventHandler<TStore> = (
 - **본문은 JS 위임** - `{ }` 안은 JS 비슷한 표현식, quble는 깊이 파싱하지 않는다.
   quble의 책임은 fullname 생성과 본문 진입 시 스코프 주입(`data`, `provided`, `get`,
   `set`, `goTo`). 표현식 평가는 호스트에 위임.
+
+### 5.5 이벤트 payload에 객체 전달 (아이디어)
+
+핸들러가 payload/context로 leaf 값 하나가 아니라 **객체를 통째로** 받게 하는 것
+(`SAVE({ user })`에서 `user`가 객체). 현재는 값 자리가 leaf-only라 스칼라만 담긴다.
+JS에서 핸들러에 객체를 넘기는 것이 일상적이므로 이를 지원하려는 방향.
+
+탐색한 접근과 그 근거·기각한 대안·POC는 [PAYLOAD-OBJECTS.md](PAYLOAD-OBJECTS.md)에.
 - **인자 바인딩** - `data`는 `events` 스키마에서, `provided`는 §5.1 구조에서. 둘 다
   leafIndex 묶음(`data`=자기 offset, `provided`=조상 컨텍스트 offset).
 
