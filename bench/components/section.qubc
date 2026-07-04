@@ -4,8 +4,7 @@ use SettingRow from "./settingrow.qubc"
 component Section {
   props {
     title: string, open: bool,
-    aLabel: string, aDesc: string, aBadge: string, aEnabled: bool,
-    bLabel: string, bDesc: string, bBadge: string, bEnabled: bool
+    a: SettingRow, b: SettingRow
   }
   contexts {
     SectionMeta { section: title }
@@ -26,8 +25,8 @@ component Section {
       @if (open) {
         @with SectionMeta {
           div(class="section__body") {
-            FirstRow: SettingRow(label={aLabel} desc={aDesc} badge={aBadge} enabled={aEnabled}) {}
-            SecondRow: SettingRow(label={bLabel} desc={bDesc} badge={bBadge} enabled={bEnabled}) {}
+            FirstRow: SettingRow(label={a.label} desc={a.desc} badge={a.badge} enabled={a.enabled}) {}
+            SecondRow: SettingRow(label={b.label} desc={b.desc} badge={b.badge} enabled={b.enabled}) {}
           }
         }
       }

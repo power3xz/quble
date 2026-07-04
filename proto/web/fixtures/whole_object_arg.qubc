@@ -1,0 +1,23 @@
+component WholeObjectArg {
+  props { title: string, row: { label: string, on: bool } }
+  template {
+    div() {
+      h1() { {title} }
+      Child(row={row}) {}
+    }
+  }
+}
+
+component Child {
+  props { row: { label: string, on: bool } }
+  template {
+    section() {
+      span() { {row.label} }
+      @if (row.on) {
+        p() { "켜짐" }
+      } @else {
+        p() { "꺼짐" }
+      }
+    }
+  }
+}

@@ -2,17 +2,17 @@
   "heading": "설정", "dirty": false, "plan": "PRO", "docsLink": "#",
   "general": {
     "open": true,
-    "aLabel": "알림", "aDesc": "푸시 알림 받기", "aBadge": "새 기능", "aEnabled": true,
-    "bLabel": "소리", "bDesc": "효과음 재생", "bBadge": "기본", "bEnabled": false
+    "a": { "label": "알림", "desc": "푸시 알림 받기", "badge": "새 기능", "enabled": true },
+    "b": { "label": "소리", "desc": "효과음 재생", "badge": "기본", "enabled": false }
   },
   "privacy": {
     "open": true,
-    "aLabel": "위치", "aDesc": "위치 공유", "aBadge": "권장", "aEnabled": false,
-    "bLabel": "추적", "bDesc": "활동 기록", "bBadge": "주의", "bEnabled": true
+    "a": { "label": "위치", "desc": "위치 공유", "badge": "권장", "enabled": false },
+    "b": { "label": "추적", "desc": "활동 기록", "badge": "주의", "enabled": true }
   },
   "premium": {
     "open": true,
-    "aLabel": "고급 분석", "aDesc": "상세 리포트", "aBadge": "PRO", "aEnabled": true,
-    "bLabel": "우선 지원", "bDesc": "빠른 응답", "bBadge": "PRO", "bEnabled": false
+    "a": { "label": "고급 분석", "desc": "상세 리포트", "badge": "PRO", "enabled": true },
+    "b": { "label": "우선 지원", "desc": "빠른 응답", "badge": "PRO", "enabled": false }
   }
 }

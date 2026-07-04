@@ -31,17 +31,9 @@ component SettingsPanel {
         }
       }
 
-      General: Section(
-        title="일반" open={general.open}
-        aLabel={general.aLabel} aDesc={general.aDesc} aBadge={general.aBadge} aEnabled={general.aEnabled}
-        bLabel={general.bLabel} bDesc={general.bDesc} bBadge={general.bBadge} bEnabled={general.bEnabled}
-      ) {}
+      General: Section(title="일반" open={general.open} a={general.a} b={general.b}) {}
 
-      Privacy: Section(
-        title="개인정보" open={privacy.open}
-        aLabel={privacy.aLabel} aDesc={privacy.aDesc} aBadge={privacy.aBadge} aEnabled={privacy.aEnabled}
-        bLabel={privacy.bLabel} bDesc={privacy.bDesc} bBadge={privacy.bBadge} bEnabled={privacy.bEnabled}
-      ) {}
+      Privacy: Section(title="개인정보" open={privacy.open} a={privacy.a} b={privacy.b}) {}
 
       @with PlanContext {
         div(class="panel__premium") {
@@ -49,11 +41,7 @@ component SettingsPanel {
             h2(class="panel__premium-title") { "프리미엄" }
             Badge(role={plan} theme="badge--pro") {}
           }
-          Premium: Section(
-            title="프리미엄 기능" open={premium.open}
-            aLabel={premium.aLabel} aDesc={premium.aDesc} aBadge={premium.aBadge} aEnabled={premium.aEnabled}
-            bLabel={premium.bLabel} bDesc={premium.bDesc} bBadge={premium.bBadge} bEnabled={premium.bEnabled}
-          ) {}
+          Premium: Section(title="프리미엄 기능" open={premium.open} a={premium.a} b={premium.b}) {}
         }
       }
 
