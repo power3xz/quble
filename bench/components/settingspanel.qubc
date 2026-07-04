@@ -6,21 +6,9 @@ use LinkButton from "./linkbutton.qubc"
 component SettingsPanel {
   props {
     heading: string, dirty: bool, plan: string, docsLink: string,
-    general: {
-      open: bool,
-      a: { title: string, desc: string, badge: string, on: bool },
-      b: { title: string, desc: string, badge: string, on: bool }
-    },
-    privacy: {
-      open: bool,
-      a: { title: string, desc: string, badge: string, on: bool },
-      b: { title: string, desc: string, badge: string, on: bool }
-    },
-    premium: {
-      open: bool,
-      a: { title: string, desc: string, badge: string, on: bool },
-      b: { title: string, desc: string, badge: string, on: bool }
-    }
+    general: Omit<Section, 'title'>,
+    privacy: Omit<Section, 'title'>,
+    premium: Omit<Section, 'title'>
   }
   contexts {
     PlanContext { plan }
@@ -45,14 +33,14 @@ component SettingsPanel {
 
       General: Section(
         title="일반" open={general.open}
-        aLabel={general.a.title} aDesc={general.a.desc} aBadge={general.a.badge} aEnabled={general.a.on}
-        bLabel={general.b.title} bDesc={general.b.desc} bBadge={general.b.badge} bEnabled={general.b.on}
+        aLabel={general.aLabel} aDesc={general.aDesc} aBadge={general.aBadge} aEnabled={general.aEnabled}
+        bLabel={general.bLabel} bDesc={general.bDesc} bBadge={general.bBadge} bEnabled={general.bEnabled}
       ) {}
 
       Privacy: Section(
         title="개인정보" open={privacy.open}
-        aLabel={privacy.a.title} aDesc={privacy.a.desc} aBadge={privacy.a.badge} aEnabled={privacy.a.on}
-        bLabel={privacy.b.title} bDesc={privacy.b.desc} bBadge={privacy.b.badge} bEnabled={privacy.b.on}
+        aLabel={privacy.aLabel} aDesc={privacy.aDesc} aBadge={privacy.aBadge} aEnabled={privacy.aEnabled}
+        bLabel={privacy.bLabel} bDesc={privacy.bDesc} bBadge={privacy.bBadge} bEnabled={privacy.bEnabled}
       ) {}
 
       @with PlanContext {
@@ -63,8 +51,8 @@ component SettingsPanel {
           }
           Premium: Section(
             title="프리미엄 기능" open={premium.open}
-            aLabel={premium.a.title} aDesc={premium.a.desc} aBadge={premium.a.badge} aEnabled={premium.a.on}
-            bLabel={premium.b.title} bDesc={premium.b.desc} bBadge={premium.b.badge} bEnabled={premium.b.on}
+            aLabel={premium.aLabel} aDesc={premium.aDesc} aBadge={premium.aBadge} aEnabled={premium.aEnabled}
+            bLabel={premium.bLabel} bDesc={premium.bDesc} bBadge={premium.bBadge} bEnabled={premium.bEnabled}
           ) {}
         }
       }
