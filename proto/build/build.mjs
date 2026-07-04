@@ -32,9 +32,9 @@ if (!entry) {
 }
 
 const buildDir = dirname(new URL(import.meta.url).pathname);
-const quble = join(buildDir, "..", "target", "release", "quble");
+const quble = join(buildDir, "..", "target", "debug", "quble");
 if (!existsSync(quble)) {
-  console.error(`quble 바이너리 없음: ${quble} (cargo build --release --bin quble 먼저)`);
+  console.error(`quble 바이너리 없음: ${quble} (cargo build --bin quble 먼저)`);
   process.exit(1);
 }
 
