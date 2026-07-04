@@ -36,6 +36,17 @@
   끊는다(runtime.js). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
   필요가 구체화되면 그 모양에 맞춰 설계한다.
 
+- **pathCache 문자열 키 메모리 (실제 문제 아닐 수 있음)** - `leaf-store.js`의 pathCache는
+  `Map<path-string, leafIndex>`라, 배열 요소마다 `organizations.0...members.M.profileDetails.name`
+  같은 경로 문자열을 키로 영구 보관한다. 요소가 많고 중첩이 깊으면 문자열 키가 쌓인다. **실측**
+  (node --expose-gc): 5만 경로 1.75MB, 12만 3.5MB, 120만 56MB (경로당 ~47B - 정수 leafIndex만이면
+  사실상 0). 문자열 길이보다 **경로 개수**가 지배 요인. **다만 우선순위 낮음:** 그 leaf가 실제로
+  화면에 살아있으려면 DOM이 훨씬 크다 - 실측(headless Chrome renderer RSS) 노드당 ~2.5KB로,
+  12만 요소면 DOM +347MB vs pathCache 3.5MB(DOM이 ~100배). 즉 이만한 규모는 가상 스크롤이 강제되고
+  살아있는 leaf는 화면분뿐이라 pathCache도 작다. 진짜 걸림돌은 캐시 키 표현(문자열 vs 정수)이
+  아니라 **회수 없음**(leafOf가 `leaves.length`로 증가만, 스크롤로 지나간 경로가 안 지워지고 누적) -
+  leafIndex 회수(REACTIVITY.md §3, 아래 createdContexts 항목과 같은 free-list 메커니즘)로 풀 문제.
+
 - **createdContexts 회수 미구현 (@for 들어올 때)** - 런타임은 EnterContext마다 컨텍스트를
   createdContexts에 append하고 contextIndex로 참조한다. 컨텍스트 fields는 그 시점
   paths로 푼 leafIndex라 인스턴스마다 달라 공유·캐시가 안 되고, 매번 새로 만든다. 지금은 정적
