@@ -5,7 +5,7 @@
 //! 돌려준다. 컴파일러는 그 정규화된 경로의 동일성만으로 다이아몬드(중복 skip)와 순환(에러)을 본다.
 //! esbuild/rollup의 resolve(importer, specifier) -> 정규화 경로 패턴의 최소 버전이다.
 
-use crate::ast::Component;
+use crate::ast::{Component, Prop, Type};
 use crate::lexer;
 use crate::parse;
 
@@ -45,6 +45,10 @@ pub enum ResolveError {
     MissingExport { path: String, name: String },
     /// use 그래프에 순환이 있음.
     Cycle(String),
+    /// prop 타입 참조(`x: Foo`)의 Foo가 평탄화된 컴포넌트에 없음.
+    UnknownType(String),
+    /// 타입 참조가 순환한다(A의 prop 타입이 B, B가 A).
+    TypeCycle(String),
 }
 
 /// 엔트리 소스를 파싱하고 use 그래프를 따라가 컴포넌트를 평탄화한다.
@@ -63,7 +67,66 @@ pub fn flatten(
     };
     // 엔트리는 want=None - 자기 파일 컴포넌트 전부.
     collect(entry_path, entry_src, None, resolver, &mut ctx)?;
+    resolve_type_refs(&mut ctx.acc)?;
     Ok(ctx.acc)
+}
+
+/// prop 타입 안의 `Type::Ref(컴포넌트명)`를 그 컴포넌트 props를 펼친 Object로 치환한다.
+/// 평탄화가 끝나 모든 컴포넌트가 acc에 있어야 참조를 풀 수 있어 여기서 한다.
+fn resolve_type_refs(comps: &mut [FlatComp]) -> Result<(), ResolveError> {
+    // 컴포넌트명 -> props 스냅샷(치환 전 원본). Ref가 Ref를 가리키는 연쇄는 resolve_type가
+    // 재귀로 따라가며 방문 스택으로 순환을 막는다.
+    let props_of: Vec<(String, Vec<Prop>)> = comps
+        .iter()
+        .map(|c| (c.comp.name.clone(), c.comp.props.clone()))
+        .collect();
+
+    for c in comps.iter_mut() {
+        for p in &mut c.comp.props {
+            resolve_type(&mut p.ty, &props_of, &mut Vec::new())?;
+        }
+    }
+    Ok(())
+}
+
+/// 타입 트리를 내려가며 Ref를 대상 컴포넌트 props의 Object로 치환한다. visiting은 현재
+/// 풀고 있는 Ref 이름 스택 - 같은 이름을 다시 만나면 순환(에러).
+fn resolve_type(
+    ty: &mut Type,
+    props_of: &[(String, Vec<Prop>)],
+    visiting: &mut Vec<String>,
+) -> Result<(), ResolveError> {
+    match ty {
+        Type::Bool | Type::Number | Type::String => Ok(()),
+        Type::Array(inner) => resolve_type(inner, props_of, visiting),
+        Type::Object(fields) => {
+            for (_, field_ty) in fields {
+                resolve_type(field_ty, props_of, visiting)?;
+            }
+            Ok(())
+        }
+        Type::Ref(name) => {
+            if visiting.iter().any(|v| v == name) {
+                return Err(ResolveError::TypeCycle(name.clone()));
+            }
+            let props = props_of
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, p)| p)
+                .ok_or_else(|| ResolveError::UnknownType(name.clone()))?;
+            visiting.push(name.clone());
+            // 대상 props를 Object 필드로 펼치고, 그 안의 Ref도 재귀로 푼다.
+            let mut fields = Vec::with_capacity(props.len());
+            for p in props {
+                let mut field_ty = p.ty.clone();
+                resolve_type(&mut field_ty, props_of, visiting)?;
+                fields.push((p.name.clone(), field_ty));
+            }
+            visiting.pop();
+            *ty = Type::Object(fields);
+            Ok(())
+        }
+    }
 }
 
 struct Ctx {

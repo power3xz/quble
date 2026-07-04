@@ -106,6 +106,7 @@ fn type_to_ts(ty: &Type) -> String {
             let body = join(fields.iter().map(|(k, t)| format!("{k}: {}", type_to_ts(t))));
             format!("{{ {body} }}")
         }
+        Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
     }
 }
 

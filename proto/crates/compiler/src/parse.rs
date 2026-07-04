@@ -269,9 +269,14 @@ impl<'a> Parser<'a> {
                 self.next()?;
                 Type::String
             }
+            // 대문자로 시작하는 식별자 = 다른 컴포넌트를 타입으로 참조(`general: Section`).
+            Some(Token::Ident(n)) if n.starts_with(char::is_uppercase) => {
+                let name = self.ident()?;
+                Type::Ref(name)
+            }
             other => {
                 return Err(ParseError::Expected {
-                    want: "bool, number, string, or {".into(),
+                    want: "bool, number, string, {, or 컴포넌트명".into(),
                     got: format!("{other:?}"),
                 })
             }

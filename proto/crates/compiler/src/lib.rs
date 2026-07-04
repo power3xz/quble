@@ -492,6 +492,61 @@ mod tests {
         compile_src("entry", src, &(|_: &str, _: &str| None)).unwrap().props
     }
 
+    /// prop 타입에 컴포넌트명 참조(`sec: Section`)를 쓰면 그 컴포넌트 props가 Object로
+    /// 펼쳐진다 - 인라인 객체로 쓴 것과 같은 leaf 경로가 나온다.
+    #[test]
+    fn prop_type_ref_expands_like_inline() {
+        let ref_props = compile_props(r#"
+            component C {
+              props { heading: string, sec: Section }
+              template { div() { {heading} } }
+            }
+            component Section {
+              props { title: string, on: bool }
+              template { div() {} }
+            }
+        "#);
+        let inline_props = compile_props(r#"
+            component C {
+              props { heading: string, sec: { title: string, on: bool } }
+              template { div() { {heading} } }
+            }
+        "#);
+        assert_eq!(ref_props, inline_props);
+        assert_eq!(ref_props, vec!["heading", "sec.title", "sec.on"]);
+    }
+
+    /// 없는 타입을 참조하면 UnknownType.
+    #[test]
+    fn prop_type_ref_unknown_errors() {
+        let err = compile_src(
+            "entry",
+            r#"component C { props { x: Nope } template { div() {} } }"#,
+            &(|_: &str, _: &str| None),
+        );
+        assert!(matches!(
+            err,
+            Err(CompileError::Resolve(ResolveError::UnknownType(n))) if n == "Nope"
+        ));
+    }
+
+    /// 타입 참조가 순환하면 TypeCycle - 무한 전개를 막는다.
+    #[test]
+    fn prop_type_ref_cycle_errors() {
+        let err = compile_src(
+            "entry",
+            r#"
+                component A { props { b: B } template { div() {} } }
+                component B { props { a: A } template { div() {} } }
+            "#,
+            &(|_: &str, _: &str| None),
+        );
+        assert!(matches!(
+            err,
+            Err(CompileError::Resolve(ResolveError::TypeCycle(_)))
+        ));
+    }
+
     #[test]
     fn props_flatten_scalars_and_objects() {
         let src = r#"

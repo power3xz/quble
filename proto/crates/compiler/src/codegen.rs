@@ -157,6 +157,7 @@ fn leaf_count(ty: &Type) -> u16 {
         Type::Bool | Type::Number | Type::String => 1,
         Type::Array(inner) => leaf_count(inner),
         Type::Object(fields) => fields.iter().map(|(_, t)| leaf_count(t)).sum(),
+        Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
     }
 }
 
@@ -230,6 +231,7 @@ fn push_leaf_paths(prefix: &str, ty: &Type, out: &mut Vec<String>) {
                 push_leaf_paths(&format!("{prefix}.{name}"), field_ty, out);
             }
         }
+        Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
     }
 }
 

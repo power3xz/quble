@@ -42,6 +42,9 @@ pub enum Type {
     String,
     Array(Box<Type>),
     Object(Vec<(String, Type)>),  // 필드 선언 순서 보존(d.ts 방출 안정성)
+    /// `general: Section` - 다른 컴포넌트(대문자명)의 props를 타입으로 참조. resolve가
+    /// 평탄화 후 그 컴포넌트 props를 Object로 환원해 치환한다(codegen엔 Ref가 안 남는다).
+    Ref(String),
 }
 
 /// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.
