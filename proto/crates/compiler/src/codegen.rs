@@ -3,7 +3,8 @@
 use crate::ast::{ArgValue, AttrValue, Context, Event, LitValue, Node, Prop, Type, VarRef};
 use crate::resolve::FlatComp;
 use bytecode::{
-    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
+    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, Leaf, Module, Op,
+    TypeEntry,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -58,6 +59,7 @@ impl<'a> CompLookup<'a> {
 pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenError> {
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
+    let mut types = TypeTable::new();
     let mut code = Vec::new();
     let mut defs = Vec::new();
     // 정규화 경로 -> resId. 등장 순서로 0,1,2…. 같은 경로는 같은 resId(모듈 전역 dedup).
@@ -97,10 +99,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                     .payload
                     .iter()
                     .map(|(field, value)| {
-                        Ok(Field {
-                            name_const_index: pool.intern_str(field),
-                            value: arg_to_field_value(value, &comp.props, &mut pool)?,
-                        })
+                        arg_to_field(field, value, &comp.props, &mut pool, &mut types)
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
@@ -118,10 +117,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                     .fields
                     .iter()
                     .map(|(field, value)| {
-                        Ok(Field {
-                            name_const_index: pool.intern_str(field),
-                            value: arg_to_field_value(value, &comp.props, &mut pool)?,
-                        })
+                        arg_to_field(field, value, &comp.props, &mut pool, &mut types)
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(ContextDef {
@@ -139,7 +135,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
         });
     }
 
-    let module = Module::new(pool, defs, code);
+    let module = Module::new(pool, types.into_entries(), defs, code);
     Ok((encode(&module).into_boxed_slice(), res_ids))
 }
 
@@ -282,16 +278,82 @@ fn var_ref_display(var: &VarRef) -> String {
     }
 }
 
-/// ArgValue를 FieldValue로. Var는 prop을 scope 인덱스로, Literal은 상수풀에 intern해 Const로.
-fn arg_to_field_value(
+/// 모듈 전역 타입 테이블(dedup). Type을 intern해 type_ref를 발급한다. 자식부터 등록해
+/// 참조가 먼저 존재하게 한다(Object 필드가 자식 type_ref를 가리킴). 같은 구조는 한 엔트리 공유
+/// - TypeEntry 자체가 키라, 필드명(상수풀 인덱스)·순서·자식 type_ref가 모두 같아야 동일 엔트리다.
+struct TypeTable {
+    entries: Vec<TypeEntry>,
+    cache: std::collections::HashMap<TypeEntry, u16>,
+}
+
+impl TypeTable {
+    fn new() -> Self {
+        TypeTable { entries: Vec::new(), cache: std::collections::HashMap::new() }
+    }
+
+    /// Type의 구조를 테이블에 intern하고 type_ref 반환. object는 필드 자식부터 재귀 intern.
+    /// 필드명은 상수풀 인덱스로. (Ref/Omit/Pick은 resolve가 이미 풀었다 - split과 같은 전제.)
+    fn intern(&mut self, ty: &Type, pool: &mut ConstPool) -> u16 {
+        let entry = match ty {
+            Type::Bool | Type::Number | Type::String => TypeEntry::Scalar,
+            Type::Array(inner) => return self.intern(inner, pool),
+            Type::Object(fields) => {
+                let fields = fields
+                    .iter()
+                    .map(|(name, field_ty)| (pool.intern_str(name), self.intern(field_ty, pool)))
+                    .collect();
+                TypeEntry::Object(fields)
+            }
+            Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
+            Type::Omit(..) | Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
+        };
+        if let Some(&idx) = self.cache.get(&entry) {
+            return idx;
+        }
+        let idx = self.entries.len() as u16;
+        self.entries.push(entry.clone());
+        self.cache.insert(entry, idx);
+        idx
+    }
+
+    fn into_entries(self) -> Vec<TypeEntry> {
+        self.entries
+    }
+}
+
+/// payload/context field 명세 하나 = 필드명 + 조립 구조(type_ref) + 채울 leaf 목록.
+/// Var는 도달 타입을 테이블에 intern하고 그 아래 leaf들의 scope 인덱스를 싣는다(객체면 여럿,
+/// 스칼라면 하나). Literal은 스칼라 type_ref + Const leaf 하나(객체 리터럴은 문법상 없다).
+fn arg_to_field(
+    field: &str,
     value: &ArgValue,
     props: &[Prop],
     pool: &mut ConstPool,
-) -> Result<FieldValue, CodegenError> {
-    Ok(match value {
-        ArgValue::Var(var) => FieldValue::Scope(var_ref_to_scope_index(var, props)?),
-        ArgValue::Literal(lit) => FieldValue::Const(pool.intern(lit_to_const(lit))),
-    })
+    types: &mut TypeTable,
+) -> Result<Field, CodegenError> {
+    let (type_ref, leaves) = match value {
+        ArgValue::Var(var) => {
+            let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
+            let type_ref = types.intern(ty, pool);
+            let leaves = indices.into_iter().map(Leaf::Scope).collect();
+            (type_ref, leaves)
+        }
+        ArgValue::Literal(lit) => {
+            // 리터럴은 항상 스칼라(객체 리터럴 없음). Scalar 엔트리 하나를 intern해 공유.
+            let type_ref = types.intern(&lit_type(lit), pool);
+            (type_ref, vec![Leaf::Const(pool.intern(lit_to_const(lit)))])
+        }
+    };
+    Ok(Field { name_const_index: pool.intern_str(field), type_ref, leaves })
+}
+
+/// 리터럴의 quble 타입. 리터럴은 스칼라라 Bool/Number/String 중 하나(intern은 모두 Scalar 엔트리).
+fn lit_type(lit: &LitValue) -> Type {
+    match lit {
+        LitValue::Str(_) => Type::String,
+        LitValue::Number(_) => Type::Number,
+        LitValue::Bool(_) => Type::Bool,
+    }
 }
 
 /// 리터럴을 상수풀 엔트리로. 소스의 타입을 그대로 실어 런타임이 올바른 JS 값으로 복원한다.

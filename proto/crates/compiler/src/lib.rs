@@ -217,6 +217,7 @@ mod tests {
 
         let expected = Module::new(
             pool,
+            vec![],
             vec![CompDef {
                 name_const_index: hello,
                 code_off: 0,
@@ -313,7 +314,7 @@ mod tests {
     /// Var(Scope)/Literal(Const)로 들어가고, 코드에 EnterContext/ExitContext가 나는지 직접 검사.
     #[test]
     fn compiles_with_context() {
-        use bytecode::{decode, FieldValue, Op};
+        use bytecode::{decode, Leaf, Op};
 
         let src = r#"
             component C {
@@ -335,17 +336,17 @@ mod tests {
         let area = &def.contexts[0];
         assert_eq!(str_at(&module, area.name_const_index), Some("Area"));
         assert_eq!(area.fields.len(), 2);
-        // section: "actions" -> Const(상수풀 인덱스), 그 인덱스가 "actions"를 가리킨다.
+        // section: "actions" -> 스칼라 field, leaf 하나가 Const(상수풀이 "actions"를 가리킴).
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("section"));
-        match area.fields[0].value {
-            FieldValue::Const(actions_index) => {
-                assert_eq!(str_at(&module, actions_index), Some("actions"));
+        match area.fields[0].leaves.as_slice() {
+            [Leaf::Const(actions_index)] => {
+                assert_eq!(str_at(&module, *actions_index), Some("actions"));
             }
-            other => panic!("section은 리터럴이라 Const여야: {other:?}"),
+            other => panic!("section은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
         }
-        // userId: assignee -> Scope(assignee의 scope 인덱스 0).
+        // userId: assignee -> 스칼라 field, leaf 하나가 Scope(assignee의 scope 인덱스 0).
         assert_eq!(str_at(&module, area.fields[1].name_const_index), Some("userId"));
-        assert_eq!(area.fields[1].value, FieldValue::Scope(0));
+        assert_eq!(area.fields[1].leaves.as_slice(), &[Leaf::Scope(0)]);
 
         // 코드: EnterContext context_index=0 ... ExitContext.
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
@@ -364,7 +365,7 @@ mod tests {
     /// contexts 필드 단축형 `key`는 `key: key`(Scope)로 푼다 - payload 단축형과 같은 규칙.
     #[test]
     fn context_field_shorthand() {
-        use bytecode::{decode, FieldValue};
+        use bytecode::{decode, Leaf};
 
         let src = r#"
             component C {
@@ -376,15 +377,15 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let area = &module.def(0).unwrap().contexts[0];
-        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0).
+        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0). 스칼라라 leaf 하나.
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("tier"));
-        assert_eq!(area.fields[0].value, FieldValue::Scope(0));
+        assert_eq!(area.fields[0].leaves.as_slice(), &[Leaf::Scope(0)]);
     }
 
     /// events 페이로드 값도 리터럴(Const)을 받는다 - contexts와 같은 arg_to_field_value 경로.
     #[test]
     fn event_payload_literal() {
-        use bytecode::{decode, FieldValue};
+        use bytecode::{decode, Leaf};
 
         let src = r#"
             component C {
@@ -396,15 +397,15 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let event = &module.def(0).unwrap().events[0];
-        // count: 단축형 -> Scope(0). label: "clicks" -> Const(상수풀이 "clicks"를 가리킴).
+        // count: 단축형 -> Scope(0). label: "clicks" -> Const. 둘 다 스칼라라 leaf 하나씩.
         assert_eq!(str_at(&module, event.fields[0].name_const_index), Some("count"));
-        assert_eq!(event.fields[0].value, FieldValue::Scope(0));
+        assert_eq!(event.fields[0].leaves.as_slice(), &[Leaf::Scope(0)]);
         assert_eq!(str_at(&module, event.fields[1].name_const_index), Some("label"));
-        match event.fields[1].value {
-            FieldValue::Const(clicks_index) => {
-                assert_eq!(str_at(&module, clicks_index), Some("clicks"));
+        match event.fields[1].leaves.as_slice() {
+            [Leaf::Const(clicks_index)] => {
+                assert_eq!(str_at(&module, *clicks_index), Some("clicks"));
             }
-            other => panic!("label은 리터럴이라 Const여야: {other:?}"),
+            other => panic!("label은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
         }
     }
 
@@ -412,7 +413,7 @@ mod tests {
     /// 문자열은 Const::Str. 런타임이 인덱스로 꺼내면 이미 올바른 값이 되도록.
     #[test]
     fn literal_types_in_pool() {
-        use bytecode::{decode, Const, FieldValue};
+        use bytecode::{decode, Const, Leaf};
 
         let src = r#"
             component C {
@@ -423,15 +424,90 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let fields = &module.def(0).unwrap().events[0].fields;
-        // 각 필드값이 Const를 가리키고, 그 상수가 타입대로다.
-        let const_of = |i: usize| match fields[i].value {
-            FieldValue::Const(idx) => module.pool.get(idx).cloned(),
-            ref other => panic!("리터럴은 Const여야: {other:?}"),
+        // 각 필드가 스칼라(leaf 하나)이고 그 leaf가 Const를 가리키며, 그 상수가 타입대로다.
+        let const_of = |i: usize| match fields[i].leaves.as_slice() {
+            [Leaf::Const(idx)] => module.pool.get(*idx).cloned(),
+            other => panic!("리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
         };
         assert_eq!(const_of(0), Some(Const::Num(42.0)));
         assert_eq!(const_of(1), Some(Const::Num(3.5)));
         assert_eq!(const_of(2), Some(Const::Bool(true)));
         assert_eq!(const_of(3), Some(Const::Str("hi".into())));
+    }
+
+    /// payload에 객체를 담으면(`SAVE({ user })`, user가 객체) field가 Object type_ref +
+    /// 그 아래 leaf들의 scope 인덱스 목록으로 인코딩된다. 타입 테이블에 구조가 실린다.
+    #[test]
+    fn object_payload_encodes_type_tree_and_leaves() {
+        use bytecode::{decode, Leaf, TypeEntry};
+
+        let src = r#"
+            component C {
+              props { user: { name: string, age: number } }
+              events { SAVE({ user }) }
+              template { button(@click:SAVE) { "x" } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let field = &module.def(0).unwrap().events[0].fields[0];
+
+        // field 이름은 user, leaf는 name(0)·age(1) 두 개(연속).
+        assert_eq!(str_at(&module, field.name_const_index), Some("user"));
+        assert_eq!(field.leaves.as_slice(), &[Leaf::Scope(0), Leaf::Scope(1)]);
+
+        // type_ref가 Object이고, 필드가 (name, age) 순으로 각각 Scalar를 가리킨다.
+        match &module.types[field.type_ref as usize] {
+            TypeEntry::Object(fields) => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(str_at(&module, fields[0].0), Some("name"));
+                assert_eq!(str_at(&module, fields[1].0), Some("age"));
+                assert!(matches!(module.types[fields[0].1 as usize], TypeEntry::Scalar));
+                assert!(matches!(module.types[fields[1].1 as usize], TypeEntry::Scalar));
+            }
+            other => panic!("user는 객체라 Object여야: {other:?}"),
+        }
+    }
+
+    /// 같은 구조의 두 객체를 각각 payload에 담으면 타입 테이블에서 한 엔트리로 dedup된다
+    /// (필드명·순서·자식 타입이 모두 같으면 같은 type_ref).
+    #[test]
+    fn identical_object_types_dedup() {
+        use bytecode::decode;
+
+        let src = r#"
+            component C {
+              props { user: { name: string, age: number }, newUser: { name: string, age: number } }
+              events { SAVE({ user, newUser }) }
+              template { button(@click:SAVE) { "x" } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let fields = &module.def(0).unwrap().events[0].fields;
+        // 두 field의 type_ref가 같다(같은 구조 = 한 엔트리 공유).
+        assert_eq!(fields[0].type_ref, fields[1].type_ref);
+    }
+
+    /// 스칼라 payload는 타입 테이블에 Scalar 엔트리 하나만 만들고 여러 스칼라 field가 공유한다.
+    #[test]
+    fn scalar_fields_share_one_scalar_entry() {
+        use bytecode::{decode, TypeEntry};
+
+        let src = r#"
+            component C {
+              props { a: string, b: number }
+              events { E({ a, b }) }
+              template { button(@click:E) { "x" } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let fields = &module.def(0).unwrap().events[0].fields;
+        // 두 스칼라 field가 같은 Scalar 엔트리를 가리킨다. 테이블엔 Scalar 하나뿐.
+        assert_eq!(fields[0].type_ref, fields[1].type_ref);
+        assert_eq!(module.types.len(), 1);
+        assert!(matches!(module.types[0], TypeEntry::Scalar));
     }
 
     /// 예약어(true/false/bool/number/string)는 prop 이름으로 못 쓴다 - 렉서가 토큰을 분리해

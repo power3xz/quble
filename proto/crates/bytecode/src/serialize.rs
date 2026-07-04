@@ -1,6 +1,6 @@
 //! 모듈 ↔ 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
 
-use crate::module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module};
+use crate::module::{CompDef, ContextDef, EventDef, Field, Leaf, Module, TypeEntry};
 use crate::pool::{Const, ConstPool};
 
 const MAGIC: &[u8; 4] = b"QBL\0";
@@ -11,6 +11,10 @@ const TAG_STR: u8 = 0;
 const TAG_NUM: u8 = 1;
 const TAG_BOOL: u8 = 2;
 
+// 타입 테이블 엔트리 태그(BYTECODE.md §4). 엔트리마다 앞에 1바이트.
+const TAG_SCALAR: u8 = 0;
+const TAG_OBJECT: u8 = 1;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
     BadMagic,
@@ -18,6 +22,7 @@ pub enum DecodeError {
     UnexpectedEof,
     BadUtf8,
     BadConstTag(u8),
+    BadTypeTag(u8),
 }
 
 // ---- 인코딩 ----
@@ -31,6 +36,12 @@ pub fn encode(m: &Module) -> Vec<u8> {
     put_u16(&mut out, m.pool.len() as u16);
     for c in m.pool.entries() {
         put_const(&mut out, c);
+    }
+
+    // 타입 테이블(모듈 전역) - 엔트리마다 태그 1바이트 + 태그별 payload.
+    put_u16(&mut out, m.types.len() as u16);
+    for t in &m.types {
+        put_type(&mut out, t);
     }
 
     // 컴포넌트 테이블
@@ -92,13 +103,33 @@ fn put_const(out: &mut Vec<u8>, c: &Const) {
     }
 }
 
-/// 필드 목록을 쓴다 - field_count, [(name_const_index, value)]. value는 FieldValue를 u16로
-/// encode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 타입 테이블 엔트리: 태그 1바이트 + payload. Scalar는 payload 없음, Object는 field_count +
+/// [(name_const_index, type_ref)]. type_ref로 자식을 가리켜 중첩·공유를 표현(BYTECODE.md §4).
+fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
+    match t {
+        TypeEntry::Scalar => out.push(TAG_SCALAR),
+        TypeEntry::Object(fields) => {
+            out.push(TAG_OBJECT);
+            put_u16(out, fields.len() as u16);
+            for (name, type_ref) in fields {
+                put_u16(out, *name);
+                put_u16(out, *type_ref);
+            }
+        }
+    }
+}
+
+/// 필드 목록을 쓴다 - field_count, [(name_const_index, type_ref, leaf_count, [leaf])]. leaf는
+/// Leaf를 u16로 encode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
 fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
     put_u16(out, fields.len() as u16);
     for f in fields {
         put_u16(out, f.name_const_index);
-        put_u16(out, f.value.encode());
+        put_u16(out, f.type_ref);
+        put_u16(out, f.leaves.len() as u16);
+        for leaf in &f.leaves {
+            put_u16(out, leaf.encode());
+        }
     }
 }
 
@@ -122,6 +153,13 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
         entries.push(r.constant()?);
     }
     let pool = ConstPool::from_entries(entries);
+
+    // 타입 테이블(모듈 전역)
+    let type_count = r.u16()?;
+    let mut types = Vec::with_capacity(type_count as usize);
+    for _ in 0..type_count {
+        types.push(read_type(&mut r)?);
+    }
 
     // 컴포넌트 테이블
     let def_count = r.u16()?;
@@ -149,18 +187,42 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
     let code_len = r.u32()? as usize;
     let code = r.take(code_len)?.to_vec();
 
-    Ok(Module::new(pool, defs, code))
+    Ok(Module::new(pool, types, defs, code))
 }
 
-/// 필드 목록을 읽는다 - field_count, [(name_const_index, value)]. value는 u16를 FieldValue로
-/// decode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 타입 테이블 엔트리를 읽는다 - 태그 1바이트 + payload(put_type 대응). 알 수 없는 태그는 거부.
+fn read_type(r: &mut Reader) -> Result<TypeEntry, DecodeError> {
+    let tag = r.u8()?;
+    match tag {
+        TAG_SCALAR => Ok(TypeEntry::Scalar),
+        TAG_OBJECT => {
+            let field_count = r.u16()?;
+            let mut fields = Vec::with_capacity(field_count as usize);
+            for _ in 0..field_count {
+                let name = r.u16()?;
+                let type_ref = r.u16()?;
+                fields.push((name, type_ref));
+            }
+            Ok(TypeEntry::Object(fields))
+        }
+        other => Err(DecodeError::BadTypeTag(other)),
+    }
+}
+
+/// 필드 목록을 읽는다 - field_count, [(name_const_index, type_ref, leaf_count, [leaf])]. leaf는
+/// u16를 Leaf로 decode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
 fn read_fields(r: &mut Reader) -> Result<Vec<Field>, DecodeError> {
     let field_count = r.u16()?;
     let mut fields = Vec::with_capacity(field_count as usize);
     for _ in 0..field_count {
         let name_const_index = r.u16()?;
-        let value = FieldValue::decode(r.u16()?);
-        fields.push(Field { name_const_index, value });
+        let type_ref = r.u16()?;
+        let leaf_count = r.u16()?;
+        let mut leaves = Vec::with_capacity(leaf_count as usize);
+        for _ in 0..leaf_count {
+            leaves.push(Leaf::decode(r.u16()?));
+        }
+        fields.push(Field { name_const_index, type_ref, leaves });
     }
     Ok(fields)
 }

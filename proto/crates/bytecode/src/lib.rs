@@ -9,7 +9,7 @@ mod opcode;
 mod pool;
 mod serialize;
 
-pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module};
+pub use module::{CompDef, ContextDef, EventDef, Field, Leaf, Module, TypeEntry};
 pub use opcode::Op;
 pub use pool::{Const, ConstPool};
 pub use serialize::{decode, encode, DecodeError};
@@ -58,7 +58,7 @@ mod tests {
             events: vec![],
             contexts: vec![],
         }];
-        Module::new(pool, defs, code)
+        Module::new(pool, vec![], defs, code)
     }
 
     fn emit_open(code: &mut Vec<u8>, tag: u16) {
@@ -118,7 +118,7 @@ mod tests {
         pool.intern(Const::Num(42.5));
         pool.intern(Const::Bool(false));
         pool.intern(Const::Bool(true));
-        let m = Module::new(pool, vec![], vec![]);
+        let m = Module::new(pool, vec![], vec![], vec![]);
         let back = decode(&encode(&m)).unwrap();
         assert_eq!(m, back);
         assert_eq!(back.pool.get(0), Some(&Const::Str("hi".into())));
@@ -132,7 +132,7 @@ mod tests {
     fn decode_rejects_bad_const_tag() {
         let mut pool = ConstPool::new();
         pool.intern_str("x");
-        let mut bytes = encode(&Module::new(pool, vec![], vec![]));
+        let mut bytes = encode(&Module::new(pool, vec![], vec![], vec![]));
         // MAGIC(4) + VERSION(2) + pool_count(2) 다음이 첫 엔트리 태그.
         bytes[8] = 0x7f;
         assert_eq!(decode(&bytes), Err(DecodeError::BadConstTag(0x7f)));
