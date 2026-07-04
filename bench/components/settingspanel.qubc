@@ -6,9 +6,21 @@ use LinkButton from "./linkbutton.qubc"
 component SettingsPanel {
   props {
     heading: string, dirty: bool, plan: string, docsLink: string,
-    genOpen: bool, genATitle: string, genADesc: string, genABadge: string, genAOn: bool, genBTitle: string, genBDesc: string, genBBadge: string, genBOn: bool,
-    privOpen: bool, privATitle: string, privADesc: string, privABadge: string, privAOn: bool, privBTitle: string, privBDesc: string, privBBadge: string, privBOn: bool,
-    proOpen: bool, proATitle: string, proADesc: string, proABadge: string, proAOn: bool, proBTitle: string, proBDesc: string, proBBadge: string, proBOn: bool
+    general: {
+      open: bool,
+      a: { title: string, desc: string, badge: string, on: bool },
+      b: { title: string, desc: string, badge: string, on: bool }
+    },
+    privacy: {
+      open: bool,
+      a: { title: string, desc: string, badge: string, on: bool },
+      b: { title: string, desc: string, badge: string, on: bool }
+    },
+    premium: {
+      open: bool,
+      a: { title: string, desc: string, badge: string, on: bool },
+      b: { title: string, desc: string, badge: string, on: bool }
+    }
   }
   contexts {
     PlanContext { plan }
@@ -32,15 +44,15 @@ component SettingsPanel {
       }
 
       General: Section(
-        title="일반" open={genOpen}
-        aLabel={genATitle} aDesc={genADesc} aBadge={genABadge} aEnabled={genAOn}
-        bLabel={genBTitle} bDesc={genBDesc} bBadge={genBBadge} bEnabled={genBOn}
+        title="일반" open={general.open}
+        aLabel={general.a.title} aDesc={general.a.desc} aBadge={general.a.badge} aEnabled={general.a.on}
+        bLabel={general.b.title} bDesc={general.b.desc} bBadge={general.b.badge} bEnabled={general.b.on}
       ) {}
 
       Privacy: Section(
-        title="개인정보" open={privOpen}
-        aLabel={privATitle} aDesc={privADesc} aBadge={privABadge} aEnabled={privAOn}
-        bLabel={privBTitle} bDesc={privBDesc} bBadge={privBBadge} bEnabled={privBOn}
+        title="개인정보" open={privacy.open}
+        aLabel={privacy.a.title} aDesc={privacy.a.desc} aBadge={privacy.a.badge} aEnabled={privacy.a.on}
+        bLabel={privacy.b.title} bDesc={privacy.b.desc} bBadge={privacy.b.badge} bEnabled={privacy.b.on}
       ) {}
 
       @with PlanContext {
@@ -50,9 +62,9 @@ component SettingsPanel {
             Badge(role={plan} theme="badge--pro") {}
           }
           Premium: Section(
-            title="프리미엄 기능" open={proOpen}
-            aLabel={proATitle} aDesc={proADesc} aBadge={proABadge} aEnabled={proAOn}
-            bLabel={proBTitle} bDesc={proBDesc} bBadge={proBBadge} bEnabled={proBOn}
+            title="프리미엄 기능" open={premium.open}
+            aLabel={premium.a.title} aDesc={premium.a.desc} aBadge={premium.a.badge} aEnabled={premium.a.on}
+            bLabel={premium.b.title} bDesc={premium.b.desc} bBadge={premium.b.badge} bEnabled={premium.b.on}
           ) {}
         }
       }

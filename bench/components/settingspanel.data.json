@@ -1,9 +1,18 @@
 {
   "heading": "설정", "dirty": false, "plan": "PRO", "docsLink": "#",
-  "genOpen": true, "genATitle": "알림", "genADesc": "푸시 알림 받기", "genABadge": "새 기능", "genAOn": true,
-  "genBTitle": "소리", "genBDesc": "효과음 재생", "genBBadge": "기본", "genBOn": false,
-  "privOpen": true, "privATitle": "위치", "privADesc": "위치 공유", "privABadge": "권장", "privAOn": false,
-  "privBTitle": "추적", "privBDesc": "활동 기록", "privBBadge": "주의", "privBOn": true,
-  "proOpen": true, "proATitle": "고급 분석", "proADesc": "상세 리포트", "proABadge": "PRO", "proAOn": true,
-  "proBTitle": "우선 지원", "proBDesc": "빠른 응답", "proBBadge": "PRO", "proBOn": false
+  "general": {
+    "open": true,
+    "a": { "title": "알림", "desc": "푸시 알림 받기", "badge": "새 기능", "on": true },
+    "b": { "title": "소리", "desc": "효과음 재생", "badge": "기본", "on": false }
+  },
+  "privacy": {
+    "open": true,
+    "a": { "title": "위치", "desc": "위치 공유", "badge": "권장", "on": false },
+    "b": { "title": "추적", "desc": "활동 기록", "badge": "주의", "on": true }
+  },
+  "premium": {
+    "open": true,
+    "a": { "title": "고급 분석", "desc": "상세 리포트", "badge": "PRO", "on": true },
+    "b": { "title": "우선 지원", "desc": "빠른 응답", "badge": "PRO", "on": false }
+  }
 }

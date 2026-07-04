@@ -26,8 +26,9 @@ pub struct CompileOutput {
     pub bytecode: Box<[u8]>,
     /// 인덱스 = 모듈 전역 resId, 값 = 리소스 정규화 경로.
     pub resources: Vec<String>,
-    /// 루트(comp 0) props 이름, 선언 순서 = scope 인덱스. manifest로 실어 mount가
-    /// 이름 data({heading, title})를 scope index에 매핑한다. 지금은 flat(string/bool 전제).
+    /// 루트(comp 0) props를 선언 순서로 펼친 leaf 경로들. 인덱스 = scope 인덱스라
+    /// mount가 paths[i]=props[i]로 scope index를 store 경로에 잇는다. 객체는 leaf까지
+    /// 점 경로로 펼친다(`general.a.title`) - scope index 공간이 leaf 펼침이라 맞춘다.
     pub props: Vec<String>,
 }
 
@@ -40,7 +41,7 @@ pub fn compile_src(
     resolver: &impl Resolver,
 ) -> Result<CompileOutput, CompileError> {
     let comps = resolve::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
-    let props = comps[0].comp.props.iter().map(|p| p.name.clone()).collect();
+    let props = codegen::flatten_prop_paths(&comps[0].comp.props);
     let (bytecode, resources) = codegen::generate(&comps).map_err(CompileError::Codegen)?;
     Ok(CompileOutput {
         bytecode,
@@ -483,6 +484,60 @@ mod tests {
             compile(src),
             Err(CompileError::Resolve(ResolveError::Parse(_)))
         ));
+    }
+
+    /// CompileOutput.props - 루트 props를 leaf 경로로 펼친다(객체는 필드까지). 인덱스가
+    /// scope 인덱스와 같아야 런타임 paths[i]가 맞으므로, 선언 순서·객체 재귀 순서를 검증.
+    fn compile_props(src: &str) -> Vec<String> {
+        compile_src("entry", src, &(|_: &str, _: &str| None)).unwrap().props
+    }
+
+    #[test]
+    fn props_flatten_scalars_and_objects() {
+        let src = r#"
+            component C {
+              props {
+                heading: string, dirty: bool,
+                general: {
+                  open: bool,
+                  a: { title: string, on: bool }
+                }
+              }
+              template { div() { {heading} } }
+            }
+        "#;
+        assert_eq!(
+            compile_props(src),
+            vec![
+                "heading", "dirty",
+                "general.open", "general.a.title", "general.a.on",
+            ],
+        );
+    }
+
+    /// 펼친 leaf 경로의 인덱스 = 그 경로를 보간했을 때 codegen이 내는 scope 인덱스여야 한다.
+    /// `general.a.on`이 props[4]면 TEXT_VAR 인덱스도 4.
+    #[test]
+    fn props_index_matches_scope_index() {
+        use bytecode::{decode, Op};
+        let src = r#"
+            component C {
+              props {
+                heading: string, dirty: bool,
+                general: { open: bool, a: { title: string, on: bool } }
+              }
+              template { div() { {general.a.on} } }
+            }
+        "#;
+        let out = compile_src("entry", src, &(|_: &str, _: &str| None)).unwrap();
+        let expected = out.props.iter().position(|p| p == "general.a.on").unwrap() as u16;
+
+        let module = decode(&out.bytecode).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let pos = code.iter().position(|&b| b == Op::TextVar as u8).unwrap();
+        let idx = u16::from_le_bytes([code[pos + 1], code[pos + 2]]);
+        assert_eq!(idx, expected, "TEXT_VAR 인덱스 = props에서의 위치");
     }
 
     /// 한 .qubc에서 여러 컴포넌트를 use. 셋 다 한 모듈로 평탄화돼야 한다 -

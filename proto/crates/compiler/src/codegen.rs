@@ -208,6 +208,31 @@ fn var_ref_to_scope_index(var: &VarRef, props: &[Prop]) -> Result<u16, CodegenEr
     }
 }
 
+/// props를 선언 순서로 펼친 leaf 경로들. `var_ref_to_scope_index`와 같은 순회라
+/// 결과 벡터의 인덱스 = scope 인덱스다. 스칼라는 이름 그대로(`heading`), 객체는 필드까지
+/// 점 경로(`general.a.title`). manifest.props가 되어 런타임 paths[i]를 store 경로에 잇는다.
+pub fn flatten_prop_paths(props: &[Prop]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for p in props {
+        push_leaf_paths(&p.name, &p.ty, &mut paths);
+    }
+    paths
+}
+
+/// 한 타입의 leaf 경로들을 prefix 아래로 펼쳐 push. 객체는 필드 선언 순서로 재귀.
+/// (배열은 요소 타입으로 - leaf_count와 동일하게 요소 1벌 취급.)
+fn push_leaf_paths(prefix: &str, ty: &Type, out: &mut Vec<String>) {
+    match ty {
+        Type::Bool | Type::Number | Type::String => out.push(prefix.to_string()),
+        Type::Array(inner) => push_leaf_paths(prefix, inner, out),
+        Type::Object(fields) => {
+            for (name, field_ty) in fields {
+                push_leaf_paths(&format!("{prefix}.{name}"), field_ty, out);
+            }
+        }
+    }
+}
+
 /// 에러 메시지용 경로 표기: `root.a.b`.
 fn var_ref_display(var: &VarRef) -> String {
     if var.path.is_empty() {
@@ -359,9 +384,8 @@ fn emit_node(
             code.extend_from_slice(&child_id.to_le_bytes());
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop - scope index 하나. (경로/표현식은 이후 단계 - 지금은 이름 하나)
-            let cond_ref = VarRef { root: cond.clone(), path: Vec::new() };
-            let scope_index = var_ref_to_scope_index(&cond_ref, props)?;
+            // cond는 불리언 prop 참조 - 경로를 평탄 scope index로. leaf여야 한다. (표현식은 이후 단계)
+            let scope_index = var_ref_to_scope_index(cond, props)?;
             code.push(Op::If as u8);
             code.extend_from_slice(&scope_index.to_le_bytes());
 
