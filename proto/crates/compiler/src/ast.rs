@@ -83,10 +83,10 @@ pub enum Node {
         name: String,
         args: Vec<(String, ArgValue)>,
     },
-    /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop명 하나
-    /// (표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
+    /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop 참조(경로 허용,
+    /// `gen.open`)이고 leaf여야 한다(표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
     If {
-        cond: String,
+        cond: VarRef,
         then: Vec<Node>,
         else_: Vec<Node>,
     },

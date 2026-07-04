@@ -455,11 +455,11 @@ impl<'a> Parser<'a> {
     }
 
     // @if ( IDENT ) { NODE* } [ @else { NODE* } ]
-    // cond는 불리언 prop명 하나(표현식은 이후 단계).
+    // cond는 불리언 prop 참조(경로 허용, `gen.open`). 표현식은 이후 단계.
     fn if_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::If))?;
         self.expect(&Token::LParen)?;
-        let cond = self.ident()?;
+        let cond = self.var_ref()?;
         self.expect(&Token::RParen)?;
         self.expect(&Token::LBrace)?;
         let then = self.nodes()?;
