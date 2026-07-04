@@ -10,14 +10,16 @@
 // runtime.js의 blueprint가 받는 store가 곧 createLeafStoreSubject의 반환물이다.
 
 // 점 표기 경로로 객체를 파고들어 값을 읽는다("a.b.c" → obj.a.b.c).
+// 중간 객체가 없으면(예: 아직 안 채운 폼의 user - 초기값이 부분적일 수 있다) undefined를
+// 돌려준다. 그 아래 leaf도 undefined이고, payload 조립은 그대로 흘러 껍데기 객체를 만든다.
 //
-// @param defaultValue 뿌리 객체
-// @param path         점으로 구분된 경로 문자열
-// @returns            경로가 가리키는 값
-const readPath = (defaultValue, path) => {
-  let cur = defaultValue;
+// @param rootValue 뿌리 객체(초기값 - 부분적일 수 있다)
+// @param path      점으로 구분된 경로 문자열
+// @returns         경로가 가리키는 값(중간이 비면 undefined)
+const readPath = (rootValue, path) => {
+  let cur = rootValue;
   for (const key of path.split(".")) {
-    cur = cur[key];
+    cur = cur?.[key];
   }
   return cur;
 };

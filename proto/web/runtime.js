@@ -237,22 +237,53 @@ class Reader {
   }
 }
 
-// field 값의 const 표지 비트(MSB). Rust FieldValue::encode와 대칭 - 이 비트와 마스킹은
+// leaf 값의 const 표지 비트(MSB). Rust Leaf::encode와 대칭 - 이 비트와 마스킹은
 // readFields 한 곳에만 둔다(소비부는 isConst/index만 본다).
 const FIELD_CONST_BIT = 0x8000;
 
-// 필드 목록을 읽는다 - field_count, [(nameConstIndex, value)]. value는 MSB=const 여부,
-// 하위 15비트=index. 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다(Rust read_fields 대칭).
+// 타입 테이블 엔트리 태그(BYTECODE.md §4). Rust read_type 대칭.
+const TYPE_SCALAR = 0;
+const TYPE_OBJECT = 1;
+
+// 타입 테이블 엔트리 하나를 읽는다. Scalar는 payload 없음, Object는 field_count +
+// [(nameConstIndex, typeRef)]. typeRef로 자식을 가리켜 중첩·공유(Rust put_type 대칭).
 //
 // @param r Reader
-// @returns [{ nameConstIndex, isConst, index }]
+// @returns { tag: "scalar" } | { tag: "object", fields: [[nameConstIndex, typeRef]] }
+const readType = (r) => {
+  const tag = r.u8();
+  if (tag === TYPE_SCALAR) {
+    return { tag: "scalar" };
+  }
+  if (tag === TYPE_OBJECT) {
+    const count = r.u16();
+    const fields = [];
+    for (let f = 0; f < count; f++) {
+      fields.push([r.u16(), r.u16()]);
+    }
+    return { tag: "object", fields };
+  }
+  throw new Error("bad type tag " + tag);
+};
+
+// 필드 목록을 읽는다 - field_count, [(nameConstIndex, typeRef, leaf_count, [leaf])]. leaf는
+// MSB=const 여부, 하위 15비트=index. 이벤트 payload와 컨텍스트가 같은 인코딩(Rust read_fields 대칭).
+//
+// @param r Reader
+// @returns [{ nameConstIndex, typeRef, leaves: [{ isConst, index }] }]
 const readFields = (r) => {
   const count = r.u16();
   const fields = [];
   for (let f = 0; f < count; f++) {
     const nameConstIndex = r.u16();
-    const raw = r.u16();
-    fields.push({ nameConstIndex, isConst: (raw & FIELD_CONST_BIT) !== 0, index: raw & ~FIELD_CONST_BIT });
+    const typeRef = r.u16();
+    const leafCount = r.u16();
+    const leaves = [];
+    for (let l = 0; l < leafCount; l++) {
+      const raw = r.u16();
+      leaves.push({ isConst: (raw & FIELD_CONST_BIT) !== 0, index: raw & ~FIELD_CONST_BIT });
+    }
+    fields.push({ nameConstIndex, typeRef, leaves });
   }
   return fields;
 };
@@ -271,14 +302,107 @@ const seedLitPath = (store, module, constIndex) => {
   return path;
 };
 
-// 필드 하나를 leafIndex로 푼다. Scope는 paths[index](인스턴스 슬롯), Const는 리터럴 leaf.
+// leaf 하나를 leafIndex로 푼다. Scope는 paths[index](인스턴스 슬롯), Const는 리터럴 leaf.
 //
-// @param field { isConst, index }
+// @param leaf  { isConst, index }
 // @param paths scope index -> store path 매핑
 // @returns     leafIndex
-const fieldLeafIndex = (field, paths, store, module) => {
-  const path = field.isConst ? seedLitPath(store, module, field.index) : paths[field.index];
+const leafToIndex = (leaf, paths, store, module) => {
+  const path = leaf.isConst ? seedLitPath(store, module, leaf.index) : paths[leaf.index];
   return store.leafOf(path);
+};
+
+// 조립 step - 런타임 내부 미니 명령(바이트코드 opcode와 다른 층). type_ref 구조를 평탄한 step
+// 열로 컴파일해두고, assemble이 그 열을 반복 실행해 중첩 객체를 짓는다(재귀·트리순회 없음).
+//   STEP_ENTER key : 새 객체를 만들어 부모[key]에 걸고 내려간다
+//   STEP_LEAF  key : 부모[key] = 다음 leaf 값
+//   STEP_EXIT      : 부모로 돌아온다
+const STEP_ENTER = 0;
+const STEP_LEAF = 1;
+const STEP_EXIT = 2;
+
+// type_ref 구조를 조립 step 열로 컴파일한다(type_ref별 1회, dedup되니 공유 가능). 명시적 스택
+// 반복이라 깊은 타입에도 콜스택 안전. leaf 자리엔 인덱스를 안 박고 STEP_LEAF로 "다음 leaf 소비"만
+// 표시 - 실제 leaf는 assemble이 leafIndices를 커서로 소비한다(구조=step, 인스턴스=leafIndices).
+//
+// @param types   타입 테이블
+// @param typeRef 시작 타입
+// @param pool    상수풀(필드명 해석)
+// @returns       [[STEP_*, key]] 평탄 열. 루트 key=null.
+const compileType = (types, typeRef, pool) => {
+  const steps = [];
+  // 한 노드로 내려간다: 스칼라면 LEAF 하나로 끝, 객체면 ENTER를 내고 남은 자식 큐를 돌려준다.
+  // 프레임은 "열어둔 객체의 아직 처리 안 한 자식들" - 이 큐만 상태로 든다(플래그 없음).
+  const enter = (ref, key) => {
+    const t = types[ref];
+    if (t.tag === "scalar") {
+      steps.push([STEP_LEAF, key]);
+      return null;
+    }
+    steps.push([STEP_ENTER, key]);
+    return t.fields.map(([nameConst, childRef]) => [pool[nameConst], childRef]);
+  };
+
+  const rootRemaining = enter(typeRef, null);
+  if (rootRemaining === null) {
+    return steps; // 루트가 스칼라면 STEP_LEAF 하나뿐
+  }
+  const stack = [rootRemaining];
+  while (stack.length) {
+    const remaining = stack[stack.length - 1];
+    if (remaining.length === 0) {
+      steps.push([STEP_EXIT, null]); // 자식 다 처리 → 이 객체 닫음
+      stack.pop();
+      continue;
+    }
+    // 다음 자식으로 내려간다(깊이우선). 객체면 즉시 top이 되어 걔부터 파고든다 - 순서 안 밀림.
+    const [key, childRef] = remaining.shift();
+    const childRemaining = enter(childRef, key);
+    if (childRemaining !== null) {
+      stack.push(childRemaining);
+    }
+  }
+  return steps;
+};
+
+// 조립 step 열을 실행해 값을 만든다(발생 시점). leafIndices를 커서로 소비하며 STEP_LEAF에서
+// store.get. 루트가 스칼라(step이 STEP_LEAF 하나)면 객체로 감싸지 않고 값을 그대로 반환한다.
+//
+// @param steps       compileType 결과
+// @param leafIndices 이 field의 leafIndex 목록(깊이우선, step의 LEAF 순서와 일치)
+const assemble = (steps, leafIndices, store) => {
+  let cursor = 0;
+  const root = {};
+  const stack = [root];
+  for (const [step, key] of steps) {
+    const top = stack[stack.length - 1];
+    if (step === STEP_LEAF) {
+      const value = store.get(leafIndices[cursor++]);
+      if (key === null) {
+        return value; // 루트가 스칼라 - 객체로 안 감싼다
+      }
+      top[key] = value;
+    } else if (step === STEP_ENTER) {
+      if (key === null) {
+        continue; // 루트 객체는 root 그대로 - 새로 만들지 않는다
+      }
+      const obj = {};
+      top[key] = obj;
+      stack.push(obj);
+    } else if (stack.length > 1) {
+      stack.pop();
+    }
+  }
+  return root;
+};
+
+// type_ref의 조립 step 열을 돌려준다. 처음 참조면 컴파일해 캐시(발생 시점 lazy). 같은 type_ref는
+// 한 번만 컴파일 - dedup된 타입 테이블의 이점이 실행 표현까지 이어진다.
+const compiledStepsOf = (module, typeRef) => {
+  if (module.compiledSteps[typeRef] === undefined) {
+    module.compiledSteps[typeRef] = compileType(module.types, typeRef, module.pool);
+  }
+  return module.compiledSteps[typeRef];
 };
 
 // qubb 바이트를 모듈로 디코드한다(상수풀·def 테이블·코드).
@@ -309,6 +433,13 @@ const decode = (bytes) => {
     pool.push(r.constant());
   }
 
+  // 타입 테이블(모듈 전역) - type_count, [ (tag, payload) ]. Rust read_type 대칭.
+  const typeCount = r.u16();
+  const types = [];
+  for (let i = 0; i < typeCount; i++) {
+    types.push(readType(r));
+  }
+
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
@@ -332,7 +463,9 @@ const decode = (bytes) => {
 
   const codeLen = r.u32();
   const code = r.take(codeLen);
-  return { pool, defs, code };
+  // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
+  // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
+  return { pool, types, defs, code, compiledSteps: [] };
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -490,12 +623,20 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
             // fullname = 합성 경로 + 로컬 이벤트명(누가 쐈나). 바인딩 시점에 불변이라 콜백 밖에서
             // 한 번 짓는다(루트는 prefix가 비어 로컬명 그대로 - 기존 동작과 호환).
             const fullName = pathPrefix ? pathPrefix + "." + eventName : eventName;
-            // fields를 leafIndex로 풀어 props 맵(필드명 -> leafIndex)을 짓는다.
-            // 풀이는 발생 때가 아니라 지금(바인딩 때) 한 번 한다(paths는 인스턴스 불변).
-            // props는 핸들러의 set/get 대상(set(props.name, v)), data는 발생 시점 현재값.
+            // fields의 leaf를 leafIndex로 미리 푼다(바인딩 때 1회, paths 불변). steps(조립 구조)는
+            // 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
+            const payload = event.fields.map((field) => ({
+              name: module.pool[field.nameConstIndex],
+              typeRef: field.typeRef,
+              leafIndices: field.leaves.map((leaf) => leafToIndex(leaf, paths, store, module)),
+            }));
+            // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field만 - 객체의 set 의미는
+            // 아직 미정(ISSUES)이라 leaf 하나짜리(스칼라)만 노출한다. data(읽기)는 객체까지 조립된다.
             const props = {};
-            for (const field of event.fields) {
-              props[module.pool[field.nameConstIndex]] = fieldLeafIndex(field, paths, store, module);
+            for (const p of payload) {
+              if (module.types[p.typeRef].tag === "scalar") {
+                props[p.name] = p.leafIndices[0];
+              }
             }
             // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
             // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
@@ -509,17 +650,17 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
               // 위임 리스너는 자기 선에서 버블을 끊는다(디폴트). fullname은 박힌 위치 하나로
               // 디스패치되며, 조상 요소의 같은 DOM 이벤트 위임으로 새지 않는다. 끄는 옵션은 미정.
               domEventObject.stopPropagation();
+              // data: 발생 시점 조립값. 스칼라면 값, 객체면 중첩 객체(steps는 여기서 lazy 컴파일).
               const data = {};
-              for (const name in props) {
-                data[name] = store.get(props[name]);
+              for (const p of payload) {
+                data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.leafIndices, store);
               }
-              // context: 발생 시점 현재값. context.<이름>.<필드> = store.get(leafIndex).
+              // context: 발생 시점 조립값. context.<이름>.<필드> = 조립값(스칼라/객체). payload와 동형.
               const context = {};
               for (const ctxName in contextLeaves) {
-                const fields = contextLeaves[ctxName];
                 const values = {};
-                for (const fieldName in fields) {
-                  values[fieldName] = store.get(fields[fieldName]);
+                for (const p of contextLeaves[ctxName]) {
+                  values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.leafIndices, store);
                 }
                 context[ctxName] = values;
               }
@@ -584,10 +725,12 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
             // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
             const contextDef = contexts[u16at()];
             const name = module.pool[contextDef.nameConstIndex];
-            const fields = {};
-            for (const field of contextDef.fields) {
-              fields[module.pool[field.nameConstIndex]] = fieldLeafIndex(field, paths, store, module);
-            }
+            // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
+            const fields = contextDef.fields.map((field) => ({
+              name: module.pool[field.nameConstIndex],
+              typeRef: field.typeRef,
+              leafIndices: field.leaves.map((leaf) => leafToIndex(leaf, paths, store, module)),
+            }));
             // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
             // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
             if (activeContexts.some((i) => createdContexts[i].name === name)) {
