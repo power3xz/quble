@@ -644,6 +644,96 @@ mod tests {
         assert_eq!(idx, expected, "TEXT_VAR 인덱스 = props에서의 위치");
     }
 
+    /// 객체 통째 전달(`row={a}`) - 부모 객체 prop을 자식 객체 prop에 통째로 넘기면 자식 leaf마다
+    /// PushArg 하나로 쪼개진다. 자식 Row는 leaf 2개(label/on)라 PushArg 2개, scope index는
+    /// 부모 `a.label`(1)·`a.on`(2)에서 연속으로 온다.
+    #[test]
+    fn compiles_whole_object_arg_splits_to_leaf_pusharg() {
+        use bytecode::{decode, Op};
+        let src = r#"
+            component C {
+              props { title: string, a: { label: string, on: bool } }
+              template { div() { Row(row={a}) {} } }
+            }
+            component Row {
+              props { row: { label: string, on: bool } }
+              template { span() { {row.label} } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // 부모 scope: title=0, a.label=1, a.on=2. row={a} -> PushArg 1, PushArg 2.
+        let pushes: Vec<u16> = code
+            .iter()
+            .enumerate()
+            .filter(|(_, &b)| b == Op::PushArg as u8)
+            .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
+            .collect();
+        assert_eq!(pushes, vec![1, 2], "자식 leaf(label/on)마다 부모 a.label/a.on scope index");
+    }
+
+    /// 통째 전달인데 도달 타입과 자식 prop 타입 구조가 다르면(필드 이름 불일치) PropTypeMismatch.
+    #[test]
+    fn whole_object_arg_type_mismatch_errors() {
+        let src = r#"
+            component C {
+              props { a: { label: string, on: bool } }
+              template { div() { Row(row={a}) {} } }
+            }
+            component Row {
+              props { row: { text: string, on: bool } }
+              template { span() { {row.text} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(
+                codegen::CodegenError::PropTypeMismatch { .. }
+            ))
+        ));
+    }
+
+    /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`{a}`)에 객체를 넣으면 여전히 NotLeaf.
+    /// 값·반응성 자리엔 leaf만 온다는 경계가 인자 허용으로 무너지지 않아야 한다.
+    #[test]
+    fn object_in_text_node_still_errors() {
+        let src = r#"
+            component C {
+              props { a: { label: string, on: bool } }
+              template { div() { {a} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::NotLeaf(_)))
+        ));
+    }
+
+    /// 스칼라 인자는 회귀 없이 그대로 - leaf 1개라 PushArg 하나(도달 타입=자식 타입=string).
+    #[test]
+    fn scalar_arg_still_single_pusharg() {
+        use bytecode::{decode, Op};
+        let src = r#"
+            component C {
+              props { name: string }
+              template { div() { Row(label={name}) {} } }
+            }
+            component Row {
+              props { label: string }
+              template { span() { {label} } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+        let count = code.iter().filter(|&&b| b == Op::PushArg as u8).count();
+        assert_eq!(count, 1, "스칼라는 PushArg 하나");
+    }
+
     /// 한 .qubc에서 여러 컴포넌트를 use. 셋 다 한 모듈로 평탄화돼야 한다 -
     /// decode해서 def 개수(3)와 이름(Card/Thumb/Badge), 엔트리 Card가 ID 0인지 확인.
     #[test]

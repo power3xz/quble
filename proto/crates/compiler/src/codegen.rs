@@ -25,6 +25,9 @@ pub enum CodegenError {
     /// 값 자리(보간·속성·payload·context)에 leaf(원시)가 아닌 객체/배열 경로가 왔다.
     /// 반응성·값 자리엔 leaf만 올 수 있다 - 객체 통째는 안 넘긴다.
     NotLeaf(String),
+    /// 객체 통째 전달(`user={user}`)에서 넘긴 경로의 도달 타입이 자식 prop 타입과 구조가 다르다.
+    /// leaf를 순서로 짝지으므로 필드 이름·순서·타입이 일치해야 한다.
+    PropTypeMismatch { comp: String, prop: String },
 }
 
 /// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
@@ -162,10 +165,14 @@ fn leaf_count(ty: &Type) -> u16 {
     }
 }
 
-/// prop 참조(root + 객체 경로)를 평탄 scope 인덱스로. props를 선언 순서로 펼친 leaf 번호를
-/// 매기되, 경로는 root prop 타입을 필드로 파고들어 도달한 leaf의 offset을 더한다. 경로가
-/// leaf(원시)에서 끝나지 않으면(객체/배열) 에러 - 값 자리엔 leaf만 온다.
-fn var_ref_to_scope_index(var: &VarRef, props: &[Prop]) -> Result<u16, CodegenError> {
+/// prop 참조(root + 객체 경로)를 경로 따라 걸어 도달 타입과 그 아래 leaf들의 scope 인덱스로
+/// 쪼갠다. scope 인덱스는 props를 선언 순서로 펼친 leaf 번호다. 도달 타입이 leaf(원시)면 길이
+/// 1(그 offset 하나), 객체/배열이면 펼친 leaf 수만큼(연속) - 객체 통째 전달(`user={user}`)이
+/// 자식 leaf마다 PushArg 하나로 쪼개진다.
+fn split_var_ref_to_scope_indices<'a>(
+    var: &VarRef,
+    props: &'a [Prop],
+) -> Result<(&'a Type, Vec<u16>), CodegenError> {
     // root prop까지의 평탄 offset(앞 prop들의 leaf 수 합)을 세며 root prop을 찾는다.
     let mut base = 0u16;
     let mut ty = None;
@@ -203,10 +210,39 @@ fn var_ref_to_scope_index(var: &VarRef, props: &[Prop]) -> Result<u16, CodegenEr
         })?;
     }
 
-    // 도달 타입이 leaf(원시)여야 한다.
+    // 도달 타입의 leaf들은 base부터 연속이다(같은 순회로 offset을 매겼으므로).
+    let indices = (base..base + leaf_count(ty)).collect();
+    Ok((ty, indices))
+}
+
+/// prop 참조를 단일 leaf(원시)의 scope 인덱스로. 값·반응성 자리(보간·속성·payload·context·@if
+/// 조건)엔 leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `split_var_ref_to_scope_indices` 위
+/// leaf-only 래퍼.
+fn var_ref_to_scope_index(var: &VarRef, props: &[Prop]) -> Result<u16, CodegenError> {
+    let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
     match ty {
-        Type::Bool | Type::Number | Type::String => Ok(base),
+        Type::Bool | Type::Number | Type::String => Ok(indices[0]),
         _ => Err(CodegenError::NotLeaf(var_ref_display(var))),
+    }
+}
+
+/// 두 타입이 구조적으로 동일한가 - 필드 이름·순서·타입이 재귀로 일치. 객체 통째 전달에서
+/// 넘긴 경로의 도달 타입과 자식 prop 타입이 같은 leaf 배치인지 검사(순서만으로 leaf를 짝지으므로
+/// 이름·순서가 어긋나면 엉뚱하게 이어진다). (Ref/Omit/Pick은 resolve가 이미 Object로 풀었다.)
+fn types_match(a: &Type, b: &Type) -> bool {
+    match (a, b) {
+        (Type::Bool, Type::Bool) | (Type::Number, Type::Number) | (Type::String, Type::String) => {
+            true
+        }
+        (Type::Array(x), Type::Array(y)) => types_match(x, y),
+        (Type::Object(fx), Type::Object(fy)) => {
+            fx.len() == fy.len()
+                && fx
+                    .iter()
+                    .zip(fy)
+                    .all(|((nx, tx), (ny, ty))| nx == ny && types_match(tx, ty))
+        }
+        _ => false,
     }
 }
 
@@ -364,9 +400,20 @@ fn emit_node(
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
-                        let scope_index = var_ref_to_scope_index(parent_var, props)?;
-                        code.push(Op::PushArg as u8);
-                        code.extend_from_slice(&scope_index.to_le_bytes());
+                        // 도달 타입이 자식 prop 타입과 구조가 같아야 leaf를 순서로 짝짓는다.
+                        // 스칼라면 leaf 1개 - 지금까지와 동일하게 PushArg 하나.
+                        let (reached_ty, scope_indices) =
+                            split_var_ref_to_scope_indices(parent_var, props)?;
+                        if !types_match(reached_ty, &child_prop.ty) {
+                            return Err(CodegenError::PropTypeMismatch {
+                                comp: name.clone(),
+                                prop: child_prop.name.clone(),
+                            });
+                        }
+                        for scope_index in scope_indices {
+                            code.push(Op::PushArg as u8);
+                            code.extend_from_slice(&scope_index.to_le_bytes());
+                        }
                     }
                     ArgValue::Literal(literal) => {
                         let value_index = pool.intern(lit_to_const(literal));
