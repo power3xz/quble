@@ -3,7 +3,8 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Ident(String),
-    Str(String),
+    Str(String),          // 큰따옴표 값 리터럴
+    TypeKey(String),      // 작은따옴표 타입 키(유틸 타입 `Omit<T, 'a'>`)
     Num(String),  // 숫자 리터럴 원문. 값 파싱(f64)은 parse 단계.
     Bool(bool),   // true / false 값 리터럴.
     KwBool,       // 타입 키워드 bool
@@ -19,6 +20,9 @@ pub enum Token {
     Comma,  // ,
     Colon,  // :
     Dot,    // . (객체 필드 접근 `assignee.name`)
+    Lt,     // < (제네릭 타입 `Omit<Section, 'a'>`)
+    Gt,     // >
+    Pipe,   // | (유니온 키 리스트 `'a' | 'b'`)
     /// `@` 뒤에 오는 디렉티브. `@if` -> `At(Directive::If)`.
     At(Directive),
 }
@@ -124,6 +128,18 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 chars.next();
                 toks.push(Token::Dot);
             }
+            '<' => {
+                chars.next();
+                toks.push(Token::Lt);
+            }
+            '>' => {
+                chars.next();
+                toks.push(Token::Gt);
+            }
+            '|' => {
+                chars.next();
+                toks.push(Token::Pipe);
+            }
             '@' => {
                 chars.next(); // @
                 let mut s = String::new();
@@ -156,6 +172,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 };
                 toks.push(Token::At(kw));
             }
+            // 큰따옴표 = 값 리터럴(속성값 `class="x"`, payload 리터럴).
             '"' => {
                 chars.next(); // 여는 따옴표
                 let mut s = String::new();
@@ -167,6 +184,19 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     }
                 }
                 toks.push(Token::Str(s));
+            }
+            // 작은따옴표 = 타입 키(TS 유틸 타입 `Omit<T, 'title'>`). 값 리터럴과 자리가 달라 구분한다.
+            '\'' => {
+                chars.next(); // 여는 따옴표
+                let mut s = String::new();
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(ch) => s.push(ch),
+                        None => return Err(LexError::UnterminatedString),
+                    }
+                }
+                toks.push(Token::TypeKey(s));
             }
             c if is_ident_start(c) => {
                 let mut s = String::new();

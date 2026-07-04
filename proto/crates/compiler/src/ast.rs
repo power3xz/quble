@@ -45,6 +45,11 @@ pub enum Type {
     /// `general: Section` - 다른 컴포넌트(대문자명)의 props를 타입으로 참조. resolve가
     /// 평탄화 후 그 컴포넌트 props를 Object로 환원해 치환한다(codegen엔 Ref가 안 남는다).
     Ref(String),
+    /// `Omit<Section, 'title'>` - 안쪽 타입(Object로 환원됨)의 필드에서 나열한 키를 뺀다.
+    /// resolve가 안쪽을 먼저 풀고 필터해 Object로 치환한다. 유틸 타입은 Ref처럼 codegen 전에 사라진다.
+    Omit(Box<Type>, Vec<String>),
+    /// `Pick<Section, 'title'>` - 안쪽 타입 필드에서 나열한 키만 고른다(Omit의 반대).
+    Pick(Box<Type>, Vec<String>),
 }
 
 /// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.

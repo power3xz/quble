@@ -49,6 +49,10 @@ pub enum ResolveError {
     UnknownType(String),
     /// 타입 참조가 순환한다(A의 prop 타입이 B, B가 A).
     TypeCycle(String),
+    /// Omit/Pick의 안쪽이 객체(로 환원되는 타입)가 아님.
+    NonObjectUtil,
+    /// Omit/Pick이 나열한 키가 안쪽 타입에 없음.
+    UnknownKey(String),
 }
 
 /// 엔트리 소스를 파싱하고 use 그래프를 따라가 컴포넌트를 평탄화한다.
@@ -126,7 +130,41 @@ fn resolve_type(
             *ty = Type::Object(fields);
             Ok(())
         }
+        // 유틸 타입: 안쪽을 Object로 풀고 키로 필터한다. 팔은 필터 방향만 다르다(Omit=제거, Pick=선택).
+        Type::Omit(inner, keys) => {
+            let fields = util_fields(inner, keys, props_of, visiting)?;
+            let kept = fields.into_iter().filter(|(n, _)| !keys.contains(n)).collect();
+            *ty = Type::Object(kept);
+            Ok(())
+        }
+        Type::Pick(inner, keys) => {
+            let fields = util_fields(inner, keys, props_of, visiting)?;
+            let kept = fields.into_iter().filter(|(n, _)| keys.contains(n)).collect();
+            *ty = Type::Object(kept);
+            Ok(())
+        }
     }
+}
+
+/// 유틸 타입(Omit/Pick)의 안쪽을 Object로 풀어 그 필드를 돌려준다. 나열한 키가 안쪽에
+/// 실재하는지 검증한다(오타 방지). 필터 방향은 호출부가 정한다.
+fn util_fields(
+    inner: &mut Type,
+    keys: &[String],
+    props_of: &[(String, Vec<Prop>)],
+    visiting: &mut Vec<String>,
+) -> Result<Vec<(String, Type)>, ResolveError> {
+    resolve_type(inner, props_of, visiting)?;
+    let fields = match std::mem::replace(inner, Type::Bool) {
+        Type::Object(fields) => fields,
+        _ => return Err(ResolveError::NonObjectUtil),
+    };
+    for k in keys {
+        if !fields.iter().any(|(n, _)| n == k) {
+            return Err(ResolveError::UnknownKey(k.clone()));
+        }
+    }
+    Ok(fields)
 }
 
 struct Ctx {

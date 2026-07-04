@@ -516,6 +516,55 @@ mod tests {
         assert_eq!(ref_props, vec!["heading", "sec.title", "sec.on"]);
     }
 
+    /// `Omit<Section, 'title'>` - Section props에서 title을 뺀 leaf만 남는다.
+    #[test]
+    fn prop_type_omit() {
+        let props = compile_props(r#"
+            component C {
+              props { sec: Omit<Section, 'title'> }
+              template { div() {} }
+            }
+            component Section {
+              props { title: string, desc: string, on: bool }
+              template { div() {} }
+            }
+        "#);
+        assert_eq!(props, vec!["sec.desc", "sec.on"]);
+    }
+
+    /// `Pick<Section, 'title' | 'on'>` - 나열한 키만 남는다(유니온 키).
+    #[test]
+    fn prop_type_pick_union() {
+        let props = compile_props(r#"
+            component C {
+              props { sec: Pick<Section, 'title' | 'on'> }
+              template { div() {} }
+            }
+            component Section {
+              props { title: string, desc: string, on: bool }
+              template { div() {} }
+            }
+        "#);
+        assert_eq!(props, vec!["sec.title", "sec.on"]);
+    }
+
+    /// 유틸 타입이 안쪽에 없는 키를 나열하면 UnknownKey.
+    #[test]
+    fn prop_type_util_unknown_key_errors() {
+        let err = compile_src(
+            "entry",
+            r#"
+                component C { props { s: Omit<Section, 'nope'> } template { div() {} } }
+                component Section { props { title: string } template { div() {} } }
+            "#,
+            &(|_: &str, _: &str| None),
+        );
+        assert!(matches!(
+            err,
+            Err(CompileError::Resolve(ResolveError::UnknownKey(k))) if k == "nope"
+        ));
+    }
+
     /// 없는 타입을 참조하면 UnknownType.
     #[test]
     fn prop_type_ref_unknown_errors() {

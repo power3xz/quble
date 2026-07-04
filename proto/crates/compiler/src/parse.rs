@@ -269,6 +269,20 @@ impl<'a> Parser<'a> {
                 self.next()?;
                 Type::String
             }
+            // 유틸 타입 `Omit<T, 'a' | 'b'>` / `Pick<T, ...>` - 안쪽 타입 필드를 가감.
+            Some(Token::Ident(n)) if n == "Omit" || n == "Pick" => {
+                let util = self.ident()?;
+                self.expect(&Token::Lt)?;
+                let inner = Box::new(self.type_expr()?);
+                self.expect(&Token::Comma)?;
+                let keys = self.type_keys()?;
+                self.expect(&Token::Gt)?;
+                if util == "Omit" {
+                    Type::Omit(inner, keys)
+                } else {
+                    Type::Pick(inner, keys)
+                }
+            }
             // 대문자로 시작하는 식별자 = 다른 컴포넌트를 타입으로 참조(`general: Section`).
             Some(Token::Ident(n)) if n.starts_with(char::is_uppercase) => {
                 let name = self.ident()?;
@@ -288,6 +302,28 @@ impl<'a> Parser<'a> {
             ty = Type::Array(Box::new(ty));
         }
         Ok(ty)
+    }
+
+    // KEYS = TYPEKEY ("|" TYPEKEY)*  - 유틸 타입의 키 목록(`'a'` 또는 `'a' | 'b'`).
+    // 키는 작은따옴표 타입 키(Token::TypeKey) - 큰따옴표 값 리터럴과 구분한다.
+    fn type_keys(&mut self) -> Result<Vec<String>, ParseError> {
+        let mut keys = vec![self.type_key()?];
+        while matches!(self.peek(), Some(Token::Pipe)) {
+            self.next()?;
+            keys.push(self.type_key()?);
+        }
+        Ok(keys)
+    }
+
+    // 타입 키(작은따옴표) 하나를 소비해 그 값을 돌려준다.
+    fn type_key(&mut self) -> Result<String, ParseError> {
+        match self.next()? {
+            Token::TypeKey(s) => Ok(s.clone()),
+            other => Err(ParseError::Expected {
+                want: "타입 키('...')".into(),
+                got: format!("{other:?}"),
+            }),
+        }
     }
 
     // OBJECT = { (IDENT : TYPE (, IDENT : TYPE)*)? }  - 필드 선언 순서 보존.
