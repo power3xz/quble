@@ -11,10 +11,10 @@ component SettingsPanel {
     premium: Omit<Section, 'title'>
   }
   contexts {
-    PlanContext { plan }
+    PlanContext { plan, general, privacy }
   }
   events {
-    SAVE({ heading })
+    SAVE({ heading, general })
     DISCARD({ heading })
   }
   template {
@@ -45,7 +45,7 @@ component SettingsPanel {
         }
       }
 
-      footer(class="panel__foot") {
+      footer(class="panel__foot" @click:SAVE) {
         LinkButton(link={docsLink} theme="btn--link") {}
       }
     }

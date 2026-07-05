@@ -21,7 +21,8 @@ const handlers: Partial<Handlers> = {
   },
 
   // 행 스위치 클릭 - enabled를 반전해 on/off.
-  "General.FirstRow.TOGGLE": (data, { props, get, set }) => {
+  "General.FirstRow.TOGGLE": (data, { props, get, set, context }) => {
+    console.log(data, context);
     set(props.enabled, !get(props.enabled));
   },
   "General.SecondRow.TOGGLE": (data, { props, get, set }) => {
@@ -33,12 +34,16 @@ const handlers: Partial<Handlers> = {
   "Privacy.SecondRow.TOGGLE": (data, { props, get, set }) => {
     set(props.enabled, !get(props.enabled));
   },
-  "Premium.FirstRow.TOGGLE": (data, { props, get, set }) => {
+  "Premium.FirstRow.TOGGLE": (data, { props, context, get, set }) => {
+    console.log(data, context);
     set(props.enabled, !get(props.enabled));
   },
   "Premium.SecondRow.TOGGLE": (data, { props, get, set }) => {
     set(props.enabled, !get(props.enabled));
   },
+  SAVE: (data) => {
+    console.log(data);
+  }
 };
 
 export default handlers;
