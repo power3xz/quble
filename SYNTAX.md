@@ -44,15 +44,24 @@ props {
 타입은 quble이 온전히 소유하는 재귀 문법이다:
 
 ```
-Type   = Prim | Array | Object
+Type   = Prim | Array | Object | Ref | Util
 Prim   = "bool" | "number" | "string"
 Array  = Type "[]"                              // string[], number[][]
 Object = "{" (이름 ":" Type ("," 이름 ":" Type)*)? "}"
+Ref    = 컴포넌트이름                            // 그 컴포넌트의 props를 객체로 참조
+Util   = ("Omit" | "Pick") "<" Type "," 키 ("|" 키)* ">"   // 키는 '작은따옴표'
 ```
 
 원시 3종(`bool`/`number`/`string`)이 잎이고, 배열·객체로 재귀 조합한다. d.ts가 TS
-타입으로 매핑한다(`bool`->`boolean`, `T[]`->`T[]`, 객체->`{...}`). 명명 타입(재사용
-가능한 이름 붙은 타입)은 아직 없다 - 인라인만.
+타입으로 매핑한다(`bool`->`boolean`, `T[]`->`T[]`, 객체->`{...}`).
+
+**명명 타입 참조(Ref)** - 다른 컴포넌트 이름을 타입으로 쓰면 그 컴포넌트의 props를
+객체로 참조한다(`sec: Section`). 순환 참조는 컴파일 에러.
+
+**유틸 타입(Omit/Pick)** - 안쪽 타입(객체로 환원되는 것)의 필드를 키로 가감한다.
+`Omit<Section, 'title'>`은 Section props에서 `title`을 뺀 것, `Pick<Section, 'title' | 'on'>`은
+나열한 키만 고른 것(유니온 키). 키는 **작은따옴표**로 쓴다(값 리터럴과 자리가 다르다).
+나열한 키가 안쪽에 없으면 컴파일 에러.
 
 ### 2.2 `contexts`
 
@@ -65,7 +74,9 @@ contexts {
 ```
 
 `ContextName { key: EXPR, … }`. 각 컨텍스트는 자기 이름공간을 가진다. 값에는 리터럴과
-props 참조(`assignee`, `priority`)가 온다. `@with`로 활성화된다.
+props 참조(`assignee`, `priority`)가 오며, **객체 prop을 통째로** 넘길 수도 있다(events
+페이로드와 같음 - `PlanContext { plan, general }`의 `general`이 객체면 핸들러가
+`context.PlanContext.general`을 중첩 객체로 받는다). `@with`로 활성화된다.
 
 ### 2.3 `events`
 
@@ -82,6 +93,10 @@ events {
 - 단축 `id` (= `id: id`)
 - `key: EXPR` (`completed: !completed`, `timestamp: Date.now()`)
 - 리터럴 `confirmRequired: true`
+
+페이로드 값은 **스칼라뿐 아니라 객체 prop을 통째로** 넘길 수 있다 - `SAVE({ heading, general })`에서
+`general`이 객체 prop(`{ open, a, b }`)이면 핸들러는 `data.general`을 그 중첩 객체로 받는다. 값 자리에
+객체가 오면 핸들러에 조립된 객체가, 스칼라면 스칼라가 간다.
 
 이벤트명은 대문자 스네이크 관례. `@click:TOGGLE`이 이 `TOGGLE`을 참조한다.
 
