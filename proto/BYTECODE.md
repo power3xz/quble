@@ -34,8 +34,7 @@ component Greeting {
 scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
 `{expr}` 전체 표현식은 아직 아니다.)
 
-이 첫 단계(props 보간)에서 없던 것 중 이후 추가됨: 합성/별칭, `@if`, events, `@with`/contexts.
-아직 없는 것: 슬롯, `@for`, 전체 `{expr}`, props 객체.
+아직 없는 것: 슬롯, `@for`, 전체 `{expr}`, 배열 타입.
 
 ---
 
@@ -119,6 +118,12 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
                  tag 0 (Str)  : len:u16, bytes:[u8;len]   // UTF-8
                  tag 1 (Num)  : f64 (8 bytes, LE)
                  tag 2 (Bool) : u8 (0/1)
+[ 타입 테이블 ]              // 모듈 전역. payload/context가 담는 객체 구조(dedup). type_ref = 배열 인덱스
+  count      : u16
+  entries    : count x ( tag:u8, payload )
+                 tag 0 (Scalar) : payload 없음
+                 tag 1 (Object) : field_count:u16, fields:field_count x ( name_const_index:u16, type_ref:u16 )
+                                  // type_ref로 자식 타입을 가리켜 중첩·공유를 표현
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
   count      : u16
   defs       : count x (
@@ -141,8 +146,11 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   <FIELDS> = field_count : u16
              fields      : field_count x (
                name_const_index : u16  // 필드명("title") 상수풀
-               value            : u16  // MSB=const 여부(1=상수풀 값, 0=scope index),
-                                       //   하위 15비트=index. const는 리터럴, scope는 그 prop scope index.
+               type_ref         : u16  // 타입 테이블 인덱스 - 이 leaf들을 어떤 구조로 조립할지
+               leaf_count       : u16
+               leaves           : leaf_count x u16  // leaf 하나. MSB=const 여부(1=상수풀 값,
+                                       //   0=scope index), 하위 15비트=index. 깊이우선 순서로
+                                       //   type_ref 구조를 채운다. scalar field는 leaf 하나.
              )
 [ 코드 ]
   len        : u32
@@ -151,6 +159,10 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 - 내장 태그 테이블/전역 상수풀은 파일에 없다 - 헤더의 version이 이 테이블들의 버전을 함께
   결정한다고 본다.
+- **타입 테이블은 모듈 전역·dedup.** payload/context가 실제로 담는 객체 타입만 등록한다(props
+  전체가 아니라). Object 필드가 자식을 `type_ref`로 가리켜 중첩·공유를 표현한다. field는
+  `type_ref`로 이 테이블을 참조하고 leaf만 따로 싣는다 - 구조는 전역에, 인스턴스(leaf)는
+  컴포넌트 field에. 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
 - **컴포넌트명은 상수풀에 둔다**(`name_const_index`로 참조).
 - **컴포넌트 ID = 테이블 배열 인덱스.** `RENDER`/합성은 이 ID로 정의를 직접 인덱싱한다.
 - 진입점(엔트리포인트) 정보는 파일에 없다 - `RENDER comp_id` 호출이 지정.
@@ -236,14 +248,18 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
 - **이벤트 - `BIND_EVENT` + 컴포넌트 이벤트 테이블.** 정의와 발생이 나뉜다.
   - **정의**는 컴포넌트 테이블(§4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
-    이벤트명/fields(필드명 + 값 출처)가 그 컴포넌트의 이벤트 배열에 들어간다. `event_index`는
-    이 배열의 인덱스(0,1,2…). **fields의 값(`FieldValue`)은 MSB로 갈린다** - scope(그 prop의
-    scope index) 또는 const(리터럴, 상수풀 인덱스). 컨텍스트와 같은 인코딩(<FIELDS>, §4).
+    이벤트명/fields(필드명 + type_ref + leaf 목록)가 그 컴포넌트의 이벤트 배열에 들어간다.
+    `event_index`는 이 배열의 인덱스(0,1,2…). 각 field는 `type_ref`(타입 테이블)로 조립 구조를,
+    **leaf 목록**으로 그 구조를 채울 값을 가리킨다. **leaf 하나는 MSB로 갈린다** - scope(그 prop의
+    scope index) 또는 const(리터럴, 상수풀 인덱스). 스칼라 field는 Scalar type_ref + leaf 하나
+    (옛 단일 값의 상위집합). 객체 field는 leaf 여러 개(깊이우선). 컨텍스트와 같은 인코딩(<FIELDS>, §4).
   - **발생 배선**은 코드의 `BIND_EVENT`다. `button(@click:TOGGLE)`은 그 요소에
     `BIND_EVENT click, 0`(click이 일어나면 0번 이벤트)을 낸다. 속성처럼 `ELEM_OPEN`과
     `ELEM_CLOSE_OPEN` 사이에 온다.
-  - **발생 시 런타임**: 0번 이벤트 정의를 보고 fields를 풀어 현재값을 모아 `data = { title: … }`를
-    만들고, 핸들러(fullname으로 찾음)에 넘긴다. 핸들러는 JS로 런타임에 주입된다. 같은 fullname = 같은 핸들러.
+  - **발생 시 런타임**: 0번 이벤트 정의를 보고, 각 field의 leaf 목록을 현재값으로 읽어 `type_ref`
+    구조대로 **조립**해 `data = { title: … }`를 만들고, 핸들러(fullname으로 찾음)에 넘긴다.
+    스칼라 field는 leaf 하나가 값이 되고, 객체 field는 leaf들이 중첩 객체로 조립된다(조립 절차는
+    런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다. 같은 fullname = 같은 핸들러.
   - 핸들러 본문/`set`은 바이트코드에 없다 - 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
     낸다. 본문은 호스트 JS에 위임(DESIGN §5.4 방향).
 - **컨텍스트 - `ENTER_CONTEXT`/`EXIT_CONTEXT` + 컴포넌트 컨텍스트 테이블.** `@with`로 주입하는
@@ -252,9 +268,9 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     fields(이벤트와 같은 인코딩)로 컨텍스트 배열에 들어간다. `context_index`는 이 배열의 인덱스.
   - **활성화**는 코드의 `ENTER_CONTEXT context_index` … `EXIT_CONTEXT`다. `@with Area { … }`가
     이 짝으로 감싼다(IF/IF_END와 동형 - 점프 없는 마커, 중첩 보장).
-  - **런타임**: ENTER가 그 컨텍스트를 활성 스택에 올리고(fields를 leafIndex로 풀어), 그 범위 안의
+  - **런타임**: ENTER가 그 컨텍스트를 활성 스택에 올리고(각 field를 type_ref 구조로 조립), 그 범위 안의
     `BIND_EVENT`가 활성 컨텍스트를 핸들러의 `context`로 전달한다(`context.Area.userId` = 발생 시점
-    현재값, `data`와 같은 처리). EXIT가 스택에서 내린다. 컨텍스트는 DOM 출력엔 영향 없다(SSR은 skip).
+    현재값, payload와 같은 조립). EXIT가 스택에서 내린다. 컨텍스트는 DOM 출력엔 영향 없다(SSR은 skip).
   - 같은 컨텍스트명 중첩은 비정상이나(맥락은 중복이 없는 게 맞다), 합성 경계 너머 중첩은 컴파일타임에
     못 봐 런타임이 안쪽 우선으로 덮고 경고한다(ISSUES.md).
 

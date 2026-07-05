@@ -1,0 +1,7 @@
+component C {
+  props { user: { name: { short: string, long: string }, email: string }, tag: string }
+  events { SAVE({ user, tag }) }
+  template {
+    button(@click:SAVE) { "x" }
+  }
+}

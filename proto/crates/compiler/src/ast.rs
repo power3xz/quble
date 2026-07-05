@@ -34,7 +34,12 @@ pub struct Prop {
 }
 
 /// prop 타입. quble이 온전히 소유하는 재귀 구조 - 원시 3종을 잎으로 배열·객체를 조합한다.
-/// d.ts가 TS 타입으로 매핑한다(bool->boolean, T[]->T[], 객체->{...}). 명명 타입은 아직 없다.
+/// d.ts가 TS 타입으로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
+///
+/// Ref/Omit/Pick은 "다른 곳의 타입을 참조/가공"하는 표기라, resolve 단계가 이를 그
+/// 실제 필드 목록(Object)으로 바꿔치기한다. 예: `Section`의 props가 `{ title, on }`이면
+/// `Omit<Section, 'title'>` → `Object([("on", ...)])`. 그래서 codegen에는 Object만 오고
+/// Ref/Omit/Pick은 남지 않는다.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     Bool,

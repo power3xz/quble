@@ -2,17 +2,17 @@
 
 use crate::pool::ConstPool;
 
-/// 필드 값의 출처. 바이트코드는 값 자체가 아니라 "어디서 값을 읽을지"를 싣는다.
+/// leaf 값 하나의 출처. field.leaves의 각 원소 - scope(런타임 paths[index]) 또는 const(리터럴).
 /// 바이트코드 u16과의 변환은 encode/decode에 가둔다 - 비트연산(0x8000)이 한 곳에만 존재.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldValue {
+pub enum Leaf {
     /// scope index. 런타임이 paths[index]로 읽는다.
     Scope(u16),
     /// 컴포넌트 상수풀 인덱스. 리터럴 값($lit).
     Const(u16),
 }
 
-impl FieldValue {
+impl Leaf {
     /// MSB = const 여부, 하위 15비트 = 인덱스. const=1, scope=0(디폴트).
     /// 인덱스 상한은 0x7fff - 초과는 인덱스 발급 지점(intern/prop 인덱싱)이 막아야 한다(미구현).
     const CONST_BIT: u16 = 0x8000;
@@ -20,27 +20,42 @@ impl FieldValue {
     /// 바이트코드 u16으로. Scope는 인덱스 그대로, Const는 MSB를 세운다.
     pub fn encode(self) -> u16 {
         match self {
-            FieldValue::Scope(index) => index,
-            FieldValue::Const(index) => index | Self::CONST_BIT,
+            Leaf::Scope(index) => index,
+            Leaf::Const(index) => index | Self::CONST_BIT,
         }
     }
 
     /// 바이트코드 u16에서. MSB가 서 있으면 Const, 아니면 Scope.
-    pub fn decode(raw: u16) -> FieldValue {
+    pub fn decode(raw: u16) -> Leaf {
         if raw & Self::CONST_BIT != 0 {
-            FieldValue::Const(raw & !Self::CONST_BIT)
+            Leaf::Const(raw & !Self::CONST_BIT)
         } else {
-            FieldValue::Scope(raw)
+            Leaf::Scope(raw)
         }
     }
 }
 
-/// 필드 하나 = 필드명 + 값 출처. 이벤트 payload와 컨텍스트가 공유하는 명세.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// payload/context가 담는 객체 타입의 구조. 모듈 전역 테이블(Module.types)에 dedup 저장.
+/// 조립 명세다 - 값도 leaf 인덱스도 없이 구조(필드명·중첩)만 담고, 런타임이 field.leaves를
+/// 받아 이 구조로 객체를 조립한다. object 필드는 자식을 type_ref(테이블 인덱스)로 가리켜
+/// 중첩·공유를 표현한다. (Array는 @for 미해결이라 아직 없음 - PAYLOAD-OBJECTS.md.)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TypeEntry {
+    Scalar,
+    /// (name_const_index, type_ref) 목록. 선언 순서 = 조립 시 leaf 소비 순서.
+    Object(Vec<(u16, u16)>),
+}
+
+/// 필드 하나 = 필드명 + 조립 구조(type_ref) + 채울 leaf 목록. 이벤트 payload와 컨텍스트가
+/// 공유하는 명세. 스칼라 field는 type_ref가 Scalar 엔트리 + leaves 하나(지금 동작의 상위집합).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     /// 필드명("title")의 컴포넌트 상수풀 인덱스.
     pub name_const_index: u16,
-    pub value: FieldValue,
+    /// 모듈 전역 타입 테이블 인덱스. 이 leaves를 어떤 구조로 조립할지.
+    pub type_ref: u16,
+    /// 조립에 채울 leaf 목록(깊이우선 순서). 스칼라는 하나, 객체는 leaf 수만큼.
+    pub leaves: Vec<Leaf>,
 }
 
 /// 컴포넌트가 선언한 이벤트 하나. `event_index`는 이 항목이 CompDef.events에서 갖는 배열 인덱스
@@ -80,13 +95,15 @@ pub struct CompDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
     pub pool: ConstPool,
+    /// 모듈 전역 타입 테이블(dedup). field.type_ref가 이걸 인덱싱한다.
+    pub types: Vec<TypeEntry>,
     pub(crate) defs: Vec<CompDef>,
     pub code: Vec<u8>,
 }
 
 impl Module {
-    pub fn new(pool: ConstPool, defs: Vec<CompDef>, code: Vec<u8>) -> Self {
-        Self { pool, defs, code }
+    pub fn new(pool: ConstPool, types: Vec<TypeEntry>, defs: Vec<CompDef>, code: Vec<u8>) -> Self {
+        Self { pool, types, defs, code }
     }
 
     /// 컴포넌트 ID로 정의를 직접 인덱싱.
@@ -101,24 +118,24 @@ mod tests {
 
     /// Scope/Const 양쪽이 u16 인코딩을 라운드트립한다. MSB가 두 variant를 가른다.
     #[test]
-    fn field_value_roundtrips() {
-        for fv in [FieldValue::Scope(0), FieldValue::Scope(42), FieldValue::Const(0), FieldValue::Const(5)] {
-            assert_eq!(FieldValue::decode(fv.encode()), fv);
+    fn leaf_roundtrips() {
+        for lf in [Leaf::Scope(0), Leaf::Scope(42), Leaf::Const(0), Leaf::Const(5)] {
+            assert_eq!(Leaf::decode(lf.encode()), lf);
         }
     }
 
     /// MSB가 const 표지다. Scope는 MSB가 꺼져 있고, Const는 켜진다.
     #[test]
-    fn field_value_const_bit() {
-        assert_eq!(FieldValue::Scope(3).encode(), 0x0003);
-        assert_eq!(FieldValue::Const(3).encode(), 0x8003);
+    fn leaf_const_bit() {
+        assert_eq!(Leaf::Scope(3).encode(), 0x0003);
+        assert_eq!(Leaf::Const(3).encode(), 0x8003);
     }
 
     /// 하위 15비트 상한(0x7fff)까지 인덱스가 보존된다.
     #[test]
-    fn field_value_max_index() {
+    fn leaf_max_index() {
         let max = 0x7fff;
-        assert_eq!(FieldValue::decode(FieldValue::Scope(max).encode()), FieldValue::Scope(max));
-        assert_eq!(FieldValue::decode(FieldValue::Const(max).encode()), FieldValue::Const(max));
+        assert_eq!(Leaf::decode(Leaf::Scope(max).encode()), Leaf::Scope(max));
+        assert_eq!(Leaf::decode(Leaf::Const(max).encode()), Leaf::Const(max));
     }
 }
