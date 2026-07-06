@@ -57,21 +57,7 @@ const createLeafStore = (rootValue) => {
     leaves[leafIndex] = value;
   };
 
-  // path에 leaf를 발급하되 초기값을 인자로 직접 받는다(rootValue에 없는 값용 - readPath를
-  // 거치지 않는다). use-site 리터럴 인자가 부모와 무관한 독립 leaf를 가질 때 쓴다. 이미 그
-  // path가 있으면 그대로 둔다(재호출 무해) - pathCache 덕에 같은 path는 한 leaf를 공유하므로
-  // 같은 리터럴 값은 store에 딱 한 번만 들어간다.
-  const seed = (path, value) => {
-    if (pathCache.has(path)) {
-      return pathCache.get(path);
-    }
-    const leafIndex = leaves.length;
-    leaves[leafIndex] = value;
-    pathCache.set(path, leafIndex);
-    return leafIndex;
-  };
-
-  return { leafOf, get, set, seed };
+  return { leafOf, get, set };
 };
 
 // ── leafStoreSubject (leafStore + 반응성) ────────────────────────────
@@ -108,5 +94,5 @@ export const createLeafStoreSubject = (rootValue) => {
     subscribers[leafIndex]?.delete(fn);
   };
 
-  return { leafOf: leafStore.leafOf, get: leafStore.get, set, seed: leafStore.seed, setPath, subscribe, unsubscribe };
+  return { leafOf: leafStore.leafOf, get: leafStore.get, set, setPath, subscribe, unsubscribe };
 };
