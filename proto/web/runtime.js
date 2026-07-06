@@ -1,18 +1,19 @@
 // Quble 클라이언트 런타임 본체 - .qubb를 두 단계로 인스턴스화한다.
 //
-//   compile(bytes)        → blueprintOf(compId) => Blueprint  (def를 청사진으로)
-//   Blueprint(store, paths) → Instance                          (청사진 호출 = 인스턴스화. DOM·구독 생성)
+//   compile(bytes)  -> blueprintOf(compId) => Blueprint  (def를 청사진으로)
+//   Blueprint(store, argumentSourcePairs) -> Instance     (청사진 호출 = 인스턴스화. DOM/구독 생성)
 //
-// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
+// Blueprint는 호출 시 def 코드를 훑어 DOM/구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
 // 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 - 단순한 "호출 시 훑기"를 택했다.)
 //
-// Instance = { nodes, regions }. nodes는 루트 노드들(부착·추적용), regions는 이 인스턴스의 모든
+// Instance = { nodes, regions }. nodes는 루트 노드들(부착/추적용), regions는 이 인스턴스의 모든
 // Region(@if swap 경계). 구독은 가지(Branch)에 모이고 activateBranch가 켤 때 건다 - 안 보이는
-// 가지는 구독 0이다(region 구조·동작은 region.js). RENDER는 자식 def를 같은 interpret으로 인라인
-// 재진입해, 자식 if가 부모와 같은 regions·가지에 합류한다(별도 인스턴스 없음).
+// 가지는 구독 0이다(region 구조/동작은 region.js). RENDER는 자식 def를 같은 interpret으로 인라인
+// 재진입해, 자식 if가 부모와 같은 regions/가지에 합류한다(별도 인스턴스 없음).
 //
-// 인덱스 세 축 (REACTIVITY.md §1~§3):
-//   offset(컴포넌트 로컬) → path(store 경로, paths가 매핑) → leafIndex(평탄, store.leafOf가 lazy 발급).
+// 값 소비 경로 (REACTIVITY.md §1~§3):
+//   offset(컴포넌트 로컬) -> argumentSourcePairs 슬롯 [kind, ref] -> kind가 STORE면 store.leafOf로
+//   leafIndex(lazy 발급) + store.get, CONST면 module.pool[ref] 직접.
 
 import {
   THEN_INDEX,
@@ -107,7 +108,7 @@ const OP = {
 // (SSR renderer operand_len과 동일.)
 //
 // @param op opcode 바이트
-// @returns  operand 바이트 수(0·2·4)
+// @returns  operand 바이트 수(0/2/4)
 const operandLen = (op) => {
   switch (op) {
     case OP.HALT:
@@ -237,9 +238,9 @@ class Reader {
   }
 }
 
-// 슬롯 해석방법. paths는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
-// paths[2*offset](해석방법) / paths[2*offset+1](참조)로 읽는다. STORE는 참조가 store
-// 경로(반응값, 구독), CONST는 참조가 상수풀 인덱스(불변, 구독 스킵). (STACK는 @for 때 추가.)
+// 슬롯 해석방법. argumentSourcePairs는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
+// argumentSourcePairs[2*offset](해석방법) / argumentSourcePairs[2*offset+1](참조)로 읽는다. STORE는 참조가 store
+// 경로(반응값, 구독), CONST는 참조가 상수풀 인덱스(불변, 구독 스킵). (RAW는 @for 때 추가.)
 const STORE = 0;
 const CONST = 1;
 
@@ -247,7 +248,7 @@ const CONST = 1;
 //   0xxxxxxxxxxxxxxx  Const  (15비트)
 //   10xxxxxxxxxxxxxx  Scope  (14비트)
 //   11xxxxxxxxxxxxxx  Raw    (14비트)
-// 이 비트연산·마스킹은 readFields 한 곳에만 둔다(소비부는 kind + index만 본다).
+// 이 비트연산/마스킹은 readFields 한 곳에만 둔다(소비부는 kind + index만 본다).
 const FV_TAG_HI = 0x8000; // 최상위: 0=Const, 1=Scope/Raw
 const FV_TAG_LO = 0x4000; // 최상위가 1일 때 둘째: 0=Scope, 1=Raw
 const FV_INDEX_MASK = 0x3fff; // Scope/Raw 태그를 벗겨 인덱스만
@@ -261,7 +262,7 @@ const TYPE_SCALAR = 0;
 const TYPE_OBJECT = 1;
 
 // 타입 테이블 엔트리 하나를 읽는다. Scalar는 payload 없음, Object는 field_count +
-// [(nameConstIndex, typeRef)]. typeRef로 자식을 가리켜 중첩·공유(Rust put_type 대칭).
+// [(nameConstIndex, typeRef)]. typeRef로 자식을 가리켜 중첩/공유(Rust put_type 대칭).
 //
 // @param r Reader
 // @returns { tag: "scalar" } | { tag: "object", fields: [[nameConstIndex, typeRef]] }
@@ -325,17 +326,17 @@ const readFields = (r) => {
 // FV_SCOPE가 가리킨 슬롯이 CONST(부모가 리터럴로 준 prop)거나.
 //
 // @param refs  field.refs - [{ kind, ref }]
-// @param paths flat 슬롯 배열
+// @param argumentSourcePairs flat 슬롯 배열
 // @returns     [kind, ref, …] flat sourcePair 열
-const refsToSourcePairs = (refs, paths, store) => {
+const refsToSourcePairs = (refs, argumentSourcePairs, store) => {
   const sourcePairs = [];
   for (const r of refs) {
     if (r.kind === FV_CONST) {
       sourcePairs.push(CONST, r.ref);
-    } else if (r.kind === FV_SCOPE && paths[2 * r.ref] === CONST) {
-      sourcePairs.push(CONST, paths[2 * r.ref + 1]);
+    } else if (r.kind === FV_SCOPE && argumentSourcePairs[2 * r.ref] === CONST) {
+      sourcePairs.push(CONST, argumentSourcePairs[2 * r.ref + 1]);
     } else if (r.kind === FV_SCOPE) {
-      sourcePairs.push(STORE, store.leafOf(paths[2 * r.ref + 1]));
+      sourcePairs.push(STORE, store.leafOf(argumentSourcePairs[2 * r.ref + 1]));
     } else {
       throw new Error("FV_RAW는 아직 미구현(@for)");
     }
@@ -344,7 +345,7 @@ const refsToSourcePairs = (refs, paths, store) => {
 };
 
 // 조립 step - 런타임 내부 미니 명령(바이트코드 opcode와 다른 층). type_ref 구조를 평탄한 step
-// 열로 컴파일해두고, assemble이 그 열을 반복 실행해 중첩 객체를 짓는다(재귀·트리순회 없음).
+// 열로 컴파일해두고, assemble이 그 열을 반복 실행해 중첩 객체를 짓는다(재귀/트리순회 없음).
 //   STEP_ENTER key : 새 객체를 만들어 부모[key]에 걸고 내려간다
 //   STEP_LEAF  key : 부모[key] = 다음 leaf 값
 //   STEP_EXIT      : 부모로 돌아온다
@@ -382,7 +383,7 @@ const compileType = (types, typeRef, pool) => {
   while (stack.length) {
     const remaining = stack[stack.length - 1];
     if (remaining.length === 0) {
-      steps.push([STEP_EXIT, null]); // 자식 다 처리 → 이 객체 닫음
+      steps.push([STEP_EXIT, null]); // 자식 다 처리 -> 이 객체 닫음
       stack.pop();
       continue;
     }
@@ -401,16 +402,16 @@ const compileType = (types, typeRef, pool) => {
 // 객체로 감싸지 않고 값을 그대로 반환한다.
 //
 // @param steps   compileType 결과
-// @param sources 이 field의 flat 값-소스 [kind, ref, …](깊이우선, step의 LEAF 순서와 일치)
-const assemble = (steps, sources, store, module) => {
+// @param fieldSourcePairs 이 field의 flat 값-소스 [kind, ref, …](깊이우선, step의 LEAF 순서와 일치)
+const assemble = (steps, fieldSourcePairs, store, module) => {
   let cursor = 0;
   const root = {};
   const stack = [root];
   for (const [step, key] of steps) {
     const top = stack[stack.length - 1];
     if (step === STEP_LEAF) {
-      const kind = sources[cursor++];
-      const ref = sources[cursor++];
+      const kind = fieldSourcePairs[cursor++];
+      const ref = fieldSourcePairs[cursor++];
       const value = kind === CONST ? module.pool[ref] : store.get(ref);
       if (key === null) {
         return value; // 루트가 스칼라 - 객체로 안 감싼다
@@ -443,7 +444,7 @@ const compiledStepsOf = (module, typeRef) => {
   return module.compiledSteps[typeRef];
 };
 
-// qubb 바이트를 모듈로 디코드한다(상수풀·def 테이블·코드).
+// qubb 바이트를 모듈로 디코드한다(상수풀/def 테이블/코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
 // @returns     { pool, defs, code }
@@ -509,12 +510,12 @@ const decode = (bytes) => {
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
 // 한 컴포넌트 def를 Blueprint(인스턴스화 함수)로 만든다.
 //
-// Blueprint는 호출 시 def 코드를 훑어 DOM·구독을 만든다. 자식 RENDER는 interpret을 자식 def
+// Blueprint는 호출 시 def 코드를 훑어 DOM/구독을 만든다. 자식 RENDER는 interpret을 자식 def
 // 구간으로 재진입해 인라인 합성한다(별도 청사진 호출 없음).
 //
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
-// @returns      Blueprint: (store, rootPaths) => Instance { nodes, regions }
+// @returns      Blueprint: (store, rootArgumentSourcePairs) => Instance { nodes, regions }
 const compileDef = (
   module,
   compId,
@@ -525,16 +526,16 @@ const compileDef = (
   if (!def) {
     throw new Error("bad component " + compId);
   }
-  // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def·자식 구간마다
+  // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def/자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
-  return (store, rootPaths, handlers = {}) => {
-    // 인스턴스 불변 상태 - 모든 build(최초·lazy)가 공유한다.
-    // 루트도 region(균일성): swap 없는 단일 가지지만, anchor·branch.nodes를 자식과 똑같이 갖춰
+  return (store, rootArgumentSourcePairs, handlers = {}) => {
+    // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
+    // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
     // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
     const regions = []; // append만, 인덱스 영구 안정. appendRegion이 새 region을 더한다.
     // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
-    // activeContexts에 싣는다. fields는 그 시점 paths로 푼 leafIndex라 인스턴스마다 달라 공유
+    // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
     // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
     const createdContexts = [];
     const rootRegion = regions[appendRegion(regions, -1)]; // 루트도 region(인덱스 0)
@@ -545,11 +546,11 @@ const compileDef = (
     //
     // 재진입 가능: 최초 인스턴스화는 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만
     // 해석한다. 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
-    // RENDER는 자식 def 구간을 자식 paths로 이 함수에 재진입해 인라인 합성한다(별도 인스턴스/
+    // RENDER는 자식 def 구간을 자식 argumentSourcePairs로 이 함수에 재진입해 인라인 합성한다(별도 인스턴스/
     // 루트 region 없이 부모 가지 안에 합류).
     //
     // @param code             해석할 바이트코드(자식은 자식 def 구간)
-    // @param paths            offset → store 경로 매핑(자식은 자식 paths)
+    // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
     // @param events           현재 def의 이벤트 테이블(BIND_EVENT가 event_idx로 참조. 자식은 자식 def의 것)
     // @param contexts         현재 def의 컨텍스트 테이블(ENTER_CONTEXT가 context_index로 참조. 자식은 자식 def의 것)
     // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
@@ -560,7 +561,7 @@ const compileDef = (
     // @returns                직속 노드를 담은 DocumentFragment
     const interpret = (
       code,
-      paths,
+      argumentSourcePairs,
       events,
       contexts,
       activeContexts,
@@ -593,12 +594,12 @@ const compileDef = (
       // 구독은 즉시 걸지 않고 현재 가지에 모은다 - activateBranch가 그 가지를 켤 때 건다
       // (안 보이는 가지는 구독 0).
       //
-      // @param offset 컴포넌트 로컬 offset(flat 슬롯 paths[2*offset]/[2*offset+1]로 해석)
+      // @param offset 컴포넌트 로컬 offset(flat 슬롯 argumentSourcePairs[2*offset]/[2*offset+1]로 해석)
       // @param update 값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
       // @returns      현재 값(없으면 "")
       const bindVar = (offset, update) => {
-        const ref = paths[2 * offset + 1];
-        if (paths[2 * offset] === CONST) {
+        const ref = argumentSourcePairs[2 * offset + 1];
+        if (argumentSourcePairs[2 * offset] === CONST) {
           // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
           return module.pool[ref] ?? "";
         }
@@ -618,7 +619,7 @@ const compileDef = (
           }
           case OP.LOAD_RES: {
             // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
-            // 스킵(한 compile의 여러 컴포넌트·인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
+            // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
             // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
             // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
             const url = resources[u16at()];
@@ -669,12 +670,12 @@ const compileDef = (
             const fullName = pathPrefix
               ? pathPrefix + "." + eventName
               : eventName;
-            // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, paths 불변). steps(조립
+            // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
             // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
             const payload = event.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              sources: refsToSourcePairs(field.refs, paths, store),
+              fieldSourcePairs: refsToSourcePairs(field.refs, argumentSourcePairs, store),
             }));
             // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field 중 STORE만 - 상수
             // 슬롯은 불변이라 set 대상이 못 된다. 객체의 set 의미는 미정(ISSUES). data(읽기)는
@@ -683,9 +684,9 @@ const compileDef = (
             for (const p of payload) {
               if (
                 module.types[p.typeRef].tag === "scalar" &&
-                p.sources[0] === STORE
+                p.fieldSourcePairs[0] === STORE
               ) {
-                props[p.name] = p.sources[1];
+                props[p.name] = p.fieldSourcePairs[1];
               }
             }
             // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
@@ -705,7 +706,7 @@ const compileDef = (
               for (const p of payload) {
                 data[p.name] = assemble(
                   compiledStepsOf(module, p.typeRef),
-                  p.sources,
+                  p.fieldSourcePairs,
                   store,
                   module,
                 );
@@ -717,7 +718,7 @@ const compileDef = (
                 for (const p of contextLeaves[ctxName]) {
                   values[p.name] = assemble(
                     compiledStepsOf(module, p.typeRef),
-                    p.sources,
+                    p.fieldSourcePairs,
                     store,
                     module,
                   );
@@ -760,10 +761,10 @@ const compileDef = (
             // 부모 슬롯 하나를 자식에게 넘긴다. 부모 슬롯의 (해석방법, 참조)를 그대로 전파해
             // kind를 보존한다 - 부모가 또 그 위에서 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
             const parentOffset = u16at();
-            if (paths[2 * parentOffset] === undefined) {
+            if (argumentSourcePairs[2 * parentOffset] === undefined) {
               throw new Error("no path for offset " + parentOffset);
             }
-            args.push(paths[2 * parentOffset], paths[2 * parentOffset + 1]);
+            args.push(argumentSourcePairs[2 * parentOffset], argumentSourcePairs[2 * parentOffset + 1]);
             break;
           }
           case OP.PUSH_ARG_LIT: {
@@ -779,7 +780,7 @@ const compileDef = (
             break;
           }
           case OP.ENTER_CONTEXT: {
-            // @with 진입: 컨텍스트 def의 fields를 지금 paths로 leafIndex로 풀어 createdContexts에
+            // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
             // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
             const contextDef = contexts[u16at()];
             const name = module.pool[contextDef.nameConstIndex];
@@ -787,7 +788,7 @@ const compileDef = (
             const fields = contextDef.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              sources: refsToSourcePairs(field.refs, paths, store),
+              fieldSourcePairs: refsToSourcePairs(field.refs, argumentSourcePairs, store),
             }));
             // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
             // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
@@ -809,21 +810,21 @@ const compileDef = (
           }
           case OP.RENDER: {
             const childCompId = u16at();
-            const childPaths = args;
+            const childArgumentSourcePairs = args;
             args = [];
             // 자식 경로 prefix = 부모 prefix + 세그먼트. 이벤트 fullname의 path 축을 누적한다.
             const childPrefix = pathPrefix
               ? pathPrefix + "." + segment
               : segment;
             segment = null;
-            // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 paths로 같은 interpret에 돌린다.
-            // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) → 자식 IF는 이 가지의
+            // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 argumentSourcePairs로 같은 interpret에 돌린다.
+            // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) -> 자식 IF는 이 가지의
             // childRegionIndices에 합류하고 같은 regions 배열에 append된다(인덱스 전역 유일).
             // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
             const childDef = module.defs[childCompId];
             const childFragment = interpret(
               module.code,
-              childPaths,
+              childArgumentSourcePairs,
               childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
               childDef.contexts, // 자식 ENTER_CONTEXT는 자식 def의 컨텍스트 테이블을 본다
               [...activeContexts], // 부모 활성 컨텍스트를 물려준다(자식이 부모 배열을 안 건드리게 복사)
@@ -842,8 +843,8 @@ const compileDef = (
             const condOffset = u16at();
             // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
             // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
-            const condIsConst = paths[2 * condOffset] === CONST;
-            const condRef = paths[2 * condOffset + 1];
+            const condIsConst = argumentSourcePairs[2 * condOffset] === CONST;
+            const condRef = argumentSourcePairs[2 * condOffset + 1];
             const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef);
             const regionIndex = appendRegion(regions, condLeafIndex);
             const region = regions[regionIndex];
@@ -864,7 +865,7 @@ const compileDef = (
             const buildThen = () => {
               const f = interpret(
                 code,
-                paths,
+                argumentSourcePairs,
                 events,
                 contexts,
                 activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
@@ -882,7 +883,7 @@ const compileDef = (
                   ? document.createDocumentFragment() // else 없는 if - 빈 가지
                   : interpret(
                       code,
-                      paths,
+                      argumentSourcePairs,
                       events,
                       contexts,
                       activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
@@ -910,7 +911,7 @@ const compileDef = (
               });
             }
             // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
-            // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachBranch가 일괄).
+            // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachBranch가 일괄).
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
             const condInitial = condIsConst
@@ -933,14 +934,14 @@ const compileDef = (
       return fragment;
     };
 
-    // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
+    // build: 트리(regions/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
     // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-    // rootPaths는 외부 계약이라 path 문자열 배열(['label', …])로 받는다 - 루트 슬롯은
+    // rootArgumentSourcePairs는 외부 계약이라 path 문자열 배열(['label', …])로 받는다 - 루트 슬롯은
     // 정의상 전부 반응값(외부 데이터 바인딩)이라 kind가 늘 STORE다. flat은 런타임 내부
     // 표현이므로 이 경계에서 한 번 [STORE, path, STORE, path, …]로 감싼다.
     const rootFlat = [];
-    for (const path of rootPaths) {
+    for (const path of rootArgumentSourcePairs) {
       rootFlat.push(STORE, path);
     }
     const fragment = interpret(
@@ -968,7 +969,7 @@ const compileDef = (
 // qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
 //
 // 사용: const blueprintOf = compile(bytes);
-//       const inst = blueprintOf(0)(store, paths);
+//       const inst = blueprintOf(0)(store, argumentSourcePairs);
 //       root.append(...inst.nodes);
 //
 // @param bytes  qubb 바이트
@@ -976,7 +977,7 @@ const compileDef = (
 // @returns      blueprintOf: (compId) => Blueprint
 export const compile = (bytes, resources = []) => {
   const module = decode(bytes);
-  // LOAD_RES dedup 집합은 compile 단위 - 이 compile에서 나온 모든 blueprint·인스턴스가 공유하되,
+  // LOAD_RES dedup 집합은 compile 단위 - 이 compile에서 나온 모든 blueprint/인스턴스가 공유하되,
   // 다른 compile(다른 렌더 세션)은 깨끗한 Set으로 시작한다.
   const loadedHrefs = new Set();
   return (compId) => compileDef(module, compId, resources, loadedHrefs);
