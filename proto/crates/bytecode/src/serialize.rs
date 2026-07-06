@@ -1,6 +1,6 @@
 //! 모듈 ↔ 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
 
-use crate::module::{CompDef, ContextDef, EventDef, Field, Leaf, Module, TypeEntry};
+use crate::module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
 use crate::pool::{Const, ConstPool};
 
 const MAGIC: &[u8; 4] = b"QBL\0";
@@ -119,16 +119,16 @@ fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
     }
 }
 
-/// 필드 목록을 쓴다 - field_count, [(name_const_index, type_ref, leaf_count, [leaf])]. leaf는
-/// Leaf를 u16로 encode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 필드 목록을 쓴다 - field_count, [(name_const_index, type_ref, ref_count, [ref])]. ref는
+/// FieldValue를 u16로 encode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
 fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
     put_u16(out, fields.len() as u16);
     for f in fields {
         put_u16(out, f.name_const_index);
         put_u16(out, f.type_ref);
-        put_u16(out, f.leaves.len() as u16);
-        for leaf in &f.leaves {
-            put_u16(out, leaf.encode());
+        put_u16(out, f.refs.len() as u16);
+        for r in &f.refs {
+            put_u16(out, r.encode());
         }
     }
 }
@@ -209,20 +209,20 @@ fn read_type(r: &mut Reader) -> Result<TypeEntry, DecodeError> {
     }
 }
 
-/// 필드 목록을 읽는다 - field_count, [(name_const_index, type_ref, leaf_count, [leaf])]. leaf는
-/// u16를 Leaf로 decode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 필드 목록을 읽는다 - field_count, [(name_const_index, type_ref, ref_count, [ref])]. ref는
+/// u16를 FieldValue로 decode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
 fn read_fields(r: &mut Reader) -> Result<Vec<Field>, DecodeError> {
     let field_count = r.u16()?;
     let mut fields = Vec::with_capacity(field_count as usize);
     for _ in 0..field_count {
         let name_const_index = r.u16()?;
         let type_ref = r.u16()?;
-        let leaf_count = r.u16()?;
-        let mut leaves = Vec::with_capacity(leaf_count as usize);
-        for _ in 0..leaf_count {
-            leaves.push(Leaf::decode(r.u16()?));
+        let ref_count = r.u16()?;
+        let mut refs = Vec::with_capacity(ref_count as usize);
+        for _ in 0..ref_count {
+            refs.push(FieldValue::decode(r.u16()?));
         }
-        fields.push(Field { name_const_index, type_ref, leaves });
+        fields.push(Field { name_const_index, type_ref, refs });
     }
     Ok(fields)
 }

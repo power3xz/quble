@@ -314,7 +314,7 @@ mod tests {
     /// Var(Scope)/Literal(Const)로 들어가고, 코드에 EnterContext/ExitContext가 나는지 직접 검사.
     #[test]
     fn compiles_with_context() {
-        use bytecode::{decode, Leaf, Op};
+        use bytecode::{decode, FieldValue, Op};
 
         let src = r#"
             component C {
@@ -338,15 +338,15 @@ mod tests {
         assert_eq!(area.fields.len(), 2);
         // section: "actions" -> 스칼라 field, leaf 하나가 Const(상수풀이 "actions"를 가리킴).
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("section"));
-        match area.fields[0].leaves.as_slice() {
-            [Leaf::Const(actions_index)] => {
+        match area.fields[0].refs.as_slice() {
+            [FieldValue::Const(actions_index)] => {
                 assert_eq!(str_at(&module, *actions_index), Some("actions"));
             }
             other => panic!("section은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
         }
         // userId: assignee -> 스칼라 field, leaf 하나가 Scope(assignee의 scope 인덱스 0).
         assert_eq!(str_at(&module, area.fields[1].name_const_index), Some("userId"));
-        assert_eq!(area.fields[1].leaves.as_slice(), &[Leaf::Scope(0)]);
+        assert_eq!(area.fields[1].refs.as_slice(), &[FieldValue::Scope(0)]);
 
         // 코드: EnterContext context_index=0 ... ExitContext.
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
@@ -365,7 +365,7 @@ mod tests {
     /// contexts 필드 단축형 `key`는 `key: key`(Scope)로 푼다 - payload 단축형과 같은 규칙.
     #[test]
     fn context_field_shorthand() {
-        use bytecode::{decode, Leaf};
+        use bytecode::{decode, FieldValue};
 
         let src = r#"
             component C {
@@ -379,13 +379,13 @@ mod tests {
         let area = &module.def(0).unwrap().contexts[0];
         // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0). 스칼라라 leaf 하나.
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("tier"));
-        assert_eq!(area.fields[0].leaves.as_slice(), &[Leaf::Scope(0)]);
+        assert_eq!(area.fields[0].refs.as_slice(), &[FieldValue::Scope(0)]);
     }
 
     /// events 페이로드 값도 리터럴(Const)을 받는다 - contexts와 같은 arg_to_field_value 경로.
     #[test]
     fn event_payload_literal() {
-        use bytecode::{decode, Leaf};
+        use bytecode::{decode, FieldValue};
 
         let src = r#"
             component C {
@@ -399,10 +399,10 @@ mod tests {
         let event = &module.def(0).unwrap().events[0];
         // count: 단축형 -> Scope(0). label: "clicks" -> Const. 둘 다 스칼라라 leaf 하나씩.
         assert_eq!(str_at(&module, event.fields[0].name_const_index), Some("count"));
-        assert_eq!(event.fields[0].leaves.as_slice(), &[Leaf::Scope(0)]);
+        assert_eq!(event.fields[0].refs.as_slice(), &[FieldValue::Scope(0)]);
         assert_eq!(str_at(&module, event.fields[1].name_const_index), Some("label"));
-        match event.fields[1].leaves.as_slice() {
-            [Leaf::Const(clicks_index)] => {
+        match event.fields[1].refs.as_slice() {
+            [FieldValue::Const(clicks_index)] => {
                 assert_eq!(str_at(&module, *clicks_index), Some("clicks"));
             }
             other => panic!("label은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
@@ -413,7 +413,7 @@ mod tests {
     /// 문자열은 Const::Str. 런타임이 인덱스로 꺼내면 이미 올바른 값이 되도록.
     #[test]
     fn literal_types_in_pool() {
-        use bytecode::{decode, Const, Leaf};
+        use bytecode::{decode, Const, FieldValue};
 
         let src = r#"
             component C {
@@ -425,8 +425,8 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let fields = &module.def(0).unwrap().events[0].fields;
         // 각 필드가 스칼라(leaf 하나)이고 그 leaf가 Const를 가리키며, 그 상수가 타입대로다.
-        let const_of = |i: usize| match fields[i].leaves.as_slice() {
-            [Leaf::Const(idx)] => module.pool.get(*idx).cloned(),
+        let const_of = |i: usize| match fields[i].refs.as_slice() {
+            [FieldValue::Const(idx)] => module.pool.get(*idx).cloned(),
             other => panic!("리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
         };
         assert_eq!(const_of(0), Some(Const::Num(42.0)));
@@ -439,7 +439,7 @@ mod tests {
     /// 그 아래 leaf들의 scope 인덱스 목록으로 인코딩된다. 타입 테이블에 구조가 실린다.
     #[test]
     fn object_payload_encodes_type_tree_and_leaves() {
-        use bytecode::{decode, Leaf, TypeEntry};
+        use bytecode::{decode, FieldValue, TypeEntry};
 
         let src = r#"
             component C {
@@ -454,7 +454,7 @@ mod tests {
 
         // field 이름은 user, leaf는 name(0)·age(1) 두 개(연속).
         assert_eq!(str_at(&module, field.name_const_index), Some("user"));
-        assert_eq!(field.leaves.as_slice(), &[Leaf::Scope(0), Leaf::Scope(1)]);
+        assert_eq!(field.refs.as_slice(), &[FieldValue::Scope(0), FieldValue::Scope(1)]);
 
         // type_ref가 Object이고, 필드가 (name, age) 순으로 각각 Scalar를 가리킨다.
         match &module.types[field.type_ref as usize] {

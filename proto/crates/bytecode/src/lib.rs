@@ -9,7 +9,7 @@ mod opcode;
 mod pool;
 mod serialize;
 
-pub use module::{CompDef, ContextDef, EventDef, Field, Leaf, Module, TypeEntry};
+pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
 pub use opcode::Op;
 pub use pool::{Const, ConstPool};
 pub use serialize::{decode, encode, DecodeError};

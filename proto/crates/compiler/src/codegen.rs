@@ -3,7 +3,7 @@
 use crate::ast::{ArgValue, AttrValue, Context, Event, LitValue, Node, Prop, Type, VarRef};
 use crate::resolve::FlatComp;
 use bytecode::{
-    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, Leaf, Module, Op,
+    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
     TypeEntry,
 };
 
@@ -331,20 +331,20 @@ fn arg_to_field(
     pool: &mut ConstPool,
     types: &mut TypeTable,
 ) -> Result<Field, CodegenError> {
-    let (type_ref, leaves) = match value {
+    let (type_ref, refs) = match value {
         ArgValue::Var(var) => {
             let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
             let type_ref = types.intern(ty, pool);
-            let leaves = indices.into_iter().map(Leaf::Scope).collect();
-            (type_ref, leaves)
+            let refs = indices.into_iter().map(FieldValue::Scope).collect();
+            (type_ref, refs)
         }
         ArgValue::Literal(lit) => {
             // 리터럴은 항상 스칼라(객체 리터럴 없음). Scalar 엔트리 하나를 intern해 공유.
             let type_ref = types.intern(&lit_type(lit), pool);
-            (type_ref, vec![Leaf::Const(pool.intern(lit_to_const(lit)))])
+            (type_ref, vec![FieldValue::Const(pool.intern(lit_to_const(lit)))])
         }
     };
-    Ok(Field { name_const_index: pool.intern_str(field), type_ref, leaves })
+    Ok(Field { name_const_index: pool.intern_str(field), type_ref, refs })
 }
 
 /// 리터럴의 quble 타입. 리터럴은 스칼라라 Bool/Number/String 중 하나(intern은 모두 Scalar 엔트리).
