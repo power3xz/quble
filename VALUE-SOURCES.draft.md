@@ -120,20 +120,14 @@ opcode로 방출됨) - 런타임만 바뀌었다.
 - 루트 진입: 외부 계약(path 문자열 배열)은 유지, 경계에서 `[STORE, path, …]`로 감쌈.
 - `store.seed` 제거(죽은 코드).
 
-## 미해결
-
-- 슬롯 배열 이름 - `paths`는 더는 path만 담지 않는다(STORE=leafIndex, CONST=pool index).
-  당장은 `paths` 유지, 코드 만질 때 교체(no-resolve-naming 결). 후보 args는 기존 임시 인자
-  버퍼(PUSH_ARG가 밀고 RENDER가 비움)와 충돌 - 상주 슬롯 배열과 생명주기가 다르다.
-- STACK 참조(`@for` 인덱스)의 실제 형태 - 스택 top을 어떻게 가리키나. `n` 생성 의미가
-  미정이라(작업 순서 2) 그때 확정. leaf 축으로도 실리면 leaf 인코딩 3진(위 "leaf 인코딩")
-  필요 - slot 축은 이미 flat이라 kind에 STACK 추가만으로 수용.
-- 작은 컴포넌트가 다수인 실사용에서 flat의 상주 이득이 체감되는 절대 규모 - 측정은 극단
-  부하(총 50만 슬롯) 기준이라 상대 비율만 신뢰. 실물 렌더로 재확인 여지.
-
 ## 닫힌 결정
 
 - 슬롯 표현: 인터리브 평탄 배열(위 "슬롯 표현" 절). 속도 무승부 → 메모리 기준 → flat.
+- 슬롯 배열 이름: `paths` → `argumentSourcePairs`로 개명 완료(더는 path만 담지 않음 -
+  STORE=leafIndex, CONST=pool index). 임시 인자 버퍼(PUSH_ARG가 밀고 RENDER가 비움)와
+  구분되는 상주 슬롯 배열.
+- 작은 컴포넌트 flat 이득: 측정이 극단 부하(총 50만 슬롯) 기준이라 상대 비율만 신뢰하되,
+  전 구간(2~100 슬롯) flat이 최경량이라 실물 재측정 없이 flat으로 확정.
 - leaf 축(`FIELD_CONST_BIT`)은 남는다. slot 경유 const는 슬롯 kind가 흡수했지만 payload
   직접 리터럴은 leaf가 pool을 직접 든다(위 "두 축은 각자 남는다"). 다음 작업(FieldValue)은
   MSB 제거가 아니라 비대칭 kind 인코딩으로의 확장.
