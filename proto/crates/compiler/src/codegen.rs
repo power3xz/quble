@@ -29,6 +29,9 @@ pub enum CodegenError {
     /// 객체 통째 전달(`user={user}`)에서 넘긴 경로의 도달 타입이 자식 prop 타입과 구조가 다르다.
     /// leaf를 순서로 짝지으므로 필드 이름·순서·타입이 일치해야 한다.
     PropTypeMismatch { comp: String, prop: String },
+    /// FieldValue 인덱스가 축별 상한을 넘었다(Scope/Raw 14비트, Const 15비트). u16 한 칸에
+    /// 태그 + 인덱스를 패킹하므로 인덱스가 넘으면 태그를 침범한다 - 발급 지점에서 거른다.
+    IndexOverflow { kind: &'static str, value: u16, max: u16 },
 }
 
 /// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
@@ -335,13 +338,25 @@ fn arg_to_field(
         ArgValue::Var(var) => {
             let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
             let type_ref = types.intern(ty, pool);
-            let refs = indices.into_iter().map(FieldValue::Scope).collect();
+            let refs = indices
+                .into_iter()
+                .map(|i| {
+                    FieldValue::try_scope(i).map_err(|value| CodegenError::IndexOverflow {
+                        kind: "Scope",
+                        value,
+                        max: FieldValue::SCOPE_MAX,
+                    })
+                })
+                .collect::<Result<_, _>>()?;
             (type_ref, refs)
         }
         ArgValue::Literal(lit) => {
             // 리터럴은 항상 스칼라(객체 리터럴 없음). Scalar 엔트리 하나를 intern해 공유.
             let type_ref = types.intern(&lit_type(lit), pool);
-            (type_ref, vec![FieldValue::Const(pool.intern(lit_to_const(lit)))])
+            let const_ref = FieldValue::try_const(pool.intern(lit_to_const(lit))).map_err(|value| {
+                CodegenError::IndexOverflow { kind: "Const", value, max: FieldValue::CONST_MAX }
+            })?;
+            (type_ref, vec![const_ref])
         }
     };
     Ok(Field { name_const_index: pool.intern_str(field), type_ref, refs })

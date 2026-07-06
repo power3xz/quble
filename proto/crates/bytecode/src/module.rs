@@ -31,6 +31,18 @@ impl FieldValue {
     /// decode에서 태그 2비트를 벗겨 인덱스만 꺼내는 마스크(Scope/Raw 공용, 하위 14비트).
     const INDEX_MASK: u16 = 0x3fff;
 
+    /// 검증 생성자 - 인덱스가 축별 상한 이내면 Ok, 초과면 그 값을 Err로. codegen이 발급
+    /// 지점에서 이걸로 만들어 상한을 컴파일 에러로 거르고, encode의 assert는 최후 방어로 남긴다.
+    pub fn try_scope(index: u16) -> Result<Self, u16> {
+        if index > Self::SCOPE_MAX { Err(index) } else { Ok(FieldValue::Scope(index)) }
+    }
+    pub fn try_const(index: u16) -> Result<Self, u16> {
+        if index > Self::CONST_MAX { Err(index) } else { Ok(FieldValue::Const(index)) }
+    }
+    pub fn try_raw(index: u16) -> Result<Self, u16> {
+        if index > Self::RAW_MAX { Err(index) } else { Ok(FieldValue::Raw(index)) }
+    }
+
     /// 바이트코드 u16으로. 상한 초과면 패닉 - codegen 가드가 앞서 걸러야 한다(ISSUES).
     pub fn encode(self) -> u16 {
         match self {
@@ -189,5 +201,16 @@ mod tests {
     #[should_panic(expected = "Const 인덱스 상한 초과")]
     fn field_value_const_over_max_panics() {
         FieldValue::Const(FieldValue::CONST_MAX + 1).encode();
+    }
+
+    /// 검증 생성자는 상한 이내면 Ok, 초과면 그 값을 Err로(codegen 발급 지점 가드용).
+    #[test]
+    fn try_ctors_guard_max() {
+        assert_eq!(FieldValue::try_scope(FieldValue::SCOPE_MAX), Ok(FieldValue::Scope(FieldValue::SCOPE_MAX)));
+        assert_eq!(FieldValue::try_scope(FieldValue::SCOPE_MAX + 1), Err(FieldValue::SCOPE_MAX + 1));
+        assert_eq!(FieldValue::try_const(FieldValue::CONST_MAX), Ok(FieldValue::Const(FieldValue::CONST_MAX)));
+        assert_eq!(FieldValue::try_const(FieldValue::CONST_MAX + 1), Err(FieldValue::CONST_MAX + 1));
+        assert_eq!(FieldValue::try_raw(FieldValue::RAW_MAX), Ok(FieldValue::Raw(FieldValue::RAW_MAX)));
+        assert_eq!(FieldValue::try_raw(FieldValue::RAW_MAX + 1), Err(FieldValue::RAW_MAX + 1));
     }
 }
