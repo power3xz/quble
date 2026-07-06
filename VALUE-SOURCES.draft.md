@@ -41,7 +41,28 @@
 슬롯의 해석방법대로 읽는다(자식은 몰라도 됨).
 
 즉 scope 슬롯 = **(해석방법, 참조)** 쌍. store/const 2진으로 시작, 런타임값에서 스택
-3진으로 확장. leaf 인코딩의 CONST_BIT(store/const 구분)와 같은 결의 확장.
+3진으로 확장.
+
+### 슬롯 표현 - 인터리브 평탄 배열 (확정)
+
+슬롯 컬렉션(`paths`)을 **인터리브 단일 배열** `[kind0, ref0, kind1, ref1, …]`로 담는다.
+슬롯 offset은 `paths[2*offset]`(해석방법) / `paths[2*offset+1]`(참조)로 읽는다.
+`kind ∈ {STORE, CONST, STACK}`.
+
+대안(튜플 배열 `[[k,ref]]`, 객체 배열 `[{kind,ref}]`, 병렬배열 SoA, Map)과 비교 측정
+결과: **속도는 표현 간 사실상 무승부**(실제 소비 비용은 store 접근이 지배, 슬롯 읽기
+차이는 먼지). **메모리가 유일한 유의미 축** - 슬롯은 인스턴스 수명 내내 상주(업데이트
+때 `bindVar`가 다시 참조)하므로 렌더마다 지고 가는 비용이다. flat이 전 구간(슬롯
+2~100개) 최경량 - object의 약 1/3, tuple의 약 1/2. SoA는 큰 컴포넌트만 유리하고 작은
+컴포넌트에서 두 배열 헤더 고정비로 최악이 되어 탈락. (측정 스크립트는 남기지 않음.)
+
+### CONST_BIT(MSB)는 제거된다
+
+leaf 인코딩의 `FIELD_CONST_BIT`(MSB로 store/const 구분)는 **없어진다**. 그 비트가 하던
+일 - "소비 지점에서 store냐 const냐 판별" - 을 슬롯의 해석방법(kind)이 흡수하기 때문.
+지금은 MSB로 갈라놓고 `leafToIndex`가 도로 `store.leafOf`로 합치는 모순 구조인데,
+슬롯이 해석방법을 이고 나르면 leaf가 그 짐을 대신 질 이유가 사라진다. "leaf CONST_BIT와
+같은 결의 확장"이 아니라 **CONST_BIT를 슬롯 kind로 흡수(그래서 제거)**.
 
 ### 부수 이득 - 구독은 store 값만
 
@@ -63,9 +84,10 @@
       return initial;
     };
 
-바뀔 방향: `paths[offset]`이 (해석방법, 참조) 슬롯이 되고, 해석방법에 따라
-store(leafOf/get + 구독) / const(pool 직접, 구독 스킵) / stack(top, 구독 스킵)으로 분기.
-앞단 `paths` 채우는 쪽(PUSH_ARG 계열, seedLitPath ~291)도 해석방법을 싣도록 바뀐다.
+바뀔 방향: `paths`가 인터리브 평탄 배열이 되어 `paths[2*offset]`(해석방법) /
+`paths[2*offset+1]`(참조)로 읽고, 해석방법에 따라 store(leafOf/get + 구독) / const(pool
+직접, 구독 스킵) / stack(top, 구독 스킵)으로 분기. 앞단 `paths` 채우는 쪽(PUSH_ARG 계열,
+seedLitPath ~291)도 해석방법을 싣도록 바뀐다.
 
 ## 작업 순서
 
@@ -77,6 +99,16 @@ store(leafOf/get + 구독) / const(pool 직접, 구독 스킵) / stack(top, 구�
 
 ## 미해결
 
-- 해석방법 인코딩 자리 - scope 슬롯 구조를 (해석방법, 참조)로 어떻게. leaf CONST_BIT와
-  같은 공간인가 별개인가(bindVar의 offset operand vs leaf 인코딩).
-- 3진 확장 시 비트 배치(2비트 vs CONST_BIT + 새 비트).
+- 슬롯 배열 이름 - 지금 `paths`는 더는 path만 담지 않는다(STORE=path, CONST=pool index,
+  STACK=스택 참조). 이름이 내용을 배신하나 당장은 `paths` 유지, 코드 만질 때 적절한
+  이름으로 교체(no-resolve-naming 결). 후보 args는 기존 임시 인자 버퍼(PUSH_ARG가 밀고
+  RENDER가 비움)와 충돌 - 그건 상주 슬롯 배열과 생명주기가 다르다.
+- STACK 참조(`@for` 인덱스)의 실제 형태 - 스택 top을 어떻게 가리키나. `n` 생성 의미가
+  아직 미정이라(작업 순서 2) 그때 확정.
+- 작은 컴포넌트가 다수인 실사용에서 flat의 상주 이득이 체감되는 절대 규모 - 측정은 극단
+  부하(총 50만 슬롯) 기준이라 상대 비율만 신뢰. 실물 렌더로 재확인 여지.
+
+## 닫힌 결정
+
+- 슬롯 표현: 인터리브 평탄 배열(위 "슬롯 표현" 절). 속도 무승부 → 메모리 기준 → flat.
+- leaf `FIELD_CONST_BIT`(MSB): 제거. 해석방법을 슬롯 kind가 흡수(위 "CONST_BIT" 절).

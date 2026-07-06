@@ -237,6 +237,12 @@ class Reader {
   }
 }
 
+// 슬롯 해석방법. paths는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
+// paths[2*offset](해석방법) / paths[2*offset+1](참조)로 읽는다. STORE는 참조가 store
+// 경로(반응값, 구독), CONST는 참조가 상수풀 인덱스(불변, 구독 스킵). (STACK는 @for 때 추가.)
+const STORE = 0;
+const CONST = 1;
+
 // leaf 값의 const 표지 비트(MSB). Rust Leaf::encode와 대칭 - 이 비트와 마스킹은
 // readFields 한 곳에만 둔다(소비부는 isConst/index만 본다).
 const FIELD_CONST_BIT = 0x8000;
@@ -281,35 +287,38 @@ const readFields = (r) => {
     const leaves = [];
     for (let l = 0; l < leafCount; l++) {
       const raw = r.u16();
-      leaves.push({ isConst: (raw & FIELD_CONST_BIT) !== 0, index: raw & ~FIELD_CONST_BIT });
+      leaves.push({
+        isConst: (raw & FIELD_CONST_BIT) !== 0,
+        index: raw & ~FIELD_CONST_BIT,
+      });
     }
     fields.push({ nameConstIndex, typeRef, leaves });
   }
   return fields;
 };
 
-// 리터럴 상수를 store에 leaf로 심고 그 path를 돌려준다. path를 pool 인덱스로 지어 같은
-// 리터럴은 같은 path=같은 leaf로 모인다(seed가 pathCache로 처음만 발급). PushArgLit과
-// Const 필드가 공유하는 리터럴 leaf 규칙.
+// field의 leaves를 flat 값-소스 열 [kind, ref, kind, ref, …]로 푼다(바인딩 때 1회). 소스는
+// 슬롯과 같은 (해석방법, 참조) 쌍: STORE는 ref가 미리 푼 leafIndex(store.get용), CONST는
+// ref가 상수풀 인덱스(module.pool용). assemble이 발생 때 kind 보고 갈라 읽는다.
 //
-// @param store     leafStoreSubject
-// @param module    { pool }
-// @param constIndex 상수풀 인덱스
-// @returns         "$lit.<constIndex>" path
-const seedLitPath = (store, module, constIndex) => {
-  const path = "$lit." + constIndex;
-  store.seed(path, module.pool[constIndex]);
-  return path;
-};
-
-// leaf 하나를 leafIndex로 푼다. Scope는 paths[index](인스턴스 슬롯), Const는 리터럴 leaf.
+// leaf가 값을 얻는 두 길이 CONST로 합류한다: leaf 자체가 리터럴(isConst, payload에 직접
+// 박힘)이거나, Scope가 가리킨 슬롯이 CONST(부모가 리터럴로 준 prop)거나.
 //
-// @param leaf  { isConst, index }
-// @param paths scope index -> store path 매핑
-// @returns     leafIndex
-const leafToIndex = (leaf, paths, store, module) => {
-  const path = leaf.isConst ? seedLitPath(store, module, leaf.index) : paths[leaf.index];
-  return store.leafOf(path);
+// @param leaves field.leaves - [{ isConst, index }]
+// @param paths  flat 슬롯 배열
+// @returns      [kind, ref, …] flat 소스 열
+const leavesToSources = (leaves, paths, store) => {
+  const sources = [];
+  for (const leaf of leaves) {
+    if (leaf.isConst) {
+      sources.push(CONST, leaf.index);
+    } else if (paths[2 * leaf.index] === CONST) {
+      sources.push(CONST, paths[2 * leaf.index + 1]);
+    } else {
+      sources.push(STORE, store.leafOf(paths[2 * leaf.index + 1]));
+    }
+  }
+  return sources;
 };
 
 // 조립 step - 런타임 내부 미니 명령(바이트코드 opcode와 다른 층). type_ref 구조를 평탄한 step
@@ -365,19 +374,22 @@ const compileType = (types, typeRef, pool) => {
   return steps;
 };
 
-// 조립 step 열을 실행해 값을 만든다(발생 시점). leafIndices를 커서로 소비하며 STEP_LEAF에서
-// store.get. 루트가 스칼라(step이 STEP_LEAF 하나)면 객체로 감싸지 않고 값을 그대로 반환한다.
+// 조립 step 열을 실행해 값을 만든다(발생 시점). sources를 (kind, ref) 쌍 커서로 소비하며
+// STEP_LEAF에서 STORE면 store.get, CONST면 pool 직접. 루트가 스칼라(step이 STEP_LEAF 하나)면
+// 객체로 감싸지 않고 값을 그대로 반환한다.
 //
-// @param steps       compileType 결과
-// @param leafIndices 이 field의 leafIndex 목록(깊이우선, step의 LEAF 순서와 일치)
-const assemble = (steps, leafIndices, store) => {
+// @param steps   compileType 결과
+// @param sources 이 field의 flat 값-소스 [kind, ref, …](깊이우선, step의 LEAF 순서와 일치)
+const assemble = (steps, sources, store, module) => {
   let cursor = 0;
   const root = {};
   const stack = [root];
   for (const [step, key] of steps) {
     const top = stack[stack.length - 1];
     if (step === STEP_LEAF) {
-      const value = store.get(leafIndices[cursor++]);
+      const kind = sources[cursor++];
+      const ref = sources[cursor++];
+      const value = kind === CONST ? module.pool[ref] : store.get(ref);
       if (key === null) {
         return value; // 루트가 스칼라 - 객체로 안 감싼다
       }
@@ -400,7 +412,11 @@ const assemble = (steps, leafIndices, store) => {
 // 한 번만 컴파일 - dedup된 타입 테이블의 이점이 실행 표현까지 이어진다.
 const compiledStepsOf = (module, typeRef) => {
   if (module.compiledSteps[typeRef] === undefined) {
-    module.compiledSteps[typeRef] = compileType(module.types, typeRef, module.pool);
+    module.compiledSteps[typeRef] = compileType(
+      module.types,
+      typeRef,
+      module.pool,
+    );
   }
   return module.compiledSteps[typeRef];
 };
@@ -477,7 +493,12 @@ const decode = (bytes) => {
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
 // @returns      Blueprint: (store, rootPaths) => Instance { nodes, regions }
-const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => {
+const compileDef = (
+  module,
+  compId,
+  resources = [],
+  loadedHrefs = new Set(),
+) => {
   const def = module.defs[compId];
   if (!def) {
     throw new Error("bad component " + compId);
@@ -550,15 +571,16 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
       // 구독은 즉시 걸지 않고 현재 가지에 모은다 - activateBranch가 그 가지를 켤 때 건다
       // (안 보이는 가지는 구독 0).
       //
-      // @param offset 컴포넌트 로컬 offset(paths로 store 경로 해석)
+      // @param offset 컴포넌트 로컬 offset(flat 슬롯 paths[2*offset]/[2*offset+1]로 해석)
       // @param update 값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
-      // @returns      현재 leaf 값(없으면 "")
+      // @returns      현재 값(없으면 "")
       const bindVar = (offset, update) => {
-        const path = paths[offset];
-        if (path === undefined) {
-          throw new Error("no path for offset " + offset);
+        const ref = paths[2 * offset + 1];
+        if (paths[2 * offset] === CONST) {
+          // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
+          return module.pool[ref] ?? "";
         }
-        const leafIndex = store.leafOf(path);
+        const leafIndex = store.leafOf(ref);
         const initial = store.get(leafIndex) ?? "";
         branch.leafIndices.push(leafIndex);
         branch.updateFns.push(update);
@@ -622,20 +644,26 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
             const eventName = module.pool[event.nameConstIndex];
             // fullname = 합성 경로 + 로컬 이벤트명(누가 쐈나). 바인딩 시점에 불변이라 콜백 밖에서
             // 한 번 짓는다(루트는 prefix가 비어 로컬명 그대로 - 기존 동작과 호환).
-            const fullName = pathPrefix ? pathPrefix + "." + eventName : eventName;
-            // fields의 leaf를 leafIndex로 미리 푼다(바인딩 때 1회, paths 불변). steps(조립 구조)는
-            // 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
+            const fullName = pathPrefix
+              ? pathPrefix + "." + eventName
+              : eventName;
+            // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, paths 불변). steps(조립
+            // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
             const payload = event.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              leafIndices: field.leaves.map((leaf) => leafToIndex(leaf, paths, store, module)),
+              sources: leavesToSources(field.leaves, paths, store),
             }));
-            // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field만 - 객체의 set 의미는
-            // 아직 미정(ISSUES)이라 leaf 하나짜리(스칼라)만 노출한다. data(읽기)는 객체까지 조립된다.
+            // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field 중 STORE만 - 상수
+            // 슬롯은 불변이라 set 대상이 못 된다. 객체의 set 의미는 미정(ISSUES). data(읽기)는
+            // 객체까지 조립된다.
             const props = {};
             for (const p of payload) {
-              if (module.types[p.typeRef].tag === "scalar") {
-                props[p.name] = p.leafIndices[0];
+              if (
+                module.types[p.typeRef].tag === "scalar" &&
+                p.sources[0] === STORE
+              ) {
+                props[p.name] = p.sources[1];
               }
             }
             // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
@@ -653,14 +681,24 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
               // data: 발생 시점 조립값. 스칼라면 값, 객체면 중첩 객체(steps는 여기서 lazy 컴파일).
               const data = {};
               for (const p of payload) {
-                data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.leafIndices, store);
+                data[p.name] = assemble(
+                  compiledStepsOf(module, p.typeRef),
+                  p.sources,
+                  store,
+                  module,
+                );
               }
               // context: 발생 시점 조립값. context.<이름>.<필드> = 조립값(스칼라/객체). payload와 동형.
               const context = {};
               for (const ctxName in contextLeaves) {
                 const values = {};
                 for (const p of contextLeaves[ctxName]) {
-                  values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.leafIndices, store);
+                  values[p.name] = assemble(
+                    compiledStepsOf(module, p.typeRef),
+                    p.sources,
+                    store,
+                    module,
+                  );
                 }
                 context[ctxName] = values;
               }
@@ -697,21 +735,19 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
             break;
           }
           case OP.PUSH_ARG: {
+            // 부모 슬롯 하나를 자식에게 넘긴다. 부모 슬롯의 (해석방법, 참조)를 그대로 전파해
+            // kind를 보존한다 - 부모가 또 그 위에서 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
             const parentOffset = u16at();
-            const path = paths[parentOffset];
-            if (path === undefined) {
+            if (paths[2 * parentOffset] === undefined) {
               throw new Error("no path for offset " + parentOffset);
             }
-            args.push(path);
+            args.push(paths[2 * parentOffset], paths[2 * parentOffset + 1]);
             break;
           }
           case OP.PUSH_ARG_LIT: {
-            // 리터럴 인자(불변): 상수 값을 store에 leaf로 심고 그 path를 자식에게 넘긴다.
-            // 자식은 변수 인자(PUSH_ARG)와 똑같이 path로 받아 분기 없이 처리한다 - 단지 부모
-            // 슬롯이 아니라 이 리터럴만의 leaf라 불변이다(set 경로는 컴파일타임 거부 예정).
-            // path를 pool 인덱스로 지어 같은 리터럴은 같은 path=같은 leaf로 모인다 - leafOf가
-            // pathCache로 처음만 발급하므로 module.pool 값이 store에 딱 한 번만 복사된다.
-            args.push(seedLitPath(store, module, u16at()));
+            // 리터럴 인자(불변): 상수풀 인덱스를 CONST 슬롯으로 자식에 넘긴다. store에 심지
+            // 않는다 - 소비 지점(bindVar)이 CONST를 보고 pool을 직접 읽고 구독을 스킵한다.
+            args.push(CONST, u16at());
             break;
           }
           case OP.PUSH_PATH_SEGMENT: {
@@ -729,12 +765,16 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
             const fields = contextDef.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              leafIndices: field.leaves.map((leaf) => leafToIndex(leaf, paths, store, module)),
+              sources: leavesToSources(field.leaves, paths, store),
             }));
             // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
             // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
             if (activeContexts.some((i) => createdContexts[i].name === name)) {
-              console.warn("quble: 컨텍스트 '" + name + "'가 중복 활성화됐습니다(안쪽이 우선).");
+              console.warn(
+                "quble: 컨텍스트 '" +
+                  name +
+                  "'가 중복 활성화됐습니다(안쪽이 우선).",
+              );
             }
             activeContexts.push(createdContexts.length);
             createdContexts.push({ name, fields });
@@ -750,7 +790,9 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
             const childPaths = args;
             args = [];
             // 자식 경로 prefix = 부모 prefix + 세그먼트. 이벤트 fullname의 path 축을 누적한다.
-            const childPrefix = pathPrefix ? pathPrefix + "." + segment : segment;
+            const childPrefix = pathPrefix
+              ? pathPrefix + "." + segment
+              : segment;
             segment = null;
             // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 paths로 같은 interpret에 돌린다.
             // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) → 자식 IF는 이 가지의
@@ -776,7 +818,11 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
           }
           case OP.IF: {
             const condOffset = u16at();
-            const condLeafIndex = store.leafOf(paths[condOffset]);
+            // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
+            // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
+            const condIsConst = paths[2 * condOffset] === CONST;
+            const condRef = paths[2 * condOffset + 1];
+            const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef);
             const regionIndex = appendRegion(regions, condLeafIndex);
             const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
@@ -830,21 +876,25 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
             elseBranch.lazyBuild = buildElse;
 
             // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateBranch가 lazyBuild 호출.
-            store.subscribe(condLeafIndex, (condValue) => {
-              activateBranch(
-                store,
-                regions,
-                regionIndex,
-                condValue ? THEN_INDEX : ELSE_INDEX,
-              );
-            });
+            // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
+            if (!condIsConst) {
+              store.subscribe(condLeafIndex, (condValue) => {
+                activateBranch(
+                  store,
+                  regions,
+                  regionIndex,
+                  condValue ? THEN_INDEX : ELSE_INDEX,
+                );
+              });
+            }
             // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
             // shownIndex만 설정한다. DOM 부착·구독 등록은 하지 않는다(attachBranch가 일괄).
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-            const initialBranchIndex = store.get(condLeafIndex)
-              ? THEN_INDEX
-              : ELSE_INDEX;
+            const condInitial = condIsConst
+              ? module.pool[condRef]
+              : store.get(condLeafIndex);
+            const initialBranchIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
             const initialBranch = region.branches[initialBranchIndex];
             initialBranch.lazyBuild();
             initialBranch.built = true;
@@ -864,9 +914,16 @@ const compileDef = (module, compId, resources = [], loadedHrefs = new Set()) => 
     // build: 트리(regions·branch.nodes·shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
     // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
+    // rootPaths는 외부 계약이라 path 문자열 배열(['label', …])로 받는다 - 루트 슬롯은
+    // 정의상 전부 반응값(외부 데이터 바인딩)이라 kind가 늘 STORE다. flat은 런타임 내부
+    // 표현이므로 이 경계에서 한 번 [STORE, path, STORE, path, …]로 감싼다.
+    const rootFlat = [];
+    for (const path of rootPaths) {
+      rootFlat.push(STORE, path);
+    }
     const fragment = interpret(
       module.code,
-      rootPaths,
+      rootFlat,
       def.events, // 루트 def의 이벤트 테이블
       def.contexts, // 루트 def의 컨텍스트 테이블
       [], // 루트는 활성 컨텍스트 없음
