@@ -68,12 +68,15 @@
   가장 흔한 패턴이라 LLM 분리 추론(UI/로직 분리) 셀링포인트의 실제 검증에도 걸린다. 이벤트
   발생 지점(DOM 요소)의 값을 payload가 참조하는 문법·의미가 미설계.
 
-- **인덱스 15비트 상한 가드 없음** - `FieldValue`(이벤트/컨텍스트 fields의 값 출처)는 u16
-  한 칸에 MSB=const 표지 + 하위 15비트=인덱스로 패킹한다. 그래서 scope offset·상수풀 인덱스
-  상한이 65535 -> 32767(0x7fff)인데, 초과를 막는 가드가 없어 조용히 깨진다. (재현: 인덱스
-  0x8000을 `FieldValue::Scope`로 만들면 encode->decode가 `Const(0)`으로 둔갑.) 가드의 자리는
-  인덱스 발급 지점(prop 인덱싱·`ConstPool::intern`) - 개수는 파서가 모르고 발급 시점에야
-  늘어난다. 발급 전반에 15비트 상한 검사를 까는 별개 작업.
+- **인덱스 상한 가드 없음** - `FieldValue`(이벤트/컨텍스트 fields의 값 출처)는 u16 한 칸에
+  kind 표지 + 인덱스로 패킹한다. STACK(`@for`) 대비로 kind가 3진이 되면 비대칭 인코딩을
+  쓴다 - Const는 상수풀이 문자열 전반을 공유해 상한 리스크가 커 15비트(0x7fff) 유지, 여유
+  있는 Scope/Stack은 14비트(0x3fff). 그래서 **상한이 축별로 다르다**. 초과를 막는 가드가
+  없어 조용히 깨진다(인덱스가 kind 비트를 오염, 엉뚱한 축으로 디코드). 가드의 자리는 인덱스
+  발급 지점(prop 인덱싱·`ConstPool::intern`) - 개수는 파서가 모르고 발급 시점에야 늘어난다.
+  단 발급 지점은 Const/Scope 축을 모르고 pool 인덱스는 leaf 아닌 자리(속성값 등)에도 쓰여
+  u16 전체가 정당하므로, 상한 검사는 **leaf로 인코딩되는 지점**(FieldValue 생성/encode)에서
+  축별로 걸어야 정확하다. FieldValue 작업에 딸린 별개 스텝.
 
 - **핸들러 타입 공급이 d.ts 파일 방식 (LSP 아님)** - 확장이 `.qubc`를 컴파일해 짝
   `x.qubc.d.ts`(`Handlers` 인터페이스)를 디스크에 쓰고, handlers.ts가 `import type { Handlers }

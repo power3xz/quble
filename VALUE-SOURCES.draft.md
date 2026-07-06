@@ -56,13 +56,41 @@
 2~100개) 최경량 - object의 약 1/3, tuple의 약 1/2. SoA는 큰 컴포넌트만 유리하고 작은
 컴포넌트에서 두 배열 헤더 고정비로 최악이 되어 탈락. (측정 스크립트는 남기지 않음.)
 
-### CONST_BIT(MSB)는 제거된다
+### 두 축은 각자 남는다 - CONST_BIT는 leaf 축의 표지로 존속
 
-leaf 인코딩의 `FIELD_CONST_BIT`(MSB로 store/const 구분)는 **없어진다**. 그 비트가 하던
-일 - "소비 지점에서 store냐 const냐 판별" - 을 슬롯의 해석방법(kind)이 흡수하기 때문.
-지금은 MSB로 갈라놓고 `leafToIndex`가 도로 `store.leafOf`로 합치는 모순 구조인데,
-슬롯이 해석방법을 이고 나르면 leaf가 그 짐을 대신 질 이유가 사라진다. "leaf CONST_BIT와
-같은 결의 확장"이 아니라 **CONST_BIT를 슬롯 kind로 흡수(그래서 제거)**.
+값 출처를 판별하는 축이 **둘**이고, 서로 섞지 않는다:
+
+- **슬롯 축**(`paths`의 kind) - use-site에서 부모가 전달하는 값. Scope leaf가 이 슬롯을
+  읽는다. 부모가 리터럴로 준 prop은 슬롯이 CONST kind를 이므로 소비가 pool 직접.
+- **leaf 축**(`FIELD_CONST_BIT`, MSB) - 컴포넌트 **자기** payload/context에 직접 박은
+  리터럴(`@emit CLICK { label: "clicks" }`). 부모를 안 거치므로 슬롯이 아니라 leaf가
+  pool 인덱스를 직접 든다.
+
+애초 예상("MSB가 슬롯 kind에 흡수돼 사라진다")은 **틀렸다**. 흡수된 건 슬롯 경유
+const(Scope가 가리킨 CONST 슬롯)뿐이고, payload 직접 리터럴은 슬롯 축에 없다. Const는
+슬롯을 **읽을 이유가 없으니**(값이 leaf에 이미 있음) 슬롯에 넣을 이유도 없다 - 억지로
+슬롯화하면 "컴포넌트가 자기 리터럴을 자기 슬롯에 까는" self-seed 진입 로직만 새로 생겨
+과하다. 그러므로 **leaf 축(MSB)은 본질적으로 남는다**.
+
+풀린 것은 MSB가 아니라 **모순**이다. 전에는 MSB로 const를 갈라놓고 `leafToIndex`가 도로
+`store.leafOf`로 합쳤다(다 store 수렴). 지금은 `leavesToSources`가 leaf를 flat
+`(kind, ref)`로 정규화해 CONST는 pool 직접·STORE는 store로 **갈래를 끝까지 유지**한다.
+MSB(`isConst`)는 `readFields`에서 태어나 `leavesToSources`에서 소비·소멸하고, `assemble`은
+정규화된 `(kind, ref)`만 본다.
+
+### leaf 인코딩 - 비대칭 kind(다음 작업, FieldValue)
+
+런타임값(STACK, `@for` 인덱스)이 leaf 축으로도 실리면 leaf가 Scope/Const/Stack 3진을
+구분해야 해 MSB 1비트로 부족하다. u16 한 칸을 **비대칭**으로 나눈다 - 상한 리스크가 큰
+Const(상수풀은 문자열 전반을 공유해 큰 컴포넌트에서 예상보다 빨리 찬다)에 15비트를 온전히
+주고, 여유 있는 Scope/Stack에서 1비트 깎는다:
+
+    0 xxxxxxxxxxxxxxx   Const  (index 15비트, 0x7fff)
+    1 0 xxxxxxxxxxxxxx  Scope  (index 14비트, 0x3fff)
+    1 1 xxxxxxxxxxxxxx  Stack  (index 14비트, 0x3fff)
+
+leaf 크기(u16) 유지 + 리스크 큰 Const 상한 유지. `Leaf`를 `FieldValue::Scope/Const/Stack`로
+개명·재정의하는 작업에서 함께. (상한 가드는 ISSUES.md - 발급 지점에서 축별 상한 검사.)
 
 ### 부수 이득 - 구독은 store 값만
 
@@ -70,45 +98,42 @@ leaf 인코딩의 `FIELD_CONST_BIT`(MSB로 store/const 구분)는 **없어진다
 상수·런타임값은 안 변하니 구독은 죽은 구독이었다. 별도 최적화가 아니라 해석방법 분리의
 자연 귀결 - 소비 경로에서 "const/스택이면 구독 안 검" 한 줄로 떨어진다.
 
-## 착지점 (코드)
-
-`proto/web/runtime.js`의 **`bindVar`(~556)** 가 모든 변수 소비의 심장이다
-(TEXT_VAR / ATTR_G_VAR / ATTR_L_VAR 전부 통과). 지금:
-
-    const bindVar = (offset, update) => {
-      const path = paths[offset];            // offset → path
-      const leafIndex = store.leafOf(path);  // 무조건 store로 수렴
-      const initial = store.get(leafIndex);
-      branch.leafIndices.push(leafIndex);    // 무조건 구독
-      branch.updateFns.push(update);
-      return initial;
-    };
-
-바뀔 방향: `paths`가 인터리브 평탄 배열이 되어 `paths[2*offset]`(해석방법) /
-`paths[2*offset+1]`(참조)로 읽고, 해석방법에 따라 store(leafOf/get + 구독) / const(pool
-직접, 구독 스킵) / stack(top, 구독 스킵)으로 분기. 앞단 `paths` 채우는 쪽(PUSH_ARG 계열,
-seedLitPath ~291)도 해석방법을 싣도록 바뀐다.
-
 ## 작업 순서
 
-1. **`$lit` 제거** - 상수를 store seed에서 빼내 pool 직접 참조. 소비 지점(bindVar)이
-   const 해석방법을 읽는 경로 신설. store/const 2진. seed 중복 해소.
-2. **`@for` 런타임값** - 스택 해석방법을 3진으로 추가. `n`은 스택에만.
+1. **`$lit` 제거** (완료) - 상수를 store seed에서 빼내 pool 직접 참조. 슬롯 store/const
+   2진. seed 중복 해소.
+2. **`@for` 런타임값** - 스택 해석방법을 3진으로. `n`은 스택에만.
 
-상수(값이 컴파일타임에 확정, 가장 단순)로 경로를 먼저 뚫어 런타임값의 디딤돌로 삼는다.
+## 1단계 착지 결과 (완료, runtime.js)
+
+`bindVar`가 무조건 `store.leafOf`로 수렴하던 소비의 심장을 flat 슬롯 분기로 바꿨다.
+codegen·bytecode는 무변경(부모 push의 store/const 구분은 이미 `PUSH_ARG`/`PUSH_ARG_LIT`
+opcode로 방출됨) - 런타임만 바뀌었다.
+
+- `STORE`/`CONST` 상수 도입. `paths`가 인터리브 평탄 배열 `[kind, ref, …]`.
+- `bindVar`/`IF`: `paths[2*offset]` 보고 STORE(leafOf/get + 구독) / CONST(pool 직접, 구독
+  스킵)로 분기. IF 조건도 CONST(부모가 리터럴로 준 prop)를 만나면 구독 없이 가지 고정.
+- `PUSH_ARG`: 부모 슬롯의 (kind, ref)를 그대로 전파(CONST 슬롯이 여러 단계 아래로 흐름).
+- `PUSH_ARG_LIT`: `seedLitPath` 제거 → `(CONST, pool_idx)` 슬롯. store seed 없음.
+- payload/context 조립 flat-aware: `leavesToSources`(leaf → flat `(kind, ref)`), `assemble`이
+  kind 보고 store/pool 분기. props(set/get 노출)는 STORE 스칼라만.
+- 루트 진입: 외부 계약(path 문자열 배열)은 유지, 경계에서 `[STORE, path, …]`로 감쌈.
+- `store.seed` 제거(죽은 코드).
 
 ## 미해결
 
-- 슬롯 배열 이름 - 지금 `paths`는 더는 path만 담지 않는다(STORE=path, CONST=pool index,
-  STACK=스택 참조). 이름이 내용을 배신하나 당장은 `paths` 유지, 코드 만질 때 적절한
-  이름으로 교체(no-resolve-naming 결). 후보 args는 기존 임시 인자 버퍼(PUSH_ARG가 밀고
-  RENDER가 비움)와 충돌 - 그건 상주 슬롯 배열과 생명주기가 다르다.
+- 슬롯 배열 이름 - `paths`는 더는 path만 담지 않는다(STORE=leafIndex, CONST=pool index).
+  당장은 `paths` 유지, 코드 만질 때 교체(no-resolve-naming 결). 후보 args는 기존 임시 인자
+  버퍼(PUSH_ARG가 밀고 RENDER가 비움)와 충돌 - 상주 슬롯 배열과 생명주기가 다르다.
 - STACK 참조(`@for` 인덱스)의 실제 형태 - 스택 top을 어떻게 가리키나. `n` 생성 의미가
-  아직 미정이라(작업 순서 2) 그때 확정.
+  미정이라(작업 순서 2) 그때 확정. leaf 축으로도 실리면 leaf 인코딩 3진(위 "leaf 인코딩")
+  필요 - slot 축은 이미 flat이라 kind에 STACK 추가만으로 수용.
 - 작은 컴포넌트가 다수인 실사용에서 flat의 상주 이득이 체감되는 절대 규모 - 측정은 극단
   부하(총 50만 슬롯) 기준이라 상대 비율만 신뢰. 실물 렌더로 재확인 여지.
 
 ## 닫힌 결정
 
 - 슬롯 표현: 인터리브 평탄 배열(위 "슬롯 표현" 절). 속도 무승부 → 메모리 기준 → flat.
-- leaf `FIELD_CONST_BIT`(MSB): 제거. 해석방법을 슬롯 kind가 흡수(위 "CONST_BIT" 절).
+- leaf 축(`FIELD_CONST_BIT`)은 남는다. slot 경유 const는 슬롯 kind가 흡수했지만 payload
+  직접 리터럴은 leaf가 pool을 직접 든다(위 "두 축은 각자 남는다"). 다음 작업(FieldValue)은
+  MSB 제거가 아니라 비대칭 kind 인코딩으로의 확장.
