@@ -243,9 +243,18 @@ class Reader {
 const STORE = 0;
 const CONST = 1;
 
-// leaf 값의 const 표지 비트(MSB). Rust Leaf::encode와 대칭 - 이 비트와 마스킹은
-// readFields 한 곳에만 둔다(소비부는 isConst/index만 본다).
-const FIELD_CONST_BIT = 0x8000;
+// FieldValue 인코딩(Rust FieldValue::encode/decode와 대칭). u16 한 칸을 비대칭으로 나눈다:
+//   0xxxxxxxxxxxxxxx  Const  (15비트)
+//   10xxxxxxxxxxxxxx  Scope  (14비트)
+//   11xxxxxxxxxxxxxx  Raw    (14비트)
+// 이 비트연산·마스킹은 readFields 한 곳에만 둔다(소비부는 kind + index만 본다).
+const FV_TAG_HI = 0x8000; // 최상위: 0=Const, 1=Scope/Raw
+const FV_TAG_LO = 0x4000; // 최상위가 1일 때 둘째: 0=Scope, 1=Raw
+const FV_INDEX_MASK = 0x3fff; // Scope/Raw 태그를 벗겨 인덱스만
+// FieldValue kind(readFields 결과). 슬롯 해석방법(STORE/CONST)과 다른 층이다.
+const FV_CONST = 0;
+const FV_SCOPE = 1;
+const FV_RAW = 2;
 
 // 타입 테이블 엔트리 태그(BYTECODE.md §4). Rust read_type 대칭.
 const TYPE_SCALAR = 0;
@@ -272,53 +281,66 @@ const readType = (r) => {
   throw new Error("bad type tag " + tag);
 };
 
-// 필드 목록을 읽는다 - field_count, [(nameConstIndex, typeRef, leaf_count, [leaf])]. leaf는
-// MSB=const 여부, 하위 15비트=index. 이벤트 payload와 컨텍스트가 같은 인코딩(Rust read_fields 대칭).
+// FieldValue u16 하나를 kind + ref로 디코드한다(Rust FieldValue::decode 대칭). ref는 kind마다
+// 가리키는 게 다르다 - Const는 상수풀 인덱스, Scope는 scope offset, Raw는 @for 런타임값 참조.
+//
+// @param raw u16
+// @returns { kind: FV_CONST|FV_SCOPE|FV_RAW, ref }
+const decodeFieldValue = (raw) => {
+  if ((raw & FV_TAG_HI) === 0) {
+    return { kind: FV_CONST, ref: raw };
+  }
+  if ((raw & FV_TAG_LO) === 0) {
+    return { kind: FV_SCOPE, ref: raw & FV_INDEX_MASK };
+  }
+  return { kind: FV_RAW, ref: raw & FV_INDEX_MASK };
+};
+
+// 필드 목록을 읽는다 - field_count, [(nameConstIndex, typeRef, ref_count, [ref])]. ref는
+// FieldValue u16. 이벤트 payload와 컨텍스트가 같은 인코딩(Rust read_fields 대칭).
 //
 // @param r Reader
-// @returns [{ nameConstIndex, typeRef, leaves: [{ isConst, index }] }]
+// @returns [{ nameConstIndex, typeRef, refs: [{ kind, ref }] }]
 const readFields = (r) => {
   const count = r.u16();
   const fields = [];
   for (let f = 0; f < count; f++) {
     const nameConstIndex = r.u16();
     const typeRef = r.u16();
-    const leafCount = r.u16();
-    const leaves = [];
-    for (let l = 0; l < leafCount; l++) {
-      const raw = r.u16();
-      leaves.push({
-        isConst: (raw & FIELD_CONST_BIT) !== 0,
-        index: raw & ~FIELD_CONST_BIT,
-      });
+    const refCount = r.u16();
+    const refs = [];
+    for (let l = 0; l < refCount; l++) {
+      refs.push(decodeFieldValue(r.u16()));
     }
-    fields.push({ nameConstIndex, typeRef, leaves });
+    fields.push({ nameConstIndex, typeRef, refs });
   }
   return fields;
 };
 
-// field의 leaves를 flat 값-소스 열 [kind, ref, kind, ref, …]로 푼다(바인딩 때 1회). 소스는
+// field의 refs를 flat 값-소스 열 [kind, ref, kind, ref, …]로 푼다(바인딩 때 1회). 소스는
 // 슬롯과 같은 (해석방법, 참조) 쌍: STORE는 ref가 미리 푼 leafIndex(store.get용), CONST는
 // ref가 상수풀 인덱스(module.pool용). assemble이 발생 때 kind 보고 갈라 읽는다.
 //
-// leaf가 값을 얻는 두 길이 CONST로 합류한다: leaf 자체가 리터럴(isConst, payload에 직접
-// 박힘)이거나, Scope가 가리킨 슬롯이 CONST(부모가 리터럴로 준 prop)거나.
+// 값이 CONST로 합류하는 두 길: FieldValue가 리터럴(FV_CONST, payload에 직접 박힘)이거나,
+// FV_SCOPE가 가리킨 슬롯이 CONST(부모가 리터럴로 준 prop)거나.
 //
-// @param leaves field.leaves - [{ isConst, index }]
-// @param paths  flat 슬롯 배열
-// @returns      [kind, ref, …] flat 소스 열
-const leavesToSources = (leaves, paths, store) => {
-  const sources = [];
-  for (const leaf of leaves) {
-    if (leaf.isConst) {
-      sources.push(CONST, leaf.index);
-    } else if (paths[2 * leaf.index] === CONST) {
-      sources.push(CONST, paths[2 * leaf.index + 1]);
+// @param refs  field.refs - [{ kind, ref }]
+// @param paths flat 슬롯 배열
+// @returns     [kind, ref, …] flat sourcePair 열
+const refsToSourcePairs = (refs, paths, store) => {
+  const sourcePairs = [];
+  for (const r of refs) {
+    if (r.kind === FV_CONST) {
+      sourcePairs.push(CONST, r.ref);
+    } else if (r.kind === FV_SCOPE && paths[2 * r.ref] === CONST) {
+      sourcePairs.push(CONST, paths[2 * r.ref + 1]);
+    } else if (r.kind === FV_SCOPE) {
+      sourcePairs.push(STORE, store.leafOf(paths[2 * r.ref + 1]));
     } else {
-      sources.push(STORE, store.leafOf(paths[2 * leaf.index + 1]));
+      throw new Error("FV_RAW는 아직 미구현(@for)");
     }
   }
-  return sources;
+  return sourcePairs;
 };
 
 // 조립 step - 런타임 내부 미니 명령(바이트코드 opcode와 다른 층). type_ref 구조를 평탄한 step
@@ -652,7 +674,7 @@ const compileDef = (
             const payload = event.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              sources: leavesToSources(field.leaves, paths, store),
+              sources: refsToSourcePairs(field.refs, paths, store),
             }));
             // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field 중 STORE만 - 상수
             // 슬롯은 불변이라 set 대상이 못 된다. 객체의 set 의미는 미정(ISSUES). data(읽기)는
@@ -765,7 +787,7 @@ const compileDef = (
             const fields = contextDef.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              sources: leavesToSources(field.leaves, paths, store),
+              sources: refsToSourcePairs(field.refs, paths, store),
             }));
             // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
             // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).

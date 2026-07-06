@@ -2,35 +2,62 @@
 
 use crate::pool::ConstPool;
 
-/// field 값 하나의 출처. field.refs의 각 원소 - scope(런타임 슬롯 참조) 또는 const(리터럴).
-/// 바이트코드 u16과의 변환은 encode/decode에 가둔다 - 비트연산(0x8000)이 한 곳에만 존재.
+/// field 값 하나의 출처. field.refs의 각 원소.
+/// - Scope: 런타임 슬롯을 거쳐 읽는 값(반응/상수/원시 - 슬롯 kind가 최종 결정).
+/// - Const: 컴포넌트 상수풀 인덱스. 리터럴 값(payload에 직접 박힘).
+/// - Raw: @for 등이 런타임에 만든 원시값. 지금은 number only(@for 인덱스). 스택이 아니라
+///   슬롯 인라인 값이다(회차 프레임 유지 시 메모리 폭발 회피). 실사용은 @for 착수 때.
+/// 바이트코드 u16과의 변환은 encode/decode에 가둔다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldValue {
-    /// scope offset. 런타임이 슬롯을 거쳐 읽는다.
     Scope(u16),
-    /// 컴포넌트 상수풀 인덱스. 리터럴 값.
     Const(u16),
+    Raw(u16),
 }
 
 impl FieldValue {
-    /// MSB = const 여부, 하위 15비트 = 인덱스. const=1, scope=0(디폴트).
-    /// 인덱스 상한은 0x7fff - 초과는 인덱스 발급 지점(intern/prop 인덱싱)이 막아야 한다(미구현).
-    const CONST_BIT: u16 = 0x8000;
+    /// u16 한 칸을 비대칭으로 나눈다 - 상한 리스크가 큰 Const에 15비트를 온전히 주고
+    /// (상수풀은 문자열 전반을 공유해 큰 컴포넌트에서 빨리 찬다), 여유 있는 Scope/Raw는
+    /// 최상위 2비트를 태그로 쓰고 14비트 인덱스:
+    ///   0 xxxxxxxxxxxxxxx  Const  (15비트, 0x7fff)
+    ///   1 0 xxxxxxxxxxxxxx  Scope  (14비트, 0x3fff)
+    ///   1 1 xxxxxxxxxxxxxx  Raw    (14비트, 0x3fff)
+    const TAG_HI: u16 = 0x8000; // 최상위: 0=Const, 1=Scope/Raw
+    const TAG_LO: u16 = 0x4000; // 최상위가 1일 때 둘째: 0=Scope, 1=Raw
+    /// 축별 인덱스 상한(encode가 넘으면 패닉). Const 15비트, Scope/Raw는 태그 2비트를 빼 14비트.
+    pub const CONST_MAX: u16 = 0x7fff;
+    pub const SCOPE_MAX: u16 = 0x3fff;
+    pub const RAW_MAX: u16 = 0x3fff;
+    /// decode에서 태그 2비트를 벗겨 인덱스만 꺼내는 마스크(Scope/Raw 공용, 하위 14비트).
+    const INDEX_MASK: u16 = 0x3fff;
 
-    /// 바이트코드 u16으로. Scope는 인덱스 그대로, Const는 MSB를 세운다.
+    /// 바이트코드 u16으로. 상한 초과면 패닉 - codegen 가드가 앞서 걸러야 한다(ISSUES).
     pub fn encode(self) -> u16 {
         match self {
-            FieldValue::Scope(index) => index,
-            FieldValue::Const(index) => index | Self::CONST_BIT,
+            FieldValue::Const(index) => {
+                assert!(index <= Self::CONST_MAX, "Const 인덱스 상한 초과: {index}");
+                index
+            }
+            FieldValue::Scope(index) => {
+                assert!(index <= Self::SCOPE_MAX, "Scope 인덱스 상한 초과: {index}");
+                Self::TAG_HI | index
+            }
+            FieldValue::Raw(index) => {
+                assert!(index <= Self::RAW_MAX, "Raw 인덱스 상한 초과: {index}");
+                Self::TAG_HI | Self::TAG_LO | index
+            }
         }
     }
 
-    /// 바이트코드 u16에서. MSB가 서 있으면 Const, 아니면 Scope.
+    /// 바이트코드 u16에서. 최상위 0이면 Const(태그 없음, raw 그대로), 1이면 둘째 비트로
+    /// Scope/Raw를 가르고 INDEX_MASK로 태그를 벗긴다. 모든 u16이 유효(무효 조합 없음).
     pub fn decode(raw: u16) -> FieldValue {
-        if raw & Self::CONST_BIT != 0 {
-            FieldValue::Const(raw & !Self::CONST_BIT)
+        if raw & Self::TAG_HI == 0 {
+            FieldValue::Const(raw)
+        } else if raw & Self::TAG_LO == 0 {
+            FieldValue::Scope(raw & Self::INDEX_MASK)
         } else {
-            FieldValue::Scope(raw)
+            FieldValue::Raw(raw & Self::INDEX_MASK)
         }
     }
 }
@@ -116,31 +143,51 @@ impl Module {
 mod tests {
     use super::*;
 
-    /// Scope/Const 양쪽이 u16 인코딩을 라운드트립한다. MSB가 두 variant를 가른다.
+    /// 세 variant가 u16 인코딩을 라운드트립한다. 최상위 2비트가 축을 가른다.
     #[test]
     fn field_value_roundtrips() {
         for v in [
-            FieldValue::Scope(0),
-            FieldValue::Scope(42),
             FieldValue::Const(0),
             FieldValue::Const(5),
+            FieldValue::Scope(0),
+            FieldValue::Scope(42),
+            FieldValue::Raw(0),
+            FieldValue::Raw(7),
         ] {
             assert_eq!(FieldValue::decode(v.encode()), v);
         }
     }
 
-    /// MSB가 const 표지다. Scope는 MSB가 꺼져 있고, Const는 켜진다.
+    /// 태그 비트 배치. Const는 최상위 0, Scope는 10, Raw는 11.
     #[test]
-    fn field_value_const_bit() {
-        assert_eq!(FieldValue::Scope(3).encode(), 0x0003);
-        assert_eq!(FieldValue::Const(3).encode(), 0x8003);
+    fn field_value_tag_bits() {
+        assert_eq!(FieldValue::Const(3).encode(), 0x0003);
+        assert_eq!(FieldValue::Scope(3).encode(), 0x8003);
+        assert_eq!(FieldValue::Raw(3).encode(), 0xc003);
     }
 
-    /// 하위 15비트 상한(0x7fff)까지 인덱스가 보존된다.
+    /// 축별 상한값까지 인덱스가 보존된다(Const 15비트, Scope/Raw 14비트).
     #[test]
     fn field_value_max_index() {
-        let max = 0x7fff;
-        assert_eq!(FieldValue::decode(FieldValue::Scope(max).encode()), FieldValue::Scope(max));
-        assert_eq!(FieldValue::decode(FieldValue::Const(max).encode()), FieldValue::Const(max));
+        for v in [
+            FieldValue::Const(FieldValue::CONST_MAX),
+            FieldValue::Scope(FieldValue::SCOPE_MAX),
+            FieldValue::Raw(FieldValue::RAW_MAX),
+        ] {
+            assert_eq!(FieldValue::decode(v.encode()), v);
+        }
+    }
+
+    /// 상한 초과는 encode에서 패닉한다(codegen 가드가 앞서 걸러야 하나, 최후 방어).
+    #[test]
+    #[should_panic(expected = "Scope 인덱스 상한 초과")]
+    fn field_value_scope_over_max_panics() {
+        FieldValue::Scope(FieldValue::SCOPE_MAX + 1).encode();
+    }
+
+    #[test]
+    #[should_panic(expected = "Const 인덱스 상한 초과")]
+    fn field_value_const_over_max_panics() {
+        FieldValue::Const(FieldValue::CONST_MAX + 1).encode();
     }
 }
