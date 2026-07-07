@@ -1,0 +1,39 @@
+.stress {
+  font-family: system-ui, sans-serif;
+  padding: 12px;
+}
+
+.stress h1 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+.card {
+  display: inline-block;
+  width: 120px;
+  padding: 6px 8px;
+  margin: 2px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  vertical-align: top;
+}
+
+.card:hover {
+  background: #f2f6ff;
+  border-color: #7aa2ff;
+}
+
+.card__name {
+  font-weight: 600;
+}
+
+.card__job {
+  color: #555;
+}
+
+.card__loc {
+  color: #999;
+}
