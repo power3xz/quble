@@ -25,7 +25,7 @@ const fnv1a = (bytes) => {
 const args = process.argv.slice(2);
 const dataIdx = args.indexOf("--data");
 const dataFile = dataIdx >= 0 ? args[dataIdx + 1] : null;
-const entry = args.find((a, i) => !a.startsWith("--") && i !== dataIdx + 1);
+const entry = args.find((a, i) => !a.startsWith("--") && !(dataIdx >= 0 && i === dataIdx + 1));
 if (!entry) {
   console.error("usage: quble-build <component.qubc> [--data <data.json>]");
   process.exit(1);
