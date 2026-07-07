@@ -1,0 +1,9 @@
+component ForLiteral {
+  template {
+    div() {
+      @for (item of 3) {
+        p() { "item" }
+      }
+    }
+  }
+}

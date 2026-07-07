@@ -100,6 +100,10 @@ const OP = {
   PUSH_PATH_SEGMENT: 0x12,
   ENTER_CONTEXT: 0x13,
   EXIT_CONTEXT: 0x14,
+  FOR_RAW: 0x15,
+  FOR_SCOPE_INDEX: 0x16,
+  FOR_END: 0x17,
+  PUSH_PATH_INDEX_SEGMENT: 0x18,
 };
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -117,6 +121,7 @@ const operandLen = (op) => {
     case OP.ELSE:
     case OP.IF_END:
     case OP.EXIT_CONTEXT:
+    case OP.FOR_END:
       return 0;
     case OP.ELEM_OPEN:
     case OP.TEXT:
@@ -128,6 +133,9 @@ const operandLen = (op) => {
     case OP.IF:
     case OP.LOAD_RES:
     case OP.ENTER_CONTEXT:
+    case OP.FOR_RAW:
+    case OP.FOR_SCOPE_INDEX:
+    case OP.PUSH_PATH_INDEX_SEGMENT:
       return 2;
     case OP.ATTR_G:
     case OP.ATTR_L:
@@ -169,6 +177,34 @@ const skipBranch = (code, startPc) => {
     }
   }
   throw new Error("unbalanced branch - no matching ELSE/IF_END");
+};
+
+// @for 몸체 끝(FOR_END)의 pc를 찾는다. bodyStart부터 op 경계를 전진하며 중첩 @for 깊이를
+// 센다(같은 깊이 0의 FOR_END가 이 몸체 끝). IF는 몸체 안에 섞여도 여기선 무시 - FOR_RAW/
+// FOR_SCOPE_INDEX/FOR_END만 깊이에 관여한다.
+//
+// @param code      def 바이트코드
+// @param bodyStart 몸체 첫 op 위치(FOR operand 직후)
+// @returns         FOR_END의 pc - 호출자가 그 마커를 소비
+const forBodyEnd = (code, bodyStart) => {
+  let pc = bodyStart;
+  let depth = 0;
+  while (pc < code.length) {
+    const markerPc = pc;
+    const op = code[pc++];
+    if (op === OP.FOR_RAW || op === OP.FOR_SCOPE_INDEX) {
+      depth += 1;
+      pc += operandLen(op);
+    } else if (op === OP.FOR_END) {
+      if (depth === 0) {
+        return markerPc;
+      }
+      depth -= 1;
+    } else {
+      pc += operandLen(op);
+    }
+  }
+  throw new Error("unbalanced @for - no matching FOR_END");
 };
 
 // IF 블록의 then/else 코드 경계를 구한다(순수 - code와 then 시작 pc만 본다).
@@ -570,12 +606,14 @@ const compileDef = (
       startRegionIndex,
       startBranchIndex,
       pathPrefix,
+      loopIndexStack,
+      loopIndexBase,
     ) => {
       const fragment = document.createDocumentFragment();
       const nodeStack = [fragment]; // 노드 스택 - DOM 부모 추적
       let pending = null;
       let args = [];
-      let segment = null; // 다음 RENDER가 소비할 경로 세그먼트(PUSH_PATH_SEGMENT가 적재)
+      let segment = null; // 다음 RENDER/BIND_EVENT가 소비할 경로 세그먼트(PUSH_PATH_SEGMENT/INDEX가 적재)
       let pc = startPc;
 
       // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
@@ -665,10 +703,16 @@ const compileDef = (
             const domEvent = DOM_EVENTS[u16at()];
             const event = events[u16at()];
             const eventName = module.pool[event.nameConstIndex];
-            // fullname = 합성 경로 + 로컬 이벤트명(누가 쐈나). 바인딩 시점에 불변이라 콜백 밖에서
-            // 한 번 짓는다(루트는 prefix가 비어 로컬명 그대로 - 기존 동작과 호환).
-            const fullName = pathPrefix
-              ? pathPrefix + "." + eventName
+            // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
+            // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
+            // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
+            let eventPrefix = pathPrefix;
+            if (segment !== null) {
+              eventPrefix = eventPrefix ? eventPrefix + "." + segment : segment;
+              segment = null;
+            }
+            const fullName = eventPrefix
+              ? eventPrefix + "." + eventName
               : eventName;
             // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
             // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
@@ -695,6 +739,12 @@ const compileDef = (
             for (const i of activeContexts) {
               const created = createdContexts[i];
               contextLeaves[created.name] = created.fields;
+            }
+            // @for 회차 인덱스를 바인딩 시점에 스냅샷($0=바깥, $1=안쪽...). 발화 때 핸들러
+            // 인자로 편다. fullname의 [$n] 정적 표기와 짝 - 이건 실제 회차값이다.
+            const loopIndices = {};
+            for (let i = 0; i < loopIndexStack.length; i++) {
+              loopIndices["$" + i] = loopIndexStack[i];
             }
             const el = pending;
             el.addEventListener(domEvent, (domEventObject) => {
@@ -731,6 +781,7 @@ const compileDef = (
                 get: store.get,
                 props,
                 context,
+                ...loopIndices,
               });
             });
             break;
@@ -777,6 +828,15 @@ const compileDef = (
             // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
             // 단일 변수로 적재 - args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
             segment = module.pool[u16at()];
+            break;
+          }
+          case OP.PUSH_PATH_INDEX_SEGMENT: {
+            // @for 인덱스 세그먼트를 정적 fullname에 접미한다. 직전 이름 세그먼트가 있으면
+            // Row[$0], 없으면(element 직속) 익명 [$0]. operand는 컴포넌트-로컬 깊이라 use-site에서
+            // 물려받은 깊이(loopIndexStack.length)를 base로 더해 누적 표기($1...)로 만든다 - 자식
+            // 컴포넌트 코드는 자기 @for를 0부터 세지만 fullname은 바깥까지 누적돼야 한다.
+            const token = "[$" + (loopIndexBase + u16at()) + "]";
+            segment = (segment ?? "") + token;
             break;
           }
           case OP.ENTER_CONTEXT: {
@@ -833,6 +893,8 @@ const compileDef = (
               startRegionIndex,
               startBranchIndex,
               childPrefix,
+              loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
+              loopIndexStack.length, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이
             );
             for (const node of childFragment.childNodes) {
               nodeTop().appendChild(node);
@@ -874,6 +936,8 @@ const compileDef = (
                 regionIndex,
                 THEN_INDEX,
                 pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+                loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
+                loopIndexBase,
               );
               thenBranch.nodes = Array.from(f.childNodes);
             };
@@ -892,6 +956,8 @@ const compileDef = (
                       regionIndex,
                       ELSE_INDEX,
                       pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+                      loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
+                      loopIndexBase,
                     );
               elseBranch.nodes = Array.from(f.childNodes);
             };
@@ -926,6 +992,50 @@ const compileDef = (
             pc = ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음으로.
             break;
           }
+          case OP.FOR_RAW:
+          case OP.FOR_SCOPE_INDEX: {
+            // 반복 횟수 확정. RAW는 operand 값 직접, SCOPE_INDEX는 슬롯 위임(STORE면 store 값,
+            // CONST면 pool - @if 조건과 동형). 반응 안 함 - 초기값만 읽고 구독 없다.
+            let count;
+            if (op === OP.FOR_RAW) {
+              count = u16at();
+            } else {
+              const offset = u16at();
+              const ref = argumentSourcePairs[2 * offset + 1];
+              count =
+                argumentSourcePairs[2 * offset] === CONST
+                  ? module.pool[ref]
+                  : store.get(store.leafOf(ref));
+            }
+            count = Number(count) || 0;
+
+            // 몸체를 count회 반복 해석. 각 회차는 독립 fragment로 지금 가지(startRegion/Branch)에
+            // 인라인된다 - @for는 컴포넌트 경계가 아니라 같은 가지의 제어 흐름이다. 회차 인덱스를
+            // loopIndexStack에 쌓아 넘긴다(발화 시 핸들러 $n + fullname 깊이 base로 쓰인다).
+            const bodyStart = pc;
+            const forEndPc = forBodyEnd(code, bodyStart);
+            for (let i = 0; i < count; i++) {
+              const f = interpret(
+                code,
+                argumentSourcePairs,
+                events,
+                contexts,
+                activeContexts,
+                bodyStart,
+                forEndPc,
+                startRegionIndex,
+                startBranchIndex,
+                pathPrefix,
+                [...loopIndexStack, i], // 이 회차 인덱스를 쌓아 넘긴다(발화 시 $n)
+                loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
+              );
+              for (const node of f.childNodes) {
+                nodeTop().appendChild(node);
+              }
+            }
+            pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
+            break;
+          }
           default: {
             throw new Error("bad opcode 0x" + op.toString(16));
           }
@@ -955,6 +1065,8 @@ const compileDef = (
       0,
       THEN_INDEX,
       "", // 루트 경로 prefix 비어 있음
+      [], // 루트는 @for 밖 - 회차 인덱스 없음
+      0, // 세그먼트 인덱스 base 0
     );
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
