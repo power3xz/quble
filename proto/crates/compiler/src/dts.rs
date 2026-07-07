@@ -43,6 +43,9 @@ struct Handler {
     props: Vec<Prop>,
     /// 발생 시점 활성 @with 컨텍스트: (컨텍스트명, 필드들). 안쪽 우선(뒤가 이김).
     contexts: Vec<(String, Vec<(String, ArgValue)>)>,
+    /// 이 이벤트에 누적된 @for 깊이 = 핸들러가 받는 회차 인덱스 개수($0..$(loop_depth-1)).
+    /// fullname의 [$n] 개수와 같다(Row[$0].Col[$1] -> 2).
+    loop_depth: u16,
 }
 
 /// d.ts 서두: 공통 타입. `Handler<Data, Props, Ctx>`가 핸들러 하나의 모양(params 배치, get/set)을
@@ -50,9 +53,9 @@ struct Handler {
 /// 퉁친다 - props에 타입 표기가 오면 분리가 필요해질 수 있다.
 const PRELUDE: &str = "\
 type LeafIndex<T> = number & { readonly __leaf: T };
-type Handler<Data, Props, Ctx> = (
+type Handler<Data, Props, Ctx, Loop> = (
   data: Data,
-  params: { context: Ctx; props: Props; get: <T>(k: LeafIndex<T>) => T; set: <T>(k: LeafIndex<T>, v: T) => void },
+  params: { context: Ctx; props: Props; get: <T>(k: LeafIndex<T>) => T; set: <T>(k: LeafIndex<T>, v: T) => void } & Loop,
 ) => void;
 ";
 
@@ -73,7 +76,8 @@ fn render(comps: &[FlatComp]) -> String {
     out
 }
 
-/// 핸들러 하나를 `Handler<Data, Props, Ctx>`로 낸다. context 없으면 Ctx는 `{}`.
+/// 핸들러 하나를 `Handler<Data, Props, Ctx, Loop>`로 낸다. context 없으면 Ctx는 `{}`,
+/// @for 밖이면 Loop는 `{}`.
 fn signature(h: &Handler) -> String {
     let data = format!("{{ {} }}", fields_type(&h.data, value_type));
     let props = format!(
@@ -92,7 +96,16 @@ fn signature(h: &Handler) -> String {
         }));
         format!("{{ {fields} }}")
     };
-    format!("Handler<{data}, {props}, {ctx}>")
+    // Loop: 회차 인덱스 $0..$(loop_depth-1). 전부 number(회차 번호). @for 밖이면 {}.
+    let loops = if h.loop_depth == 0 {
+        "{}".to_string()
+    } else {
+        format!(
+            "{{ {} }}",
+            join((0..h.loop_depth).map(|i| format!("${i}: number")))
+        )
+    };
+    format!("Handler<{data}, {props}, {ctx}, {loops}>")
 }
 
 /// prop 선언 타입 -> TS 타입 문자열. 원시는 이름 매핑, 배열은 `T[]`, 객체는 `{ k: T; ... }`.
@@ -191,7 +204,7 @@ fn walk_nodes(
                     format!("{path_prefix}.{suffix}")
                 };
                 for (_dom, event_name) in event_bindings {
-                    emit(comp, event_name, &event_prefix, context_stack, handlers, seen);
+                    emit(comp, event_name, &event_prefix, context_stack, depth_base, handlers, seen);
                 }
                 walk_nodes(comps, comp, children, path_prefix, context_stack, pending, depth_base, handlers, seen);
             }
@@ -238,6 +251,7 @@ fn emit(
     event_name: &str,
     path_prefix: &str,
     context_stack: &[(String, Vec<(String, ArgValue)>)],
+    loop_depth: u16,
     handlers: &mut Vec<Handler>,
     seen: &mut Vec<String>,
 ) {
@@ -271,6 +285,7 @@ fn emit(
         data,
         props: comp.props.clone(),
         contexts,
+        loop_depth,
     });
 }
 
@@ -293,7 +308,7 @@ mod tests {
             }
         "#);
         assert!(out.contains("type LeafIndex<T> = number & { readonly __leaf: T };"));
-        assert!(out.contains("type Handler<Data, Props, Ctx> = ("));
+        assert!(out.contains("type Handler<Data, Props, Ctx, Loop> = ("));
     }
 
     /// 단순 event - data(값)·props(leafIndex). context 없으면 Ctx는 {}.
@@ -308,7 +323,7 @@ mod tests {
             }
         "#);
         assert!(out.contains(
-            "'CLICK': Handler<{ avatar: string }, { avatar: LeafIndex<string>; size: LeafIndex<number>; active: LeafIndex<boolean> }, {}>;"
+            "'CLICK': Handler<{ avatar: string }, { avatar: LeafIndex<string>; size: LeafIndex<number>; active: LeafIndex<boolean> }, {}, {}>;"
         ), "실제 출력:\n{out}");
     }
 
@@ -368,7 +383,7 @@ mod tests {
               }
             }
         "#);
-        assert!(out.contains(r#", { Area: { section: "actions"; user: string } }>"#), "실제 출력:\n{out}");
+        assert!(out.contains(r#", { Area: { section: "actions"; user: string } }, {}>"#), "실제 출력:\n{out}");
     }
 
     /// 리터럴 payload 필드는 그 값으로 좁혀지고, 변수 필드는 string.
