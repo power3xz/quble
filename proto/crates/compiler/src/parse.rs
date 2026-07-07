@@ -10,8 +10,8 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, LitValue, Node, Prop, SourceFile, Type, Use,
-    VarRef,
+    ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, Prop, SourceFile,
+    Type, Use, VarRef,
 };
 use crate::lexer::{Directive, Token};
 
@@ -479,6 +479,8 @@ impl<'a> Parser<'a> {
                 Some(Token::LBrace) => nodes.push(self.var()?),
                 // @if 분기.
                 Some(Token::At(Directive::If)) => nodes.push(self.if_node()?),
+                // @for 반복.
+                Some(Token::At(Directive::For)) => nodes.push(self.for_node()?),
                 // @with 컨텍스트.
                 Some(Token::At(Directive::With)) => nodes.push(self.with_node()?),
                 // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
@@ -518,6 +520,39 @@ impl<'a> Parser<'a> {
         };
 
         Ok(Node::If { cond, then, else_ })
+    }
+
+    // @for ( IDENT of ( NUM | VAR_REF ) ) { NODE* }
+    // count는 정수 리터럴(of 3) 또는 숫자 prop 참조(of count). of는 문맥 키워드(Ident("of")).
+    fn for_node(&mut self) -> Result<Node, ParseError> {
+        self.expect(&Token::At(Directive::For))?;
+        self.expect(&Token::LParen)?;
+        let item = self.ident()?;
+        match self.next()? {
+            Token::Ident(s) if s == "of" => {}
+            got => {
+                return Err(ParseError::Expected {
+                    want: "of".into(),
+                    got: format!("{got:?}"),
+                })
+            }
+        }
+        let count = match self.peek() {
+            Some(Token::Num(n)) => {
+                let count = n.parse::<u16>().map_err(|_| ParseError::Expected {
+                    want: "0..=65535 정수 반복 횟수".into(),
+                    got: n.clone(),
+                })?;
+                self.next()?;
+                ForCount::Literal(count)
+            }
+            _ => ForCount::Var(self.var_ref()?),
+        };
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::LBrace)?;
+        let body = self.nodes()?;
+        self.expect(&Token::RBrace)?;
+        Ok(Node::For { item, count, body })
     }
 
     // @with CONTEXT { NODE* }   - context는 이 컴포넌트 contexts에 선언된 이름.

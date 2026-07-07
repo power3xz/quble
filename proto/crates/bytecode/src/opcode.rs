@@ -47,6 +47,12 @@ pub enum Op {
     EnterContext = 0x13,
     /// `@with` 블록 끝. operand 없는 마커(IfEnd와 동형). 활성 컨텍스트 스택 pop.
     ExitContext = 0x14,
+    /// `@for (x of N)` 반복. operand: 반복 횟수 u16(슬롯 안 거치고 직접 인라인). FOR_END까지가 몸체.
+    ForRaw = 0x15,
+    /// `@for (x of count)` 반복. operand: count의 scope index u16. 런타임이 그 슬롯 값을 횟수로.
+    ForScopeIndex = 0x16,
+    /// `@for` 몸체 끝 마커(operand 없음, IfEnd 동형).
+    ForEnd = 0x17,
 }
 
 impl Op {
@@ -74,6 +80,9 @@ impl Op {
             0x12 => Op::PushPathSegment,
             0x13 => Op::EnterContext,
             0x14 => Op::ExitContext,
+            0x15 => Op::ForRaw,
+            0x16 => Op::ForScopeIndex,
+            0x17 => Op::ForEnd,
             _ => return None,
         })
     }

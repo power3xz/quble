@@ -1,6 +1,6 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{ArgValue, AttrValue, Context, Event, LitValue, Node, Prop, Type, VarRef};
+use crate::ast::{ArgValue, AttrValue, Context, Event, ForCount, LitValue, Node, Prop, Type, VarRef};
 use crate::resolve::FlatComp;
 use bytecode::{
     encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
@@ -529,6 +529,26 @@ fn emit_node(
             }
 
             code.push(Op::IfEnd as u8);
+        }
+        Node::For { count, body, .. } => {
+            // count 출처로 opcode를 가른다 - 리터럴은 값 직접(ForRaw), prop은 scope index(ForScopeIndex).
+            match count {
+                ForCount::Literal(n) => {
+                    code.push(Op::ForRaw as u8);
+                    code.extend_from_slice(&n.to_le_bytes());
+                }
+                ForCount::Var(var) => {
+                    let scope_index = var_ref_to_scope_index(var, props)?;
+                    code.push(Op::ForScopeIndex as u8);
+                    code.extend_from_slice(&scope_index.to_le_bytes());
+                }
+            }
+
+            for node in body {
+                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+            }
+
+            code.push(Op::ForEnd as u8);
         }
         Node::With { context, children } => {
             // context_index는 이 컴포넌트 contexts에서 이름으로 찾는다(선언 순서 = index,

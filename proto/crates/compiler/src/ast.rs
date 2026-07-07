@@ -103,12 +103,28 @@ pub enum Node {
         then: Vec<Node>,
         else_: Vec<Node>,
     },
+    /// `@for (item of count) { body }` - count 회 반복 렌더. count는 정수 리터럴 또는 숫자 prop
+    /// 참조(ForCount). item(반복 변수)은 파싱만, 몸체 참조는 다음 단계.
+    For {
+        item: String,
+        count: ForCount,
+        body: Vec<Node>,
+    },
     /// `@with Context { children }` - 자식들을 그 컨텍스트 범위로 감싼다. context는 이 컴포넌트
     /// contexts에 선언된 이름(codegen이 context_index로 해석). codegen이 EnterContext/ExitContext로 감싼다.
     With {
         context: String,
         children: Vec<Node>,
     },
+}
+
+/// `@for`의 반복 횟수 출처. codegen이 이걸로 ForRaw(리터럴) / ForScopeIndex(prop) opcode를 가른다.
+/// - Literal: 소스에 직접 박은 정수(`of 3`). 슬롯 안 거치고 opcode에 값 인라인.
+/// - Var: 숫자 prop 참조(`of count`). 슬롯 offset을 거쳐 런타임이 값을 읽는다(STORE/CONST 위임).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ForCount {
+    Literal(u16),
+    Var(VarRef),
 }
 
 /// 속성값: 정적 문자열(`class="card"`) 또는 변수 참조(`class={x}`).

@@ -44,26 +44,47 @@
 
 @for는 세그먼트를 추가하지 않고 회차 인덱스만 관리한다.
 
-### 인덱스는 회차 속성 - 몸체 각 자식 세그먼트에 균일 접미
+### 인덱스 세그먼트 - 자식 컴포넌트에 접미, 없으면 익명 세그먼트
 
-인덱스 `[$n]`은 특정 자식이 아니라 **@for 회차 자체의 속성**이다. 몸체 안
-모든 자식 컴포넌트 세그먼트에 동일하게 접미된다:
+`[$n]`의 n = 그 세그먼트를 감싼 @for의 **중첩 깊이**(바깥 0, 안쪽 1...).
+핸들러가 받는 `{ $0, $1 }`이 곧 바깥/안쪽 루프 인덱스와 1:1.
+
+붙는 자리는 @for 몸체 최상위가 무엇이냐로 갈린다:
+
+- **합성 자식 컴포넌트가 있으면** 그 이름에 접미:
+
+      @for (item of items) { VideoItem(@click:CLICK) {} }
+      -> List.VideoItem[$0].CLICK
+
+- **없으면(element 직속)** 익명 세그먼트 `[$n]`:
+
+      @for (item of items) { li(@click:SELECT) { {item} } }
+      -> Menu.[$0].SELECT
+
+접미 vs 분리(`[$0].VideoItem`)를 검토해 접미 채택 - fullname은 사람이 읽는
+핸들러 키라 인덱스가 대상 뒤(`VideoItem[$0]`)에 와야 읽힌다(분리는 인덱스가 앞에 떠
+안 읽힘). 대가로 컴포넌트/element 두 케이스가 생기지만 가독성을 택했다.
+
+@for는 이름(별칭)을 안 만든다 - `Items:` 같은 세그먼트를 두면 `Items.VideoItem`이
+"아이템 안에 아이템"으로 읽혀 가짜 계층이 생긴다.
+
+자식 여러 개 허용 - 각자 제 이벤트 이름이라 충돌 없다:
 
     @for (item of items) {
-      VideoItem(...) {}
-      DeleteButton(...) {}
+      VideoItem(@click:CLICK) {}
+      DeleteButton(@click:DELETE) {}
     }
     -> List.VideoItem[$0].CLICK
        List.DeleteButton[$0].DELETE
 
-서로 다른 이벤트 이름이라 충돌 없음. 자식이 하나든 여럿이든 규칙이 같아,
-"단일 자식 강제"(인덱스 붙일 곳 모호 회피용 제약)가 필요 없다.
-순수 DOM 노드(이벤트 없음)는 세그먼트가 없으니 인덱스와 무관.
+중첩은 각 세그먼트가 자기 @for 깊이의 인덱스를 이음. 깊이는 use-site에서 누적된다 -
+@for가 서로 다른 컴포넌트에 있어도 이어받는다(리셋 X, fullname이 use-site 결정이므로):
 
-중첩은 스택 깊이만큼:
+    @for (row of rows) { Row() { @for (cell of row) { Cell(@click:PICK) {} } } }
+    -> List.Row[$0].Cell[$1].PICK
 
-    @for (row of rows) { Row() { @for (cell of row) { Cell(...) } } }
-    -> List.Row[$0].Cell[$1].CLICK
+    @for (x of xs) { div() { @for (y of ys) { span(@click:C) {} } } }
+    -> Menu.[$0].[$1].C
 
 ### 이름은 정적 템플릿 하나 - 인덱스값은 분리 전달
 
@@ -115,21 +136,26 @@ count 구독을 안 하므로, 반응형 프레임워크가 회차마다 지는 
 ## opcode
 
 - `FOR_RAW <count:u16>` - 리터럴 count. operand에 값 직접(pool 안 거침).
-- `FOR_LEAF_VALUE <offset:u16>` - store 숫자값. 슬롯 offset을 받아
-  `store.get(store.leafOf(ref))`로 count 확정. 슬롯 kind가 CONST(부모가
-  리터럴로 준 prop)면 pool 직접 - @if 조건과 동형으로 위임 흡수. 그래서
-  종류는 이 둘로 고정(FOR_CONST 불필요).
+- `FOR_SCOPE_INDEX <offset:u16>` - 숫자 prop. operand는 count의 scope index
+  (슬롯 offset). 런타임이 그 슬롯 값을 횟수로(STORE면 store 값, CONST면 pool -
+  @if 조건과 동형 위임). 종류는 이 둘로 고정(FOR_CONST 불필요).
 - `FOR_END` - 몸체 끝 마커(IF_END 동형).
 
 워킹 스택 opcode(PUSH_SCOPE/PUSH_RAW/POP_*)는 도입 검토했으나 폐기 -
-FOR가 출처별로 갈리면(FOR_RAW/FOR_LEAF_VALUE) operand로 값 출처를 직접 들어
+FOR가 출처별로 갈리면(FOR_RAW/FOR_SCOPE_INDEX) operand로 값 출처를 직접 들어
 스택 경유가 불필요. @if가 조건 슬롯 offset을 operand로 직접 드는 것과 같은 구조.
 
-## 인덱스 세그먼트 접미 - codegen이 굳힌다
+## 인덱스 세그먼트 - codegen이 굳힌다
 
-`VideoItem[$0]`은 @for 밖에선 `VideoItem`, 안에선 `VideoItem[$0]`으로 문맥
-의존적. codegen이 "이 자식은 @for 깊이 d 안" 정보로 `VideoItem[$0]` 세그먼트
-상수를 pool에 넣는다(런타임 분기 제거). PushPathSegment 경로 그대로.
+세그먼트에 `[$n]`을 접미하는 건 codegen이 한다(런타임 분기 제거). @for 깊이 d를
+알고:
+
+- 몸체 자식 컴포넌트: 세그먼트 상수를 `VideoItem[$0]`으로 굳혀 PushPathSegment.
+  (@for 밖 같은 컴포넌트는 `VideoItem` - use-site 의존적이나 codegen이 확정.)
+- 몸체가 element 직속(세그먼트 만드는 컴포넌트 없음): 익명 세그먼트 `[$0]`을
+  PushPathSegment로 낸다.
+
+깊이는 use-site 누적 - 자식 컴포넌트로 내려가도 이어진다(dts와 동일 규칙).
 
 ## 닫힌 결정
 
