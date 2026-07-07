@@ -53,6 +53,10 @@ pub enum Op {
     ForScopeIndex = 0x16,
     /// `@for` 몸체 끝 마커(operand 없음, IfEnd 동형).
     ForEnd = 0x17,
+    /// 합성 경로에 @for 인덱스 세그먼트를 민다. operand: @for 깊이 u16(loopIndexStack에서 읽을
+    /// 위치). 런타임이 그 회차 인덱스를 직전 이름 세그먼트에 접미(VideoItem[3])하거나, 직전
+    /// 이름이 없으면 익명 세그먼트([3])로. PushPathSegment와 짝지어(둘 다 뒤 RENDER/발화가 소비).
+    PushPathIndexSegment = 0x18,
 }
 
 impl Op {
@@ -83,6 +87,7 @@ impl Op {
             0x15 => Op::ForRaw,
             0x16 => Op::ForScopeIndex,
             0x17 => Op::ForEnd,
+            0x18 => Op::PushPathIndexSegment,
             _ => return None,
         })
     }

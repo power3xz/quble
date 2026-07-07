@@ -87,6 +87,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 &comp.events,
                 &comp.contexts,
                 &comp_lookup,
+                ForScope::ROOT,
                 &mut pool,
                 &mut code,
             )?;
@@ -380,12 +381,26 @@ fn lit_to_const(lit: &LitValue) -> Const {
     }
 }
 
+/// @for 세그먼트 상태. pending: 아직 세그먼트에 못 실은 @for 깊이들(다음 PushPathSegment/이벤트가
+/// 접미로 소비, 소비되면 비움). depth_base: 다음 @for가 쓸 깊이(use-site부터 누적 - 컴포넌트가
+/// pending을 소비해도 이어진다). dts.rs walk_nodes와 같은 규칙 - 문자열 대신 PushPathIndexSegment로 낸다.
+#[derive(Clone, Copy)]
+struct ForScope<'a> {
+    pending: &'a [u16],
+    depth_base: u16,
+}
+
+impl ForScope<'_> {
+    const ROOT: ForScope<'static> = ForScope { pending: &[], depth_base: 0 };
+}
+
 fn emit_node(
     node: &Node,
     props: &[Prop],
     events: &[Event],
     contexts: &[Context],
     comp_lookup: &CompLookup,
+    for_scope: ForScope,
     pool: &mut ConstPool,
     code: &mut Vec<u8>,
 ) -> Result<(), CodegenError> {
@@ -410,6 +425,16 @@ fn emit_node(
 
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
+
+            // @for 직속 element(세그먼트 만드는 컴포넌트 없이)에서 이벤트가 나면 익명 인덱스
+            // 세그먼트를 먼저 민다([$0].SELECT). pending의 각 깊이마다 하나씩 - 발화 시 런타임이
+            // 직전 이름 세그먼트가 없어 익명으로 조립한다. 이벤트가 없으면 굳이 안 낸다.
+            if !event_bindings.is_empty() {
+                for depth in for_scope.pending {
+                    code.push(Op::PushPathIndexSegment as u8);
+                    code.extend_from_slice(&depth.to_le_bytes());
+                }
+            }
 
             // 이벤트 바인딩 - 속성과 같은 자리(여는 태그 진행 중). event_index는 이 컴포넌트
             // events에서 이벤트명으로 찾는다(선언 순서 = index).
@@ -450,8 +475,10 @@ fn emit_node(
 
             code.push(Op::ElemCloseOpen as u8);
 
+            // element는 세그먼트를 안 만든다 - 자식으로 for_scope를 그대로 흘려보낸다
+            // (같은 @for 안 중첩 element가 같은 인덱스를 이벤트에 실을 수 있게 pending 유지).
             for child in children {
-                emit_node(child, props, events, contexts, comp_lookup, pool, code)?;
+                emit_node(child, props, events, contexts, comp_lookup, for_scope, pool, code)?;
             }
 
             // END는 operand 없음 - 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
@@ -508,6 +535,14 @@ fn emit_node(
             code.push(Op::PushPathSegment as u8);
             code.extend_from_slice(&segment_index.to_le_bytes());
 
+            // @for 안이면 이 세그먼트가 pending 인덱스를 접미한다(VideoItem[$0]). 깊이는 컴포넌트-로컬
+            // (자기 컴포넌트 안 @for만 0,1,2). use-site 누적은 런타임 loopIndexStack이 합성한다.
+            for depth in for_scope.pending {
+                code.push(Op::PushPathIndexSegment as u8);
+                code.extend_from_slice(&depth.to_le_bytes());
+            }
+
+            // RENDER는 자식 def(별도 코드)로 넘어간다 - for_scope는 안 흐른다(자식은 자기 ROOT부터).
             code.push(Op::Render as u8);
             code.extend_from_slice(&child_id.to_le_bytes());
         }
@@ -518,13 +553,13 @@ fn emit_node(
             code.extend_from_slice(&scope_index.to_le_bytes());
 
             for node in then {
-                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
             }
 
             if !else_.is_empty() {
                 code.push(Op::Else as u8);
                 for node in else_ {
-                    emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+                    emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
                 }
             }
 
@@ -544,8 +579,16 @@ fn emit_node(
                 }
             }
 
+            // @for 진입 - depth_base를 pending에 추가(다음 세그먼트/이벤트가 접미), 다음 @for는
+            // depth_base+1. 컴포넌트-로컬 깊이라 자식 컴포넌트로 안 넘어간다(RENDER가 경계).
+            let mut nested = for_scope.pending.to_vec();
+            nested.push(for_scope.depth_base);
+            let body_scope = ForScope {
+                pending: &nested,
+                depth_base: for_scope.depth_base + 1,
+            };
             for node in body {
-                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, body_scope, pool, code)?;
             }
 
             code.push(Op::ForEnd as u8);
@@ -562,7 +605,7 @@ fn emit_node(
             code.extend_from_slice(&context_index.to_le_bytes());
 
             for node in children {
-                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
             }
 
             // ExitContext는 operand 없는 마커(IfEnd 동형).

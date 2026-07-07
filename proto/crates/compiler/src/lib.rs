@@ -421,6 +421,125 @@ mod tests {
         assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
     }
 
+    /// 컴포넌트 상수풀에서 문자열의 인덱스를 찾는다(테스트용 - 세그먼트 operand 확인).
+    fn str_index(module: &bytecode::Module, s: &str) -> u16 {
+        (0..)
+            .find(|&i| str_at(module, i) == Some(s))
+            .expect("문자열이 상수풀에 있어야")
+    }
+
+    /// @for 안 자식 컴포넌트는 PushPathSegment(Row) 직후 PushPathIndexSegment(깊이 0)를 낸다
+    /// (런타임이 Row[$0]으로 접미 조립). 깊이는 컴포넌트-로컬.
+    #[test]
+    fn for_component_pushes_index_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component List { template { @for (item of 3) { Row: Inner() {} } } }
+            component Inner {
+              events { PICK({ id: "x" }) }
+              template { button(@click:PICK) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // PushPathSegment(Row) 다음 바로 PushPathIndexSegment(0) - 접미 관계.
+        let mut seq = vec![Op::PushPathSegment as u8];
+        seq.extend_from_slice(&str_index(&module, "Row").to_le_bytes());
+        seq.push(Op::PushPathIndexSegment as u8);
+        seq.extend_from_slice(&0u16.to_le_bytes());
+        assert!(
+            code.windows(seq.len()).any(|w| w == seq.as_slice()),
+            "PushPathSegment(Row) 직후 PushPathIndexSegment(0):\n{code:?}",
+        );
+    }
+
+    /// @for 안 중첩 @for는 컴포넌트-로컬 깊이 0,1을 각각 낸다 - Row 세그먼트가 [$0][$1] 둘 다 접미.
+    #[test]
+    fn nested_for_local_depths() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component List {
+              template {
+                @for (a of 3) { @for (b of 3) { Row: Inner() {} } }
+              }
+            }
+            component Inner {
+              events { PICK({ id: "x" }) }
+              template { button(@click:PICK) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // PushPathSegment(Row) 다음 PushPathIndexSegment(0) 그다음 (1) - 세그먼트가 둘 다 접미.
+        let mut seq = vec![Op::PushPathSegment as u8];
+        seq.extend_from_slice(&str_index(&module, "Row").to_le_bytes());
+        seq.push(Op::PushPathIndexSegment as u8);
+        seq.extend_from_slice(&0u16.to_le_bytes());
+        seq.push(Op::PushPathIndexSegment as u8);
+        seq.extend_from_slice(&1u16.to_le_bytes());
+        assert!(
+            code.windows(seq.len()).any(|w| w == seq.as_slice()),
+            "Row 세그먼트가 인덱스 0,1을 연달아 접미:\n{code:?}",
+        );
+    }
+
+    /// @for 직속 element 이벤트는 익명 인덱스 세그먼트를 낸다(런타임이 [$0]으로 조립).
+    #[test]
+    fn for_element_pushes_index_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Menu {
+              events { SELECT({ i: "x" }) }
+              template { @for (item of 3) { li(@click:SELECT) {} } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // 익명 PushPathIndexSegment(0) 직후 BindEvent - 이벤트 앞에 인덱스 세그먼트가 실린다.
+        let mut seq = vec![Op::PushPathIndexSegment as u8];
+        seq.extend_from_slice(&0u16.to_le_bytes());
+        seq.push(Op::BindEvent as u8);
+        assert!(
+            code.windows(seq.len()).any(|w| w == seq.as_slice()),
+            "익명 PushPathIndexSegment(0) 직후 BindEvent:\n{code:?}",
+        );
+    }
+
+    /// @for 밖 컴포넌트는 PushPathIndexSegment를 안 낸다(회귀).
+    #[test]
+    fn outside_for_no_index_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component List { template { Row: Inner() {} } }
+            component Inner {
+              events { PICK({ id: "x" }) }
+              template { button(@click:PICK) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        assert!(
+            !code.contains(&(Op::PushPathIndexSegment as u8)),
+            "@for 밖은 인덱스 세그먼트 없음:\n{code:?}",
+        );
+    }
+
     /// count 리터럴이 u16 상한을 넘으면 파싱 에러(0..=65535).
     #[test]
     fn for_count_over_u16_rejected() {
