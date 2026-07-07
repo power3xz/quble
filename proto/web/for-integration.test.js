@@ -16,6 +16,7 @@ before(() => {
     "for_count",
     "for_event_component",
     "for_event_element",
+    "for_nested_render",
   ]) {
     qubb[name] = buildFixture(name);
   }
@@ -59,6 +60,28 @@ test("@for 안 자식 컴포넌트: fullname Item[$0], 발화 시 $0 회차 인�
   buttons[2].click();
   buttons[0].click();
   assert.deepEqual(picks, [2, 0], "클릭한 회차의 $0가 전달된다");
+});
+
+// RENDER로 진입한 자식 안의 @for가 여러 노드를 조립할 때 하나도 안 새는지 - 라이브 NodeList를
+// for-of로 돌며 appendChild하면 컬렉션이 실시간으로 줄어 인덱스가 밀려 노드를 건너뛰던 회귀
+// (ISSUES.md 해결됨 참고). 3x4=12장이 전부 렌더되고 두 뎁스 인덱스가 12조합 다 나와야 한다.
+test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누락 없음", () => {
+  const fired = [];
+  const { host } = instantiate("for_nested_render", [], {}, {
+    "Mid.Col[$0].Card[$1].PICK": (data, { $0, $1 }) => {
+      fired.push([$0, $1]);
+    },
+  });
+  const buttons = [...host.querySelectorAll("button")];
+  assert.equal(buttons.length, 12, "3x4 = 12장이 전부 렌더된다(누락 없음)");
+  buttons.forEach((b) => b.click());
+  const expected = [];
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 4; j++) {
+      expected.push([i, j]);
+    }
+  }
+  assert.deepEqual(fired, expected, "두 뎁스 회차 인덱스가 12조합 전부 순서대로");
 });
 
 test("@for 직속 element: fullname 익명 [$0], 발화 시 $0", () => {

@@ -896,8 +896,10 @@ const compileDef = (
               loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
               loopIndexStack.length, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이
             );
-            for (const node of childFragment.childNodes) {
-              nodeTop().appendChild(node);
+            // firstChild 루프 - childNodes는 라이브라 for-of 중 appendChild가 노드를
+            // 떼어내면 인덱스가 밀려 건너뛴다. fragment가 빌 때까지 앞에서 옮긴다.
+            while (childFragment.firstChild) {
+              nodeTop().appendChild(childFragment.firstChild);
             }
             break;
           }
@@ -1029,8 +1031,10 @@ const compileDef = (
                 [...loopIndexStack, i], // 이 회차 인덱스를 쌓아 넘긴다(발화 시 $n)
                 loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
               );
-              for (const node of f.childNodes) {
-                nodeTop().appendChild(node);
+              // firstChild 루프 - childNodes는 라이브라 for-of 중 appendChild가 노드를
+              // 떼어내면 인덱스가 밀려 건너뛴다. fragment가 빌 때까지 앞에서 옮긴다.
+              while (f.firstChild) {
+                nodeTop().appendChild(f.firstChild);
               }
             }
             pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.

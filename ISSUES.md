@@ -2,6 +2,18 @@
 
 알려진 문제를 추적한다. 증상·재현만 적고 해결책은 정해지면 채운다(방법 미정이면 비워 둔다).
 
+## 해결됨
+
+- **라이브 NodeList 순회로 노드 누락 (@for 다중 노드에서 발각)** - runtime.js가 fragment의
+  자식을 부모에 붙일 때 `for (const node of fragment.childNodes) parent.appendChild(node)`로
+  돌았다. `childNodes`는 라이브라 `appendChild`가 노드를 fragment에서 떼어낼 때마다 컬렉션이
+  줄어 인덱스가 밀리고, 매 순회 한 노드씩 건너뛴다. 단일 노드 컴포넌트에선 안 드러났고, `@for`가
+  여러 노드를 조립하면서 발각됐다. 중첩마다 누락이 곱해져 10x100x100=10만이 6250으로, 발화
+  인덱스도 `$2`가 건너뛴 값으로 나왔다. (재현: `bench/components/forstress.qubc` 또는 RENDER로
+  진입한 자식의 최상위 `@for`가 여러 카드를 낼 때.) **해결:** 두 조립 지점(RENDER 자식 붙이기,
+  `@for` 회차 붙이기)을 `while (fragment.firstChild) parent.appendChild(fragment.firstChild)`
+  스냅샷 순회로 바꿨다. 다른 `childNodes` 사용처는 이미 `Array.from`으로 스냅샷을 떠 안전했다.
+
 ## 미해결
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
