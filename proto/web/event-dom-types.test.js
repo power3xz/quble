@@ -29,7 +29,7 @@ test("@input은 input 이벤트에 리스너를 달아 핸들러를 부른다", 
       called += 1;
     },
   });
-  input.dispatchEvent(new Event("input"));
+  input.dispatchEvent(new Event("input", { bubbles: true }));
   assert.equal(called, 1, "input 이벤트로 핸들러 1회 호출");
 });
 
@@ -40,6 +40,6 @@ test("@input 핸들러는 click에는 반응하지 않는다(이벤트 종류 �
       called += 1;
     },
   });
-  input.dispatchEvent(new Event("click"));
+  input.dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(called, 0, "click으로는 input 핸들러 안 불림");
 });

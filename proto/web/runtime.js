@@ -480,6 +480,61 @@ const compiledStepsOf = (module, typeRef) => {
   return module.compiledSteps[typeRef];
 };
 
+// ── 이벤트 위임 ──────────────────────────────────────────────────────
+// element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
+// element -> 발화 바인딩을 WeakMap에 심고 document에 DOM 이벤트 타입별 위임 리스너 하나만 단다.
+// 발화 시 target에서 위로 올라가며 첫 바인딩을 찾아 디스패치하고 멈춘다(자기 선에서 버블 끊기와
+// 동등 - 조상의 같은 타입 위임으로 새지 않는다). 바인딩은 인스턴스 스코프 값(handlers/store/module)을
+// 함께 담아 위임 리스너에서 복원한다.
+const eventBindings = new WeakMap();
+const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 타입(중복 설치 방지)
+
+// 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
+const dispatchBinding = (b, domEventObject) => {
+  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module } = b;
+  const data = {};
+  for (const p of payload) {
+    data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
+  }
+  const context = {};
+  for (const ctxName in contextLeaves) {
+    const values = {};
+    for (const p of contextLeaves[ctxName]) {
+      values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
+    }
+    context[ctxName] = values;
+  }
+  handlers[fullName]?.(data, {
+    event: domEventObject,
+    set: store.set,
+    get: store.get,
+    props,
+    context,
+    ...loopIndices,
+  });
+};
+
+// domEvent 타입의 위임 리스너를 document에 (한 번만) 단다. target -> 조상 순회로 첫 바인딩을
+// 찾아 발화하고 멈춘다. 같은 타입 바인딩이 있는 element만 매칭한다.
+const ensureDelegate = (domEvent) => {
+  if (installedDelegates.has(domEvent)) {
+    return;
+  }
+  installedDelegates.add(domEvent);
+  document.addEventListener(domEvent, (domEventObject) => {
+    let node = domEventObject.target;
+    while (node && node !== document) {
+      const bound = eventBindings.get(node);
+      const b = bound && bound[domEvent];
+      if (b) {
+        dispatchBinding(b, domEventObject);
+        return; // 첫 매칭에서 멈춤 - 자기 선에서 버블 끊기와 동등
+      }
+      node = node.parentNode;
+    }
+  });
+};
+
 // qubb 바이트를 모듈로 디코드한다(상수풀/def 테이블/코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
@@ -746,44 +801,25 @@ const compileDef = (
             for (let i = 0; i < loopIndexStack.length; i++) {
               loopIndices["$" + i] = loopIndexStack[i];
             }
+            // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
+            // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
             const el = pending;
-            el.addEventListener(domEvent, (domEventObject) => {
-              // 위임 리스너는 자기 선에서 버블을 끊는다(디폴트). fullname은 박힌 위치 하나로
-              // 디스패치되며, 조상 요소의 같은 DOM 이벤트 위임으로 새지 않는다. 끄는 옵션은 미정.
-              domEventObject.stopPropagation();
-              // data: 발생 시점 조립값. 스칼라면 값, 객체면 중첩 객체(steps는 여기서 lazy 컴파일).
-              const data = {};
-              for (const p of payload) {
-                data[p.name] = assemble(
-                  compiledStepsOf(module, p.typeRef),
-                  p.fieldSourcePairs,
-                  store,
-                  module,
-                );
-              }
-              // context: 발생 시점 조립값. context.<이름>.<필드> = 조립값(스칼라/객체). payload와 동형.
-              const context = {};
-              for (const ctxName in contextLeaves) {
-                const values = {};
-                for (const p of contextLeaves[ctxName]) {
-                  values[p.name] = assemble(
-                    compiledStepsOf(module, p.typeRef),
-                    p.fieldSourcePairs,
-                    store,
-                    module,
-                  );
-                }
-                context[ctxName] = values;
-              }
-              handlers[fullName]?.(data, {
-                event: domEventObject,
-                set: store.set,
-                get: store.get,
-                props,
-                context,
-                ...loopIndices,
-              });
-            });
+            let bound = eventBindings.get(el);
+            if (!bound) {
+              bound = {};
+              eventBindings.set(el, bound);
+            }
+            bound[domEvent] = {
+              handlers,
+              fullName,
+              payload,
+              contextLeaves,
+              props,
+              loopIndices,
+              store,
+              module,
+            };
+            ensureDelegate(domEvent);
             break;
           }
           case OP.ELEM_CLOSE_OPEN: {
@@ -887,7 +923,9 @@ const compileDef = (
               childArgumentSourcePairs,
               childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
               childDef.contexts, // 자식 ENTER_CONTEXT는 자식 def의 컨텍스트 테이블을 본다
-              [...activeContexts], // 부모 활성 컨텍스트를 물려준다(자식이 부모 배열을 안 건드리게 복사)
+              activeContexts, // 부모 활성 컨텍스트를 공유로 물려준다 - 자식의 ENTER/EXIT_CONTEXT는
+              // @with 경계마다 push/pop 짝이라 자식 반환 시 원상복구된다(RENDER는 반환 후
+              // activeContexts를 다시 읽지 않아 오염 여지도 없다). 매 RENDER의 [...] 복사 제거.
               childDef.codeOff,
               childDef.codeOff + childDef.codeLen,
               startRegionIndex,
@@ -896,11 +934,10 @@ const compileDef = (
               loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
               loopIndexStack.length, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이
             );
-            // firstChild 루프 - childNodes는 라이브라 for-of 중 appendChild가 노드를
-            // 떼어내면 인덱스가 밀려 건너뛴다. fragment가 빌 때까지 앞에서 옮긴다.
-            while (childFragment.firstChild) {
-              nodeTop().appendChild(childFragment.firstChild);
-            }
+            // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
+            // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
+            // 라이브라 순회 중 인덱스가 밀려 건너뛴다.
+            nodeTop().appendChild(childFragment);
             break;
           }
           case OP.IF: {
@@ -1017,6 +1054,11 @@ const compileDef = (
             const bodyStart = pc;
             const forEndPc = forBodyEnd(code, bodyStart);
             for (let i = 0; i < count; i++) {
+              // 회차 인덱스를 공유 스택에 push -> 재귀 -> pop. 매 회차 [...stack, i] 복사 대신
+              // 배열 하나를 재사용한다(10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된
+              // 상태에서 완료되고, 발화 인덱스는 BIND_EVENT가 바인딩 시점에 loopIndices로
+              // 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
+              loopIndexStack.push(i);
               const f = interpret(
                 code,
                 argumentSourcePairs,
@@ -1028,14 +1070,14 @@ const compileDef = (
                 startRegionIndex,
                 startBranchIndex,
                 pathPrefix,
-                [...loopIndexStack, i], // 이 회차 인덱스를 쌓아 넘긴다(발화 시 $n)
+                loopIndexStack, // 회차 값을 물려준다(발화 시 $n)
                 loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
               );
-              // firstChild 루프 - childNodes는 라이브라 for-of 중 appendChild가 노드를
-              // 떼어내면 인덱스가 밀려 건너뛴다. fragment가 빌 때까지 앞에서 옮긴다.
-              while (f.firstChild) {
-                nodeTop().appendChild(f.firstChild);
-              }
+              loopIndexStack.pop();
+              // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
+              // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
+              // 라이브라 순회 중 인덱스가 밀려 건너뛴다.
+              nodeTop().appendChild(f);
             }
             pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
             break;
