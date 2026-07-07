@@ -1,0 +1,5 @@
+
+component D1 { template { div() { @for (a of 10) { Row: D2() {} } } } }
+component D2 { template { @for (b of 50) { Col: D3() {} } } }
+component D3 { template { @for (c of 50) { Card: Leaf() {} } } }
+component Leaf { template { div(class="card") { div(class="card__name"){"Jane"} div(class="card__job"){"Eng"} div(class="card__loc"){"Seoul"} } } }

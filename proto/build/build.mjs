@@ -117,7 +117,17 @@ ${preloads.join("\n")}
   <div id="quble-app"></div>
   <script type="module">
     import { mount } from "./quble-runtime.js";
+    // 초기 렌더 계측: mount 시작 -> 반환(디코드+인스턴스화+부착) -> rAF(페인트 후).
+    // React/Svelte 데모와 같은 방식으로 재 나란히 비교한다.
+    const t0 = performance.now();
     await mount("./${stem}.qubb", document.getElementById("quble-app"), ${data});
+    const mounted = performance.now();
+    requestAnimationFrame(() => {
+      const painted = performance.now();
+      console.log(
+        \`[quble] mount \${(mounted - t0).toFixed(1)}ms, 페인트까지 \${(painted - t0).toFixed(1)}ms\`,
+      );
+    });
   </script>
 </body>
 </html>

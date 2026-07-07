@@ -13,7 +13,7 @@ component Depth1 {
 
 component Depth2 {
   template {
-    @for (b of 100) {
+    @for (b of 50) {
       Col: Depth3() {}
     }
   }
