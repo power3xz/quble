@@ -362,6 +362,93 @@ mod tests {
         );
     }
 
+    /// `@for (x of N)` 리터럴 count가 끝까지(렉서 -> 파서 -> codegen) 흐르는지.
+    /// ForRaw operand에 count 값이 직접 실리고 FOR_END로 닫힌다.
+    #[test]
+    fn compiles_for_literal_count() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              template {
+                @for (item of 3) {
+                  div() { "x" }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        let mut for_raw = vec![Op::ForRaw as u8];
+        for_raw.extend_from_slice(&3u16.to_le_bytes());
+        assert!(
+            code.windows(for_raw.len()).any(|w| w == for_raw.as_slice()),
+            "ForRaw count=3 이 코드에 있어야",
+        );
+        assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
+    }
+
+    /// `@for (x of count)` prop count는 ForScopeIndex + count의 scope index.
+    #[test]
+    fn compiles_for_prop_count() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { count: number }
+              template {
+                @for (item of count) {
+                  div() { "x" }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // count는 유일한 prop이라 scope index 0.
+        let mut for_scope = vec![Op::ForScopeIndex as u8];
+        for_scope.extend_from_slice(&0u16.to_le_bytes());
+        assert!(
+            code.windows(for_scope.len()).any(|w| w == for_scope.as_slice()),
+            "ForScopeIndex index=0 이 코드에 있어야",
+        );
+        assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
+    }
+
+    /// count 리터럴이 u16 상한을 넘으면 파싱 에러(0..=65535).
+    #[test]
+    fn for_count_over_u16_rejected() {
+        let src = r#"
+            component C {
+              template { @for (x of 70000) { div() {} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// `of` 없이 쓰면 파싱 에러.
+    #[test]
+    fn for_missing_of_rejected() {
+        let src = r#"
+            component C {
+              template { @for (x 3) { div() {} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
     /// contexts 필드 단축형 `key`는 `key: key`(Scope)로 푼다 - payload 단축형과 같은 규칙.
     #[test]
     fn context_field_shorthand() {
