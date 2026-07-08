@@ -122,7 +122,7 @@ const readFields = (r) => {
 // qubb 바이트를 모듈로 디코드한다(상수풀·def 테이블·코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
-// @returns     { pool, defs, code }
+// @returns     { constpool, defs, code }
 const decode = (bytes) => {
   const r = new Reader(bytes);
   const magic = r.take(4);
@@ -136,9 +136,9 @@ const decode = (bytes) => {
 
   const poolCount = r.u16();
   const poolStart = r.pos; // count 헤더 직후 - 풀 항목들의 직렬화 바이트 시작
-  const pool = [];
+  const constpool = [];
   for (let i = 0; i < poolCount; i++) {
-    pool.push(r.constant());
+    constpool.push(r.constant());
   }
   const poolBytes = r.pos - poolStart; // 항목들(각 태그 + 타입별 payload)의 총 바이트
 
@@ -165,7 +165,7 @@ const decode = (bytes) => {
 
   const codeLen = r.u32();
   const code = r.take(codeLen);
-  return { pool, poolBytes, defs, code };
+  return { constpool, poolBytes, defs, code };
 };
 
 // 속성값 안의 따옴표를 이스케이프해 qubc 문자열 리터럴로 만든다.
@@ -174,13 +174,13 @@ const quote = (s) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 // 필드 하나를 qubc 선언 조각으로 복원. Scope(변수)는 argN - 필드명과 같으면 shorthand,
 // 다르면 `field: argN`. Const(리터럴)는 `field: "값"`.
 //
-// @param module { pool }
+// @param module { constpool }
 // @param field  { nameConstIndex, isConst, index }
 // @returns      "field" | "field: argN" | 'field: "값"'
 const fieldDecl = (module, field) => {
-  const name = module.pool[field.nameConstIndex];
+  const name = module.constpool[field.nameConstIndex];
   if (field.isConst) {
-    return name + ": " + quote(module.pool[field.index]);
+    return name + ": " + quote(module.constpool[field.index]);
   }
   const prop = "arg" + field.index;
   return name === prop ? name : name + ": " + prop;
@@ -226,7 +226,7 @@ const decompileBody = (module, def) => {
   // 자식 def명 복원(별칭 미구현 -> 일반 컴포넌트명).
   const compName = (compId) => {
     const childDef = module.defs[compId];
-    return childDef ? module.pool[childDef.nameConstIndex] : "Comp" + compId;
+    return childDef ? module.constpool[childDef.nameConstIndex] : "Comp" + compId;
   };
 
   // 여는 태그를 누적하는 상태. ELEM_OPEN이 열고 ATTR_*가 채우고 CLOSE_OPEN/END가 닫는다.
@@ -263,22 +263,22 @@ const decompileBody = (module, def) => {
         attrs = [];
         break;
       case OP.ATTR_G:
-        attrs.push(ATTRS[u16()] + "=" + quote(module.pool[u16()]));
+        attrs.push(ATTRS[u16()] + "=" + quote(module.constpool[u16()]));
         break;
       case OP.ATTR_L:
-        attrs.push(module.pool[u16()] + "=" + quote(module.pool[u16()]));
+        attrs.push(module.constpool[u16()] + "=" + quote(module.constpool[u16()]));
         break;
       case OP.ATTR_G_VAR:
         attrs.push(ATTRS[u16()] + "={" + seenArg(u16(), "string") + "}");
         break;
       case OP.ATTR_L_VAR:
-        attrs.push(module.pool[u16()] + "={" + seenArg(u16(), "string") + "}");
+        attrs.push(module.constpool[u16()] + "={" + seenArg(u16(), "string") + "}");
         break;
       case OP.ELEM_CLOSE_OPEN:
         flushOpen(false);
         break;
       case OP.TEXT:
-        lines.push(pad() + quote(module.pool[u16()]));
+        lines.push(pad() + quote(module.constpool[u16()]));
         break;
       case OP.TEXT_VAR:
         lines.push(pad() + "{" + seenArg(u16(), "string") + "}");
@@ -292,7 +292,7 @@ const decompileBody = (module, def) => {
         break;
       case OP.PUSH_ARG_LIT:
         // 리터럴 인자: 부모 변수가 아니라 상수풀 값. `argN="lit"`으로 복원(변수의 `={x}`와 구분).
-        pendingArgs.push({ kind: "lit", text: quote(module.pool[u16()]) });
+        pendingArgs.push({ kind: "lit", text: quote(module.constpool[u16()]) });
         break;
       case OP.RENDER: {
         const name = compName(u16());
@@ -343,18 +343,18 @@ const decompileBody = (module, def) => {
         // 여는 태그에 리스너를 묶는다 -> 속성처럼 한 줄에 합친다. `@click:EVENT`.
         const domEvent = DOM_EVENTS[u16()];
         const event = def.events[u16()];
-        attrs.push("@" + domEvent + ":" + module.pool[event.nameConstIndex]);
+        attrs.push("@" + domEvent + ":" + module.constpool[event.nameConstIndex]);
         break;
       }
       case OP.PUSH_PATH_SEGMENT:
         // 다음 RENDER가 쓸 세그먼트를 잡는다. type-name과 같으면 무명, 다르면 use-site alias라
         // `Alias: Comp(...)`로 복원한다. (이벤트 fullname 산출은 별도: collectEventFullnames.)
-        pendingSegment = module.pool[u16()];
+        pendingSegment = module.constpool[u16()];
         break;
       // @with 블록. IF와 같은 패턴 - 열고 depth++, ExitContext가 depth-- 하고 닫는다.
       // context_index로 def.contexts에서 컨텍스트명을 복원한다.
       case OP.ENTER_CONTEXT: {
-        const ctxName = module.pool[def.contexts[u16()].nameConstIndex];
+        const ctxName = module.constpool[def.contexts[u16()].nameConstIndex];
         lines.push(pad() + "@with " + ctxName + " {");
         depth += 1;
         break;
@@ -402,7 +402,7 @@ export const decompileComponent = (module, compId, resources = []) => {
   if (!def) {
     throw new Error("bad component " + compId);
   }
-  const name = module.pool[def.nameConstIndex];
+  const name = module.constpool[def.nameConstIndex];
   const { lines, maxArg, uses, resIds } = decompileBody(module, def);
 
   const out = [];
@@ -429,7 +429,7 @@ export const decompileComponent = (module, compId, resources = []) => {
   // contexts 블록 복원. `ContextName { 필드 }` - 필드는 events와 같은 인코딩이라 fieldDecl 공유.
   if (def.contexts.length > 0) {
     const decls = def.contexts.map((ctx) => {
-      const ctxName = module.pool[ctx.nameConstIndex];
+      const ctxName = module.constpool[ctx.nameConstIndex];
       const fields = ctx.fields.map((f) => fieldDecl(module, f));
       return ctxName + " { " + fields.join(", ") + " }";
     });
@@ -440,7 +440,7 @@ export const decompileComponent = (module, compId, resources = []) => {
   // Const: 리터럴 문자열({ field: "값" }).
   if (def.events.length > 0) {
     const decls = def.events.map((event) => {
-      const eventName = module.pool[event.nameConstIndex];
+      const eventName = module.constpool[event.nameConstIndex];
       const fields = event.fields.map((f) => fieldDecl(module, f));
       return eventName + "({ " + fields.join(", ") + " })";
     });
@@ -540,7 +540,7 @@ export const collectEventFullnames = (module, rootCompId) => {
     while (pc < end) {
       const op = code[pc++];
       if (op === OP.PUSH_PATH_SEGMENT) {
-        segment = module.pool[code[pc] | (code[pc + 1] << 8)];
+        segment = module.constpool[code[pc] | (code[pc + 1] << 8)];
         pc += 2;
       } else if (op === OP.PUSH_ARG) {
         // 자식 offset(등장 순서) <- 부모 offset(operand). 부모 offset을 상위로 마저 환산해 둔다.
@@ -548,17 +548,17 @@ export const collectEventFullnames = (module, rootCompId) => {
         pc += 2;
       } else if (op === OP.PUSH_ARG_LIT) {
         // 리터럴 인자 - 부모 scope 값이 아니라 상수. 여기서 체인이 끊긴다.
-        argParents.push({ kind: "lit", value: module.pool[code[pc] | (code[pc + 1] << 8)] });
+        argParents.push({ kind: "lit", value: module.constpool[code[pc] | (code[pc + 1] << 8)] });
         pc += 2;
       } else if (op === OP.ENTER_CONTEXT) {
         // 활성화되는 컨텍스트의 이름 + 필드. 필드는 payload와 같은 {field, source} 형태로,
         // Const는 리터럴값(literal type 가능), Scope는 변수 참조. def는 이 컨텍스트가 선언된 곳.
         const ctxDef = def.contexts[code[pc] | (code[pc + 1] << 8)];
         contextStack.push({
-          name: module.pool[ctxDef.nameConstIndex],
+          name: module.constpool[ctxDef.nameConstIndex],
           fields: ctxDef.fields.map((f) => ({
-            field: module.pool[f.nameConstIndex],
-            source: f.isConst ? { kind: "lit", value: module.pool[f.index] } : toRoot(f.index),
+            field: module.constpool[f.nameConstIndex],
+            source: f.isConst ? { kind: "lit", value: module.constpool[f.index] } : toRoot(f.index),
           })),
         });
         pc += 2;
@@ -579,11 +579,11 @@ export const collectEventFullnames = (module, rootCompId) => {
         pc += 2; // event_type 스킵
         const event = def.events[code[pc] | (code[pc + 1] << 8)];
         pc += 2;
-        const localName = module.pool[event.nameConstIndex];
+        const localName = module.constpool[event.nameConstIndex];
         // 필드 값 출처: Scope(변수)는 루트 기준으로 추적, Const(리터럴)는 상수값 자체가 출처.
         const payload = event.fields.map((f) => ({
-          field: module.pool[f.nameConstIndex],
-          source: f.isConst ? { kind: "lit", value: module.pool[f.index] } : toRoot(f.index),
+          field: module.constpool[f.nameConstIndex],
+          source: f.isConst ? { kind: "lit", value: module.constpool[f.index] } : toRoot(f.index),
         }));
         // 발생 시점 활성 컨텍스트. 같은 이름 겹치면 안쪽(뒤)이 이기므로 이름 기준 중복 제거(뒤 우선).
         const byName = new Map();
@@ -610,7 +610,7 @@ export const inspect = (bytes) => {
   const module = decode(bytes);
   const components = module.defs.map((def, compId) => ({
     compId,
-    name: module.pool[def.nameConstIndex],
+    name: module.constpool[def.nameConstIndex],
   }));
   return { module, components };
 };

@@ -13,7 +13,7 @@
 //
 // 값 소비 경로 (REACTIVITY.md §1~§3):
 //   offset(컴포넌트 로컬) -> argumentSourcePairs 슬롯 [kind, ref] -> kind가 STORE면 store.leafOf로
-//   leafIndex(lazy 발급) + store.get, CONST면 module.pool[ref] 직접.
+//   leafIndex(lazy 발급) + store.get, CONST면 module.constpool[ref] 직접.
 
 import {
   THEN_INDEX,
@@ -359,7 +359,7 @@ const readFields = (r) => {
 
 // field의 refs를 flat 값-소스 열 [kind, ref, kind, ref, …]로 푼다(바인딩 때 1회). 소스는
 // 슬롯과 같은 (해석방법, 참조) 쌍: STORE는 ref가 미리 푼 leafIndex(store.get용), CONST는
-// ref가 상수풀 인덱스(module.pool용). assemble이 발생 때 kind 보고 갈라 읽는다.
+// ref가 상수풀 인덱스(module.constpool용). assemble이 발생 때 kind 보고 갈라 읽는다.
 //
 // 값이 CONST로 합류하는 두 길: FieldValue가 리터럴(FV_CONST, payload에 직접 박힘)이거나,
 // FV_SCOPE가 가리킨 슬롯이 CONST(부모가 리터럴로 준 prop)거나.
@@ -401,9 +401,9 @@ const STEP_EXIT = 2;
 //
 // @param types   타입 테이블
 // @param typeRef 시작 타입
-// @param pool    상수풀(필드명 해석)
+// @param constpool 상수풀(필드명 해석)
 // @returns       [[STEP_*, key]] 평탄 열. 루트 key=null.
-const compileType = (types, typeRef, pool) => {
+const compileType = (types, typeRef, constpool) => {
   const steps = [];
   // 한 노드로 내려간다: 스칼라면 LEAF 하나로 끝, 객체면 ENTER를 내고 남은 자식 큐를 돌려준다.
   // 프레임은 "열어둔 객체의 아직 처리 안 한 자식들" - 이 큐만 상태로 든다(플래그 없음).
@@ -414,7 +414,7 @@ const compileType = (types, typeRef, pool) => {
       return null;
     }
     steps.push([STEP_ENTER, key]);
-    return t.fields.map(([nameConst, childRef]) => [pool[nameConst], childRef]);
+    return t.fields.map(([nameConst, childRef]) => [constpool[nameConst], childRef]);
   };
 
   const rootRemaining = enter(typeRef, null);
@@ -440,7 +440,7 @@ const compileType = (types, typeRef, pool) => {
 };
 
 // 조립 step 열을 실행해 값을 만든다(발생 시점). sources를 (kind, ref) 쌍 커서로 소비하며
-// STEP_LEAF에서 STORE면 store.get, CONST면 pool 직접. 루트가 스칼라(step이 STEP_LEAF 하나)면
+// STEP_LEAF에서 STORE면 store.get, CONST면 constpool 직접. 루트가 스칼라(step이 STEP_LEAF 하나)면
 // 객체로 감싸지 않고 값을 그대로 반환한다.
 //
 // @param steps   compileType 결과
@@ -454,7 +454,7 @@ const assemble = (steps, fieldSourcePairs, store, module) => {
     if (step === STEP_LEAF) {
       const kind = fieldSourcePairs[cursor++];
       const ref = fieldSourcePairs[cursor++];
-      const value = kind === CONST ? module.pool[ref] : store.get(ref);
+      const value = kind === CONST ? module.constpool[ref] : store.get(ref);
       if (key === null) {
         return value; // 루트가 스칼라 - 객체로 안 감싼다
       }
@@ -480,7 +480,7 @@ const compiledStepsOf = (module, typeRef) => {
     module.compiledSteps[typeRef] = compileType(
       module.types,
       typeRef,
-      module.pool,
+      module.constpool,
     );
   }
   return module.compiledSteps[typeRef];
@@ -563,7 +563,7 @@ const ensureDelegate = (domEvent) => {
 // qubb 바이트를 모듈로 디코드한다(상수풀/def 테이블/코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
-// @returns     { pool, defs, code }
+// @returns     { constpool, defs, code }
 const decode = (bytes) => {
   const r = new Reader(bytes);
   const magic = r.take(4);
@@ -583,9 +583,9 @@ const decode = (bytes) => {
   }
 
   const poolCount = r.u16();
-  const pool = [];
+  const constpool = [];
   for (let i = 0; i < poolCount; i++) {
-    pool.push(r.constant());
+    constpool.push(r.constant());
   }
 
   // 타입 테이블(모듈 전역) - type_count, [ (tag, payload) ]. Rust read_type 대칭.
@@ -620,7 +620,7 @@ const decode = (bytes) => {
   const code = r.take(codeLen);
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
-  return { pool, types, defs, code, compiledSteps: [] };
+  return { constpool, types, defs, code, compiledSteps: [] };
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -818,7 +818,7 @@ const compileDef = (
         const ref = argumentSourcePairs[2 * offset + 1];
         if (argumentSourcePairs[2 * offset] === CONST) {
           // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
-          return module.pool[ref] ?? "";
+          return module.constpool[ref] ?? "";
         }
         const leafIndex = store.leafOf(ref);
         const initial = store.get(leafIndex) ?? "";
@@ -855,12 +855,12 @@ const compileDef = (
           }
           case OP.ATTR_G: {
             const name = ATTRS[u16at()];
-            pending.setAttribute(name, module.pool[u16at()]);
+            pending.setAttribute(name, module.constpool[u16at()]);
             break;
           }
           case OP.ATTR_L: {
-            const name = module.pool[u16at()];
-            pending.setAttribute(name, module.pool[u16at()]);
+            const name = module.constpool[u16at()];
+            pending.setAttribute(name, module.constpool[u16at()]);
             break;
           }
           case OP.ATTR_G_VAR: {
@@ -871,7 +871,7 @@ const compileDef = (
             break;
           }
           case OP.ATTR_L_VAR: {
-            const name = module.pool[u16at()];
+            const name = module.constpool[u16at()];
             const el = pending;
             const v = bindVar(u16at(), (v) => el.setAttribute(name, v));
             el.setAttribute(name, v);
@@ -881,7 +881,7 @@ const compileDef = (
             // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
             const domEvent = DOM_EVENTS[u16at()];
             const event = events[u16at()];
-            const eventName = module.pool[event.nameConstIndex];
+            const eventName = module.constpool[event.nameConstIndex];
             // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
             // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
             // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
@@ -896,7 +896,7 @@ const compileDef = (
             // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
             // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
             const payload = event.fields.map((field) => ({
-              name: module.pool[field.nameConstIndex],
+              name: module.constpool[field.nameConstIndex],
               typeRef: field.typeRef,
               fieldSourcePairs: refsToSourcePairs(
                 field.refs,
@@ -958,7 +958,7 @@ const compileDef = (
           }
           case OP.TEXT: {
             nodeTop().appendChild(
-              document.createTextNode(module.pool[u16at()]),
+              document.createTextNode(module.constpool[u16at()]),
             );
             break;
           }
@@ -994,7 +994,7 @@ const compileDef = (
           case OP.PUSH_PATH_SEGMENT: {
             // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
             // 단일 변수로 적재 - args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
-            segment = module.pool[u16at()];
+            segment = module.constpool[u16at()];
             break;
           }
           case OP.PUSH_PATH_INDEX_SEGMENT: {
@@ -1010,10 +1010,10 @@ const compileDef = (
             // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
             // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
             const contextDef = contexts[u16at()];
-            const name = module.pool[contextDef.nameConstIndex];
+            const name = module.constpool[contextDef.nameConstIndex];
             // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
             const fields = contextDef.fields.map((field) => ({
-              name: module.pool[field.nameConstIndex],
+              name: module.constpool[field.nameConstIndex],
               typeRef: field.typeRef,
               fieldSourcePairs: refsToSourcePairs(
                 field.refs,
@@ -1158,7 +1158,7 @@ const compileDef = (
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
             const condInitial = condIsConst
-              ? module.pool[condRef]
+              ? module.constpool[condRef]
               : store.get(condLeafIndex);
             const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
             const initialBranch = branches[region.branchIndices[initialShownIndex]];
@@ -1186,7 +1186,7 @@ const compileDef = (
             const bodyStart = pc;
             const forEndPc = forBodyEnd(code, bodyStart);
             if (argumentSourcePairs[2 * offset] === CONST) {
-              inlineFor(Number(module.pool[ref]) || 0, bodyStart, forEndPc);
+              inlineFor(Number(module.constpool[ref]) || 0, bodyStart, forEndPc);
             } else {
               reactiveFor(store.leafOf(ref), bodyStart, forEndPc);
             }
