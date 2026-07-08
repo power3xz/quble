@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    // Node 22 --experimental-strip-types로 실행 - 트랜스파일 없이 .ts를 그대로 돌리므로
+    // target/module도 Node가 이해하는 최신 ESM 그대로 맞춘다.
+    "target": "ES2022",
+    "module": "ES2022",
+    // esbuild(build.mjs)가 번들러 역할 - Node 네이티브 실행과 동일한 해석 규칙을 쓰는
+    // "bundler" 모드가 둘 다와 맞는다(확장자 없는 import, package.json exports 등).
+    "moduleResolution": "bundler",
+    // 신규 .ts 전환분이라 처음부터 strict로 - any 누수 없이 타입을 확실히 잡는다.
+    "strict": true,
+    // tsc는 타입체크 전용(noEmit) - 실제 실행은 Node의 타입 스트리핑이, 배포용 번들은
+    // esbuild가 담당하므로 tsc가 산출물을 낼 필요가 없다.
+    "noEmit": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}
