@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mount } from "./fixtures/dom.js";
 import { buildFixture } from "./fixtures/build.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 let qubb;
 before(() => {

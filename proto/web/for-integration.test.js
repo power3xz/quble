@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 import { buildFixture } from "./fixtures/build.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 const qubb = {};
 before(() => {
@@ -52,11 +52,16 @@ test("count 0이면 몸체 렌더 없음", () => {
 // -- 이벤트 fullname [$n] + 회차 인덱스 -------------------------------
 test("@for 안 자식 컴포넌트: fullname Item[$0], 발화 시 $0 회차 인덱스", () => {
   const picks = [];
-  const { host } = instantiate("for_event_component", [], {}, {
-    "Item[$0].PICK": (data, { $0 }) => {
-      picks.push($0);
+  const { host } = instantiate(
+    "for_event_component",
+    [],
+    {},
+    {
+      "Item[$0].PICK": (data, { $0 }) => {
+        picks.push($0);
+      },
     },
-  });
+  );
   const buttons = [...host.querySelectorAll("button")];
   assert.equal(buttons.length, 3, "3회차 버튼 3개");
   buttons[2].click();
@@ -69,11 +74,16 @@ test("@for 안 자식 컴포넌트: fullname Item[$0], 발화 시 $0 회차 인�
 // (ISSUES.md 해결됨 참고). 3x4=12장이 전부 렌더되고 두 뎁스 인덱스가 12조합 다 나와야 한다.
 test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누락 없음", () => {
   const fired = [];
-  const { host } = instantiate("for_nested_render", [], {}, {
-    "Mid.Col[$0].Card[$1].PICK": (data, { $0, $1 }) => {
-      fired.push([$0, $1]);
+  const { host } = instantiate(
+    "for_nested_render",
+    [],
+    {},
+    {
+      "Mid.Col[$0].Card[$1].PICK": (data, { $0, $1 }) => {
+        fired.push([$0, $1]);
+      },
     },
-  });
+  );
   const buttons = [...host.querySelectorAll("button")];
   assert.equal(buttons.length, 12, "3x4 = 12장이 전부 렌더된다(누락 없음)");
   buttons.forEach((b) => b.click());
@@ -88,11 +98,16 @@ test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누
 
 test("@for 직속 element: fullname 익명 [$0], 발화 시 $0", () => {
   const sels = [];
-  const { host } = instantiate("for_event_element", [], {}, {
-    "[$0].SELECT": (data, { $0 }) => {
-      sels.push($0);
+  const { host } = instantiate(
+    "for_event_element",
+    [],
+    {},
+    {
+      "[$0].SELECT": (data, { $0 }) => {
+        sels.push($0);
+      },
     },
-  });
+  );
   const buttons = [...host.querySelectorAll("button")];
   assert.equal(buttons.length, 3, "3회차 버튼 3개");
   buttons[1].click();
@@ -126,11 +141,16 @@ test("count 0으로 갔다 다시 늘려도 회차가 복원된다", () => {
 // 늘린 뒤 새로 생긴 마지막 회차 버튼을 클릭한다.
 test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () => {
   const picks = [];
-  const { host, store } = instantiate("for_event_count", ["n"], { n: 1 }, {
-    "Item[$0].PICK": (data, { $0 }) => {
-      picks.push($0);
+  const { host, store } = instantiate(
+    "for_event_count",
+    ["n"],
+    { n: 1 },
+    {
+      "Item[$0].PICK": (data, { $0 }) => {
+        picks.push($0);
+      },
     },
-  });
+  );
   assert.equal(host.querySelectorAll("button").length, 1, "초기 n=1");
   store.setPath("n", 3);
   const buttons = [...host.querySelectorAll("button")];
@@ -143,11 +163,16 @@ test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () =
 // 떼어낸 회차의 구독/바인딩이 남아 잘못 발화하거나 $값이 어긋나면 안 된다.
 test("회차 제거 후 재추가한 회차의 이벤트·$값이 정상", () => {
   const picks = [];
-  const { host, store } = instantiate("for_event_count", ["n"], { n: 3 }, {
-    "Item[$0].PICK": (data, { $0 }) => {
-      picks.push($0);
+  const { host, store } = instantiate(
+    "for_event_count",
+    ["n"],
+    { n: 3 },
+    {
+      "Item[$0].PICK": (data, { $0 }) => {
+        picks.push($0);
+      },
     },
-  });
+  );
   store.setPath("n", 1); // 회차 1,2 제거
   store.setPath("n", 3); // 회차 1,2 재추가(새로 build)
   const buttons = [...host.querySelectorAll("button")];

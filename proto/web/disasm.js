@@ -7,7 +7,28 @@
 //
 // 포맷·테이블은 runtime.js와 같아야 한다(같은 계약). 여기선 디코드만 하므로 독립 디코더를 둔다.
 
-const TAGS = ["div", "span", "p", "h1", "h2", "h3", "a", "ul", "li", "button", "article", "img", "section", "header", "footer", "nav", "main", "aside", "label", "input"];
+const TAGS = [
+  "div",
+  "span",
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "a",
+  "ul",
+  "li",
+  "button",
+  "article",
+  "img",
+  "section",
+  "header",
+  "footer",
+  "nav",
+  "main",
+  "aside",
+  "label",
+  "input",
+];
 const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"];
 
 const OP = {
@@ -306,9 +327,7 @@ const decompileBody = (module, def) => {
         // 자식명은 comp_id로 def 테이블에서 복원하고(compName), 슬롯은 언어상 항상 비어(컴파일러
         // parse.rs: 슬롯 미지원) {}로 닫는다.
         const binds = pendingArgs.map((arg, childOffset) =>
-          arg.kind === "lit"
-            ? "arg" + childOffset + "=" + arg.text
-            : "arg" + childOffset + "={" + arg.text + "}",
+          arg.kind === "lit" ? "arg" + childOffset + "=" + arg.text : "arg" + childOffset + "={" + arg.text + "}",
         );
         pendingArgs = [];
         // 세그먼트가 type-name과 다르면 use-site alias - `Alias: Comp(...)`로 복원.
@@ -413,7 +432,7 @@ export const decompileComponent = (module, compId, resources = []) => {
     out.push('use "' + (href !== undefined ? href : "res" + resId) + '"');
   }
   for (const childName of uses) {
-    out.push('use ' + childName + ' from "./' + childName + '.qubc"');
+    out.push("use " + childName + ' from "./' + childName + '.qubc"');
   }
   if (uses.length > 0 || resIds.length > 0) {
     out.push("");

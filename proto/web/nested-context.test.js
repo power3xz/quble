@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 import { buildFixture } from "./fixtures/build.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 const fireToggle = (qubb, paths, values, handlers) => {
   const store = createLeafStoreSubject(values);
@@ -20,11 +20,16 @@ const fireToggle = (qubb, paths, values, handlers) => {
 test("다른 이름 중첩 - context에 바깥/안쪽 컨텍스트가 모두 담긴다", () => {
   const qubb = buildFixture("nested_context");
   let received = null;
-  fireToggle(qubb, ["userId"], { userId: 7 }, {
-    TOGGLE: (data, { context }) => {
-      received = context;
+  fireToggle(
+    qubb,
+    ["userId"],
+    { userId: 7 },
+    {
+      TOGGLE: (data, { context }) => {
+        received = context;
+      },
     },
-  });
+  );
   assert.deepEqual(received, {
     Outer: { area: "outer", userId: 7 },
     Inner: { area: "inner", tier: "gold" },
@@ -41,11 +46,16 @@ test("같은 이름 합성 중첩 - 자식이 부모를 통째 덮고(필드 머
   try {
     // 부모 props [userId]. Child(userId={userId})로 물려준다.
     // 버튼은 자식 안 - 별칭 없는 합성이라 fullname은 Child.TOGGLE.
-    fireToggle(qubb, ["userId"], { userId: 7 }, {
-      "Child.TOGGLE": (data, { context }) => {
-        received = context;
+    fireToggle(
+      qubb,
+      ["userId"],
+      { userId: 7 },
+      {
+        "Child.TOGGLE": (data, { context }) => {
+          received = context;
+        },
       },
-    });
+    );
   } finally {
     console.warn = origWarn;
   }

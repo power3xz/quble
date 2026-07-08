@@ -33,8 +33,6 @@ export const buildFixture = (name) => {
 export const buildFixtureWithResmap = (name) => {
   const qubb = buildFixture(name);
   const manifestPath = join(PROTO, "dist", `${name}.manifest.json`);
-  const resmap = existsSync(manifestPath)
-    ? JSON.parse(readFileSync(manifestPath, "utf8")).resources
-    : [];
+  const resmap = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")).resources : [];
   return { qubb, resmap };
 };

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 import { buildFixture } from "./fixtures/build.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -33,8 +33,8 @@ test("중첩 객체 leaf가 평탄 scope index로 올바르게 렌더된다", ()
   });
   const spans = host.querySelectorAll("span");
   assert.equal(host.querySelector("h1").textContent, "제목");
-  assert.equal(spans[0].textContent, "김철수");        // user.name
-  assert.equal(spans[1].textContent, "kim@ex.com");    // user.contact.email
+  assert.equal(spans[0].textContent, "김철수"); // user.name
+  assert.equal(spans[1].textContent, "kim@ex.com"); // user.contact.email
 });
 
 test("중첩 leaf 갱신이 그 leaf 구독 노드만 반영한다", () => {

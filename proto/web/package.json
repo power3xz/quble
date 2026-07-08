@@ -4,9 +4,12 @@
   "type": "module",
   "description": "Quble 클라이언트 런타임(실험) — runtime.js/region.js. 테스트는 node --test + jsdom.",
   "scripts": {
-    "test": "node --experimental-strip-types --test --test-concurrency=1"
+    "test": "node --experimental-strip-types --test --test-concurrency=1",
+    "lint": "biome check .",
+    "format": "biome format --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.3",
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3"
   }

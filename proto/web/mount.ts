@@ -1,9 +1,9 @@
 // Quble 앱 진입점 - 배포된 산출물(qubb + manifest)을 fetch해 브라우저에 마운트한다.
 // qubc 컴파일은 빌드가 이미 끝났고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
 
-import { compile, createLeafStoreSubject } from "./runtime.js";
+import { compile, createLeafStoreSubject } from "./runtime.ts";
 
-type Manifest = {
+type TManifest = {
   resources: string[];
   props: string[];
   handlers?: string;
@@ -16,10 +16,7 @@ type Manifest = {
  * @param base      manifest.handlers 상대경로 해소 기준 URL
  * @returns         fullname -> handler 맵 (핸들러 없으면 {})
  */
-export const loadHandlers = async (
-  manifest: Manifest,
-  base: string | URL,
-): Promise<Record<string, unknown>> => {
+export const loadHandlers = async (manifest: TManifest, base: string | URL): Promise<Record<string, unknown>> => {
   if (!manifest.handlers) {
     return {};
   }
@@ -39,7 +36,7 @@ export const loadHandlers = async (
 export const mount = async (qubbUrl: string, rootEl: Element, data: unknown) => {
   const base = new URL(qubbUrl, location.href);
   const manifestUrl = qubbUrl.replace(/\.qubb$/, "") + ".manifest.json";
-  const manifest: Manifest = await fetch(manifestUrl).then((r) => r.json());
+  const manifest: TManifest = await fetch(manifestUrl).then((r) => r.json());
 
   // manifest만 있으면 qubb fetch와 핸들러 로드는 서로 독립 - 병렬로.
   const [bytesBuf, handlers] = await Promise.all([
