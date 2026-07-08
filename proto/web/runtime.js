@@ -27,7 +27,7 @@ import {
 } from "./region.js";
 
 // 상태 저장소(store)는 leaf-store.js가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.
-export { createLeafStoreSubject } from "./leaf-store.js";
+export { createLeafStoreSubject } from "./leaf-store.ts";
 
 const TAGS = [
   "div",
