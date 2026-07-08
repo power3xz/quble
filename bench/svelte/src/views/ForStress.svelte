@@ -18,15 +18,26 @@
     });
   });
 
-  const D1 = 10;
+  const D1 = 1;
   const D2 = 50;
   const D3 = 100;
 
-  const rounds = Array.from({ length: D1 }, (_, i) => i);
+  let rows = $state(D1);
+  const rounds = $derived(Array.from({ length: rows }, (_, i) => i));
+
+  // 행 추가(+5,000 카드) 계측 - quble ADD 핸들러와 같은 방식(클릭 t0 -> rAF).
+  const addRow = () => {
+    const t = performance.now();
+    rows += 1;
+    requestAnimationFrame(() => {
+      console.log(`[svelte] 행 추가(+5,000) ${(performance.now() - t).toFixed(1)}ms`);
+    });
+  };
 </script>
 
 <div class="stress">
-  <h1>svelte 부하: 10 x 100 x 100 = 100,000 카드</h1>
+  <h1>svelte 부하: rows x 50 x 100 카드</h1>
+  <button class="stress__add" onclick={addRow}>행 추가 (+5,000 카드)</button>
   {#each rounds as i}
     <StressDepth2 {i} count={D2} inner={D3} />
   {/each}

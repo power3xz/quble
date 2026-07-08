@@ -1,10 +1,13 @@
 use "./forstress.css"
 
 component Depth1 {
+  props { rows: number }
+  events { ADD({ n: rows }) }
   template {
     div(class="stress") {
-      h1() { "quble @for 부하: 10 x 100 x 100 = 100,000 카드" }
-      @for (a of 10) {
+      h1() { "quble @for 부하: rows x 50 x 100 카드" }
+      button(class="stress__add" @click:ADD) { "행 추가 (+5,000 카드)" }
+      @for (a of rows) {
         Row: Depth2() {}
       }
     }
