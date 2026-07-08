@@ -11,7 +11,23 @@ const handlers: Handlers = {
     const t0 = performance.now();
     set(props.n, get(props.n) + 1);
     requestAnimationFrame(() => {
-      console.log(`[quble] 행 추가(+5,000) ${(performance.now() - t0).toFixed(1)}ms`);
+      const inst = (window as any).__quble.inst;
+      const live = inst.branches.filter((b: any) => b !== null).length; // null=제거된 회차 칸
+      console.log(`[quble] 행 추가(+5,000) ${(performance.now() - t0).toFixed(1)}ms, regions=${inst.regions.length}, branches=${live}/${inst.branches.length}`);
+    });
+  },
+  REMOVE: (data, { get, set, props }) => {
+    // 최상위 @for count(rows)를 -1 -> 꼬리 회차(5,000 카드) 제거. 0 하한.
+    const cur = get(props.n);
+    if (cur <= 0) {
+      return;
+    }
+    const t0 = performance.now();
+    set(props.n, cur - 1);
+    requestAnimationFrame(() => {
+      const inst = (window as any).__quble.inst;
+      const live = inst.branches.filter((b: any) => b !== null).length; // null=제거된 회차 칸
+      console.log(`[quble] 행 제거(-5,000) ${(performance.now() - t0).toFixed(1)}ms, regions=${inst.regions.length}, branches=${live}/${inst.branches.length}`);
     });
   },
 };
