@@ -650,12 +650,13 @@ const compileDef = (
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
     // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
     const regions = []; // append만, 인덱스 영구 안정. appendIfRegion/appendForRegion이 새 region을 더한다.
+    const branches = []; // 한 인스턴스의 모든 Branch(전역 플랫). append만, @for 회차 제거 시 그 칸은 null.
     // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
     // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
     // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
     const createdContexts = [];
-    const rootRegion = regions[appendIfRegion(regions, -1)]; // 루트도 region(인덱스 0)
-    rootRegion.branches[THEN_INDEX].built = true; // 루트 then은 즉시 build됨(아래 interpret)
+    const rootRegion = regions[appendIfRegion(regions, branches, -1)]; // 루트도 region(인덱스 0)
+    branches[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
 
     // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
@@ -672,7 +673,7 @@ const compileDef = (
     // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
     // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
     // @param startRegionIndex 구독을 쌓을 region
-    // @param startBranchIndex 구독을 쌓을 가지(THEN/ELSE)
+    // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branches[startBranchIndex])
     // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
     // @returns                직속 노드를 담은 DocumentFragment
     const interpret = (
@@ -698,7 +699,7 @@ const compileDef = (
 
       // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
       // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
-      const branch = regions[startRegionIndex].branches[startBranchIndex];
+      const branch = branches[startBranchIndex]; // startBranchIndex는 전역 branchIndex
 
       const u16at = () => {
         const v = code[pc] | (code[pc + 1] << 8);
@@ -768,14 +769,15 @@ const compileDef = (
         nodeTop().appendChild(region.anchor);
 
         // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
-        // 되찾게 branch.nodes에 보관). 껍데기 push(appendForIteration) + build(buildIteration).
+        // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
+        // 새 회차의 전역 branchIndex를 돌려준다.
         const addIterationBranch = (i) => {
           const newBranchIndex = appendBranchOfForRegion(
             regions,
+            branches,
             forRegionIndex,
           );
-          const newBranch = region.branches[newBranchIndex];
-          newBranch.nodes = Array.from(
+          branches[newBranchIndex].nodes = Array.from(
             buildIteration(
               i,
               bodyStart,
@@ -784,7 +786,7 @@ const compileDef = (
               newBranchIndex,
             ).childNodes,
           );
-          return newBranch;
+          return newBranchIndex;
         };
 
         const initial = Number(store.get(countLeafIndex)) || 0;
@@ -794,12 +796,12 @@ const compileDef = (
 
         store.subscribe(countLeafIndex, (v) => {
           const next = Number(v) || 0;
-          const cur = region.branches.length;
+          const cur = region.branchIndices.length;
           for (let i = cur; i < next; i++) {
-            attachForIteration(store, regions, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+            attachForIteration(store, regions, branches, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
           }
           if (next < cur) {
-            truncateFor(store, regions, region, next); // 줄어든 꼬리 제거
+            truncateFor(store, regions, branches, region, next); // 줄어든 꼬리 제거
           }
         });
       };
@@ -1080,11 +1082,13 @@ const compileDef = (
             const condIsConst = argumentSourcePairs[2 * condOffset] === CONST;
             const condRef = argumentSourcePairs[2 * condOffset + 1];
             const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef);
-            const regionIndex = appendIfRegion(regions, condLeafIndex);
+            const regionIndex = appendIfRegion(regions, branches, condLeafIndex);
             const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
-            const thenBranch = region.branches[THEN_INDEX];
-            const elseBranch = region.branches[ELSE_INDEX];
+            const thenBranchIndex = region.branchIndices[THEN_INDEX];
+            const elseBranchIndex = region.branchIndices[ELSE_INDEX];
+            const thenBranch = branches[thenBranchIndex];
+            const elseBranch = branches[elseBranchIndex];
             // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
             nodeTop().appendChild(region.anchor);
 
@@ -1106,7 +1110,7 @@ const compileDef = (
                 thenStart,
                 thenEnd,
                 regionIndex,
-                THEN_INDEX,
+                thenBranchIndex,
                 pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
                 loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
                 loopIndexBase,
@@ -1126,7 +1130,7 @@ const compileDef = (
                       elseStart,
                       ifEndPc,
                       regionIndex,
-                      ELSE_INDEX,
+                      elseBranchIndex,
                       pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
                       loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
                       loopIndexBase,
@@ -1143,6 +1147,7 @@ const compileDef = (
                 activateIf(
                   store,
                   regions,
+                  branches,
                   regionIndex,
                   condValue ? THEN_INDEX : ELSE_INDEX,
                 );
@@ -1155,11 +1160,11 @@ const compileDef = (
             const condInitial = condIsConst
               ? module.pool[condRef]
               : store.get(condLeafIndex);
-            const initialBranchIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
-            const initialBranch = region.branches[initialBranchIndex];
+            const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
+            const initialBranch = branches[region.branchIndices[initialShownIndex]];
             initialBranch.lazyBuild();
             initialBranch.built = true;
-            region.shownIndex = initialBranchIndex;
+            region.shownIndex = initialShownIndex;
 
             pc = ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음으로.
             break;
@@ -1215,17 +1220,17 @@ const compileDef = (
       def.codeOff,
       def.codeOff + def.codeLen,
       0,
-      THEN_INDEX,
+      rootRegion.branchIndices[THEN_INDEX],
       "", // 루트 경로 prefix 비어 있음
       [], // 루트는 @for 밖 - 회차 인덱스 없음
       0, // 세그먼트 인덱스 base 0
     );
-    rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
+    branches[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
-    rootRegion.attach(store, regions, rootRegion);
+    rootRegion.attach(store, regions, branches, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
-    return { nodes, regions };
+    return { nodes, regions, branches };
   };
 };
 
