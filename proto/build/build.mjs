@@ -120,7 +120,9 @@ ${preloads.join("\n")}
     // 초기 렌더 계측: mount 시작 -> 반환(디코드+인스턴스화+부착) -> rAF(페인트 후).
     // React/Svelte 데모와 같은 방식으로 재 나란히 비교한다.
     const t0 = performance.now();
-    await mount("./${stem}.qubb", document.getElementById("quble-app"), ${data});
+    // 디버깅용: mount 결과({ store, inst })를 window에 노출한다. inst.regions는 이 인스턴스의
+    // 모든 Region(@if swap/@for 회차 경계)이라, 콘솔에서 __quble.inst.regions.length로 누수를 잰다.
+    window.__quble = await mount("./${stem}.qubb", document.getElementById("quble-app"), ${data});
     const mounted = performance.now();
     requestAnimationFrame(() => {
       const painted = performance.now();
