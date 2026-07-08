@@ -7,6 +7,8 @@
     // esbuild(build.mjs)가 번들러 역할 - Node 네이티브 실행과 동일한 해석 규칙을 쓰는
     // "bundler" 모드가 둘 다와 맞는다(확장자 없는 import, package.json exports 등).
     "moduleResolution": "bundler",
+    // Node 네이티브 실행이 상대 import에 실제 확장자(.ts)를 요구하므로 tsc도 그 표기를 허용.
+    "allowImportingTsExtensions": true,
     // 신규 .ts 전환분이라 처음부터 strict로 - any 누수 없이 타입을 확실히 잡는다.
     "strict": true,
     // runtime.js 등 아직 안 옮긴 .js를 .ts에서 import하므로, tsc가 그 .js를 읽어(암묵적
