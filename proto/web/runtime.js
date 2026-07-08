@@ -7,7 +7,7 @@
 // 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 - 단순한 "호출 시 훑기"를 택했다.)
 //
 // Instance = { nodes, regions }. nodes는 루트 노드들(부착/추적용), regions는 이 인스턴스의 모든
-// Region(@if swap 경계). 구독은 가지(Branch)에 모이고 activateBranch가 켤 때 건다 - 안 보이는
+// Region(@if swap / @for 회차 경계). 구독은 가지(Branch)에 모이고 attach가 켤 때 건다 - 안 보이는
 // 가지는 구독 0이다(region 구조/동작은 region.js). RENDER는 자식 def를 같은 interpret으로 인라인
 // 재진입해, 자식 if가 부모와 같은 regions/가지에 합류한다(별도 인스턴스 없음).
 //
@@ -18,9 +18,12 @@
 import {
   THEN_INDEX,
   ELSE_INDEX,
-  appendRegion,
-  activateBranch,
-  attachBranch,
+  appendIfRegion,
+  activateIf,
+  appendForRegion,
+  appendBranchOfForRegion,
+  attachForIteration,
+  truncateFor,
 } from "./region.js";
 
 // 상태 저장소(store)는 leaf-store.js가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.
@@ -369,7 +372,10 @@ const refsToSourcePairs = (refs, argumentSourcePairs, store) => {
   for (const r of refs) {
     if (r.kind === FV_CONST) {
       sourcePairs.push(CONST, r.ref);
-    } else if (r.kind === FV_SCOPE && argumentSourcePairs[2 * r.ref] === CONST) {
+    } else if (
+      r.kind === FV_SCOPE &&
+      argumentSourcePairs[2 * r.ref] === CONST
+    ) {
       sourcePairs.push(CONST, argumentSourcePairs[2 * r.ref + 1]);
     } else if (r.kind === FV_SCOPE) {
       sourcePairs.push(STORE, store.leafOf(argumentSourcePairs[2 * r.ref + 1]));
@@ -491,16 +497,35 @@ const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 �
 
 // 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
 const dispatchBinding = (b, domEventObject) => {
-  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module } = b;
+  const {
+    handlers,
+    fullName,
+    payload,
+    contextLeaves,
+    props,
+    loopIndices,
+    store,
+    module,
+  } = b;
   const data = {};
   for (const p of payload) {
-    data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
+    data[p.name] = assemble(
+      compiledStepsOf(module, p.typeRef),
+      p.fieldSourcePairs,
+      store,
+      module,
+    );
   }
   const context = {};
   for (const ctxName in contextLeaves) {
     const values = {};
     for (const p of contextLeaves[ctxName]) {
-      values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
+      values[p.name] = assemble(
+        compiledStepsOf(module, p.typeRef),
+        p.fieldSourcePairs,
+        store,
+        module,
+      );
     }
     context[ctxName] = values;
   }
@@ -623,13 +648,13 @@ const compileDef = (
   return (store, rootArgumentSourcePairs, handlers = {}) => {
     // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
-    // attachBranch가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
-    const regions = []; // append만, 인덱스 영구 안정. appendRegion이 새 region을 더한다.
+    // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
+    const regions = []; // append만, 인덱스 영구 안정. appendIfRegion/appendForRegion이 새 region을 더한다.
     // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
     // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
     // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
     const createdContexts = [];
-    const rootRegion = regions[appendRegion(regions, -1)]; // 루트도 region(인덱스 0)
+    const rootRegion = regions[appendIfRegion(regions, -1)]; // 루트도 region(인덱스 0)
     rootRegion.branches[THEN_INDEX].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
 
@@ -682,9 +707,106 @@ const compileDef = (
       };
       const nodeTop = () => nodeStack[nodeStack.length - 1];
 
+      // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드·구독·자식region은
+      // target 가지에 쌓인다(인라인이면 지금 가지, 반응이면 회차 branch). 회차 인덱스를 공유
+      // 스택에 push -> 재귀 -> pop한다 - 매 회차 [...stack, i] 복사 대신 배열 하나를 재사용한다
+      // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는
+      // BIND_EVENT가 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
+      const buildIteration = (
+        i,
+        bodyStart,
+        forEndPc,
+        targetRegionIndex,
+        targetBranchIndex,
+      ) => {
+        loopIndexStack.push(i);
+        const f = interpret(
+          code,
+          argumentSourcePairs,
+          events,
+          contexts,
+          activeContexts,
+          bodyStart,
+          forEndPc,
+          targetRegionIndex,
+          targetBranchIndex,
+          pathPrefix,
+          loopIndexStack, // 회차 값을 물려준다(발화 시 $n)
+          loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
+        );
+        loopIndexStack.pop();
+        return f;
+      };
+
+      // 안 변하는 @for(FOR_RAW·CONST) - 각 회차를 지금 가지(startRegion/Branch)에 fragment로
+      // 인라인한다. @for는 컴포넌트 경계가 아니라 같은 가지의 제어 흐름이라 부모 노드에 통째로
+      // 붙인다. appendChild(fragment)는 내용 전체를 한 번에 옮기고 fragment를 비운다(노드별 재입양
+      // 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는 라이브라 순회 중 인덱스가 밀려 건너뛴다.
+      const inlineFor = (count, bodyStart, forEndPc) => {
+        for (let i = 0; i < count; i++) {
+          nodeTop().appendChild(
+            buildIteration(
+              i,
+              bodyStart,
+              forEndPc,
+              startRegionIndex,
+              startBranchIndex,
+            ),
+          );
+        }
+      };
+
+      // 반응 @for(FOR_SCOPE_INDEX+STORE) - 전용 region을 만들어 회차마다 branch 하나에 노드·구독·
+      // 자식region을 격리한다(count 줄 때 그 회차만 통째로 떼기 위함). anchor를 지금 가지에 남기고
+      // 회차 노드는 anchor 뒤에 붙는다. 초기엔 branch.nodes만 채운다(부모 attachIf가 루트부터 일괄
+      // attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일). count leaf
+      // 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
+      const reactiveFor = (countLeafIndex, bodyStart, forEndPc) => {
+        const forRegionIndex = appendForRegion(regions, countLeafIndex);
+        const region = regions[forRegionIndex];
+        branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
+        nodeTop().appendChild(region.anchor);
+
+        // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
+        // 되찾게 branch.nodes에 보관). 껍데기 push(appendForIteration) + build(buildIteration).
+        const addIterationBranch = (i) => {
+          const newBranchIndex = appendBranchOfForRegion(
+            regions,
+            forRegionIndex,
+          );
+          const newBranch = region.branches[newBranchIndex];
+          newBranch.nodes = Array.from(
+            buildIteration(
+              i,
+              bodyStart,
+              forEndPc,
+              forRegionIndex,
+              newBranchIndex,
+            ).childNodes,
+          );
+          return newBranch;
+        };
+
+        const initial = Number(store.get(countLeafIndex)) || 0;
+        for (let i = 0; i < initial; i++) {
+          addIterationBranch(i);
+        }
+
+        store.subscribe(countLeafIndex, (v) => {
+          const next = Number(v) || 0;
+          const cur = region.branches.length;
+          for (let i = cur; i < next; i++) {
+            attachForIteration(store, regions, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+          }
+          if (next < cur) {
+            truncateFor(store, regions, region, next); // 줄어든 꼬리 제거
+          }
+        });
+      };
+
       // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
       //
-      // 구독은 즉시 걸지 않고 현재 가지에 모은다 - activateBranch가 그 가지를 켤 때 건다
+      // 구독은 즉시 걸지 않고 현재 가지에 모은다 - attach가 그 가지를 켤 때 건다
       // (안 보이는 가지는 구독 0).
       //
       // @param offset 컴포넌트 로컬 offset(flat 슬롯 argumentSourcePairs[2*offset]/[2*offset+1]로 해석)
@@ -774,7 +896,11 @@ const compileDef = (
             const payload = event.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              fieldSourcePairs: refsToSourcePairs(field.refs, argumentSourcePairs, store),
+              fieldSourcePairs: refsToSourcePairs(
+                field.refs,
+                argumentSourcePairs,
+                store,
+              ),
             }));
             // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field 중 STORE만 - 상수
             // 슬롯은 불변이라 set 대상이 못 된다. 객체의 set 의미는 미정(ISSUES). data(읽기)는
@@ -851,7 +977,10 @@ const compileDef = (
             if (argumentSourcePairs[2 * parentOffset] === undefined) {
               throw new Error("no path for offset " + parentOffset);
             }
-            args.push(argumentSourcePairs[2 * parentOffset], argumentSourcePairs[2 * parentOffset + 1]);
+            args.push(
+              argumentSourcePairs[2 * parentOffset],
+              argumentSourcePairs[2 * parentOffset + 1],
+            );
             break;
           }
           case OP.PUSH_ARG_LIT: {
@@ -884,7 +1013,11 @@ const compileDef = (
             const fields = contextDef.fields.map((field) => ({
               name: module.pool[field.nameConstIndex],
               typeRef: field.typeRef,
-              fieldSourcePairs: refsToSourcePairs(field.refs, argumentSourcePairs, store),
+              fieldSourcePairs: refsToSourcePairs(
+                field.refs,
+                argumentSourcePairs,
+                store,
+              ),
             }));
             // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
             // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
@@ -947,12 +1080,12 @@ const compileDef = (
             const condIsConst = argumentSourcePairs[2 * condOffset] === CONST;
             const condRef = argumentSourcePairs[2 * condOffset + 1];
             const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef);
-            const regionIndex = appendRegion(regions, condLeafIndex);
+            const regionIndex = appendIfRegion(regions, condLeafIndex);
             const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
             const thenBranch = region.branches[THEN_INDEX];
             const elseBranch = region.branches[ELSE_INDEX];
-            // anchor(if 자리 고정용 주석)는 appendRegion이 만들었다. 여기서 DOM 트리에 붙인다.
+            // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
             nodeTop().appendChild(region.anchor);
 
             // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
@@ -1003,11 +1136,11 @@ const compileDef = (
             thenBranch.lazyBuild = buildThen;
             elseBranch.lazyBuild = buildElse;
 
-            // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateBranch가 lazyBuild 호출.
+            // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
             // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
             if (!condIsConst) {
               store.subscribe(condLeafIndex, (condValue) => {
-                activateBranch(
+                activateIf(
                   store,
                   regions,
                   regionIndex,
@@ -1016,7 +1149,7 @@ const compileDef = (
               });
             }
             // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
-            // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachBranch가 일괄).
+            // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
             // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
             const condInitial = condIsConst
@@ -1031,53 +1164,26 @@ const compileDef = (
             pc = ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음으로.
             break;
           }
-          case OP.FOR_RAW:
-          case OP.FOR_SCOPE_INDEX: {
-            // 반복 횟수 확정. RAW는 operand 값 직접, SCOPE_INDEX는 슬롯 위임(STORE면 store 값,
-            // CONST면 pool - @if 조건과 동형). 반응 안 함 - 초기값만 읽고 구독 없다.
-            let count;
-            if (op === OP.FOR_RAW) {
-              count = u16at();
-            } else {
-              const offset = u16at();
-              const ref = argumentSourcePairs[2 * offset + 1];
-              count =
-                argumentSourcePairs[2 * offset] === CONST
-                  ? module.pool[ref]
-                  : store.get(store.leafOf(ref));
-            }
-            count = Number(count) || 0;
-
-            // 몸체를 count회 반복 해석. 각 회차는 독립 fragment로 지금 가지(startRegion/Branch)에
-            // 인라인된다 - @for는 컴포넌트 경계가 아니라 같은 가지의 제어 흐름이다. 회차 인덱스를
-            // loopIndexStack에 쌓아 넘긴다(발화 시 핸들러 $n + fullname 깊이 base로 쓰인다).
+          case OP.FOR_RAW: {
+            // 소스에 박힌 리터럴 횟수 - 안 변하니 지금 가지(startRegion/Branch)에 count회 인라인.
+            const count = Number(u16at()) || 0;
             const bodyStart = pc;
             const forEndPc = forBodyEnd(code, bodyStart);
-            for (let i = 0; i < count; i++) {
-              // 회차 인덱스를 공유 스택에 push -> 재귀 -> pop. 매 회차 [...stack, i] 복사 대신
-              // 배열 하나를 재사용한다(10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된
-              // 상태에서 완료되고, 발화 인덱스는 BIND_EVENT가 바인딩 시점에 loopIndices로
-              // 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
-              loopIndexStack.push(i);
-              const f = interpret(
-                code,
-                argumentSourcePairs,
-                events,
-                contexts,
-                activeContexts,
-                bodyStart,
-                forEndPc,
-                startRegionIndex,
-                startBranchIndex,
-                pathPrefix,
-                loopIndexStack, // 회차 값을 물려준다(발화 시 $n)
-                loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
-              );
-              loopIndexStack.pop();
-              // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
-              // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
-              // 라이브라 순회 중 인덱스가 밀려 건너뛴다.
-              nodeTop().appendChild(f);
+            inlineFor(count, bodyStart, forEndPc);
+            pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
+            break;
+          }
+          case OP.FOR_SCOPE_INDEX: {
+            // 슬롯 위임(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
+            // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다.
+            const offset = u16at();
+            const ref = argumentSourcePairs[2 * offset + 1];
+            const bodyStart = pc;
+            const forEndPc = forBodyEnd(code, bodyStart);
+            if (argumentSourcePairs[2 * offset] === CONST) {
+              inlineFor(Number(module.pool[ref]) || 0, bodyStart, forEndPc);
+            } else {
+              reactiveFor(store.leafOf(ref), bodyStart, forEndPc);
             }
             pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
             break;
@@ -1092,7 +1198,7 @@ const compileDef = (
 
     // build: 트리(regions/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
-    // attachBranch가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
+    // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
     // rootArgumentSourcePairs는 외부 계약이라 path 문자열 배열(['label', …])로 받는다 - 루트 슬롯은
     // 정의상 전부 반응값(외부 데이터 바인딩)이라 kind가 늘 STORE다. flat은 런타임 내부
     // 표현이므로 이 경계에서 한 번 [STORE, path, STORE, path, …]로 감싼다.
@@ -1116,7 +1222,7 @@ const compileDef = (
     );
     rootRegion.branches[THEN_INDEX].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
-    attachBranch(store, regions, rootRegion);
+    rootRegion.attach(store, regions, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     return { nodes, regions };

@@ -16,6 +16,8 @@ before(() => {
     "for_count",
     "for_event_component",
     "for_event_element",
+    "for_event_count",
+    "for_if_count",
     "for_nested_render",
   ]) {
     qubb[name] = buildFixture(name);
@@ -95,4 +97,72 @@ test("@for 직속 element: fullname 익명 [$0], 발화 시 $0", () => {
   assert.equal(buttons.length, 3, "3회차 버튼 3개");
   buttons[1].click();
   assert.deepEqual(sels, [1], "익명 세그먼트 fullname으로 디스패치 + $0=1");
+});
+
+// -- prop count 반응(FOR_SCOPE_INDEX+STORE): count leaf 구독으로 회차 증감 -----
+test("count 늘리면 꼬리 회차만 추가된다", () => {
+  const { host, store } = instantiate("for_count", ["n"], { n: 2 });
+  assert.deepEqual(paras(host), ["row", "row"], "초기 n=2");
+  store.setPath("n", 5);
+  assert.deepEqual(paras(host), ["row", "row", "row", "row", "row"], "n=5 -> 5개");
+});
+
+test("count 줄이면 꼬리 회차만 제거된다", () => {
+  const { host, store } = instantiate("for_count", ["n"], { n: 5 });
+  assert.deepEqual(paras(host).length, 5, "초기 n=5");
+  store.setPath("n", 2);
+  assert.deepEqual(paras(host), ["row", "row"], "n=2 -> 2개");
+});
+
+test("count 0으로 갔다 다시 늘려도 회차가 복원된다", () => {
+  const { host, store } = instantiate("for_count", ["n"], { n: 3 });
+  store.setPath("n", 0);
+  assert.deepEqual(paras(host), [], "n=0 -> 빈 반복");
+  store.setPath("n", 2);
+  assert.deepEqual(paras(host), ["row", "row"], "n=2 -> 도로 2개");
+});
+
+// 반응으로 늘린 회차도 이벤트가 붙고 회차 인덱스($0)가 자기 자리로 온다 - prop count(n) fixture로
+// 늘린 뒤 새로 생긴 마지막 회차 버튼을 클릭한다.
+test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () => {
+  const picks = [];
+  const { host, store } = instantiate("for_event_count", ["n"], { n: 1 }, {
+    "Item[$0].PICK": (data, { $0 }) => {
+      picks.push($0);
+    },
+  });
+  assert.equal(host.querySelectorAll("button").length, 1, "초기 n=1");
+  store.setPath("n", 3);
+  const buttons = [...host.querySelectorAll("button")];
+  assert.equal(buttons.length, 3, "n=3 -> 버튼 3개");
+  buttons[2].click(); // 반응으로 새로 생긴 회차
+  assert.deepEqual(picks, [2], "늘린 회차의 $0=2로 디스패치");
+});
+
+// 회차를 줄여 떼어낸 뒤 다시 늘려 새로 build된 회차의 이벤트·$값이 옛 회차 잔재 없이 정상인지 -
+// 떼어낸 회차의 구독/바인딩이 남아 잘못 발화하거나 $값이 어긋나면 안 된다.
+test("회차 제거 후 재추가한 회차의 이벤트·$값이 정상", () => {
+  const picks = [];
+  const { host, store } = instantiate("for_event_count", ["n"], { n: 3 }, {
+    "Item[$0].PICK": (data, { $0 }) => {
+      picks.push($0);
+    },
+  });
+  store.setPath("n", 1); // 회차 1,2 제거
+  store.setPath("n", 3); // 회차 1,2 재추가(새로 build)
+  const buttons = [...host.querySelectorAll("button")];
+  assert.equal(buttons.length, 3, "n=3 -> 버튼 3개");
+  buttons.forEach((b) => b.click());
+  assert.deepEqual(picks, [0, 1, 2], "재추가된 회차도 각자 $0로 한 번씩만 발화(잔재 없음)");
+});
+
+// 회차 몸체가 @if(자식 region)를 품은 반응 @for - 늘린 회차의 자식 region도 붙고(초기 가지 렌더),
+// 그 뒤 flag를 바꾸면 모든 회차의 가지가 swap된다(자식 region 구독이 회차마다 살아 있어야 한다).
+test("반응 @for 몸체의 @if 자식 region이 회차 증가·swap에 정상", () => {
+  const { host, store } = instantiate("for_if_count", ["n", "flag"], { n: 1, flag: true });
+  assert.deepEqual(paras(host), ["on"], "초기 n=1, flag=true");
+  store.setPath("n", 3);
+  assert.deepEqual(paras(host), ["on", "on", "on"], "늘린 회차도 @if then 렌더");
+  store.setPath("flag", false);
+  assert.deepEqual(paras(host), ["off", "off", "off"], "flag swap이 모든 회차에 반영");
 });

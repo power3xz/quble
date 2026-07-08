@@ -72,6 +72,9 @@ export const createLeafStoreSubject = (rootValue) => {
   const subscribers = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
 
   const set = (leafIndex, value) => {
+    if (leafStore.get(leafIndex) === value) {
+      return;
+    }
     leafStore.set(leafIndex, value);
     const subs = subscribers[leafIndex];
     if (subs) {
@@ -94,5 +97,12 @@ export const createLeafStoreSubject = (rootValue) => {
     subscribers[leafIndex]?.delete(fn);
   };
 
-  return { leafOf: leafStore.leafOf, get: leafStore.get, set, setPath, subscribe, unsubscribe };
+  return {
+    leafOf: leafStore.leafOf,
+    get: leafStore.get,
+    set,
+    setPath,
+    subscribe,
+    unsubscribe,
+  };
 };

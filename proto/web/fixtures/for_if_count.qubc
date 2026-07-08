@@ -1,0 +1,14 @@
+component ForIfCount {
+  props { n: number, flag: bool }
+  template {
+    div() {
+      @for (item of n) {
+        @if (flag) {
+          p() { "on" }
+        } @else {
+          p() { "off" }
+        }
+      }
+    }
+  }
+}
