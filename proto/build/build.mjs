@@ -3,6 +3,9 @@
 // esbuild로 번들해 manifest에 등록한 뒤, 런타임 번들(quble-runtime.js)과 진입 페이지(index.html)를
 // 함께 낸다. 결과 dist/는 자기완결 - 정적 서버에 올리면 index.html이 바로 구동된다.
 // 사용: node build.mjs <path/to/component.qubc> [--data <data.json>]
+// --data: 컴포넌트가 초기 props(예: @for count)를 요구하면 그 초기값 JSON을 준다. 안 주면 {}로
+//   mount돼 그 값에 걸린 렌더가 비어 나온다. 관례상 짝 파일 <component>.data.json에 둔다
+//   (예: forstress.qubc <-> forstress.data.json). entry 빌드 전 짝 data.json 유무를 확인할 것.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -120,8 +123,8 @@ ${preloads.join("\n")}
     // 초기 렌더 계측: mount 시작 -> 반환(디코드+인스턴스화+부착) -> rAF(페인트 후).
     // React/Svelte 데모와 같은 방식으로 재 나란히 비교한다.
     const t0 = performance.now();
-    // 디버깅용: mount 결과({ store, inst })를 window에 노출한다. inst.regions는 이 인스턴스의
-    // 모든 Region(@if swap/@for 회차 경계)이라, 콘솔에서 __quble.inst.regions.length로 누수를 잰다.
+    // 디버깅용: mount 결과({ store, inst })를 window에 노출한다. inst.regionPool은 이 인스턴스의
+    // 모든 Region(@if swap/@for 회차 경계)이라, 콘솔에서 __quble.inst.regionPool.length로 누수를 잰다.
     window.__quble = await mount("./${stem}.qubb", document.getElementById("quble-app"), ${data});
     const mounted = performance.now();
     requestAnimationFrame(() => {

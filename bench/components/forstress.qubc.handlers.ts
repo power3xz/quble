@@ -12,8 +12,8 @@ const handlers: Handlers = {
     set(props.n, get(props.n) + 1);
     requestAnimationFrame(() => {
       const inst = (window as any).__quble.inst;
-      const live = inst.branches.filter((b: any) => b !== null).length; // null=제거된 회차 칸
-      console.log(`[quble] 행 추가(+5,000) ${(performance.now() - t0).toFixed(1)}ms, regions=${inst.regions.length}, branches=${live}/${inst.branches.length}`);
+      const live = inst.branchPool.filter((b: any) => b !== null).length; // null=제거된 회차 칸
+      console.log(`[quble] 행 추가(+5,000) ${(performance.now() - t0).toFixed(1)}ms, regions=${inst.regionPool.length}, branches=${live}/${inst.branchPool.length}`);
     });
   },
   REMOVE: (data, { get, set, props }) => {
@@ -26,8 +26,8 @@ const handlers: Handlers = {
     set(props.n, cur - 1);
     requestAnimationFrame(() => {
       const inst = (window as any).__quble.inst;
-      const live = inst.branches.filter((b: any) => b !== null).length; // null=제거된 회차 칸
-      console.log(`[quble] 행 제거(-5,000) ${(performance.now() - t0).toFixed(1)}ms, regions=${inst.regions.length}, branches=${live}/${inst.branches.length}`);
+      const live = inst.branchPool.filter((b: any) => b !== null).length; // null=제거된 회차 칸
+      console.log(`[quble] 행 제거(-5,000) ${(performance.now() - t0).toFixed(1)}ms, regions=${inst.regionPool.length}, branches=${live}/${inst.branchPool.length}`);
     });
   },
 };
