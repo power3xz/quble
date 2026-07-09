@@ -28,7 +28,7 @@ test("핸들러 context에 활성 @with 컨텍스트가 이름별로 담긴다",
   const { button } = instantiate(
     { userId: 42 },
     {
-      TOGGLE: (data, { context }) => {
+      TOGGLE: (_data, { context }) => {
         received = context;
       },
     },
@@ -44,7 +44,7 @@ test("context 필드의 변수 값은 발생 시점 현재값이다", () => {
   const { store, button } = instantiate(
     { userId: 1 },
     {
-      TOGGLE: (data, { context }) => {
+      TOGGLE: (_data, { context }) => {
         received = context.Area.userId;
       },
     },

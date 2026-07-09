@@ -25,7 +25,7 @@ test("다른 이름 중첩 - context에 바깥/안쪽 컨텍스트가 모두 담
     ["userId"],
     { userId: 7 },
     {
-      TOGGLE: (data, { context }) => {
+      TOGGLE: (_data, { context }) => {
         received = context;
       },
     },
@@ -51,7 +51,7 @@ test("같은 이름 합성 중첩 - 자식이 부모를 통째 덮고(필드 머
       ["userId"],
       { userId: 7 },
       {
-        "Child.TOGGLE": (data, { context }) => {
+        "Child.TOGGLE": (_data, { context }) => {
           received = context;
         },
       },

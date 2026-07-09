@@ -57,7 +57,7 @@ test("@for 안 자식 컴포넌트: fullname Item[$0], 발화 시 $0 회차 인�
     [],
     {},
     {
-      "Item[$0].PICK": (data, { $0 }) => {
+      "Item[$0].PICK": (_data, { $0 }) => {
         picks.push($0);
       },
     },
@@ -79,7 +79,7 @@ test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누
     [],
     {},
     {
-      "Mid.Col[$0].Card[$1].PICK": (data, { $0, $1 }) => {
+      "Mid.Col[$0].Card[$1].PICK": (_data, { $0, $1 }) => {
         fired.push([$0, $1]);
       },
     },
@@ -105,7 +105,7 @@ test("@for 직속 element: fullname 익명 [$0], 발화 시 $0", () => {
     [],
     {},
     {
-      "[$0].SELECT": (data, { $0 }) => {
+      "[$0].SELECT": (_data, { $0 }) => {
         sels.push($0);
       },
     },
@@ -148,7 +148,7 @@ test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () =
     ["n"],
     { n: 1 },
     {
-      "Item[$0].PICK": (data, { $0 }) => {
+      "Item[$0].PICK": (_data, { $0 }) => {
         picks.push($0);
       },
     },
@@ -170,7 +170,7 @@ test("회차 제거 후 재추가한 회차의 이벤트·$값이 정상", () =>
     ["n"],
     { n: 3 },
     {
-      "Item[$0].PICK": (data, { $0 }) => {
+      "Item[$0].PICK": (_data, { $0 }) => {
         picks.push($0);
       },
     },

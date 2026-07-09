@@ -69,7 +69,7 @@ test("둘째 인자 set/props로 상태를 바꾸면 DOM이 갱신된다", () =>
   const { button } = instantiate(
     { label: "켜기", on: false },
     {
-      TOGGLE: (data, { set, props }) => {
+      TOGGLE: (_data, { set, props }) => {
         set(props.label, "끄기"); // props.label = label leafIndex, set이 통지 -> DOM
       },
     },
@@ -84,7 +84,7 @@ test("둘째 인자 get으로 현재값을 읽는다", () => {
   const { button } = instantiate(
     { label: "현재값", on: false },
     {
-      TOGGLE: (data, { get, props }) => {
+      TOGGLE: (_data, { get, props }) => {
         read = get(props.label);
       },
     },
@@ -98,7 +98,7 @@ test("둘째 인자 event로 DOM 이벤트 객체를 받는다", () => {
   const { button } = instantiate(
     { label: "A", on: false },
     {
-      TOGGLE: (data, { event }) => {
+      TOGGLE: (_data, { event }) => {
         received = event;
       },
     },
