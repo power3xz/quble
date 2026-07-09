@@ -4,7 +4,7 @@
 //     안쪽(자식)이 통째로 덮는다(필드 머지 아님). 워닝을 띄운다.
 
 import assert from "node:assert/strict";
-import { before, test } from "node:test";
+import { test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 

@@ -250,7 +250,7 @@ export const attachForIteration = (
   const branch = branches[branchIndex] as TBranch;
   const slot = region.branchIndices.indexOf(branchIndex);
   const prev = slot > 0 ? (branches[region.branchIndices[slot - 1]] as TBranch) : null;
-  const after = prev && prev.nodes.length ? prev.nodes[prev.nodes.length - 1] : region.anchor;
+  const after = prev?.nodes.length ? prev.nodes[prev.nodes.length - 1] : region.anchor;
   after.after(...branch.nodes);
   restoreBranchSubs(store, branch);
   for (const childRegionIndex of branch.childRegionIndices) {

@@ -530,7 +530,7 @@ const ensureDelegate = (domEventName: (typeof DOM_EVENTS)[number]) => {
     let node = domEventObject.target;
     while (node && node !== document) {
       const bound = eventBindings.get(node as Element);
-      const b = bound && bound[domEventName];
+      const b = bound?.[domEventName];
       if (b) {
         dispatchBinding(b, domEventObject);
         return; // 첫 매칭에서 멈춤 - 자기 선에서 버블 끊기와 동등
