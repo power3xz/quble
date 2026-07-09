@@ -369,14 +369,15 @@ const readFields = (reader: Reader): TFieldEntry[] => {
 // @returns     [kind, ref, …] flat sourcePair 열
 type TRef = { kind: number; ref: number };
 const refsToSourcePairs = (refs: TRef[], argumentSourcePairs: (string | number)[], store: TLeafStoreSubject) => {
-  const sourcePairs = [];
+  const sourcePairs: number[] = [];
   for (const r of refs) {
     if (r.kind === FV_CONST) {
       sourcePairs.push(CONST, r.ref);
     } else if (r.kind === FV_SCOPE && argumentSourcePairs[2 * r.ref] === CONST) {
-      sourcePairs.push(CONST, argumentSourcePairs[2 * r.ref + 1]);
+      // CONST 슬롯의 참조는 상수풀 인덱스(number).
+      sourcePairs.push(CONST, argumentSourcePairs[2 * r.ref + 1] as number);
     } else if (r.kind === FV_SCOPE) {
-      sourcePairs.push(STORE, store.leafOf(argumentSourcePairs[2 * r.ref + 1]));
+      sourcePairs.push(STORE, store.leafOf(argumentSourcePairs[2 * r.ref + 1] as string));
     } else {
       throw new Error("FV_RAW는 아직 미구현(@for)");
     }
@@ -450,8 +451,8 @@ const compileType = (types: TType[], typeRef: number, constpool: (string | numbe
 
 const assemble = (steps: TStep[], fieldSourcePairs: number[], store: TLeafStoreSubject, module: TModule) => {
   let cursor = 0;
-  const root = {};
-  const stack: any = [root];
+  const root: Record<string, unknown> = {};
+  const stack: Record<string, unknown>[] = [root];
   for (const [step, key] of steps) {
     const top = stack[stack.length - 1];
     if (step === STEP_LEAF) {
@@ -491,19 +492,19 @@ const compiledStepsOf = (module: TModule, typeRef: number) => {
 // 발화 시 target에서 위로 올라가며 첫 바인딩을 찾아 디스패치하고 멈춘다(자기 선에서 버블 끊기와
 // 동등 - 조상의 같은 타입 위임으로 새지 않는다). 바인딩은 인스턴스 스코프 값(handlers/store/module)을
 // 함께 담아 위임 리스너에서 복원한다.
-const eventBindings = new WeakMap();
+const eventBindings = new WeakMap<Element, Record<string, TBinding>>();
 const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 타입(중복 설치 방지)
 
 // 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
-const dispatchBinding = (b: any, domEventObject: Event) => {
+const dispatchBinding = (b: TBinding, domEventObject: Event) => {
   const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module } = b;
-  const data: any = {};
+  const data: Record<string, unknown> = {};
   for (const p of payload) {
     data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
   }
-  const context: Record<string, any> = {};
+  const context: Record<string, Record<string, unknown>> = {};
   for (const ctxName in contextLeaves) {
-    const values: Record<string, any> = {};
+    const values: Record<string, unknown> = {};
     for (const p of contextLeaves[ctxName]) {
       values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
     }
@@ -529,7 +530,7 @@ const ensureDelegate = (domEventName: (typeof DOM_EVENTS)[number]) => {
   document.addEventListener(domEventName, (domEventObject) => {
     let node = domEventObject.target;
     while (node && node !== document) {
-      const bound = eventBindings.get(node);
+      const bound = eventBindings.get(node as Element);
       const b = bound && bound[domEventName];
       if (b) {
         dispatchBinding(b, domEventObject);
@@ -615,6 +616,19 @@ type TModule = {
 type TAssembled = { name: string; typeRef: number; fieldSourcePairs: number[] };
 // ENTER_CONTEXT가 만든 컨텍스트 인스턴스. createdContexts에 append된다.
 type TCreatedContext = { name: string; fields: TAssembled[] };
+// 핸들러 맵(fullName -> 핸들러). 핸들러 인자 계약은 dispatchBinding이 조립해 넘긴다.
+export type THandlers = Record<string, ((data: Record<string, unknown>, ctx: Record<string, unknown>) => void) | undefined>;
+// 한 element·DOM이벤트 타입의 발화 바인딩. eventBindings WeakMap에 심고 위임 리스너가 복원한다.
+type TBinding = {
+  handlers: THandlers;
+  fullName: string;
+  payload: TAssembled[];
+  contextLeaves: Record<string, TAssembled[]>;
+  props: Record<string, number>;
+  loopIndices: Partial<{ [key in TIndexSymbol]: number }>;
+  store: TLeafStoreSubject;
+  module: TModule;
+};
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
 // 한 컴포넌트 def를 Blueprint(인스턴스화 함수)로 만든다.
@@ -633,7 +647,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def/자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
-  return (store: TLeafStoreSubject, rootArgumentSourcePairs: string[], handlers = {}) => {
+  return (store: TLeafStoreSubject, rootArgumentSourcePairs: string[], handlers: THandlers = {}) => {
     // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
     // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
@@ -764,7 +778,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           addIterationBranch(i);
         }
 
-        store.subscribe(countLeafIndex, (v: number) => {
+        store.subscribe(countLeafIndex, (v: unknown) => {
           const next = Number(v) || 0;
           const cur = region.branchIndices.length;
           for (let i = cur; i < next; i++) {
@@ -837,21 +851,21 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             const name = ATTRS[u16at()];
             const el = pending!;
             const v = bindVar(u16at(), (v) => el.setAttribute(name, v as string));
-            el.setAttribute(name, v);
+            el.setAttribute(name, v as string);
             break;
           }
           case OP.ATTR_L_VAR: {
             const name = module.constpool[u16at()] as string;
             const el = pending!;
             const v = bindVar(u16at(), (v) => el.setAttribute(name, v as string));
-            el.setAttribute(name, v);
+            el.setAttribute(name, v as string);
             break;
           }
           case OP.BIND_EVENT: {
             // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
             const domEvent = DOM_EVENTS[u16at()];
             const event = events[u16at()];
-            const eventName = module.constpool[event.nameConstIndex];
+            const eventName = module.constpool[event.nameConstIndex] as string;
             // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
             // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
             // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
@@ -871,7 +885,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field 중 STORE만 - 상수
             // 슬롯은 불변이라 set 대상이 못 된다. 객체의 set 의미는 미정(ISSUES). data(읽기)는
             // 객체까지 조립된다.
-            const props: Record<string, any> = {};
+            const props: Record<string, number> = {};
             for (const p of payload) {
               if (module.types[p.typeRef].tag === "scalar" && p.fieldSourcePairs[0] === STORE) {
                 props[p.name] = p.fieldSourcePairs[1];
@@ -879,7 +893,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             }
             // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
             // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
-            const contextLeaves: Record<string, any> = {};
+            const contextLeaves: Record<string, TAssembled[]> = {};
             for (const i of activeContexts) {
               const created = createdContexts[i];
               contextLeaves[created.name] = created.fields;
@@ -923,7 +937,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           }
           case OP.TEXT_VAR: {
             const node = document.createTextNode("");
-            node.textContent = bindVar(u16at(), (v) => (node.textContent = v as string));
+            node.textContent = bindVar(u16at(), (v) => (node.textContent = v as string)) as string;
             nodeTop().appendChild(node);
             break;
           }
@@ -1027,7 +1041,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
             const condIsConst = argumentSourcePairs[2 * condOffset] === CONST;
             const condRef = argumentSourcePairs[2 * condOffset + 1];
-            const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef);
+            const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef as string);
             const regionIndex = appendIfRegion(regions, branches, condLeafIndex);
             const region = regions[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록

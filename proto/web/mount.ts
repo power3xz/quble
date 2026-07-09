@@ -1,7 +1,7 @@
 // Quble 앱 진입점 - 배포된 산출물(qubb + manifest)을 fetch해 브라우저에 마운트한다.
 // qubc 컴파일은 빌드가 이미 끝났고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
 
-import { compile, createLeafStoreSubject } from "./runtime.ts";
+import { compile, createLeafStoreSubject, type THandlers } from "./runtime.ts";
 
 type TManifest = {
   resources: string[];
@@ -16,7 +16,7 @@ type TManifest = {
  * @param base      manifest.handlers 상대경로 해소 기준 URL
  * @returns         fullname -> handler 맵 (핸들러 없으면 {})
  */
-export const loadHandlers = async (manifest: TManifest, base: string | URL): Promise<Record<string, unknown>> => {
+export const loadHandlers = async (manifest: TManifest, base: string | URL): Promise<THandlers> => {
   if (!manifest.handlers) {
     return {};
   }

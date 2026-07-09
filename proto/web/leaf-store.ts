@@ -69,8 +69,15 @@ const createLeafStore = (rootValue: unknown) => {
 //
 // @param rootValue leafStore에 넘길 뿌리 객체
 // @returns         { leafOf, get, set, setPath, subscribe, unsubscribe }
-export type LeafStoreSubject = { leafOf: any; get: any; set: any; setPath: any; subscribe: any; unsubscribe: any };
-export const createLeafStoreSubject = (rootValue: unknown) => {
+export type LeafStoreSubject = {
+  leafOf: (path: string) => LeafIndex;
+  get: (leafIndex: LeafIndex) => unknown;
+  set: (leafIndex: LeafIndex, value: unknown) => void;
+  setPath: (path: string, value: unknown) => void;
+  subscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
+  unsubscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
+};
+export const createLeafStoreSubject = (rootValue: unknown): LeafStoreSubject => {
   const leafStore = createLeafStore(rootValue);
   const subscribers: Array<Set<(v: unknown) => void> | undefined> = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
 
