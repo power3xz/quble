@@ -6,10 +6,10 @@
 // Blueprint는 호출 시 def 코드를 훑어 DOM/구독을 만든다. (미리-파싱 방식도 시도했으나, 인스턴스화
 // 병목이 DOM API라 파싱 방식 차이는 측정 노이즈 수준 - 단순한 "호출 시 훑기"를 택했다.)
 //
-// Instance = { nodes, regions }. nodes는 루트 노드들(부착/추적용), regions는 이 인스턴스의 모든
+// Instance = { nodes, regionPool }. nodes는 루트 노드들(부착/추적용), regionPool는 이 인스턴스의 모든
 // Region(@if swap / @for 회차 경계). 구독은 가지(Branch)에 모이고 attach가 켤 때 건다 - 안 보이는
 // 가지는 구독 0이다(region 구조/동작은 region.js). RENDER는 자식 def를 같은 interpret으로 인라인
-// 재진입해, 자식 if가 부모와 같은 regions/가지에 합류한다(별도 인스턴스 없음).
+// 재진입해, 자식 if가 부모와 같은 regionPool/가지에 합류한다(별도 인스턴스 없음).
 //
 // 값 소비 경로 (REACTIVITY.md §1~§3):
 //   offset(컴포넌트 로컬) -> argumentSourcePairs 슬롯 [kind, ref] -> kind가 STORE면 store.leafOf로
@@ -641,7 +641,7 @@ type TBinding = {
 //
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
-// @returns      Blueprint: (store, rootArgumentSourcePairs) => Instance { nodes, regions }
+// @returns      Blueprint: (store, rootArgumentSourcePairs) => Instance { nodes, regionPool }
 const compileDef = (module: TModule, compId: number, resources: string[] = [], loadedHrefs = new Set()) => {
   const def = module.defs[compId];
   if (!def) {
@@ -654,14 +654,14 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
     // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
-    const regions: TRegion[] = []; // append만, 인덱스 영구 안정. appendIfRegion/appendForRegion이 새 region을 더한다.
-    const branches: TBranch[] = []; // 한 인스턴스의 모든 Branch(전역 플랫). append만, @for 회차 제거 시 그 칸은 null.
+    const regionPool: TRegion[] = []; // append만, 인덱스 영구 안정. appendIfRegion/appendForRegion이 새 region을 더한다.
+    const branchPool: TBranch[] = []; // 한 인스턴스의 모든 Branch(전역 플랫). append만, @for 회차 제거 시 그 칸은 null.
     // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
     // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
     // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
     const createdContexts: TCreatedContext[] = [];
-    const rootRegion = regions[appendIfRegion(regions, branches, -1)]; // 루트도 region(인덱스 0)
-    branches[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
+    const rootRegion = regionPool[appendIfRegion(regionPool, branchPool, -1)]; // 루트도 region(인덱스 0)
+    branchPool[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
 
     // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
@@ -678,7 +678,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
     // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
     // @param startRegionIndex 구독을 쌓을 region
-    // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branches[startBranchIndex])
+    // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
     // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
     // @returns                직속 노드를 담은 DocumentFragment
     const interpret = (
@@ -704,7 +704,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
 
       // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
       // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
-      const branch = branches[startBranchIndex]; // startBranchIndex는 전역 branchIndex
+      const branch = branchPool[startBranchIndex]; // startBranchIndex는 전역 branchIndex
 
       const u16at = () => {
         const v = code[pc] | (code[pc + 1] << 8);
@@ -760,8 +760,8 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       // attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일). count leaf
       // 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
       const reactiveFor = (countLeafIndex: number, bodyStart: number, forEndPc: number) => {
-        const forRegionIndex = appendForRegion(regions, countLeafIndex);
-        const region = regions[forRegionIndex];
+        const forRegionIndex = appendForRegion(regionPool, countLeafIndex);
+        const region = regionPool[forRegionIndex];
         branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
         nodeTop().appendChild(region.anchor);
 
@@ -769,8 +769,8 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
         // 새 회차의 전역 branchIndex를 돌려준다.
         const addIterationBranch = (i: number) => {
-          const newBranchIndex = appendBranchOfForRegion(regions, branches, forRegionIndex);
-          branches[newBranchIndex].nodes = Array.from(
+          const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, forRegionIndex);
+          branchPool[newBranchIndex].nodes = Array.from(
             buildIteration(i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
           );
           return newBranchIndex;
@@ -785,10 +785,10 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           const next = Number(v) || 0;
           const cur = region.branchIndices.length;
           for (let i = cur; i < next; i++) {
-            attachForIteration(store, regions, branches, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+            attachForIteration(store, regionPool, branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
           }
           if (next < cur) {
-            truncateFor(store, regions, branches, region, next); // 줄어든 꼬리 제거
+            truncateFor(store, regionPool, branchPool, region, next); // 줄어든 꼬리 제거
           }
         });
       };
@@ -1020,7 +1020,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             segment = null;
             // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 argumentSourcePairs로 같은 interpret에 돌린다.
             // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) -> 자식 IF는 이 가지의
-            // childRegionIndices에 합류하고 같은 regions 배열에 append된다(인덱스 전역 유일).
+            // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
             // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
             const childDef = module.defs[childCompId];
             const childFragment = interpret(
@@ -1053,13 +1053,13 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             const condIsConst = argumentSourcePairs[2 * condOffset] === CONST;
             const condRef = argumentSourcePairs[2 * condOffset + 1];
             const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef as string);
-            const regionIndex = appendIfRegion(regions, branches, condLeafIndex);
-            const region = regions[regionIndex];
+            const regionIndex = appendIfRegion(regionPool, branchPool, condLeafIndex);
+            const region = regionPool[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
             const thenBranchIndex = region.branchIndices[THEN_INDEX];
             const elseBranchIndex = region.branchIndices[ELSE_INDEX];
-            const thenBranch = branches[thenBranchIndex];
-            const elseBranch = branches[elseBranchIndex];
+            const thenBranch = branchPool[thenBranchIndex];
+            const elseBranch = branchPool[elseBranchIndex];
             // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
             nodeTop().appendChild(region.anchor);
 
@@ -1112,7 +1112,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
             if (!condIsConst) {
               store.subscribe(condLeafIndex, (condValue: unknown) => {
-                activateIf(store, regions, branches, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+                activateIf(store, regionPool, branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
               });
             }
             // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
@@ -1121,7 +1121,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
             const condInitial = condIsConst ? module.constpool[condRef as number] : store.get(condLeafIndex);
             const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
-            const initialBranch = branches[region.branchIndices[initialShownIndex]];
+            const initialBranch = branchPool[region.branchIndices[initialShownIndex]];
             // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
             initialBranch.lazyBuild!();
             initialBranch.built = true;
@@ -1162,7 +1162,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       return fragment;
     };
 
-    // build: 트리(regions/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
+    // build: 트리(regionPool/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
     // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
     // rootArgumentSourcePairs는 외부 계약이라 path 문자열 배열(['label', …])로 받는다 - 루트 슬롯은
@@ -1186,12 +1186,12 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       [], // 루트는 @for 밖 - 회차 인덱스 없음
       0, // 세그먼트 인덱스 base 0
     );
-    branches[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
+    branchPool[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
-    rootRegion.attach(store, regions, branches, rootRegion);
+    rootRegion.attach(store, regionPool, branchPool, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
-    return { nodes, regions, branches };
+    return { nodes, regionPool, branchPool };
   };
 };
 
