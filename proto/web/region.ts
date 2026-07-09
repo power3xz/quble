@@ -1,3 +1,5 @@
+import { allocInPool, freeInPool } from "./pool-allocator.ts";
+
 // Region - 노드가 붙었다/떼였다 하는 경계. 두 종류다.
 //   @if : 가지 중 shownIndex 하나만 보인다(then/else swap). appendIfRegion 계열.
 //   @for: 가지가 회차 리스트라 전부 동시에 보인다(회차 하나=Branch 하나). count가 바뀌면
@@ -9,13 +11,13 @@
 // 첫 활성화 때 딱 한 번 build되고(branch.built), 이후엔 detach/attach만 한다.
 // build 자체는 runtime.js의 interpret을 캡처한 branch.lazyBuild 클로저가 한다 - region.js는
 // 바이트코드/경계를 모른 채 "가지 토글"만 책임진다. @for 회차는 늘 활성이라 lazy가 아니다
-// (build 즉시 보인다). truncateFor로 떼어낸 회차는 재사용 안 하고 버린다(count가 도로 늘면
-// 새 회차를 build).
+// (build 즉시 보인다). truncateFor로 떼어낸 회차는 되살리지 않는다 - count가 도로 늘면 새 회차를
+// build한다(빈 칸(인덱스)은 pool-allocator가 재사용하지만, 그 안의 branch 객체는 새로 만든다).
 //
 // 데이터 모양 (모든 관계는 인덱스 기반 - 객체는 두 전역 플랫 배열에만 살고, 나머지는 숫자로 든다):
-//   regionPool:  Region[]           - 한 인스턴스의 모든 Region. append만, 인덱스 영구 안정.
-//   branchPool: Branch[]           - 한 인스턴스의 모든 Branch. append만. @for 회차 제거 시 그 칸은
-//                                  null로 비운다(전역 배열이 유일 소유자라 null로 끊어야 GC된다).
+//   regionPool / branchPool         - 한 인스턴스의 모든 Region / Branch. 칸 할당·반납은
+//                                  pool-allocator에 위임한다(빈 칸 재사용). @for 회차가 줄면 그
+//                                  회차의 branch와 자식 region이 함께 반납된다(truncateFor).
 //   Region { branchIndices:[], condLeafIndex, anchor, shownIndex, detach, attach }
 //     branchIndices = branchPool 배열 인덱스 목록.
 //     @if: branchIndices[THEN_INDEX]=then, branchIndices[ELSE_INDEX]=else, shownIndex=보이는 가지(-1=없음).
@@ -63,17 +65,16 @@ export type TRegion = {
   condLeafIndex: number;
   anchor: Comment;
   shownIndex: number;
-  detach: (store: Store, regionPool: TRegion[], branchPool: (TBranch | null)[], region: TRegion) => void;
-  attach: (store: Store, regionPool: TRegion[], branchPool: (TBranch | null)[], region: TRegion) => void;
+  detach: (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion) => void;
+  attach: (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion) => void;
 };
 
 export const THEN_INDEX = 0;
 export const ELSE_INDEX = 1;
 
-// 전역 branchPool에 빈 Branch를 append하고 그 branchIndex를 돌려준다.
-const appendBranch = (branchPool: (TBranch | null)[]): number => {
-  const branchIndex = branchPool.length;
-  branchPool.push({
+// branchPool에 빈 Branch를 alloc(빈 칸 재사용 or append)하고 그 branchIndex를 돌려준다.
+const appendBranch = (branchPool: TBranch[], freeBranches: number[]): number =>
+  allocInPool(branchPool, freeBranches, {
     nodes: [],
     leafIndices: [],
     updateFns: [],
@@ -81,8 +82,6 @@ const appendBranch = (branchPool: (TBranch | null)[]): number => {
     built: false,
     lazyBuild: null, // runtime.js가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
   });
-  return branchIndex;
-};
 
 // 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detach 함수가 전담.
 const teardownBranchSubs = (store: Store, branch: TBranch): void => {
@@ -103,13 +102,8 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
 
 // 한 가지(branchIndex)를 떼어낸다 - 노드 detach + 직속 구독 해제 + 활성 자식 Region 재귀.
 // anchor가 평평한 형제라 자식 swap 노드가 잔류하므로 자식까지 따라 내려가 떼야 한다.
-const detachOneBranch = (
-  store: Store,
-  regionPool: TRegion[],
-  branchPool: (TBranch | null)[],
-  branchIndex: number,
-): void => {
-  const branch = branchPool[branchIndex] as TBranch;
+const detachOneBranch = (store: Store, regionPool: TRegion[], branchPool: TBranch[], branchIndex: number): void => {
+  const branch = branchPool[branchIndex];
   for (const node of branch.nodes) {
     node.remove();
   }
@@ -125,11 +119,11 @@ const detachOneBranch = (
 const attachOneBranch = (
   store: Store,
   regionPool: TRegion[],
-  branchPool: (TBranch | null)[],
+  branchPool: TBranch[],
   anchor: ChildNode,
   branchIndex: number,
 ): void => {
-  const branch = branchPool[branchIndex] as TBranch;
+  const branch = branchPool[branchIndex];
   anchor.after(...branch.nodes);
   restoreBranchSubs(store, branch);
   for (const childRegionIndex of branch.childRegionIndices) {
@@ -141,35 +135,37 @@ const attachOneBranch = (
 // ── @if: then/else 둘 중 shownIndex 하나만 보인다 ──────────────────────────────
 
 // region을 받아 그 활성(shownIndex) 가지를 끈다.
-const detachIf = (store: Store, regionPool: TRegion[], branchPool: (TBranch | null)[], region: TRegion): void => {
+const detachIf = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
   detachOneBranch(store, regionPool, branchPool, region.branchIndices[region.shownIndex]);
 };
 
 // region을 받아 그 활성(shownIndex) 가지를 켠다. 최초 인스턴스화의 부착도 이 함수로 한다
 // (runtime.js가 build로 트리만 만든 뒤 루트 Region부터 호출). 루트도 anchor를 가져 자식과
 // 균일 처리된다(분기 없음).
-const attachIf = (store: Store, regionPool: TRegion[], branchPool: (TBranch | null)[], region: TRegion): void => {
+const attachIf = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
   attachOneBranch(store, regionPool, branchPool, region.anchor, region.branchIndices[region.shownIndex]);
 };
 
-// regionPool에 @if Region을 스폰한다 - anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 push하고
+// regionPool에 @if Region을 스폰한다 - anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 alloc하고
 // 그 인덱스를 돌려준다. anchor를 DOM 트리 어디에 붙일지는 호출자 몫(IF는 nodeTop, 루트는 fragment).
-// 인덱스는 append-only라 영구 안정.
+// 인덱스는 alloc이 정한다(빈 칸 재사용 시 length와 다름) - 그래서 anchor 라벨은 alloc 후 채운다.
 export const appendIfRegion = (
   regionPool: TRegion[],
-  branchPool: (TBranch | null)[],
+  freeRegions: number[],
+  branchPool: TBranch[],
+  freeBranches: number[],
   condLeafIndex: number,
 ): number => {
-  const regionIndex = regionPool.length;
-  const anchor = document.createComment(`qb:region#${regionIndex}`);
-  regionPool.push({
-    branchIndices: [appendBranch(branchPool), appendBranch(branchPool)],
+  const anchor = document.createComment("");
+  const regionIndex = allocInPool(regionPool, freeRegions, {
+    branchIndices: [appendBranch(branchPool, freeBranches), appendBranch(branchPool, freeBranches)],
     condLeafIndex,
     anchor,
     shownIndex: -1,
     detach: detachIf,
     attach: attachIf,
   });
+  anchor.data = `qb:region#${regionIndex}`;
   return regionIndex;
 };
 
@@ -180,7 +176,7 @@ export const appendIfRegion = (
 export const activateIf = (
   store: Store,
   regionPool: TRegion[],
-  branchPool: (TBranch | null)[],
+  branchPool: TBranch[],
   regionIndex: number,
   shownIndex: number,
 ): void => {
@@ -191,7 +187,7 @@ export const activateIf = (
   if (region.shownIndex !== -1) {
     detachIf(store, regionPool, branchPool, region); // 이전 shownIndex 기준으로 끈다
   }
-  const nextBranch = branchPool[region.branchIndices[shownIndex]] as TBranch;
+  const nextBranch = branchPool[region.branchIndices[shownIndex]];
   if (!nextBranch.built) {
     // 생애 첫 활성화 - 지금(런타임) 처음 build해 nodes·구독을 채운다. 이후엔 detach/attach만.
     (nextBranch.lazyBuild as () => void)();
@@ -205,14 +201,14 @@ export const activateIf = (
 // ── @for: branchPool가 회차 리스트, 전부 동시에 보인다 ──────────────────────────
 
 // region을 받아 회차 전부를 떼어낸다.
-const detachFor = (store: Store, regionPool: TRegion[], branchPool: (TBranch | null)[], region: TRegion): void => {
+const detachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
   for (const branchIndex of region.branchIndices) {
     detachOneBranch(store, regionPool, branchPool, branchIndex);
   }
 };
 
 // region을 받아 회차 전부를 붙인다.
-const attachFor = (store: Store, regionPool: TRegion[], branchPool: (TBranch | null)[], region: TRegion): void => {
+const attachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
   for (const branchIndex of region.branchIndices) {
     attachOneBranch(store, regionPool, branchPool, region.anchor, branchIndex);
   }
@@ -220,10 +216,9 @@ const attachFor = (store: Store, regionPool: TRegion[], branchPool: (TBranch | n
 
 // regionPool에 @for Region을 스폰한다 - anchor만 만들고 회차는 0개(회차는 appendBranchOfForRegion이
 // 하나씩 더한다). countLeafIndex = 반복 횟수를 읽는 leaf(구독 대상).
-export const appendForRegion = (regionPool: TRegion[], countLeafIndex: number): number => {
-  const regionIndex = regionPool.length;
-  const anchor = document.createComment(`qb:region#${regionIndex}`);
-  regionPool.push({
+export const appendForRegion = (regionPool: TRegion[], freeRegions: number[], countLeafIndex: number): number => {
+  const anchor = document.createComment("");
+  const regionIndex = allocInPool(regionPool, freeRegions, {
     branchIndices: [],
     condLeafIndex: countLeafIndex,
     anchor,
@@ -231,6 +226,7 @@ export const appendForRegion = (regionPool: TRegion[], countLeafIndex: number): 
     detach: detachFor,
     attach: attachFor,
   });
+  anchor.data = `qb:region#${regionIndex}`;
   return regionIndex;
 };
 
@@ -238,10 +234,11 @@ export const appendForRegion = (regionPool: TRegion[], countLeafIndex: number): 
 // startBranchIndex로 interpret해 노드·구독·자식region을 이 회차에 격리한다.
 export const appendBranchOfForRegion = (
   regionPool: TRegion[],
-  branchPool: (TBranch | null)[],
+  branchPool: TBranch[],
+  freeBranches: number[],
   regionIndex: number,
 ): number => {
-  const branchIndex = appendBranch(branchPool);
+  const branchIndex = appendBranch(branchPool, freeBranches);
   regionPool[regionIndex].branchIndices.push(branchIndex);
   return branchIndex;
 };
@@ -252,13 +249,13 @@ export const appendBranchOfForRegion = (
 export const attachForIteration = (
   store: Store,
   regionPool: TRegion[],
-  branchPool: (TBranch | null)[],
+  branchPool: TBranch[],
   region: TRegion,
   branchIndex: number,
 ): void => {
-  const branch = branchPool[branchIndex] as TBranch;
+  const branch = branchPool[branchIndex];
   const slot = region.branchIndices.indexOf(branchIndex);
-  const prev = slot > 0 ? (branchPool[region.branchIndices[slot - 1]] as TBranch) : null;
+  const prev = slot > 0 ? branchPool[region.branchIndices[slot - 1]] : null;
   const after = prev?.nodes.length ? prev.nodes[prev.nodes.length - 1] : region.anchor;
   after.after(...branch.nodes);
   restoreBranchSubs(store, branch);
@@ -268,20 +265,53 @@ export const attachForIteration = (
   }
 };
 
-// @for region의 꼬리 회차를 count개만 남기고 떼어 버린다(count 줄 때). 떼어낸 회차는 재사용
-// 안 한다 - 노드 remove + 직속 구독 해제 + 자식 region 재귀 detach 후, region 명단에서 자르고
-// 전역 branchPool의 그 칸을 null로 비운다(전역 배열이 유일 소유자라 null로 끊어야 GC된다).
+// branch(branchIndex)와 그 자식 region들을 리프까지 재귀로 free해 칸을 반납한다. detach(DOM/구독
+// 떼기)와는 별개 - detach는 @if swap에서도 쓰여 free하면 안 되므로 안 섞는다. 호출 전 detach가
+// 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
+const freeBranchTree = (
+  branchPool: TBranch[],
+  freeBranches: number[],
+  regionPool: TRegion[],
+  freeRegions: number[],
+  branchIndex: number,
+): void => {
+  for (const childRegionIndex of branchPool[branchIndex].childRegionIndices) {
+    freeRegionTree(branchPool, freeBranches, regionPool, freeRegions, childRegionIndex);
+  }
+  freeInPool(branchPool, freeBranches, branchIndex);
+};
+
+// region(regionIndex)이 든 모든 branch를 재귀 free한 뒤 이 region 칸을 반납한다.
+const freeRegionTree = (
+  branchPool: TBranch[],
+  freeBranches: number[],
+  regionPool: TRegion[],
+  freeRegions: number[],
+  regionIndex: number,
+): void => {
+  for (const branchIndex of regionPool[regionIndex].branchIndices) {
+    freeBranchTree(branchPool, freeBranches, regionPool, freeRegions, branchIndex);
+  }
+  freeInPool(regionPool, freeRegions, regionIndex);
+};
+
+// @for region의 꼬리 회차를 count개만 남기고 떼어낸다(count 줄 때). 회차마다 detach(떼기)와
+// freeBranchTree(칸 반납)를 함께 하는데, 둘은 별개다 - detach는 자식 region을 DOM/구독에서
+// 떼지만 regionPool엔 남겨 두므로(같은 detach가 @if swap에서도 쓰여 반납하면 안 되기 때문),
+// freeBranchTree가 그 자식 region까지 재귀로 반납해야 명단이 정리된다.
 export const truncateFor = (
   store: Store,
   regionPool: TRegion[],
-  branchPool: (TBranch | null)[],
+  freeRegions: number[],
+  branchPool: TBranch[],
+  freeBranches: number[],
   region: TRegion,
   count: number,
 ): void => {
   const branchIndices = region.branchIndices;
   for (let i = branchIndices.length - 1; i >= count; i--) {
     detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-    branchPool[branchIndices[i]] = null;
+    freeBranchTree(branchPool, freeBranches, regionPool, freeRegions, branchIndices[i]);
   }
   branchIndices.length = count;
 };

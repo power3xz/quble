@@ -654,13 +654,15 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
     // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
-    const regionPool: TRegion[] = []; // append만, 인덱스 영구 안정. appendIfRegion/appendForRegion이 새 region을 더한다.
-    const branchPool: TBranch[] = []; // 한 인스턴스의 모든 Branch(전역 플랫). append만, @for 회차 제거 시 그 칸은 null.
+    const regionPool: TRegion[] = []; // 한 인스턴스의 모든 Region. alloc/free(@for 회차 제거 시 자식 region 반납).
+    const freeRegions: number[] = []; // regionPool의 빈 칸 인덱스(freelist). alloc이 재사용한다.
+    const branchPool: TBranch[] = []; // 한 인스턴스의 모든 Branch. alloc/free(@for 회차 제거 시 반납).
+    const freeBranches: number[] = []; // branchPool의 빈 칸 인덱스(freelist). alloc이 재사용한다.
     // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
     // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
     // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
     const createdContexts: TCreatedContext[] = [];
-    const rootRegion = regionPool[appendIfRegion(regionPool, branchPool, -1)]; // 루트도 region(인덱스 0)
+    const rootRegion = regionPool[appendIfRegion(regionPool, freeRegions, branchPool, freeBranches, -1)]; // 루트도 region(인덱스 0)
     branchPool[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
 
@@ -760,7 +762,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       // attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일). count leaf
       // 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
       const reactiveFor = (countLeafIndex: number, bodyStart: number, forEndPc: number) => {
-        const forRegionIndex = appendForRegion(regionPool, countLeafIndex);
+        const forRegionIndex = appendForRegion(regionPool, freeRegions, countLeafIndex);
         const region = regionPool[forRegionIndex];
         branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
         nodeTop().appendChild(region.anchor);
@@ -769,7 +771,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
         // 새 회차의 전역 branchIndex를 돌려준다.
         const addIterationBranch = (i: number) => {
-          const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, forRegionIndex);
+          const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
           branchPool[newBranchIndex].nodes = Array.from(
             buildIteration(i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
           );
@@ -788,7 +790,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             attachForIteration(store, regionPool, branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
           }
           if (next < cur) {
-            truncateFor(store, regionPool, branchPool, region, next); // 줄어든 꼬리 제거
+            truncateFor(store, regionPool, freeRegions, branchPool, freeBranches, region, next); // 줄어든 꼬리 제거
           }
         });
       };
@@ -1053,7 +1055,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             const condIsConst = argumentSourcePairs[2 * condOffset] === CONST;
             const condRef = argumentSourcePairs[2 * condOffset + 1];
             const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef as string);
-            const regionIndex = appendIfRegion(regionPool, branchPool, condLeafIndex);
+            const regionIndex = appendIfRegion(regionPool, freeRegions, branchPool, freeBranches, condLeafIndex);
             const region = regionPool[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
             const thenBranchIndex = region.branchIndices[THEN_INDEX];
