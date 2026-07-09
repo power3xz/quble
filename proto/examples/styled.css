@@ -4,5 +4,8 @@
   border-radius: 999px;
   background: #4a90d9;
   color: #fff;
-  font: 600 12px/1 -apple-system, system-ui, sans-serif;
+  font:
+    600 12px / 1 -apple-system,
+    system-ui,
+    sans-serif;
 }

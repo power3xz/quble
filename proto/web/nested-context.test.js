@@ -3,12 +3,12 @@
 //  2) 같은 이름 합성 중첩: 부모가 @with Area로 감싼 안에서 자식도 @with Area를 활성화 -
 //     안쪽(자식)이 통째로 덮는다(필드 머지 아님). 워닝을 띄운다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
+import { test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 const fireToggle = (qubb, paths, values, handlers) => {
   const store = createLeafStoreSubject(values);
@@ -20,11 +20,16 @@ const fireToggle = (qubb, paths, values, handlers) => {
 test("다른 이름 중첩 - context에 바깥/안쪽 컨텍스트가 모두 담긴다", () => {
   const qubb = buildFixture("nested_context");
   let received = null;
-  fireToggle(qubb, ["userId"], { userId: 7 }, {
-    TOGGLE: (data, { context }) => {
-      received = context;
+  fireToggle(
+    qubb,
+    ["userId"],
+    { userId: 7 },
+    {
+      TOGGLE: (_data, { context }) => {
+        received = context;
+      },
     },
-  });
+  );
   assert.deepEqual(received, {
     Outer: { area: "outer", userId: 7 },
     Inner: { area: "inner", tier: "gold" },
@@ -41,11 +46,16 @@ test("같은 이름 합성 중첩 - 자식이 부모를 통째 덮고(필드 머
   try {
     // 부모 props [userId]. Child(userId={userId})로 물려준다.
     // 버튼은 자식 안 - 별칭 없는 합성이라 fullname은 Child.TOGGLE.
-    fireToggle(qubb, ["userId"], { userId: 7 }, {
-      "Child.TOGGLE": (data, { context }) => {
-        received = context;
+    fireToggle(
+      qubb,
+      ["userId"],
+      { userId: 7 },
+      {
+        "Child.TOGGLE": (_data, { context }) => {
+          received = context;
+        },
       },
-    });
+    );
   } finally {
     console.warn = origWarn;
   }

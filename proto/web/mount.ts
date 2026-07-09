@@ -1,7 +1,13 @@
 // Quble 앱 진입점 - 배포된 산출물(qubb + manifest)을 fetch해 브라우저에 마운트한다.
-// qubc 컴파일은 빌드가 이미 끝냈고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
+// qubc 컴파일은 빌드가 이미 끝났고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
 
-import { compile, createLeafStoreSubject } from "./runtime.js";
+import { compile, createLeafStoreSubject, type THandlers } from "./runtime.ts";
+
+type TManifest = {
+  resources: string[];
+  props: string[];
+  handlers?: string;
+};
 
 /**
  * manifest.handlers가 가리키는 JS를 로드해 fullname -> handler 맵(default export)을 돌려준다.
@@ -10,7 +16,7 @@ import { compile, createLeafStoreSubject } from "./runtime.js";
  * @param base      manifest.handlers 상대경로 해소 기준 URL
  * @returns         fullname -> handler 맵 (핸들러 없으면 {})
  */
-export const loadHandlers = async (manifest, base) => {
+export const loadHandlers = async (manifest: TManifest, base: string | URL): Promise<THandlers> => {
   if (!manifest.handlers) {
     return {};
   }
@@ -27,10 +33,10 @@ export const loadHandlers = async (manifest, base) => {
  * @param rootEl   마운트 대상 DOM 요소
  * @param data     props명 -> 초기값. 그대로 store 루트가 된다(자식도 이름 경로로 참조).
  */
-export const mount = async (qubbUrl, rootEl, data) => {
+export const mount = async (qubbUrl: string, rootEl: Element, data: unknown) => {
   const base = new URL(qubbUrl, location.href);
-  const manifestUrl = qubbUrl.replace(/\.qubb$/, "") + ".manifest.json";
-  const manifest = await fetch(manifestUrl).then((r) => r.json());
+  const manifestUrl = `${qubbUrl.replace(/\.qubb$/, "")}.manifest.json`;
+  const manifest: TManifest = await fetch(manifestUrl).then((r) => r.json());
 
   // manifest만 있으면 qubb fetch와 핸들러 로드는 서로 독립 - 병렬로.
   const [bytesBuf, handlers] = await Promise.all([

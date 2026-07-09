@@ -5,7 +5,7 @@
 // 사용: node build.mjs <path/to/component.qubc> [--data <data.json>]
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { build } from "esbuild";
 
@@ -81,7 +81,7 @@ if (existsSync(handlersTs)) {
 
 // 3. 런타임 번들 - mount.js(runtime/region/leaf-store 포함)를 한 파일로. 매 빌드 생성.
 const runtimeBundle = await build({
-  entryPoints: [join(buildDir, "..", "web", "mount.js")],
+  entryPoints: [join(buildDir, "..", "web", "mount.ts")],
   bundle: true,
   format: "esm",
   platform: "browser",

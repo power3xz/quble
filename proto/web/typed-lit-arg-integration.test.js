@@ -2,12 +2,12 @@
 // 실제 JS number/boolean으로 복원되는지 본다(문자열 "42"/"true"가 아니라). 리터럴은 $lit.* path로
 // store에 심기므로, 심긴 leaf 값의 typeof로 타입 유지를 확인한다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js";
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -26,7 +26,7 @@ test("literals are not seeded into store", () => {
   };
   compile(qubb)(0)(store, []); // TypedLitArg = comp 0, props 없음
   // 리터럴만 있는 컴포넌트라 STORE leaf 발급이 전혀 없어야 한다($lit.* 잔재도 없음).
-  assert.deepEqual(seen, [], "리터럴은 leaf 발급 없이 pool에서 직접: " + JSON.stringify(seen));
+  assert.deepEqual(seen, [], `리터럴은 leaf 발급 없이 pool에서 직접: ${JSON.stringify(seen)}`);
 });
 
 // 타입 있는 리터럴이 텍스트로도 올바르게 렌더된다(number/bool은 DOM에서 문자열화).

@@ -2,12 +2,12 @@
 // 짧은 이름(TOGGLE)이 아니라 fullname("Toggle.TOGGLE")으로 핸들러를 부른다. PUSH_PATH_SEGMENT가
 // RENDER 앞에서 세그먼트를 적재하고 runtime이 pathPrefix로 누적한 결과를 본다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js";
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 let qubb;
 before(() => {

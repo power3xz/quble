@@ -5,18 +5,27 @@
 // 구독 0(안 보이는 가지)은 "비활성 가지 leaf를 set해도 화면이 안 바뀐다"로 행동 검증한다 -
 // createLeafStoreSubject는 subscribers를 노출하지 않으므로(최소 노출), 부작용으로 간접 확인한다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
 // dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb = {};
 before(() => {
-  for (const name of ["single_if", "nested_if", "no_else_if", "sibling_if", "triple_if", "composed_triple", "if_with_context", "lit_bool_if"]) {
+  for (const name of [
+    "single_if",
+    "nested_if",
+    "no_else_if",
+    "sibling_if",
+    "triple_if",
+    "composed_triple",
+    "if_with_context",
+    "lit_bool_if",
+  ]) {
     qubb[name] = buildFixture(name);
   }
 });
@@ -33,8 +42,7 @@ const instantiate = (name, paths, values) => {
 // region 트리 탐색. branchOf: region의 슬롯(THEN/ELSE)을 전역 branches에서 Branch 객체로 푼다.
 const THEN = 0;
 const ELSE = 1;
-const branchOf = (inst, region, slot) =>
-  inst.branches[region.branchIndices[slot]];
+const branchOf = (inst, region, slot) => inst.branches[region.branchIndices[slot]];
 const childRegion = (inst, regionIndex, slot, nth = 0) =>
   inst.regions[branchOf(inst, inst.regions[regionIndex], slot).childRegionIndices[nth]];
 
@@ -75,11 +83,13 @@ test("단일 if: 활성 가지 set은 즉시 반영", () => {
 
 // ── 중첩 if ──────────────────────────────────────────────────────────
 test("중첩 if: 바깥 then 활성 시 안쪽 if도 build·자식 등록", () => {
-  const { inst, host } = instantiate(
-    "nested_if",
-    ["outer", "inner", "a", "b", "c"],
-    { outer: true, inner: true, a: "A", b: "B", c: "C" },
-  );
+  const { inst, host } = instantiate("nested_if", ["outer", "inner", "a", "b", "c"], {
+    outer: true,
+    inner: true,
+    a: "A",
+    b: "B",
+    c: "C",
+  });
   assert.deepEqual(texts(host), ["A", "B"], "바깥 then의 a + 안쪽 then의 b");
   const outer = childRegion(inst, 0, THEN);
   assert.equal(branchOf(inst, outer, THEN).childRegionIndices.length, 1, "안쪽 if 1개 등록");
@@ -88,21 +98,25 @@ test("중첩 if: 바깥 then 활성 시 안쪽 if도 build·자식 등록", () =
 });
 
 test("중첩 if: 안쪽 swap은 바깥과 독립", () => {
-  const { host, set } = instantiate(
-    "nested_if",
-    ["outer", "inner", "a", "b", "c"],
-    { outer: true, inner: true, a: "A", b: "B", c: "C" },
-  );
+  const { host, set } = instantiate("nested_if", ["outer", "inner", "a", "b", "c"], {
+    outer: true,
+    inner: true,
+    a: "A",
+    b: "B",
+    c: "C",
+  });
   set("inner", false);
   assert.deepEqual(texts(host), ["A", "C"], "a 유지 + 안쪽 else의 c");
 });
 
 test("중첩 if: 바깥 swap이 안쪽(자식)까지 detach", () => {
-  const { host, set } = instantiate(
-    "nested_if",
-    ["outer", "inner", "a", "b", "c"],
-    { outer: true, inner: true, a: "A", b: "B", c: "C" },
-  );
+  const { host, set } = instantiate("nested_if", ["outer", "inner", "a", "b", "c"], {
+    outer: true,
+    inner: true,
+    a: "A",
+    b: "B",
+    c: "C",
+  });
   set("outer", false);
   assert.deepEqual(texts(host), ["A"], "바깥 else의 a만(안쪽 트리 통째 사라짐)");
   // 바깥 비활성 동안 안쪽 leaf를 바꿔도 무반응(재귀로 구독 해제됨)
@@ -127,11 +141,14 @@ test("else 없는 if: true면 렌더, false면 빈 자리(anchor만)", () => {
 
 // ── 형제 if ──────────────────────────────────────────────────────────
 test("형제 if: 같은 가지의 if 둘이 독립 swap", () => {
-  const { inst, host, set } = instantiate(
-    "sibling_if",
-    ["c1", "c2", "a", "b", "c", "d"],
-    { c1: true, c2: false, a: "A", b: "B", c: "C", d: "D" },
-  );
+  const { inst, host, set } = instantiate("sibling_if", ["c1", "c2", "a", "b", "c", "d"], {
+    c1: true,
+    c2: false,
+    a: "A",
+    b: "B",
+    c: "C",
+    d: "D",
+  });
   assert.deepEqual(texts(host), ["A", "D"], "첫 if then(A) + 둘째 if else(D)");
   assert.equal(branchOf(inst, inst.regions[0], THEN).childRegionIndices.length, 2, "루트 가지에 if 2개");
 
@@ -143,11 +160,15 @@ test("형제 if: 같은 가지의 if 둘이 독립 swap", () => {
 
 // ── 3단 중첩 ─────────────────────────────────────────────────────────
 test("3단 중첩: 최하단까지 렌더, 최상단 swap이 전부 detach", () => {
-  const { host, set } = instantiate(
-    "triple_if",
-    ["c1", "c2", "c3", "a", "b", "c", "d"],
-    { c1: true, c2: true, c3: true, a: "A", b: "B", c: "C", d: "D" },
-  );
+  const { host, set } = instantiate("triple_if", ["c1", "c2", "c3", "a", "b", "c", "d"], {
+    c1: true,
+    c2: true,
+    c3: true,
+    a: "A",
+    b: "B",
+    c: "C",
+    d: "D",
+  });
   assert.deepEqual(texts(host), ["A"], "3단 then까지 내려가 a");
   set("c3", false);
   assert.deepEqual(texts(host), ["B"], "최하단만 else(b)");
@@ -184,11 +205,15 @@ test("리터럴 bool @if: cond=false가 실제 boolean이라 else로 간다", ()
 // triple_if를 부모(바깥 c1) + 자식 InnerPair(c2/c3)로 쪼개 RENDER로 합성. 같은 store·path를 쓰므로
 // triple_if와 동일한 set/texts 시퀀스가 그대로 통과해야 한다(합성이 단일 컴포넌트와 동등).
 test("합성 3단: triple_if를 부모+자식으로 쪼개도 동일 동작", () => {
-  const { host, set } = instantiate(
-    "composed_triple",
-    ["c1", "c2", "c3", "a", "b", "c", "d"],
-    { c1: true, c2: true, c3: true, a: "A", b: "B", c: "C", d: "D" },
-  );
+  const { host, set } = instantiate("composed_triple", ["c1", "c2", "c3", "a", "b", "c", "d"], {
+    c1: true,
+    c2: true,
+    c3: true,
+    a: "A",
+    b: "B",
+    c: "C",
+    d: "D",
+  });
   assert.deepEqual(texts(host), ["A"], "3단 then까지 내려가 a");
   set("c3", false);
   assert.deepEqual(texts(host), ["B"], "최하단만 else(b)");

@@ -2,12 +2,12 @@
 // runtime을 jsdom 위에서 돌린다. 버튼 클릭 → 이벤트 발생 → 핸들러 data.user가 타입 트리로 조립된
 // 중첩 객체로 닿는지, 스칼라 field는 값 그대로인지, leaf 갱신이 조립값에 반영되는지 본다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js";
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
