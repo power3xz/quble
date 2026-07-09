@@ -22,20 +22,19 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 
 type TIndexSymbol = `$${TDigitString}`;
 
+import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
 import {
-  THEN_INDEX,
-  ELSE_INDEX,
-  appendIfRegion,
   activateIf,
-  appendForRegion,
   appendBranchOfForRegion,
+  appendForRegion,
+  appendIfRegion,
   attachForIteration,
-  truncateFor,
-  type TRegion,
+  ELSE_INDEX,
   type TBranch,
+  THEN_INDEX,
+  type TRegion,
+  truncateFor,
 } from "./region.ts";
-
-import { type LeafStoreSubject as TLeafStoreSubject, createLeafStoreSubject } from "./leaf-store.ts";
 
 const TAGS = [
   "div",
@@ -617,7 +616,10 @@ type TAssembled = { name: string; typeRef: number; fieldSourcePairs: number[] };
 // ENTER_CONTEXT가 만든 컨텍스트 인스턴스. createdContexts에 append된다.
 type TCreatedContext = { name: string; fields: TAssembled[] };
 // 핸들러 맵(fullName -> 핸들러). 핸들러 인자 계약은 dispatchBinding이 조립해 넘긴다.
-export type THandlers = Record<string, ((data: Record<string, unknown>, ctx: Record<string, unknown>) => void) | undefined>;
+export type THandlers = Record<
+  string,
+  ((data: Record<string, unknown>, ctx: Record<string, unknown>) => void) | undefined
+>;
 // 한 element·DOM이벤트 타입의 발화 바인딩. eventBindings WeakMap에 심고 위임 리스너가 복원한다.
 type TBinding = {
   handlers: THandlers;

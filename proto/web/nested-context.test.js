@@ -3,10 +3,10 @@
 //  2) 같은 이름 합성 중첩: 부모가 @with Area로 감싼 안에서 자식도 @with Area를 활성화 -
 //     안쪽(자식)이 통째로 덮는다(필드 머지 아님). 워닝을 띄운다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
 const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 

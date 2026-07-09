@@ -100,7 +100,8 @@ export const createLeafStoreSubject = (rootValue: unknown): LeafStoreSubject => 
   };
 
   const subscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {
-    (subscribers[leafIndex] ??= new Set()).add(fn);
+    subscribers[leafIndex] ??= new Set();
+    subscribers[leafIndex].add(fn);
   };
 
   const unsubscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {

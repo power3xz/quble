@@ -2,8 +2,8 @@
 // runtime.js를 jsdom 위에서 돌린다. compile(bytes, resmap)이 LOAD_RES를 만나 resId의 URL로
 // <link>를 document.head에 삽입하는지, 같은 URL은 dedup되는지 검증한다.
 
-import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { beforeEach, test } from "node:test";
 import "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import). 심볼은 안 쓰고 부수효과만 필요.
 import { buildFixture, buildFixtureWithResmap } from "./fixtures/build.js";
 

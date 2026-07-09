@@ -2,10 +2,10 @@
 // 실제 runtime.js를 jsdom 위에서 돌린다. 반복 렌더(리터럴/prop count), 이벤트 fullname의 [$n]
 // 정적 표기(컴포넌트 접미 Item[$0], element 익명 [$0]), 발화 시 회차 인덱스($0) 주입을 검증한다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
 const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
@@ -86,7 +86,9 @@ test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누
   );
   const buttons = [...host.querySelectorAll("button")];
   assert.equal(buttons.length, 12, "3x4 = 12장이 전부 렌더된다(누락 없음)");
-  buttons.forEach((b) => b.click());
+  buttons.forEach((b) => {
+    b.click();
+  });
   const expected = [];
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < 4; j++) {
@@ -177,7 +179,9 @@ test("회차 제거 후 재추가한 회차의 이벤트·$값이 정상", () =>
   store.setPath("n", 3); // 회차 1,2 재추가(새로 build)
   const buttons = [...host.querySelectorAll("button")];
   assert.equal(buttons.length, 3, "n=3 -> 버튼 3개");
-  buttons.forEach((b) => b.click());
+  buttons.forEach((b) => {
+    b.click();
+  });
   assert.deepEqual(picks, [0, 1, 2], "재추가된 회차도 각자 $0로 한 번씩만 발화(잔재 없음)");
 });
 

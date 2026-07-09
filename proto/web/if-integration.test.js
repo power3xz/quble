@@ -5,10 +5,10 @@
 // 구독 0(안 보이는 가지)은 "비활성 가지 leaf를 set해도 화면이 안 바뀐다"로 행동 검증한다 -
 // createLeafStoreSubject는 subscribers를 노출하지 않으므로(최소 노출), 부작용으로 간접 확인한다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
 // dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
 const { compile, createLeafStoreSubject } = await import("./runtime.ts");

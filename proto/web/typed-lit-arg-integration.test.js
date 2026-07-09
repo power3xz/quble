@@ -2,10 +2,10 @@
 // 실제 JS number/boolean으로 복원되는지 본다(문자열 "42"/"true"가 아니라). 리터럴은 $lit.* path로
 // store에 심기므로, 심긴 leaf 값의 typeof로 타입 유지를 확인한다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js";
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js";
 
 const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 

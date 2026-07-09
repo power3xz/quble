@@ -1,10 +1,10 @@
 // click 외 DOM 이벤트(@input) 통합 테스트 - 새로 추가한 DOM 이벤트 종류가 실제 컴파일러로
 // BIND_EVENT를 내고, runtime.js가 그 event_type을 input 리스너로 풀어 핸들러를 부르는지.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js";
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js";
 
 const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 

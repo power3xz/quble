@@ -2,10 +2,10 @@
 // 실제 runtime.js를 jsdom 위에서 돌린다. 단일 컴포넌트(합성·fullname 없음): 버튼 클릭 → 이벤트
 // 발생 → payload(현재값) 조립 → 핸들러 호출 → 핸들러의 set이 기존 반응성으로 DOM을 갱신.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
 const { compile, createLeafStoreSubject } = await import("./runtime.ts");
 
