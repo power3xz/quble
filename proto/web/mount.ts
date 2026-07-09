@@ -35,7 +35,7 @@ export const loadHandlers = async (manifest: TManifest, base: string | URL): Pro
  */
 export const mount = async (qubbUrl: string, rootEl: Element, data: unknown) => {
   const base = new URL(qubbUrl, location.href);
-  const manifestUrl = qubbUrl.replace(/\.qubb$/, "") + ".manifest.json";
+  const manifestUrl = `${qubbUrl.replace(/\.qubb$/, "")}.manifest.json`;
   const manifest: TManifest = await fetch(manifestUrl).then((r) => r.json());
 
   // manifest만 있으면 qubb fetch와 핸들러 로드는 서로 독립 - 병렬로.

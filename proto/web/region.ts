@@ -152,7 +152,7 @@ const attachIf = (store: Store, regions: TRegion[], branches: (TBranch | null)[]
 // 인덱스는 append-only라 영구 안정.
 export const appendIfRegion = (regions: TRegion[], branches: (TBranch | null)[], condLeafIndex: number): number => {
   const regionIndex = regions.length;
-  const anchor = document.createComment("qb:region#" + regionIndex);
+  const anchor = document.createComment(`qb:region#${regionIndex}`);
   regions.push({
     branchIndices: [appendBranch(branches), appendBranch(branches)],
     condLeafIndex,
@@ -213,7 +213,7 @@ const attachFor = (store: Store, regions: TRegion[], branches: (TBranch | null)[
 // 하나씩 더한다). countLeafIndex = 반복 횟수를 읽는 leaf(구독 대상).
 export const appendForRegion = (regions: TRegion[], countLeafIndex: number): number => {
   const regionIndex = regions.length;
-  const anchor = document.createComment("qb:region#" + regionIndex);
+  const anchor = document.createComment(`qb:region#${regionIndex}`);
   regions.push({
     branchIndices: [],
     condLeafIndex: countLeafIndex,

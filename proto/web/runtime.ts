@@ -142,7 +142,7 @@ const operandLen = (op: number) => {
     case OP.BIND_EVENT:
       return 4;
     default:
-      throw new Error("bad opcode 0x" + op.toString(16));
+      throw new Error(`bad opcode 0x${op.toString(16)}`);
   }
 };
 
@@ -270,7 +270,7 @@ class Reader {
     if (tag === 2) {
       return this.u8() !== 0;
     }
-    throw new Error("bad const tag " + tag);
+    throw new Error(`bad const tag ${tag}`);
   }
 }
 
@@ -317,7 +317,7 @@ const readType = (reader: Reader): TType => {
     }
     return { tag: "object", fields };
   }
-  throw new Error("bad type tag " + tag);
+  throw new Error(`bad type tag ${tag}`);
 };
 
 // FieldValue u16 하나를 kind + ref로 디코드한다(Rust FieldValue::decode 대칭). ref는 kind마다
@@ -552,7 +552,7 @@ const decode = (bytes: Uint8Array) => {
   }
   const version = r.u16();
   if (version !== 0) {
-    throw new Error("bad version " + version);
+    throw new Error(`bad version ${version}`);
   }
 
   const poolCount = r.u16();
@@ -644,7 +644,7 @@ type TBinding = {
 const compileDef = (module: TModule, compId: number, resources: string[] = [], loadedHrefs = new Set()) => {
   const def = module.defs[compId];
   if (!def) {
-    throw new Error("bad component " + compId);
+    throw new Error(`bad component ${compId}`);
   }
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def/자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
@@ -873,10 +873,10 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
             let eventPrefix = pathPrefix;
             if (segment !== null) {
-              eventPrefix = eventPrefix ? eventPrefix + "." + segment : segment;
+              eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
               segment = null;
             }
-            const fullName = eventPrefix ? eventPrefix + "." + eventName : eventName;
+            const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
             // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
             // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
             const payload: TAssembled[] = event.fields.map((field) => ({
@@ -904,7 +904,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // 인자로 편다. fullname의 [$n] 정적 표기와 짝 - 이건 실제 회차값이다.
             const loopIndices: Partial<{ [key in TIndexSymbol]: number }> = {};
             for (let i = 0; i < loopIndexStack.length; i++) {
-              loopIndices[("$" + i) as TIndexSymbol] = loopIndexStack[i];
+              loopIndices[`$${i}` as TIndexSymbol] = loopIndexStack[i];
             }
             // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
             // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
@@ -952,7 +952,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // kind를 보존한다 - 부모가 또 그 위에서 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
             const parentOffset = u16at();
             if (argumentSourcePairs[2 * parentOffset] === undefined) {
-              throw new Error("no path for offset " + parentOffset);
+              throw new Error(`no path for offset ${parentOffset}`);
             }
             args.push(argumentSourcePairs[2 * parentOffset], argumentSourcePairs[2 * parentOffset + 1]);
             break;
@@ -974,7 +974,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // Row[$0], 없으면(element 직속) 익명 [$0]. operand는 컴포넌트-로컬 깊이라 use-site에서
             // 물려받은 깊이(loopIndexStack.length)를 base로 더해 누적 표기($1...)로 만든다 - 자식
             // 컴포넌트 코드는 자기 @for를 0부터 세지만 fullname은 바깥까지 누적돼야 한다.
-            const token = "[$" + (loopIndexBase + u16at()) + "]";
+            const token = `[$${loopIndexBase + u16at()}]`;
             segment = (segment ?? "") + token;
             break;
           }
@@ -992,7 +992,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
             // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
             if (activeContexts.some((i) => createdContexts[i].name === name)) {
-              console.warn("quble: 컨텍스트 '" + name + "'가 중복 활성화됐습니다(안쪽이 우선).");
+              console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
             }
             activeContexts.push(createdContexts.length);
             createdContexts.push({ name, fields });
@@ -1008,7 +1008,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             const childArgumentSourcePairs = args;
             args = [];
             // 자식 경로 prefix = 부모 prefix + 세그먼트. 이벤트 fullname의 path 축을 누적한다.
-            const childPrefix = pathPrefix ? pathPrefix + "." + segment : segment;
+            const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
             segment = null;
             // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 argumentSourcePairs로 같은 interpret에 돌린다.
             // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) -> 자식 IF는 이 가지의
@@ -1145,7 +1145,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             break;
           }
           default: {
-            throw new Error("bad opcode 0x" + op.toString(16));
+            throw new Error(`bad opcode 0x${op.toString(16)}`);
           }
         }
       }
