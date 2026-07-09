@@ -432,7 +432,8 @@ const compileType = (types: TType[], typeRef: number, constpool: (string | numbe
       continue;
     }
     // 다음 자식으로 내려간다(깊이우선). 객체면 즉시 top이 되어 걔부터 파고든다 - 순서 안 밀림.
-    const [key, childRef] = remaining.shift()!; // length===0은 위에서 continue - 여기 도달하면 비어있지 않음
+    // biome-ignore lint/style/noNonNullAssertion: length===0은 위에서 continue - 여기 도달하면 remaining은 비어있지 않음
+    const [key, childRef] = remaining.shift()!;
     const childRemaining = enter(childRef, key);
     if (childRemaining !== null) {
       stack.push(childRemaining);
@@ -841,16 +842,19 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           }
           case OP.ATTR_G: {
             const name = ATTRS[u16at()];
+            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             pending!.setAttribute(name, module.constpool[u16at()] as string);
             break;
           }
           case OP.ATTR_L: {
             const name = module.constpool[u16at()] as string;
+            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             pending!.setAttribute(name, module.constpool[u16at()] as string);
             break;
           }
           case OP.ATTR_G_VAR: {
             const name = ATTRS[u16at()];
+            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             const el = pending!;
             const v = bindVar(u16at(), (v) => el.setAttribute(name, v as string));
             el.setAttribute(name, v as string);
@@ -858,6 +862,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           }
           case OP.ATTR_L_VAR: {
             const name = module.constpool[u16at()] as string;
+            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             const el = pending!;
             const v = bindVar(u16at(), (v) => el.setAttribute(name, v as string));
             el.setAttribute(name, v as string);
@@ -908,6 +913,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             }
             // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
             // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
+            // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             const el = pending!;
             let bound = eventBindings.get(el);
             if (!bound) {
@@ -928,7 +934,9 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             break;
           }
           case OP.ELEM_CLOSE_OPEN: {
+            // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             nodeTop().appendChild(pending!);
+            // biome-ignore lint/style/noNonNullAssertion: 바로 위와 같은 pending
             nodeStack.push(pending!);
             pending = null;
             break;
@@ -1027,6 +1035,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
               childDef.codeOff + childDef.codeLen,
               startRegionIndex,
               startBranchIndex,
+              // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
               childPrefix!,
               loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
               loopIndexStack.length, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이
@@ -1113,7 +1122,8 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             const condInitial = condIsConst ? module.constpool[condRef as number] : store.get(condLeafIndex);
             const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
             const initialBranch = branches[region.branchIndices[initialShownIndex]];
-            initialBranch.lazyBuild!(); // 방금 buildThen/buildElse로 심었으니 null 아님
+            // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
+            initialBranch.lazyBuild!();
             initialBranch.built = true;
             region.shownIndex = initialShownIndex;
 
