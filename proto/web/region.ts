@@ -1,44 +1,17 @@
 import { allocInPool, freeInPool } from "./pool-allocator.ts";
 
-// Region - 노드가 붙었다/떼였다 하는 경계. 두 종류다.
-//   @if : 가지 중 shownIndex 하나만 보인다(then/else swap). appendIfRegion 계열.
-//   @for: 가지가 회차 리스트라 전부 동시에 보인다(회차 하나=Branch 하나). count가 바뀌면
-//         꼬리 회차만 늘리고 줄인다(append / truncateFor). appendForRegion 계열.
+// Region - 노드가 붙었다/떼였다 하는 경계. @if(then/else 중 하나만 보임)와 @for(회차 전부 보임)
+// 두 종류. 모든 관계는 인덱스 기반 - 객체는 regionPool/branchPool 두 배열에만 살고 나머지는 숫자로
+// 든다(숫자를 끝까지 들고, 객체는 최말단에서만 pool[i]로 푼다).
 //
-// "해석 ≠ build": @if는 활성 가지만 보이고 비활성 가지의 구독은 0이어야 한다(안 보이는 노드는
-// set에 반응하지 않는다). lazy build: 비활성 가지는 최초 인스턴스화 때 build하지 않고
-// (노드 0·구독 0), 그 가지가 처음 활성화될 때(런타임 swap) 비로소 build한다. 각 가지는 생애
-// 첫 활성화 때 딱 한 번 build되고(branch.built), 이후엔 detach/attach만 한다.
-// build 자체는 runtime.js의 interpret을 캡처한 branch.lazyBuild 클로저가 한다 - region.js는
-// 바이트코드/경계를 모른 채 "가지 토글"만 책임진다. @for 회차는 늘 활성이라 lazy가 아니다
-// (build 즉시 보인다). truncateFor로 떼어낸 회차는 되살리지 않는다 - count가 도로 늘면 새 회차를
-// build한다(빈 칸(인덱스)은 pool-allocator가 재사용하지만, 그 안의 branch 객체는 새로 만든다).
+// 왜 lazy build: @if 비활성 가지는 안 보이니 구독 0이어야 한다(안 보이는 노드는 set에 반응 안 함).
+// 그래서 비활성 가지는 최초 인스턴스화 때 build하지 않고, 처음 활성화될 때 1회 build한다(built).
+// @for 회차는 늘 활성이라 즉시 build한다.
 //
-// 데이터 모양 (모든 관계는 인덱스 기반 - 객체는 두 전역 플랫 배열에만 살고, 나머지는 숫자로 든다):
-//   regionPool / branchPool         - 한 인스턴스의 모든 Region / Branch. 칸 할당·반납은
-//                                  pool-allocator에 위임한다(빈 칸 재사용). @for 회차가 줄면 그
-//                                  회차의 branch와 자식 region이 함께 반납된다(truncateFor).
-//   Region { branchIndices:[], condLeafIndex, anchor, shownIndex, detach, attach }
-//     branchIndices = branchPool 배열 인덱스 목록.
-//     @if: branchIndices[THEN_INDEX]=then, branchIndices[ELSE_INDEX]=else, shownIndex=보이는 가지(-1=없음).
-//     @for: branchIndices=회차 리스트(0..count-1 전부 활성), shownIndex 안 씀. condLeafIndex는 @if는
-//     조건 leaf, @for는 count leaf. detach/attach는 종류별 함수 포인터 - 자식 재귀가 자식이
-//     @if인지 @for인지 몰라도 regionPool[i].detach(...)로 호출한다.
-//   Branch { nodes, leafIndices, updateFns, childRegionIndices, built, lazyBuild }
-//     leafIndices[i] <-> updateFns[i] (병렬). childRegionIndices = regionPool 배열 인덱스.
-//     built = 이 가지를 build한 적 있는가(@if 처음 활성화 때 1회 build). lazyBuild = build 클로저.
-//
-// 이름 규약(엄격): branch=Branch 객체 / branchIndex=branchPool 배열 인덱스(숫자) / branchIndices=숫자 배열.
-//   숫자를 끝까지 들고 다니고, branchPool[branchIndex]로 실제 객체를 푸는 건 노드·구독을 만지는 최말단에서만.
-//
-// off/on은 노드·구독 모두 자식 Region까지 재귀로 처리한다(detach/attach).
-//   anchor는 주석 노드라 자식을 못 가져 DOM 트리가 평평하다 - 자식 Region이 swap되면 그 노드는
-//   부모 가지 노드가 아니라 자식 anchor의 형제로 붙는다. 그래서 부모 가지의 nodes만 떼면 자식
-//   swap 노드가 잔류한다(평평한 형제는 부모를 따라 안 떨어진다). 노드도 구독처럼 자식 Region까지
-//   재귀로 떼고/붙인다. 트리 순회는 detach/attach가 맡고, 한 가지의 직속 구독 처리는
-//   teardown/restoreBranchSubs가 잎(leaf) 작업으로 맡는다(자식 재귀는 트리 함수가 전담).
-//   (regionPool 매개변수는 childRegionIndices(인덱스)->객체 풀이용. 일반 노드/자식 컴포넌트는 swap
-//   단위가 아니라 건너뛰고 Region끼리만 재귀한다.)
+// 왜 자식 Region까지 재귀로 떼고/붙이나: anchor가 주석 노드라 자식을 못 가져 DOM이 평평하다 -
+// 자식 Region이 swap되면 그 노드는 자식 anchor의 형제로 붙어, 부모 가지 nodes만 떼면 잔류한다.
+// 그래서 detach/attach가 자식 Region까지 따라 내려간다(직속 구독은 teardown/restoreBranchSubs가,
+// 트리 순회는 detach/attach가 전담).
 
 // runtime.js는 아직 .js라 createLeafStoreSubject의 반환 shape을 여기서 다시 정의한다
 // (leaf-store.ts가 export하는 것과 동일 계약). runtime.js가 .ts로 바뀌면 그쪽 타입을 재사용한다.
@@ -100,8 +73,7 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
   }
 };
 
-// 한 가지(branchIndex)를 떼어낸다 - 노드 detach + 직속 구독 해제 + 활성 자식 Region 재귀.
-// anchor가 평평한 형제라 자식 swap 노드가 잔류하므로 자식까지 따라 내려가 떼야 한다.
+// 한 가지를 떼어낸다. anchor가 평평한 형제라 자식 swap 노드가 잔류하므로 자식 Region까지 재귀로 뗀다.
 const detachOneBranch = (store: Store, regionPool: TRegion[], branchPool: TBranch[], branchIndex: number): void => {
   const branch = branchPool[branchIndex];
   for (const node of branch.nodes) {
@@ -114,8 +86,8 @@ const detachOneBranch = (store: Store, regionPool: TRegion[], branchPool: TBranc
   }
 };
 
-// 한 가지(branchIndex)를 붙인다 - anchor 뒤에 노드 attach + 직속 구독 복원 + 활성 자식 Region 재귀.
-// 부모 노드를 먼저 anchor 뒤에 붙여야(자식 anchor가 그 안에 들어가) 자식 노드가 위치를 가진다.
+// 한 가지를 붙인다. 부모 노드를 먼저 anchor 뒤에 붙여야(자식 anchor가 그 안에 들어가) 자식 노드가
+// 위치를 가지므로, 부모 부착 후 자식 Region까지 재귀로 붙인다.
 const attachOneBranch = (
   store: Store,
   regionPool: TRegion[],
@@ -198,7 +170,7 @@ export const activateIf = (
   attachIf(store, regionPool, branchPool, region);
 };
 
-// ── @for: branchPool가 회차 리스트, 전부 동시에 보인다 ──────────────────────────
+// ── @for: 가지가 회차 리스트, 전부 동시에 보인다 ──────────────────────────
 
 // region을 받아 회차 전부를 떼어낸다.
 const detachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
@@ -295,10 +267,8 @@ const freeRegionTree = (
   freeInPool(regionPool, freeRegions, regionIndex);
 };
 
-// @for region의 꼬리 회차를 count개만 남기고 떼어낸다(count 줄 때). 회차마다 detach(떼기)와
-// freeBranchTree(칸 반납)를 함께 하는데, 둘은 별개다 - detach는 자식 region을 DOM/구독에서
-// 떼지만 regionPool엔 남겨 두므로(같은 detach가 @if swap에서도 쓰여 반납하면 안 되기 때문),
-// freeBranchTree가 그 자식 region까지 재귀로 반납해야 명단이 정리된다.
+// @for region의 꼬리 회차를 count개만 남기고 떼어낸다(count 줄 때). 회차마다 detach(떼기) 후
+// freeBranchTree(칸 반납)를 부른다 - 둘이 별개인 이유는 freeBranchTree 주석 참고.
 export const truncateFor = (
   store: Store,
   regionPool: TRegion[],
