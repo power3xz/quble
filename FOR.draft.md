@@ -162,7 +162,9 @@ FOR가 출처별로 갈리면(FOR_RAW/FOR_SCOPE_INDEX) operand로 값 출처를 
 - **이번 커밋 = 한 덩어리** - count 반복 + loopIndexStack + fullname `[$0]` 접미까지.
   이벤트 네이밍이 인덱스를 요구하므로 쪼개지 않는다.
 - **`item` 요소값은 다음 단계** - nums가 숫자면 의미 없다. 배열 순회 착수 때.
-  `item` 식별자는 파싱만, 몸체 참조는 미구현.
+  `item` 식별자는 파싱만, 몸체 참조는 미구현. 배열 요소를 leaf로 담고 참조하는
+  메커니즘은 VALUE-SOURCES.draft.md "배열 - ARR kind"에 있다(값 출처 축). 여기(FOR)는
+  그 요소를 회차가 순회·`{item.name}`으로 참조하는 반복 축을 맡는다.
 - **FieldValue::Raw는 자리만 유지** - @for 인덱스는 이름 분리 전달이라 payload/context
   정의(leaf 축)엔 안 들어간다. 그래도 인코딩 자리는 이미 구현돼 있어 유지 -
   향후 쓰일 가능성 대비. 존속/제거 재판단은 실제 미사용이 굳어질 때.
