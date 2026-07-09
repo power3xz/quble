@@ -19,6 +19,7 @@ before(() => {
     "for_event_count",
     "for_if_count",
     "for_nested_render",
+    "for_obj_field",
   ]) {
     qubb[name] = buildFixture(name);
   }
@@ -194,4 +195,18 @@ test("반응 @for 몸체의 @if 자식 region이 회차 증가·swap에 정상",
   assert.deepEqual(paras(host), ["on", "on", "on"], "늘린 회차도 @if then 렌더");
   store.setPath("flag", false);
   assert.deepEqual(paras(host), ["off", "off", "off"], "flag swap이 모든 회차에 반영");
+});
+
+// -- 객체 prop 필드를 @for count·몸체에서 참조 (of c.count / {c.count}) --------------
+// 객체 prop은 leaf로 평탄화되어 c.count가 하나의 leafIndex다. of와 몸체가 그 leaf를 참조한다.
+test("@for (of c.count): 객체 필드를 count로, 몸체에서 값 참조", () => {
+  const { host } = instantiate("for_obj_field", ["c.count"], { c: { count: 3 } });
+  assert.deepEqual(paras(host), ["3", "3", "3"], "count=3 -> p 3개, 각 회차가 c.count 값 표시");
+});
+
+test("객체 필드 count 반응: setPath로 회차가 증감한다", () => {
+  const { host, store } = instantiate("for_obj_field", ["c.count"], { c: { count: 2 } });
+  assert.deepEqual(paras(host), ["2", "2"], "초기 count=2");
+  store.setPath("c.count", 4);
+  assert.deepEqual(paras(host), ["4", "4", "4", "4"], "count=4 -> 회차 4개 + 새 값 반영");
 });
