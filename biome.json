@@ -7,7 +7,16 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!fixtures/dist/**", "!**/*.qubc.d.ts", "!fixtures/**/*.json", "!fixtures/**/*.css"]
+    "includes": [
+      "proto/web/**",
+      "proto/build/**",
+      "proto/examples/**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/*.qubc.d.ts",
+      "!proto/web/fixtures/**/*.json",
+      "!proto/web/fixtures/**/*.css"
+    ]
   },
   "formatter": {
     "enabled": true,

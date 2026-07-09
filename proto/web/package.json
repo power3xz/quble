@@ -5,12 +5,9 @@
   "description": "Quble 클라이언트 런타임(실험) — runtime.ts/region.ts. 테스트는 npm test(node --experimental-strip-types --test) + jsdom.",
   "scripts": {
     "test": "node --experimental-strip-types --test --test-concurrency=1",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check .",
-    "format": "biome format --write ."
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.3",
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3"
   }
