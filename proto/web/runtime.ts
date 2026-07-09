@@ -1193,7 +1193,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     rootRegion.attach(store, regionPool, branchPool, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
-    return { nodes, regionPool, branchPool };
+    return { nodes, regionPool, freeRegions, branchPool, freeBranches };
   };
 };
 
