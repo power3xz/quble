@@ -783,7 +783,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           addIterationBranch(i);
         }
 
-        store.subscribe(countLeafIndex, (v: unknown) => {
+        const onCount = (v: unknown) => {
           const next = Number(v) || 0;
           const cur = region.branchIndices.length;
           for (let i = cur; i < next; i++) {
@@ -792,7 +792,11 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           if (next < cur) {
             truncateFor(store, regionPool, freeRegions, branchPool, freeBranches, region, next); // 줄어든 꼬리 제거
           }
-        });
+        };
+        // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
+        branch.leafIndices.push(countLeafIndex);
+        branch.updateFns.push(onCount);
+        store.subscribe(countLeafIndex, onCount);
       };
 
       // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
@@ -1113,9 +1117,13 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
             // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
             if (!condIsConst) {
-              store.subscribe(condLeafIndex, (condValue: unknown) => {
+              const onCond = (condValue: unknown) => {
                 activateIf(store, regionPool, branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
-              });
+              };
+              // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
+              branch.leafIndices.push(condLeafIndex);
+              branch.updateFns.push(onCond);
+              store.subscribe(condLeafIndex, onCond);
             }
             // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
             // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).

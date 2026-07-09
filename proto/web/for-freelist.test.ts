@@ -19,9 +19,11 @@ before(() => {
 const instantiate = (name: string, paths: string[], values: Record<string, unknown>) => {
   const store = createLeafStoreSubject(values);
   const inst = compile(qubb[name])(0)(store, paths, {});
-  mount(inst);
-  return { store, inst };
+  const host = mount(inst);
+  return { store, inst, host };
 };
+
+const paragraphTexts = (host: HTMLElement) => [...host.querySelectorAll("p")].map((p) => p.textContent);
 
 test("count 줄이면 떼어낸 회차의 branch 칸이 freeBranches에 반납된다", () => {
   const { store, inst } = instantiate("for_count", ["n"], { n: 5 });
@@ -53,4 +55,24 @@ test("@if 품은 회차 재증가 시 region 칸도 재사용돼 regionPool이 �
   store.setPath("n", 3);
   assert.equal(inst.freeRegions.length, 0, "반납된 region 칸 전부 재사용");
   assert.equal(inst.regionPool.length, lenAt3, "재사용했으니 regionPool 길이 그대로");
+});
+
+// 제거된 회차의 @if 조건 구독이 store에 잔류하면, 이후 flag 토글이 free된(또는 재사용된) region을
+// 건드려 화면이 틀어진다. 구독이 회차 branch 생애에 묶여 free 때 해제되면 남은 회차만 반응한다.
+test("회차 제거 후 flag 토글: 잔류 구독 없이 남은 회차만 swap된다", () => {
+  const { store, host } = instantiate("for_if_count", ["n", "flag"], { n: 3, flag: true });
+  assert.deepEqual(paragraphTexts(host), ["on", "on", "on"], "초기 n=3 모두 on");
+  store.setPath("n", 1); // 회차 2개 제거 -> 그 @if 조건 구독도 해제되어야
+  store.setPath("flag", false);
+  assert.deepEqual(paragraphTexts(host), ["off"], "남은 회차 1개만 off로 swap(잔재 회차 반응 없음)");
+});
+
+// 제거 후 재증가해 region 칸이 재사용된 상태에서 flag 토글 - 잔류 구독이 있으면 재사용된 region을
+// 엉뚱하게 swap한다. 재사용된 회차들도 각자 정상 반응해야 한다.
+test("회차 재증가로 칸 재사용 후 flag 토글: 재사용 region도 정상 swap", () => {
+  const { store, host } = instantiate("for_if_count", ["n", "flag"], { n: 3, flag: true });
+  store.setPath("n", 1); // 회차 2개 제거(구독 해제 + 칸 반납)
+  store.setPath("n", 3); // 반납된 칸 재사용해 회차 2개 재생성
+  store.setPath("flag", false);
+  assert.deepEqual(paragraphTexts(host), ["off", "off", "off"], "재사용된 회차 포함 3개 모두 off");
 });
