@@ -421,6 +421,62 @@ mod tests {
         assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
     }
 
+    /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개(앵커)라 ForScopeIndex
+    /// operand=0. 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 {tag}가 TextVar 1을 낸다.
+    #[test]
+    fn compiles_for_scalar_array() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag of tags) {
+                  p() { {tag} }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // 배열 앵커는 슬롯 0(유일 prop).
+        let mut for_scope = vec![Op::ForScopeIndex as u8];
+        for_scope.extend_from_slice(&0u16.to_le_bytes());
+        assert!(
+            code.windows(for_scope.len()).any(|w| w == for_scope.as_slice()),
+            "ForScopeIndex(배열 앵커=0)이 있어야:\n{code:?}",
+        );
+        // {tag} 회차변수는 props 슬롯(1개) 뒤 offset 1.
+        let mut text_var = vec![Op::TextVar as u8];
+        text_var.extend_from_slice(&1u16.to_le_bytes());
+        assert!(
+            code.windows(text_var.len()).any(|w| w == text_var.as_slice()),
+            "TextVar(회차변수 tag=1)가 있어야:\n{code:?}",
+        );
+    }
+
+    /// 회차변수 이름이 prop과 겹치면 에러(섀도잉 금지).
+    #[test]
+    fn for_item_name_collision_is_error() {
+        let src = r#"
+            component C {
+              props { tag: string, tags: string[] }
+              template {
+                @for (tag of tags) {
+                  p() { {tag} }
+                }
+              }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::DuplicateBinding(_)))
+        ));
+    }
+
     /// 컴포넌트 상수풀에서 문자열의 인덱스를 찾는다(테스트용 - 세그먼트 operand 확인).
     fn str_index(module: &bytecode::Module, s: &str) -> u16 {
         (0..)

@@ -85,7 +85,7 @@ fn signature(h: &Handler) -> String {
         join(
             h.props
                 .iter()
-                .map(|p| format!("{}: LeafIndex<{}>", p.name, type_to_ts(&p.ty)))
+                .map(|p| format!("{}: LeafIndex<{}>", p.name, type_to_ts(&p.type_)))
         )
     );
     let ctx = if h.contexts.is_empty() {

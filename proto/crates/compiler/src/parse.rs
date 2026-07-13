@@ -58,7 +58,11 @@ pub fn parse(tokens: &[Token]) -> Result<SourceFile, ParseError> {
             got: format!("{t:?}"),
         });
     }
-    Ok(SourceFile { uses, resources, comps })
+    Ok(SourceFile {
+        uses,
+        resources,
+        comps,
+    })
 }
 
 struct Parser<'a> {
@@ -133,12 +137,14 @@ impl<'a> Parser<'a> {
         match self.next()? {
             Token::Str(s) => Ok(LitValue::Str(s.clone())),
             Token::Bool(b) => Ok(LitValue::Bool(*b)),
-            Token::Num(n) => n.parse::<f64>().map(LitValue::Number).map_err(|_| {
-                ParseError::Expected {
-                    want: "number literal".into(),
-                    got: n.clone(),
-                }
-            }),
+            Token::Num(n) => {
+                n.parse::<f64>()
+                    .map(LitValue::Number)
+                    .map_err(|_| ParseError::Expected {
+                        want: "number literal".into(),
+                        got: n.clone(),
+                    })
+            }
             got => Err(ParseError::Expected {
                 want: "literal (\"str\", 42, true)".into(),
                 got: format!("{got:?}"),
@@ -158,7 +164,6 @@ impl<'a> Parser<'a> {
             })
         }
     }
-
 
     // 컴포넌트 import:  use IDENT (, IDENT)* from STRING
     // 리소스:           use STRING
@@ -221,7 +226,13 @@ impl<'a> Parser<'a> {
         let template = self.nodes()?;
         self.expect(&Token::RBrace)?; // template
         self.expect(&Token::RBrace)?; // component
-        Ok(Component { name, props, events, contexts, template })
+        Ok(Component {
+            name,
+            props,
+            events,
+            contexts,
+            template,
+        })
     }
 
     // props { IDENT : TYPE (, IDENT : TYPE)* }
@@ -239,7 +250,7 @@ impl<'a> Parser<'a> {
                     let name = self.ident()?;
                     self.expect(&Token::Colon)?;
                     let ty = self.type_expr()?;
-                    props.push(Prop { name, ty });
+                    props.push(Prop { name, type_: ty });
                 }
                 Some(t) => {
                     return Err(ParseError::Expected {
@@ -395,7 +406,10 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
-                        ArgValue::Var(VarRef { root: field.clone(), path: Vec::new() })
+                        ArgValue::Var(VarRef {
+                            root: field.clone(),
+                            path: Vec::new(),
+                        })
                     };
                     payload.push((field, value));
                 }
@@ -449,7 +463,10 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
-                        ArgValue::Var(VarRef { root: key.clone(), path: Vec::new() })
+                        ArgValue::Var(VarRef {
+                            root: key.clone(),
+                            path: Vec::new(),
+                        })
                     };
                     fields.push((key, value));
                 }
@@ -651,7 +668,12 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LBrace)?;
         let children = self.nodes()?;
         self.expect(&Token::RBrace)?;
-        Ok(Node::Element { tag, attrs, event_bindings, children })
+        Ok(Node::Element {
+            tag,
+            attrs,
+            event_bindings,
+            children,
+        })
     }
 
     // RParen 전까지 ATTR과 이벤트 바인딩(`@click:EVENT`)을 모은다. 콤마는 선택적 구분자.
