@@ -177,18 +177,30 @@ fn slot_count(ty: &Type) -> u16 {
 fn split_var_ref_to_scope_indices<'a>(
     var: &VarRef,
     props: &'a [Prop],
+    for_vars: &'a [ForVar],
 ) -> Result<(&'a Type, Vec<u16>), CodegenError> {
-    // root prop까지의 평탄 offset(앞 prop들의 leaf 수 합)을 세며 root prop을 찾는다.
-    let mut base = 0u16;
-    let mut ty = None;
-    for p in props {
-        if p.name == var.root {
-            ty = Some(&p.type_);
-            break;
+    // root를 회차변수(@for item)에서 먼저 찾는다. props와 이름이 겹칠 수 없어(@for 진입에서
+    // 충돌을 에러로 건다) 조회 순서는 무관. root의 base/ty만 다를 뿐, 아래 path 내려가기는
+    // props와 같은 로직 - 스칼라도 객체 요소도 한 경로로 선다:
+    //
+    //   {tag}       root=tag(for_var)   path=[]       -> ty=String, base=offset
+    //   {item.title} root=item(for_var) path=[title]  -> path 내려가며 offset 누적
+    //   {user.name}  root=user(prop)    path=[name]    -> props에서 base, 이하 동일
+    let (mut base, mut ty) = match for_vars.iter().find(|fv| fv.name == var.root) {
+        Some(fv) => (fv.offset, &fv.type_),
+        None => {
+            let mut base = 0u16;
+            let mut ty = None;
+            for p in props {
+                if p.name == var.root {
+                    ty = Some(&p.type_);
+                    break;
+                }
+                base += slot_count(&p.type_);
+            }
+            (base, ty.ok_or_else(|| CodegenError::UnknownProp(var.root.clone()))?)
         }
-        base += slot_count(&p.type_);
-    }
-    let mut ty = ty.ok_or_else(|| CodegenError::UnknownProp(var.root.clone()))?;
+    };
 
     // 경로를 타입 따라 내려가며 offset을 누적한다. 각 단계에서 앞 형제 필드의 leaf 수를 더한다.
     for key in &var.path {
@@ -228,17 +240,7 @@ fn var_ref_to_scope_index(
     props: &[Prop],
     for_vars: &[ForVar],
 ) -> Result<u16, CodegenError> {
-    // 회차변수(@for item)를 먼저 본다. 이름은 props/바깥 for_vars와 겹칠 수 없다(@for 진입에서
-    // 충돌을 에러로 거른다) - 매치는 최대 하나라 조회 순서는 무관하다.
-    if let Some(fv) = for_vars.iter().find(|fv| fv.name == var.root) {
-        return match (&fv.type_, var.path.is_empty()) {
-            // 스칼라 요소 - 요소값 자체가 leaf, offset 그대로.
-            (Type::Bool | Type::Number | Type::String, true) => Ok(fv.offset),
-            // 객체 요소 필드 접근(item.field)은 회차변수 축의 다음 단계 - 아직 미구현.
-            _ => Err(CodegenError::NotLeaf(var_ref_display(var))),
-        };
-    }
-    let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
+    let (ty, indices) = split_var_ref_to_scope_indices(var, props, for_vars)?;
     match ty {
         Type::Bool | Type::Number | Type::String => Ok(indices[0]),
         _ => Err(CodegenError::NotLeaf(var_ref_display(var))),
@@ -356,7 +358,8 @@ fn arg_to_field(
 ) -> Result<Field, CodegenError> {
     let (type_ref, refs) = match value {
         ArgValue::Var(var) => {
-            let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
+            // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
+            let (ty, indices) = split_var_ref_to_scope_indices(var, props, &[])?;
             let type_ref = types.intern(ty, pool);
             let refs = indices
                 .into_iter()
@@ -539,7 +542,7 @@ fn emit_node(
                         // 도달 타입이 자식 prop 타입과 구조가 같아야 leaf를 순서로 짝짓는다.
                         // 스칼라면 leaf 1개 - 지금까지와 동일하게 PushArg 하나.
                         let (reached_ty, scope_indices) =
-                            split_var_ref_to_scope_indices(parent_var, props)?;
+                            split_var_ref_to_scope_indices(parent_var, props, for_scope.for_vars)?;
                         if !types_match(reached_ty, &child_prop.type_) {
                             return Err(CodegenError::PropTypeMismatch {
                                 comp: name.clone(),
@@ -607,7 +610,8 @@ fn emit_node(
                     code.extend_from_slice(&n.to_le_bytes());
                 }
                 ForCount::Var(var) => {
-                    let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
+                    let (ty, indices) =
+                        split_var_ref_to_scope_indices(var, props, for_scope.for_vars)?;
                     match ty {
                         Type::Number => {}
                         Type::Array(inner) => {

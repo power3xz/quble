@@ -458,6 +458,59 @@ mod tests {
         );
     }
 
+    /// 회차변수를 자식 컴포넌트 인자로 넘긴다(`Card(title={tag})`). 회차변수 offset(1)이
+    /// PushArg에 실려 자식 prop으로 전달된다.
+    #[test]
+    fn for_item_passed_to_child_component() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Card { props { title: string } template { p() { {title} } } }
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag of tags) {
+                  Card(title={tag}) {}
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        // C는 두 번째 정의(id 1).
+        let def = module.def(1).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // title={tag} - 회차변수 tag(offset 1)가 PushArg에 실린다.
+        let mut push_arg = vec![Op::PushArg as u8];
+        push_arg.extend_from_slice(&1u16.to_le_bytes());
+        assert!(
+            code.windows(push_arg.len()).any(|w| w == push_arg.as_slice()),
+            "PushArg(회차변수 tag=1)가 있어야:\n{code:?}",
+        );
+    }
+
+    /// 회차변수는 부모 값일 뿐 자식 props 인터페이스에 안 샌다 - 자식이 tag를 선언 안 하면
+    /// `Card(tag={tag})`는 UnknownArg(자식엔 그런 prop 없음).
+    #[test]
+    fn for_item_does_not_leak_into_child_props() {
+        let src = r#"
+            component Card { props { title: string } template { p() { {title} } } }
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag of tags) {
+                  Card(tag={tag}) {}
+                }
+              }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::UnknownArg { .. }))
+        ));
+    }
+
     /// 회차변수 이름이 prop과 겹치면 에러(섀도잉 금지).
     #[test]
     fn for_item_name_collision_is_error() {
