@@ -188,11 +188,11 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ELEM_END`        | 0x05 | -                     | -                         | 가장 최근에 연 태그를 닫는다(`</TAG>`). 닫을 태그는 스택 top으로 안다.   |
 | `RENDER`          | 0x06 | comp_id: u16          | -                         | 쌓인 인자를 자식 scope로 넘겨 comp_id 정의를 렌더(호출). 인자 버퍼를 비운다. |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
-| `TEXT_VAR`        | 0x08 | scope_index: u16      | scope                     | `scope[scope_index]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).  |
-| `ATTR_G_VAR`      | 0x09 | name: u16, scope_index: u16 | name=전역, value=scope | ` name="scope[scope_index]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
-| `ATTR_L_VAR`      | 0x0a | name: u16, scope_index: u16 | name=컴포넌트, value=scope | ` name="scope[scope_index]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수. |
+| `TEXT_VAR`        | 0x08 | scope_index:u8, offset:u8 | scope                 | `scope[scope_index]` 슬롯 `(kind,base)`에서 `base+offset` 값을 텍스트로 출력 (HTML 이스케이프). 경로 없는 `{title}`은 offset 0, 객체 필드 `{user.name}`은 필드 거리. |
+| `ATTR_G_VAR`      | 0x09 | name:u16, scope_index:u8, offset:u8 | name=전역, value=scope | ` name="..."` 출력. name은 전역 상수풀 ID, 값은 `scope[scope_index]`의 `base+offset`(속성값 이스케이프). |
+| `ATTR_L_VAR`      | 0x0a | name:u16, scope_index:u8, offset:u8 | name=컴포넌트, value=scope | ` name="..."` 출력. name은 컴포넌트 상수풀 인덱스, 값은 `scope[scope_index]`의 `base+offset`. |
 | `PUSH_THROUGH`    | 0x0b | scope_index: u8       | scope                     | 부모 `scope[scope_index]` 슬롯 `(kind,index)`을 편집 없이 그대로 자식 인자 버퍼에 push(경로 없는 참조 `{a}`/`{user}`). 뒤따르는 `RENDER`가 소비. |
-| `IF`              | 0x0c | cond_scope_index: u16 | scope                     | `scope[cond_scope_index]`(불리언)으로 분기 시작. then 가지 코드가 이어진다. |
+| `IF`              | 0x0c | scope_index:u8, offset:u8 | scope                 | `scope[scope_index]`의 `base+offset`(불리언)으로 분기 시작. 경로 없는 조건은 offset 0. then 가지 코드가 이어진다. |
 | `ELSE`            | 0x0d | -                     | -                         | then 가지 끝, else 가지 시작. (else 있을 때만)                            |
 | `IF_END`          | 0x0e | -                     | -                         | if 블록 끝.                                                              |
 | `LOAD_RES`        | 0x0f | res: u16              | 모듈 전역 리소스          | `res`(resId)의 외부 리소스(CSS 등)를 로드. resId->URL은 런타임이 주입.    |
@@ -229,12 +229,15 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   - 진입점(최상위)은 외부에서 `render(qubb, comp_id, scope)`로 scope를 직접 준다. 인자 버퍼는
     `RENDER`로 합성할 때만 쓰인다.
 - `TEXT_VAR`는 런타임 주입 값을 가리킨다. 렌더 시 `render(qubb, comp_id, scope)`로 **scope**
-  (값 배열)를 넘기고, `TEXT_VAR scope_index`가 `scope[scope_index]`를 출력한다. 심볼 이름은 바이트코드에 없다
-  - 컴파일타임에 **scope 인덱스로 확정**되므로(정적 분석), 런타임은 배열 인덱스로 O(1) 접근한다.
-  (1단계: 값은 문자열. 객체/반응성은 이후 단계.)
+  (슬롯 배열)를 넘기고, `TEXT_VAR scope_index, offset`이 `scope[scope_index]` 슬롯의 `base+offset`을
+  출력한다. 심볼 이름은 바이트코드에 없다
+  - 값 자리(`TEXT_VAR`/`ATTR_*_VAR`/`IF`)는 **자기 scope**라 컴파일이 레이아웃을 안다. push와
+    달리 kind를 전파할 필요가 없어 `(scope_index, offset)` 한 형태로 통일한다 - 경로 없는
+    `{title}`은 offset 0, 객체 필드 `{user.name}`은 필드 거리. (push는 자식이 kind를 런타임에
+    받아야 해 `THROUGH`/`FIELD`로 갈리지만, 값 자리는 나눌 실익이 없어 offset을 항상 싣는다.)
 - 속성은 **두 축**으로 갈린다 - name(전역 `G` / 컴포넌트 `L`) x value(정적 / 변수 `_VAR`).
-  네 조합이 `ATTR_G`/`ATTR_L`/`ATTR_G_VAR`/`ATTR_L_VAR`. 변수 속성값의 scope index는 **`TEXT_VAR`와
-  같은 scope index 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 값 배열).
+  네 조합이 `ATTR_G`/`ATTR_L`/`ATTR_G_VAR`/`ATTR_L_VAR`. 변수 속성값의 `(scope_index, offset)`은
+  **`TEXT_VAR`와 같은 slot 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 슬롯 배열).
 - **분기 - `IF`/`ELSE`/`IF_END` (마커).** `@if`/`@else`를 세 마커로 감싼다. 형태와 "왜 점프가
   없어야 하는가"는 §5.1에서 따로 설명한다.
 - 반복(`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다. 방향만 - 점프 없이 **해석단이
