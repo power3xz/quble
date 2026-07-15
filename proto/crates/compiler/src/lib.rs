@@ -217,7 +217,9 @@ mod tests {
 
         let expected = Module::new(
             pool,
-            vec![],
+            // props 없는 컴포넌트라도 루트 props를 빈 객체 타입으로 intern한다(엔트리 #0).
+            vec![bytecode::TypeEntry::Object(vec![])],
+            0,
             vec![CompDef {
                 name_const_index: hello,
                 code_off: 0,
@@ -819,10 +821,11 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let fields = &module.def(0).unwrap().events[0].fields;
-        // 두 스칼라 field가 같은 Scalar 엔트리를 가리킨다. 테이블엔 Scalar 하나뿐.
+        // 두 스칼라 field가 같은 Scalar 엔트리를 가리킨다.
         assert_eq!(fields[0].type_ref, fields[1].type_ref);
-        assert_eq!(module.types.len(), 1);
-        assert!(matches!(module.types[0], TypeEntry::Scalar));
+        assert!(matches!(module.types[fields[0].type_ref as usize], TypeEntry::Scalar));
+        // 테이블엔 Scalar 하나 + 루트 props 객체({a,b}) 하나뿐 - 두 스칼라 field는 Scalar를 공유.
+        assert_eq!(module.types.len(), 2);
     }
 
     /// 예약어(true/false/bool/number/string)는 prop 이름으로 못 쓴다 - 렉서가 토큰을 분리해

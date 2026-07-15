@@ -144,7 +144,15 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
         });
     }
 
-    let module = Module::new(pool, types.into_entries(), defs, code);
+    // 루트 컴포넌트(#0) props를 하나의 객체 타입으로 intern - 진입점이 rootValue를 이 구조로 풀필.
+    // props 없는(빈) 파일은 없다는 전제(FlatComp가 최소 하나) - comps[0]을 루트로 본다.
+    let root_props = &comps[0].comp.props;
+    let root_props_ty = Type::Object(
+        root_props.iter().map(|p| (p.name.clone(), p.type_.clone())).collect(),
+    );
+    let root_props_type_ref = types.intern(&root_props_ty, &mut pool);
+
+    let module = Module::new(pool, types.into_entries(), root_props_type_ref, defs, code);
     Ok((encode(&module).into_boxed_slice(), res_ids))
 }
 

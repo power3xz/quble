@@ -80,13 +80,22 @@ pub struct Module {
     pub pool: ConstPool,
     /// 모듈 전역 타입 테이블(dedup). field.type_ref가 이걸 인덱싱한다.
     pub types: Vec<TypeEntry>,
+    /// 루트 컴포넌트(#0) props의 객체 타입 인덱스(types 테이블). 진입점이 rootValue를
+    /// 이 구조로 store에 풀필한다. 비루트 props 타입은 쓰이지 않아 인코딩하지 않는다.
+    pub root_props_type_ref: u16,
     pub(crate) defs: Vec<CompDef>,
     pub code: Vec<u8>,
 }
 
 impl Module {
-    pub fn new(pool: ConstPool, types: Vec<TypeEntry>, defs: Vec<CompDef>, code: Vec<u8>) -> Self {
-        Self { pool, types, defs, code }
+    pub fn new(
+        pool: ConstPool,
+        types: Vec<TypeEntry>,
+        root_props_type_ref: u16,
+        defs: Vec<CompDef>,
+        code: Vec<u8>,
+    ) -> Self {
+        Self { pool, types, root_props_type_ref, defs, code }
     }
 
     /// 컴포넌트 ID로 정의를 직접 인덱싱.

@@ -51,6 +51,9 @@ pub fn encode(m: &Module) -> Vec<u8> {
         put_type(&mut out, t);
     }
 
+    // 루트 props 객체 타입 인덱스 - 진입점이 rootValue를 이 구조로 풀필한다.
+    put_u16(&mut out, m.root_props_type_ref);
+
     // 컴포넌트 테이블
     put_u16(&mut out, m.defs.len() as u16);
     for d in &m.defs {
@@ -189,6 +192,8 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
         types.push(read_type(&mut r)?);
     }
 
+    let root_props_type_ref = r.u16()?;
+
     // 컴포넌트 테이블
     let def_count = r.u16()?;
     let mut defs = Vec::with_capacity(def_count as usize);
@@ -215,7 +220,7 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
     let code_len = r.u32()? as usize;
     let code = r.take(code_len)?.to_vec();
 
-    Ok(Module::new(pool, types, defs, code))
+    Ok(Module::new(pool, types, root_props_type_ref, defs, code))
 }
 
 /// 타입 테이블 엔트리를 읽는다 - 태그 1바이트 + payload(put_type 대응). 알 수 없는 태그는 거부.

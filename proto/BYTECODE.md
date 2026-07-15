@@ -126,6 +126,9 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
                                   // type_ref로 자식 타입을 가리켜 중첩·공유를 표현
                  tag 2 (Array)  : elem_type_ref:u16   // 원소 타입. 배열의 배열은 elem이 다시 Array
                                   //   (string[][] = #0 Array(1) -> #1 Array(2) -> #2 Scalar)
+[ 루트 props 타입 ]
+  root_props_type_ref : u16   // 루트 컴포넌트(#0) props의 객체 타입 인덱스. 진입점이 rootValue를
+                              //   이 구조로 store에 풀필. 비루트 props 타입은 안 쓰여 인코딩 안 함
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
   count      : u16
   defs       : count x (

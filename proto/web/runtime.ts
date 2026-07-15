@@ -590,6 +590,9 @@ const decode = (bytes: Uint8Array) => {
     types.push(readType(r));
   }
 
+  // 루트 props 객체 타입 인덱스 - 진입점이 rootValue를 이 구조로 store에 풀필한다.
+  const rootPropsTypeRef = r.u16();
+
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
@@ -616,7 +619,7 @@ const decode = (bytes: Uint8Array) => {
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
   // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
-  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [] };
+  return { constpool, types, rootPropsTypeRef, defs, code, compiledSteps: [], leafCounts: [] };
 };
 type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
 type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
@@ -631,6 +634,7 @@ type TModule = {
   code: Uint8Array;
   constpool: (string | number | boolean)[];
   types: TType[];
+  rootPropsTypeRef: number;
   compiledSteps: TStep[][];
   leafCounts: number[];
   defs: TDef[];
