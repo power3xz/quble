@@ -13,14 +13,11 @@ import { allocInPool, freeInPool } from "./pool-allocator.ts";
 // 그래서 detach/attach가 자식 Region까지 따라 내려간다(직속 구독은 teardown/restoreBranchSubs가,
 // 트리 순회는 detach/attach가 전담).
 
-// runtime.js는 아직 .js라 createLeafStoreSubject의 반환 shape을 여기서 다시 정의한다
-// (leaf-store.ts가 export하는 것과 동일 계약). runtime.js가 .ts로 바뀌면 그쪽 타입을 재사용한다.
+// leaf-store.ts가 export하는 LeafStoreSubject와 동일 계약을 여기서 다시 정의한다(순환 import
+// 회피). leafIndex가 유일한 접근 축 - path/leafOf는 진입점 plant로 없어졌다.
 export type Store = {
-  leafOf: (path: string) => number;
-  allocLeaf: (value: unknown) => number;
   get: (leafIndex: number) => unknown;
   set: (leafIndex: number, value: unknown) => void;
-  setPath: (path: string, value: unknown) => void;
   subscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
   unsubscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
 };

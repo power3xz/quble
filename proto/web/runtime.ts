@@ -507,6 +507,40 @@ const leafCountOf = (module: TModule, typeRef: number): number => {
   return count;
 };
 
+// value를 typeRef 구조대로 leaves에 연속 push한다(스칼라마다 한 칸, 객체는 필드 선언 순서로
+// 재귀). push 순서 = leafIndex 순서라 객체 필드가 base부터 연속으로 앉아 base+offset이 성립한다.
+// (배열은 슬롯 하나지만 요소 심기는 @for 착수 때 - 지금 루트 배열 prop은 미지원.)
+const plantValue = (value: unknown, typeRef: number, module: TModule, leaves: unknown[]) => {
+  const t = module.types[typeRef];
+  if (t.tag === "scalar") {
+    leaves.push(value);
+    return;
+  }
+  // readType이 Array 태그를 아직 안 읽어(TType은 scalar|object) 배열 타입은 여기 도달 전에
+  // decode에서 걸린다 - 루트 배열 prop 심기는 @for 착수 때.
+  const obj = value as Record<string, unknown> | undefined;
+  for (const [nameConstIndex, childTypeRef] of t.fields) {
+    const key = module.constpool[nameConstIndex] as string;
+    plantValue(obj?.[key], childTypeRef, module, leaves);
+  }
+};
+
+// 루트 props 타입(반드시 object)의 각 1뎁스 prop을 슬롯 하나로 보고, rootValue를 leaves에 펴며
+// 각 prop의 base leafIndex를 모은다. 반환 leaves로 store를 만들고, rootFlat([STORE, base, …])을
+// 진입점 argumentSourcePairs로 쓴다. 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 kind가 늘 STORE.
+const plantRoot = (module: TModule, rootValue: unknown) => {
+  const rootType = module.types[module.rootPropsTypeRef];
+  const leaves: unknown[] = [];
+  const rootFlat: number[] = [];
+  const obj = rootValue as Record<string, unknown> | undefined;
+  for (const [nameConstIndex, childTypeRef] of (rootType as { fields: TField[] }).fields) {
+    rootFlat.push(STORE, leaves.length); // 이 prop 첫 leaf가 base
+    const key = module.constpool[nameConstIndex] as string;
+    plantValue(obj?.[key], childTypeRef, module, leaves);
+  }
+  return { leaves, rootFlat };
+};
+
 // ── 이벤트 위임 ──────────────────────────────────────────────────────
 // element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
 // element -> 발화 바인딩을 WeakMap에 심고 document에 DOM 이벤트 타입별 위임 리스너 하나만 단다.
@@ -668,7 +702,7 @@ type TBinding = {
 //
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
-// @returns      Blueprint: (store, rootArgumentSourcePairs) => Instance { nodes, regionPool }
+// @returns      Blueprint: (rootValue, handlers) => Instance { nodes, regionPool, store }
 const compileDef = (module: TModule, compId: number, resources: string[] = [], loadedHrefs = new Set()) => {
   const def = module.defs[compId];
   if (!def) {
@@ -677,7 +711,11 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def/자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
-  return (store: TLeafStoreSubject, rootArgumentSourcePairs: string[], handlers: THandlers = {}) => {
+  return (rootValue: unknown, handlers: THandlers = {}) => {
+    // rootValue를 루트 props 타입대로 store에 펴 심고(연속), 각 루트 슬롯의 base leafIndex를
+    // rootFlat([STORE, base, …])으로 얻는다. 슬롯 ref가 leafIndex라 진입점이 여기서 심는다.
+    const { leaves, rootFlat } = plantRoot(module, rootValue);
+    const store = createLeafStoreSubject(leaves);
     // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
     // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
@@ -1219,13 +1257,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // build: 트리(regionPool/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
     // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-    // rootArgumentSourcePairs는 외부 계약이라 path 문자열 배열(['label', …])로 받는다 - 루트 슬롯은
-    // 정의상 전부 반응값(외부 데이터 바인딩)이라 kind가 늘 STORE다. flat은 런타임 내부
-    // 표현이므로 이 경계에서 한 번 [STORE, path, STORE, path, …]로 감싼다.
-    const rootFlat: (string | number)[] = [];
-    for (const path of rootArgumentSourcePairs) {
-      rootFlat.push(STORE, path);
-    }
+    // rootFlat은 plantRoot가 준 [STORE, base, …] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
     const fragment = interpret(
       module.code,
       rootFlat,
@@ -1245,7 +1277,8 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     rootRegion.attach(store, regionPool, branchPool, rootRegion);
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
-    return { nodes, regionPool, freeRegions, branchPool, freeBranches };
+    // store를 인스턴스에 실어 반환 - 호출측이 set(leafIndex, v)로 반응성을 건다(옛 setPath 대체).
+    return { nodes, regionPool, freeRegions, branchPool, freeBranches, store };
   };
 };
 
@@ -1253,7 +1286,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
 // qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
 //
 // 사용: const blueprintOf = compile(bytes);
-//       const inst = blueprintOf(0)(store, argumentSourcePairs);
+//       const inst = blueprintOf(0)(rootValue, handlers);
 //       root.append(...inst.nodes);
 //
 // @param bytes  qubb 바이트
