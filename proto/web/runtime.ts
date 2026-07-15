@@ -294,13 +294,17 @@ const FV_RAW = 2;
 // 타입 테이블 엔트리 태그(BYTECODE.md §4). Rust read_type 대칭.
 const TYPE_SCALAR = 0;
 const TYPE_OBJECT = 1;
+const TYPE_ARRAY = 2;
 
 // 타입 테이블 엔트리 하나를 읽는다. Scalar는 payload 없음, Object는 field_count +
-// [(nameConstIndex, typeRef)]. typeRef로 자식을 가리켜 중첩/공유(Rust put_type 대칭).
+// [(nameConstIndex, typeRef)], Array는 elem_type_ref. typeRef로 자식을 가리켜 중첩/공유(Rust put_type 대칭).
 //
 // @param r Reader
-// @returns { tag: "scalar" } | { tag: "object", fields: [[nameConstIndex, typeRef]] }
-type TType = { tag: "scalar" } | { tag: "object"; fields: TField[] };
+// @returns { tag: "scalar" } | { tag: "object", fields } | { tag: "array", elemTypeRef }
+type TType =
+  | { tag: "scalar" }
+  | { tag: "object"; fields: TField[] }
+  | { tag: "array"; elemTypeRef: number };
 type TField = [number, number];
 const readType = (reader: Reader): TType => {
   const tag = reader.u8();
@@ -314,6 +318,9 @@ const readType = (reader: Reader): TType => {
       fields.push([reader.u16(), reader.u16()]);
     }
     return { tag: "object", fields };
+  }
+  if (tag === TYPE_ARRAY) {
+    return { tag: "array", elemTypeRef: reader.u16() };
   }
   throw new Error(`bad type tag ${tag}`);
 };
@@ -414,6 +421,10 @@ const compileType = (types: TType[], typeRef: number, constpool: (string | numbe
       steps.push([STEP_LEAF, key]);
       return null;
     }
+    if (t.tag === "array") {
+      // payload/context에 배열 통째 전달은 아직 없다 - 값 자리엔 leaf만(컴파일러 NotLeaf로 거른다).
+      throw new Error("배열 타입 조립은 미구현(payload/context 배열 전달)");
+    }
     steps.push([STEP_ENTER, key]);
     return t.fields.map(([nameConst, childRef]: TField): [string, number] => [
       constpool[nameConst] as string,
@@ -496,7 +507,7 @@ const leafCountOf = (module: TModule, typeRef: number): number => {
     return cached;
   }
   const t = module.types[typeRef];
-  let count = 1; // 스칼라
+  let count = 1; // 스칼라, 배열(칸 하나에 arrayInfoIndex - 요소는 arrayPool/store 끝에 별도로 산다)
   if (t.tag === "object") {
     count = 0;
     for (const [, childTypeRef] of t.fields) {
@@ -507,36 +518,80 @@ const leafCountOf = (module: TModule, typeRef: number): number => {
   return count;
 };
 
-// value를 typeRef 구조대로 leaves에 연속 push한다(스칼라마다 한 칸, 객체는 필드 선언 순서로
-// 재귀). push 순서 = leafIndex 순서라 객체 필드가 base부터 연속으로 앉아 base+offset이 성립한다.
-// (배열은 슬롯 하나지만 요소 심기는 @for 착수 때 - 지금 루트 배열 prop은 미지원.)
-const plantValue = (value: unknown, typeRef: number, module: TModule, leaves: unknown[]) => {
+// 지연 심기 항목 - 배열 하나. 요소 leaf가 객체 고정 칸 사이에 끼면 뒤 필드 offset이 밀리므로,
+// 고정부를 다 심은 뒤 요소를 store 끝에 몰아 심는다(중간 삽입 금지). value는 원본 배열.
+type TDeferredArray = { arrayInfoIndex: number; value: unknown; elemTypeRef: number };
+
+// value를 typeRef의 "고정 칸"만 leaves에 연속 push하고, 만난 배열들을 반환한다 - 스칼라=값 한 칸,
+// 배열=arrayInfoIndex 한 칸(요소는 안 심고 반환에 담아 나중에), 객체=필드 선언 순서 재귀. push 순서
+// = leafIndex 순서라 이 값의 고정부가 끊김 없이 연속으로 앉아 base+offset이 성립한다. 반환된 배열들의
+// 요소 심기는 호출자가 이 고정부 뒤에서 처리한다(plantRoot의 레벨 루프).
+const plantFixed = (
+  value: unknown,
+  typeRef: number,
+  module: TModule,
+  leaves: unknown[],
+  arrayPool: TArrayInfo[],
+  freeArrays: number[],
+): TDeferredArray[] => {
   const t = module.types[typeRef];
   if (t.tag === "scalar") {
     leaves.push(value);
-    return;
+    return [];
   }
-  // readType이 Array 태그를 아직 안 읽어(TType은 scalar|object) 배열 타입은 여기 도달 전에
-  // decode에서 걸린다 - 루트 배열 prop 심기는 @for 착수 때.
+  if (t.tag === "array") {
+    // 배열 칸 = arrayInfoIndex 하나. 요소 심기는 미룬다(고정부 연속 유지).
+    const elemSize = leafCountOf(module, t.elemTypeRef);
+    const arrayInfoIndex = appendArrayInfo(arrayPool, freeArrays, elemSize);
+    leaves.push(arrayInfoIndex);
+    return [{ arrayInfoIndex, value, elemTypeRef: t.elemTypeRef }];
+  }
   const obj = value as Record<string, unknown> | undefined;
+  const deferred: TDeferredArray[] = [];
   for (const [nameConstIndex, childTypeRef] of t.fields) {
     const key = module.constpool[nameConstIndex] as string;
-    plantValue(obj?.[key], childTypeRef, module, leaves);
+    deferred.push(...plantFixed(obj?.[key], childTypeRef, module, leaves, arrayPool, freeArrays));
   }
+  return deferred;
 };
 
 // 루트 props 타입(반드시 object)의 각 1뎁스 prop을 슬롯 하나로 보고, rootValue를 leaves에 펴며
-// 각 prop의 base leafIndex를 모은다. 반환 leaves로 store를 만들고, rootFlat([STORE, base, …])을
-// 진입점 argumentSourcePairs로 쓴다. 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 kind가 늘 STORE.
-const plantRoot = (module: TModule, rootValue: unknown) => {
+// 각 prop의 base leafIndex를 모은다. 반환 leaves/arrayPool로 store·인스턴스를 채우고,
+// rootFlat([STORE, base, …])을 진입점 argumentSourcePairs로 쓴다. 루트 슬롯은 정의상 전부
+// 외부 데이터 바인딩이라 kind가 늘 STORE. 루트 고정부를 다 심은 뒤(base가 고정 칸을 가리켜야
+// 한다) 배열 요소를 store 끝에 몰아 심는다(drainArrays).
+const plantRoot = (
+  module: TModule,
+  rootValue: unknown,
+  arrayPool: TArrayInfo[],
+  freeArrays: number[],
+) => {
   const rootType = module.types[module.rootPropsTypeRef];
   const leaves: unknown[] = [];
   const rootFlat: number[] = [];
   const obj = rootValue as Record<string, unknown> | undefined;
+
+  // 루트 고정부를 먼저 심어(base가 고정 칸을 가리켜야 한다) 레벨 0 배열들을 얻는다.
+  let pending: TDeferredArray[] = [];
   for (const [nameConstIndex, childTypeRef] of (rootType as { fields: TField[] }).fields) {
-    rootFlat.push(STORE, leaves.length); // 이 prop 첫 leaf가 base
+    rootFlat.push(STORE, leaves.length); // 이 prop 첫 고정 칸이 base
     const key = module.constpool[nameConstIndex] as string;
-    plantValue(obj?.[key], childTypeRef, module, leaves);
+    pending.push(...plantFixed(obj?.[key], childTypeRef, module, leaves, arrayPool, freeArrays));
+  }
+
+  // 레벨별로 배열 요소를 store 끝에 심는다. 한 레벨의 형제 배열들 요소를 다 심어(연속) 그 안에서
+  // 만난 다음 레벨 배열들을 next에 모으고, 빌 때까지 반복. for 경계가 다 고정이라 자라는 큐가 없다.
+  while (pending.length) {
+    const next: TDeferredArray[] = [];
+    for (const { arrayInfoIndex, value, elemTypeRef } of pending) {
+      const info = arrayPool[arrayInfoIndex];
+      const elems = Array.isArray(value) ? value : [];
+      for (const elem of elems) {
+        info.elemStartLeafIndices.push(leaves.length); // 이 요소 첫 leaf
+        next.push(...plantFixed(elem, elemTypeRef, module, leaves, arrayPool, freeArrays));
+      }
+    }
+    pending = next;
   }
   return { leaves, rootFlat };
 };
@@ -712,19 +767,19 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 
   return (rootValue: unknown, handlers: THandlers = {}) => {
-    // rootValue를 루트 props 타입대로 store에 펴 심고(연속), 각 루트 슬롯의 base leafIndex를
-    // rootFlat([STORE, base, …])으로 얻는다. 슬롯 ref가 leafIndex라 진입점이 여기서 심는다.
-    const { leaves, rootFlat } = plantRoot(module, rootValue);
-    const store = createLeafStoreSubject(leaves);
     // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
+    const arrayPool: TArrayInfo[] = []; // @for가 순회하는 배열마다 요소 leaf 위치. 요소 추가/제거 시 참조.
+    const freeArrays: number[] = []; // arrayPool의 빈 칸 인덱스(freelist).
+    // rootValue를 루트 props 타입대로 store에 펴 심고(고정부 연속 + 배열 요소는 뒤로), 각 루트
+    // 슬롯의 base leafIndex를 rootFlat([STORE, base, …])으로 얻는다. 배열 요소는 arrayPool에 등록된다.
+    const { leaves, rootFlat } = plantRoot(module, rootValue, arrayPool, freeArrays);
+    const store = createLeafStoreSubject(leaves);
     // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
     // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
     const regionPool: TRegion[] = []; // 한 인스턴스의 모든 Region. alloc/free(@for 회차 제거 시 자식 region 반납).
     const freeRegions: number[] = []; // regionPool의 빈 칸 인덱스(freelist). alloc이 재사용한다.
     const branchPool: TBranch[] = []; // 한 인스턴스의 모든 Branch. alloc/free(@for 회차 제거 시 반납).
     const freeBranches: number[] = []; // branchPool의 빈 칸 인덱스(freelist). alloc이 재사용한다.
-    const arrayPool: TArrayInfo[] = []; // @for가 순회하는 배열마다 요소 leaf 위치. 요소 추가/제거 시 참조.
-    const freeArrays: number[] = []; // arrayPool의 빈 칸 인덱스(freelist).
     // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
     // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
     // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
@@ -1278,7 +1333,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     // store를 인스턴스에 실어 반환 - 호출측이 set(leafIndex, v)로 반응성을 건다(옛 setPath 대체).
-    return { nodes, regionPool, freeRegions, branchPool, freeBranches, store };
+    return { nodes, regionPool, freeRegions, branchPool, freeBranches, arrayPool, store };
   };
 };
 

@@ -1,0 +1,12 @@
+component ArrayPropPlant {
+  props {
+    title: string,
+    tags: string[],
+    rows: { label: string, cells: string[] }[]
+  }
+  template {
+    div() {
+      h1() { {title} }
+    }
+  }
+}
