@@ -14,6 +14,7 @@ const TAG_BOOL: u8 = 2;
 // 타입 테이블 엔트리 태그(BYTECODE.md §4). 엔트리마다 앞에 1바이트.
 const TAG_SCALAR: u8 = 0;
 const TAG_OBJECT: u8 = 1;
+const TAG_ARRAY: u8 = 2;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -104,7 +105,8 @@ fn put_const(out: &mut Vec<u8>, c: &Const) {
 }
 
 /// 타입 테이블 엔트리: 태그 1바이트 + payload. Scalar는 payload 없음, Object는 field_count +
-/// [(name_const_index, type_ref)]. type_ref로 자식을 가리켜 중첩·공유를 표현(BYTECODE.md §4).
+/// [(name_const_index, type_ref)], Array는 elem_type_ref. type_ref로 자식을 가리켜 중첩·공유를
+/// 표현(BYTECODE.md §4).
 fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
     match t {
         TypeEntry::Scalar => out.push(TAG_SCALAR),
@@ -115,6 +117,10 @@ fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
                 put_u16(out, *name);
                 put_u16(out, *type_ref);
             }
+        }
+        TypeEntry::Array(elem_type_ref) => {
+            out.push(TAG_ARRAY);
+            put_u16(out, *elem_type_ref);
         }
     }
 }
@@ -205,6 +211,7 @@ fn read_type(r: &mut Reader) -> Result<TypeEntry, DecodeError> {
             }
             Ok(TypeEntry::Object(fields))
         }
+        TAG_ARRAY => Ok(TypeEntry::Array(r.u16()?)),
         other => Err(DecodeError::BadTypeTag(other)),
     }
 }

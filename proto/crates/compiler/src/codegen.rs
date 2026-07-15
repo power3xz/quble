@@ -321,7 +321,7 @@ impl TypeTable {
     fn intern(&mut self, ty: &Type, pool: &mut ConstPool) -> u16 {
         let entry = match ty {
             Type::Bool | Type::Number | Type::String => TypeEntry::Scalar,
-            Type::Array(inner) => return self.intern(inner, pool),
+            Type::Array(inner) => TypeEntry::Array(self.intern(inner, pool)),
             Type::Object(fields) => {
                 let fields = fields
                     .iter()
