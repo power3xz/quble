@@ -20,10 +20,9 @@ pub enum Op {
     AttrGVar = 0x09,
     /// 컴포넌트 상수풀 속성명 인덱스 + scope index. 속성값이 변수(`data-id={x}`).
     AttrLVar = 0x0a,
-    /// 부모 scope index 하나를 자식 인자 버퍼에 push. 뒤따르는 RENDER가 소비.
-    /// 부모의 paths/scope[scope_index]을 자식에게 그대로 넘긴다(한 단계 풀기). 순서 = 자식 scope index 0,1,2….
-    /// use-site 바인딩(`Comp(name={b})` - b는 부모 scope index)의 인코딩.
-    PushArg = 0x0b,
+    /// 부모 scope[scope_index] 슬롯 `(kind, index)`을 편집 없이 그대로 자식 인자 버퍼에 push.
+    /// 경로 없는 참조(`Comp(x={a})`)의 인코딩. 뒤따르는 RENDER가 소비. 순서 = 자식 scope index 0,1,2….
+    PushThrough = 0x0b,
     /// 분기 시작. scope index 하나(불리언)로 then/else를 가른다. then 가지 코드가 이어진다.
     If = 0x0c,
     /// then 가지 끝, else 가지 시작. (else 있을 때만)
@@ -57,6 +56,10 @@ pub enum Op {
     /// 위치). 런타임이 그 회차 인덱스를 직전 이름 세그먼트에 접미(VideoItem[3])하거나, 직전
     /// 이름이 없으면 익명 세그먼트([3])로. PushPathSegment와 짝지어(둘 다 뒤 RENDER/발화가 소비).
     PushPathIndexSegment = 0x18,
+    /// 부모 scope[scope_index]에서 필드로 내려가 `(kind, base+offset)`을 자식에 push.
+    /// 경로 참조(`Comp(x={user.name})`)의 인코딩. kind(출처)는 부모 슬롯 그대로 전파, 위치만
+    /// 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다. 뒤따르는 RENDER가 소비.
+    PushField = 0x19,
 }
 
 impl Op {
@@ -74,7 +77,7 @@ impl Op {
             0x08 => Op::TextVar,
             0x09 => Op::AttrGVar,
             0x0a => Op::AttrLVar,
-            0x0b => Op::PushArg,
+            0x0b => Op::PushThrough,
             0x0c => Op::If,
             0x0d => Op::Else,
             0x0e => Op::IfEnd,
@@ -88,6 +91,7 @@ impl Op {
             0x16 => Op::ForScopeIndex,
             0x17 => Op::ForEnd,
             0x18 => Op::PushPathIndexSegment,
+            0x19 => Op::PushField,
             _ => return None,
         })
     }

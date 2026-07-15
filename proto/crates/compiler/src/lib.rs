@@ -482,7 +482,7 @@ mod tests {
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
         // title={tag} - 회차변수 tag(offset 1)가 PushArg에 실린다.
-        let mut push_arg = vec![Op::PushArg as u8];
+        let mut push_arg = vec![Op::PushThrough as u8];
         push_arg.extend_from_slice(&1u16.to_le_bytes());
         assert!(
             code.windows(push_arg.len()).any(|w| w == push_arg.as_slice()),
@@ -1060,7 +1060,7 @@ mod tests {
         let pushes: Vec<u16> = code
             .iter()
             .enumerate()
-            .filter(|(_, &b)| b == Op::PushArg as u8)
+            .filter(|(_, &b)| b == Op::PushThrough as u8)
             .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
             .collect();
         assert_eq!(pushes, vec![1, 2], "자식 leaf(label/on)마다 부모 a.label/a.on scope index");
@@ -1121,7 +1121,7 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
-        let count = code.iter().filter(|&&b| b == Op::PushArg as u8).count();
+        let count = code.iter().filter(|&&b| b == Op::PushThrough as u8).count();
         assert_eq!(count, 1, "스칼라는 PushArg 하나");
     }
 

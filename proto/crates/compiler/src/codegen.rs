@@ -550,7 +550,7 @@ fn emit_node(
                             });
                         }
                         for scope_index in scope_indices {
-                            code.push(Op::PushArg as u8);
+                            code.push(Op::PushThrough as u8);
                             code.extend_from_slice(&scope_index.to_le_bytes());
                         }
                     }

@@ -123,7 +123,7 @@ fn exec(
                 out.push_str(name);
                 out.push('>');
             }
-            Op::PushArg => {
+            Op::PushThrough => {
                 let scope_index = read_u16(code, &mut pc)?;
                 let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
                 args.push(val.clone());
@@ -206,7 +206,7 @@ fn truthy(val: &str) -> bool {
 fn operand_len(op: Op) -> usize {
     match op {
         Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd | Op::ExitContext => 0,
-        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushArg | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes | Op::EnterContext => 2,
+        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushThrough | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes | Op::EnterContext => 2,
         Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar | Op::BindEvent => 4,
     }
 }
@@ -335,7 +335,7 @@ mod tests {
         }
         /// 부모 scope index를 자식 인자로 push.
         fn push_arg(&mut self, scope_index: u16) -> &mut Self {
-            self.code.push(Op::PushArg as u8);
+            self.code.push(Op::PushThrough as u8);
             self.code.extend_from_slice(&scope_index.to_le_bytes());
             self
         }
