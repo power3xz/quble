@@ -7,7 +7,7 @@ import { beforeEach, test } from "node:test";
 import "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import). 심볼은 안 쓰고 부수효과만 필요.
 import { buildFixture, buildFixtureWithResmap } from "./fixtures/build.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 const qubb = buildFixture("styled_res");
 
@@ -23,21 +23,20 @@ beforeEach(() => {
 const hrefs = () => [...document.head.querySelectorAll("link[rel=stylesheet]")].map((l) => l.getAttribute("href"));
 
 test("LOAD_RES가 resId의 URL로 <link>를 head에 삽입한다", () => {
-  const store = createLeafStoreSubject({});
-  compile(qubb, ["/res/styled.abc.css"])(0)(store, []);
+  compile(qubb, ["/res/styled.abc.css"])(0)({});
   assert.deepEqual(hrefs(), ["/res/styled.abc.css"]);
 });
 
 test("같은 URL은 dedup - 한 compile에서 두 번 인스턴스화해도 <link>는 하나", () => {
   // dedup은 compile 단위 - 같은 blueprint를 두 번 인스턴스화하면 href는 한 번만 삽입된다.
   const blueprint = compile(qubb, ["/res/styled.abc.css"])(0);
-  blueprint(createLeafStoreSubject({}), []);
-  blueprint(createLeafStoreSubject({}), []);
+  blueprint({});
+  blueprint({});
   assert.deepEqual(hrefs(), ["/res/styled.abc.css"], "중복 href 스킵");
 });
 
 test("resmap 없으면 <link>를 안 만든다(리소스 로드 생략)", () => {
-  compile(qubb)(0)(createLeafStoreSubject({}), []);
+  compile(qubb)(0)({});
   assert.deepEqual(hrefs(), []);
 });
 
@@ -49,11 +48,10 @@ test("@if 비활성 가지 안의 컴포넌트 CSS는 가지가 켜질 때 로�
   assert.equal(resmap.length, 1, "Styled의 CSS 하나가 resmap에 있다");
 
   // Outer = comp 0. props [show]. show=false로 시작 - @if 가지 비활성.
-  const store = createLeafStoreSubject({ show: false });
-  compile(outerQubb, resmap)(0)(store, ["show"]);
+  const inst = compile(outerQubb, resmap)(0)({ show: false });
   assert.deepEqual(hrefs(), [], "가지가 꺼져 있으면 자식 CSS는 아직 로드되지 않는다");
 
-  // show=true로 토글 → 가지 활성 → Styled RENDER → LOAD_RES 실행 → <link> 삽입.
-  store.setPath("show", true);
+  // show=true로 토글 → 가지 활성 → Styled RENDER → LOAD_RES 실행 → <link> 삽입. show=leafIndex 0.
+  inst.store.set(0, true);
   assert.deepEqual(hrefs(), resmap, "가지가 켜지면 그때 자식 CSS가 로드된다");
 });

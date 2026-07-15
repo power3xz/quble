@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -16,8 +16,8 @@ before(() => {
 
 // C 인스턴스 하나. props [count].
 const instantiate = (values, handlers) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, ["count"], handlers);
+  const inst = compile(qubb)(0)(values, handlers);
+  const store = inst.store;
   const host = mount(inst);
   const button = host.querySelector("button");
   return { store, button };

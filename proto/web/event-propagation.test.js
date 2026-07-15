@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -15,8 +15,7 @@ before(() => {
 });
 
 const instantiate = (handlers) => {
-  const store = createLeafStoreSubject({ label: "X" });
-  const inst = compile(qubb)(0)(store, ["label"], handlers);
+  const inst = compile(qubb)(0)({ label: "X" }, handlers);
   const host = mount(inst);
   return host.querySelector("button");
 };

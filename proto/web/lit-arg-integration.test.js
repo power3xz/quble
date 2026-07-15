@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -16,8 +16,7 @@ before(() => {
 
 // 리터럴 인자가 클라 런타임에서 렌더된다 - 부모 scope가 비어도 자식이 상수값을 받아 출력.
 test("literal arg renders in client runtime", () => {
-  const store = createLeafStoreSubject({});
-  const inst = compile(qubb)(0)(store, []); // LitArg = comp 0, props 없음 → paths 빈 배열
+  const inst = compile(qubb)(0)({}); // LitArg = comp 0, props 없음
   const host = mount(inst);
   const spans = [...host.querySelectorAll("span")].map((s) => s.textContent);
   assert.deepEqual(spans, ["고정", "고정"]);

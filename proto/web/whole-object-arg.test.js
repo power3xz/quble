@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -15,12 +15,9 @@ before(() => {
 });
 
 // 부모 props 평탄 leaf 순서: title=0, row.label=1, row.on=2.
-const rootPaths = ["title", "row.label", "row.on"];
-
 const instantiate = (values) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, rootPaths);
-  return { store, host: mount(inst) };
+  const inst = compile(qubb)(0)(values);
+  return { store: inst.store, host: mount(inst) };
 };
 
 test("통째 전달한 객체 leaf가 자식에서 렌더된다", () => {
@@ -32,6 +29,6 @@ test("통째 전달한 객체 leaf가 자식에서 렌더된다", () => {
 
 test("통째 전달한 불리언 leaf 갱신이 자식 분기에 반영된다", () => {
   const { store, host } = instantiate({ title: "제목", row: { label: "알림", on: true } });
-  store.setPath("row.on", false);
+  store.set(2, false); // row.on = leafIndex 2
   assert.equal(host.querySelector("p").textContent, "꺼짐");
 });

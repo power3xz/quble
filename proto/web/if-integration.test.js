@@ -11,7 +11,7 @@ import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
 // dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb = {};
@@ -30,13 +30,13 @@ before(() => {
   }
 });
 
-// 한 인스턴스를 만들어 { store, inst, host, set } 묶음으로 - set은 path로 바로 쓰게.
-const instantiate = (name, paths, values) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb[name])(0)(store, paths);
+// 한 인스턴스를 만들어 { store, inst, host, set } 묶음으로. leafNames는 평탄 leaf 선언 순서라
+// 인덱스가 곧 leafIndex - set은 이름을 그 leafIndex로 풀어 쓰게(테스트 가독성용 매핑표).
+const instantiate = (name, leafNames, values) => {
+  const inst = compile(qubb[name])(0)(values);
   const host = mount(inst);
-  const set = (path, value) => store.setPath(path, value);
-  return { store, inst, host, set };
+  const set = (leafName, value) => inst.store.set(leafNames.indexOf(leafName), value);
+  return { store: inst.store, inst, host, set };
 };
 
 // region 트리 탐색. branchOf: region의 슬롯(THEN/ELSE)을 전역 branchPool에서 Branch 객체로 푼다.

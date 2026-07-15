@@ -8,11 +8,10 @@ import { test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
-const fireToggle = (qubb, paths, values, handlers) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, paths, handlers);
+const fireToggle = (qubb, values, handlers) => {
+  const inst = compile(qubb)(0)(values, handlers);
   const button = mount(inst).querySelector("button");
   button.click();
 };
@@ -22,7 +21,6 @@ test("다른 이름 중첩 - context에 바깥/안쪽 컨텍스트가 모두 담
   let received = null;
   fireToggle(
     qubb,
-    ["userId"],
     { userId: 7 },
     {
       TOGGLE: (_data, { context }) => {
@@ -48,7 +46,6 @@ test("같은 이름 합성 중첩 - 자식이 부모를 통째 덮고(필드 머
     // 버튼은 자식 안 - 별칭 없는 합성이라 fullname은 Child.TOGGLE.
     fireToggle(
       qubb,
-      ["userId"],
       { userId: 7 },
       {
         "Child.TOGGLE": (_data, { context }) => {

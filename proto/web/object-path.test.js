@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -16,14 +16,11 @@ before(() => {
 
 // props: title, user{ name, contact{ email } }.
 // 평탄 leaf 순서 = 선언 순서로 펼침: title=0, user.name=1, user.contact.email=2.
-// rootPaths는 그 순서대로 store 점경로를 담는다.
-const rootPaths = ["title", "user.name", "user.contact.email"];
-
+// blueprint가 값 객체를 이 순서로 store에 펴 심는다(plant).
 const instantiate = (values) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, rootPaths);
+  const inst = compile(qubb)(0)(values);
   const host = mount(inst);
-  return { store, host };
+  return { store: inst.store, host };
 };
 
 test("중첩 객체 leaf가 평탄 scope index로 올바르게 렌더된다", () => {
@@ -42,7 +39,7 @@ test("중첩 leaf 갱신이 그 leaf 구독 노드만 반영한다", () => {
     title: "제목",
     user: { name: "김철수", contact: { email: "kim@ex.com" } },
   });
-  store.setPath("user.contact.email", "new@ex.com");
+  store.set(2, "new@ex.com"); // user.contact.email = leafIndex 2
   const spans = host.querySelectorAll("span");
   assert.equal(spans[1].textContent, "new@ex.com", "깊은 leaf 갱신 반영");
   assert.equal(spans[0].textContent, "김철수", "형제 leaf는 안 건드림");

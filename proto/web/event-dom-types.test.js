@@ -6,7 +6,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -15,8 +15,8 @@ before(() => {
 
 // Field 인스턴스 하나 - props [value].
 const instantiate = (values, handlers) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, ["value"], handlers);
+  const inst = compile(qubb)(0)(values, handlers);
+  const store = inst.store;
   const host = mount(inst);
   const input = host.querySelector("input");
   return { store, host, input };

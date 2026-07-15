@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -16,11 +16,10 @@ before(() => {
 
 // C 인스턴스 하나. props [userId].
 const instantiate = (values, handlers) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, ["userId"], handlers);
+  const inst = compile(qubb)(0)(values, handlers);
   const host = mount(inst);
   const button = host.querySelector("button");
-  return { store, host, button };
+  return { store: inst.store, host, button };
 };
 
 test("핸들러 context에 활성 @with 컨텍스트가 이름별로 담긴다", () => {
@@ -49,7 +48,7 @@ test("context 필드의 변수 값은 발생 시점 현재값이다", () => {
       },
     },
   );
-  store.setPath("userId", 99); // 발생 전에 prop을 바꾼다
+  store.set(0, 99); // userId: 발생 전에 prop을 바꾼다
   button.click();
   assert.equal(received, 99, "리터럴이 아닌 변수 필드는 현재값을 반영");
 });

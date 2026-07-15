@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -16,8 +16,7 @@ before(() => {
 
 // Card(부모, props 없음) 인스턴스 - 내부에서 Toggle을 합성. 클릭할 button을 돌려준다.
 const instantiate = (handlers) => {
-  const store = createLeafStoreSubject({});
-  const inst = compile(qubb)(0)(store, [], handlers); // Card = comp 0, props 없음
+  const inst = compile(qubb)(0)({}, handlers); // Card = comp 0, props 없음
   const host = mount(inst);
   return host.querySelector("button");
 };

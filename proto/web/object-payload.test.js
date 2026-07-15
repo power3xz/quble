@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -15,13 +15,10 @@ before(() => {
 });
 
 // props 평탄 leaf 순서: user.name.short=0, user.name.long=1, user.email=2, tag=3.
-const rootPaths = ["user.name.short", "user.name.long", "user.email", "tag"];
-
 const instantiate = (values, handlers) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, rootPaths, handlers);
+  const inst = compile(qubb)(0)(values, handlers);
   const button = mount(inst).querySelector("button");
-  return { store, button };
+  return { store: inst.store, button };
 };
 
 const sample = () => ({
@@ -50,7 +47,7 @@ test("스칼라 field는 값 그대로, 객체 field는 중첩 구조로 온다"
 test("leaf 갱신이 발생 시점 조립값에 반영된다", () => {
   let received = null;
   const { store, button } = instantiate(sample(), { SAVE: (data) => (received = data) });
-  store.setPath("user.name.short", "lee"); // 발생 전에 안쪽 leaf 하나 변경
+  store.set(0, "lee"); // user.name.short(leafIndex 0): 발생 전에 안쪽 leaf 하나 변경
   button.click();
   assert.equal(received.user.name.short, "lee");
   assert.equal(received.user.name.long, "kim gil-dong"); // 나머지는 그대로

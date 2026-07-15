@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입(첫 import)
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -16,8 +16,8 @@ before(() => {
 
 // Toggle 인스턴스 하나 - { store, host, button }. props [label, on].
 const instantiate = (values, handlers) => {
-  const store = createLeafStoreSubject(values);
-  const inst = compile(qubb)(0)(store, ["label", "on"], handlers);
+  const inst = compile(qubb)(0)(values, handlers);
+  const store = inst.store;
   const host = mount(inst);
   const button = host.querySelector("button");
   return { store, host, button };
@@ -56,7 +56,7 @@ test("핸들러의 set이 DOM을 갱신한다(클릭 → set → 텍스트 변�
     { label: "켜기", on: false },
     {
       TOGGLE: (data) => {
-        store.setPath("label", data.on ? "켜기" : "끄기"); // on=false면 "끄기"로
+        store.set(0, data.on ? "켜기" : "끄기"); // label(leafIndex 0): on=false면 "끄기"로
       },
     },
   );

@@ -7,7 +7,7 @@ import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
 import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.ts");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -15,24 +15,9 @@ before(() => {
 });
 
 // 리터럴은 store에 심지 않는다 - CONST 슬롯으로 자식에 전달돼 상수풀에서 직접 조립/렌더된다.
-// leafOf는 반응값(STORE)만 발급한다. 리터럴 하나도 leaf가 발급되면 안 된다(구독 대상 0).
-test("literals are not seeded into store", () => {
-  const store = createLeafStoreSubject({});
-  const seen = [];
-  const realLeafOf = store.leafOf;
-  store.leafOf = (path) => {
-    seen.push(path);
-    return realLeafOf(path);
-  };
-  compile(qubb)(0)(store, []); // TypedLitArg = comp 0, props 없음
-  // 리터럴만 있는 컴포넌트라 STORE leaf 발급이 전혀 없어야 한다($lit.* 잔재도 없음).
-  assert.deepEqual(seen, [], `리터럴은 leaf 발급 없이 pool에서 직접: ${JSON.stringify(seen)}`);
-});
-
 // 타입 있는 리터럴이 텍스트로도 올바르게 렌더된다(number/bool은 DOM에서 문자열화).
 test("typed literals render as text", () => {
-  const store = createLeafStoreSubject({});
-  const inst = compile(qubb)(0)(store, []);
+  const inst = compile(qubb)(0)({});
   const host = mount(inst);
   assert.equal(host.querySelector("span").textContent, "42trues");
 });
