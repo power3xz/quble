@@ -124,6 +124,8 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
                  tag 0 (Scalar) : payload 없음
                  tag 1 (Object) : field_count:u16, fields:field_count x ( name_const_index:u16, type_ref:u16 )
                                   // type_ref로 자식 타입을 가리켜 중첩·공유를 표현
+                 tag 2 (Array)  : elem_type_ref:u16   // 원소 타입. 배열의 배열은 elem이 다시 Array
+                                  //   (string[][] = #0 Array(1) -> #1 Array(2) -> #2 Scalar)
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
   count      : u16
   defs       : count x (
@@ -163,6 +165,9 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   전체가 아니라). Object 필드가 자식을 `type_ref`로 가리켜 중첩·공유를 표현한다. field는
   `type_ref`로 이 테이블을 참조하고 leaf만 따로 싣는다 - 구조는 전역에, 인스턴스(leaf)는
   컴포넌트 field에. 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
+- **`elem_type_ref`/`type_ref`는 말단(Scalar)으로 내려가는 하위 참조만.** 자기/조상 인덱스를
+  가리키는 재귀 타입(`type Tree = Tree[]`)은 미지원 - 컴파일러가 그런 엔트리를 내지 않는다
+  (내면 순회가 무한). 필요해지면 사이클 검출을 그때 추가.
 - **컴포넌트명은 상수풀에 둔다**(`name_const_index`로 참조).
 - **컴포넌트 ID = 테이블 배열 인덱스.** `RENDER`/합성은 이 ID로 정의를 직접 인덱싱한다.
 - 진입점(엔트리포인트) 정보는 파일에 없다 - `RENDER comp_id` 호출이 지정.
@@ -186,7 +191,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `TEXT_VAR`        | 0x08 | scope_index: u16      | scope                     | `scope[scope_index]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).  |
 | `ATTR_G_VAR`      | 0x09 | name: u16, scope_index: u16 | name=전역, value=scope | ` name="scope[scope_index]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
 | `ATTR_L_VAR`      | 0x0a | name: u16, scope_index: u16 | name=컴포넌트, value=scope | ` name="scope[scope_index]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수. |
-| `PUSH_ARG`        | 0x0b | scope_index: u16      | scope                     | 부모 `scope[scope_index]`을 자식 인자 버퍼에 push. 뒤따르는 `RENDER`가 소비. |
+| `PUSH_THROUGH`    | 0x0b | scope_index: u8       | scope                     | 부모 `scope[scope_index]` 슬롯 `(kind,index)`을 편집 없이 그대로 자식 인자 버퍼에 push(경로 없는 참조 `{a}`/`{user}`). 뒤따르는 `RENDER`가 소비. |
 | `IF`              | 0x0c | cond_scope_index: u16 | scope                     | `scope[cond_scope_index]`(불리언)으로 분기 시작. then 가지 코드가 이어진다. |
 | `ELSE`            | 0x0d | -                     | -                         | then 가지 끝, else 가지 시작. (else 있을 때만)                            |
 | `IF_END`          | 0x0e | -                     | -                         | if 블록 끝.                                                              |
@@ -195,6 +200,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `PUSH_ARG_LIT`    | 0x11 | const_index: u16      | 컴포넌트 상수풀           | 리터럴 값을 자식 인자 버퍼에 push. 부모 슬롯과 분리된 독립 leaf(use-site `Comp(prop="lit")`). |
 | `PUSH_PATH_SEGMENT` | 0x12 | seg_index: u16      | 컴포넌트 상수풀           | 합성 경로(fullname)에 세그먼트 하나를 민다(자식 type-name/alias). 뒤따르는 `RENDER`가 소비. |
 | `ENTER_CONTEXT`   | 0x13 | context_index: u16    | 컴포넌트 컨텍스트 테이블   | `@with` 진입. `ContextDef.fields`를 읽어 활성 컨텍스트 스택에 push. 이후 코드가 그 범위. |
+| `PUSH_FIELD`      | 0x19 | scope_index:u8, offset:u8 | scope                 | 부모 `scope[scope_index]`에서 필드로 내려가 `(kind, base+offset)`을 자식에 push(경로 참조 `{user.name}`). kind(출처)는 부모 슬롯 그대로 전파, 위치만 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다(leaf면 `store.get`, object면 base+offset, array면 `arrayPool[store.get()]`). |
 | `EXIT_CONTEXT`    | 0x14 | -                     | -                         | `@with` 블록 끝(IF_END 동형 마커). 활성 컨텍스트 스택 pop.                 |
 
 설계 메모:
@@ -205,16 +211,21 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   복귀만 하면 돼 **DOM 노드 스택**을 유지한다. (이전엔 END가 tag ID를 들었으나 잉여라 제거.
   요소당 2B 절감 - grid raw −8.7% 실측.)
 - 빈 요소 `h1() {}`도 OPEN -> CLOSE_OPEN -> END (`<h1></h1>`). void element 최적화는 나중.
-- **합성 - `PUSH_ARG` + `RENDER`.** 부모가 자식을 호출할 때, use-site 바인딩
-  (`Comp(name={b})` - `b`는 부모 scope index)을 `PUSH_ARG scope_index`로 **자식 scope index 순서대로** 쌓고
-  `RENDER comp_id`가 그 인자 버퍼를 **자식 scope**로 넘긴다(그리고 비운다). `ATTR`이 `ELEM` 앞에
-  쌓이고 `CLOSE_OPEN`이 닫는 것과 같은 패턴 - 인자가 `RENDER` 앞에 쌓이고 `RENDER`가 흡수한다.
-  - `PUSH_ARG`가 싣는 건 **값이 아니라 부모 scope index**다. 부모 `scope[scope_index]`(SSR) /
-    `paths[scope_index]`(클라 반응성)을 **한 단계 풀어** 자식에게 준다. 그래서 leafIndex 같은 전역
-    인덱스를 넘기지 않는다 - 같은 컴포넌트가 use-site마다 다른 값을 받을 수 있기 때문(§ 정의 vs 사용).
-  - 인자는 **자식 scope index 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부** 바인딩한다고
-    보고 순서만으로 매핑한다. 일부 생략을 허용할 때 `PUSH_ARG`에 scope index를 명시하거나 빈 자리용 opcode를
-    더한다(미정).
+- **합성 - `PUSH_THROUGH`/`PUSH_FIELD`/`PUSH_ARG_LIT` + `RENDER`.** 부모가 자식을 호출할 때,
+  use-site 바인딩을 자식 scope index 순서대로 쌓고 `RENDER comp_id`가 그 인자 버퍼를 **자식
+  scope**로 넘긴다(그리고 비운다). `ATTR`이 `ELEM` 앞에 쌓이고 `CLOSE_OPEN`이 닫는 것과 같은
+  패턴 - 인자가 `RENDER` 앞에 쌓이고 `RENDER`가 흡수한다.
+  - 셋의 갈림 - **경로 유무 + 출처**다:
+    - `Comp(x={a})`(경로 없음) -> `PUSH_THROUGH scope_index`: 부모 슬롯 `(kind, index)`을 편집
+      없이 그대로. 넘기는 게 leaf든 object든 array든 슬롯을 통째로 전파한다.
+    - `Comp(x={user.name})`(경로 있음) -> `PUSH_FIELD scope_index, offset`: 부모 슬롯에서
+      `base+offset`으로 내려가 `(kind, base+offset)`을 넘긴다. kind는 그대로 전파, **위치만**
+      넘기고 결과 타입은 자식이 자기 선언으로 안다(array면 자식이 `arrayPool[store.get()]`).
+    - `Comp(x="lit")`(리터럴) -> `PUSH_ARG_LIT const_index`: 부모 슬롯과 분리된 독립 const.
+  - **싣는 건 값이 아니라 부모 scope의 (kind, index)**다. 같은 컴포넌트가 use-site마다 다른
+    값을 받을 수 있어(§ 정의 vs 사용) 전역 leafIndex가 아니라 부모 슬롯을 한 단계 풀어 준다.
+  - 인자는 **자식 scope index 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부**
+    바인딩한다고 보고 순서만으로 매핑한다. 일부 생략 허용은 미정(빈 자리용 opcode 등).
   - 진입점(최상위)은 외부에서 `render(qubb, comp_id, scope)`로 scope를 직접 준다. 인자 버퍼는
     `RENDER`로 합성할 때만 쓰인다.
 - `TEXT_VAR`는 런타임 주입 값을 가리킨다. 렌더 시 `render(qubb, comp_id, scope)`로 **scope**
