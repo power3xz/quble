@@ -157,14 +157,14 @@ fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
     (res_ids.len() - 1) as u16
 }
 
-/// 타입이 scope offset 공간에서 차지하는 슬롯 수. scope 인덱스는 props를 선언 순서로 펼친
-/// 평탄 번호라, 앞 prop들이 차지하는 칸을 세는 데 쓴다. 원시는 1(leaf), 객체는 필드 슬롯의 합.
-/// 배열은 1 - 슬롯 하나에 참조((ARR, arrInfoIndex))로 앉고 요소는 그 뒤(arrInfo)에 산다.
-fn slot_count(ty: &Type) -> u16 {
+/// 타입이 store에서 차지하는 칸 수. 객체 안 필드 offset을 누적할 때 앞 형제 필드가 먹는 칸을
+/// 세는 데 쓴다. 원시는 1(leaf), 배열은 1(칸 하나에 arrayPoolIndex로 앉고 요소는 arrayPool에
+/// 산다), 객체는 필드 칸의 합(base부터 필드들이 연속으로 깔린다).
+fn store_size(ty: &Type) -> u16 {
     match ty {
         Type::Bool | Type::Number | Type::String => 1,
         Type::Array(_) => 1,
-        Type::Object(fields) => fields.iter().map(|(_, t)| slot_count(t)).sum(),
+        Type::Object(fields) => fields.iter().map(|(_, t)| store_size(t)).sum(),
         Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
         Type::Omit(..) | Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
     }
@@ -196,7 +196,7 @@ fn split_var_ref_to_scope_indices<'a>(
                     ty = Some(&p.type_);
                     break;
                 }
-                base += slot_count(&p.type_);
+                base += store_size(&p.type_);
             }
             (base, ty.ok_or_else(|| CodegenError::UnknownProp(var.root.clone()))?)
         }
@@ -219,7 +219,7 @@ fn split_var_ref_to_scope_indices<'a>(
                 found = Some(field_ty);
                 break;
             }
-            base += slot_count(field_ty);
+            base += store_size(field_ty);
         }
         ty = found.ok_or_else(|| CodegenError::UnknownField {
             root: var.root.clone(),
@@ -228,7 +228,7 @@ fn split_var_ref_to_scope_indices<'a>(
     }
 
     // 도달 타입의 leaf들은 base부터 연속이다(같은 순회로 offset을 매겼으므로).
-    let indices = (base..base + slot_count(ty)).collect();
+    let indices = (base..base + store_size(ty)).collect();
     Ok((ty, indices))
 }
 
@@ -622,7 +622,7 @@ fn emit_node(
                                 return Err(CodegenError::DuplicateBinding(item.clone()));
                             }
                             // 요소값이 앉을 슬롯 - props 슬롯 뒤에 바깥 회차변수까지 이어 붙인 자리.
-                            let props_slots: u16 = props.iter().map(|p| slot_count(&p.type_)).sum();
+                            let props_slots: u16 = props.iter().map(|p| store_size(&p.type_)).sum();
                             new_for_var = Some(ForVar {
                                 name: item.clone(),
                                 offset: props_slots + for_scope.for_vars.len() as u16,
@@ -632,7 +632,7 @@ fn emit_node(
                         _ => return Err(CodegenError::ForCountNotIterable(var_ref_display(var))),
                     }
                     code.push(Op::ForScopeIndex as u8);
-                    code.extend_from_slice(&indices[0 /* slot_count=1, 단일 슬롯 offset */].to_le_bytes());
+                    code.extend_from_slice(&indices[0 /* store_size=1, 단일 슬롯 offset */].to_le_bytes());
                 }
             }
 
