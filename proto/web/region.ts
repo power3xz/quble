@@ -17,6 +17,7 @@ import { allocInPool, freeInPool } from "./pool-allocator.ts";
 // (leaf-store.ts가 export하는 것과 동일 계약). runtime.js가 .ts로 바뀌면 그쪽 타입을 재사용한다.
 export type Store = {
   leafOf: (path: string) => number;
+  allocLeaf: (value: unknown) => number;
   get: (leafIndex: number) => unknown;
   set: (leafIndex: number, value: unknown) => void;
   setPath: (path: string, value: unknown) => void;
@@ -42,8 +43,21 @@ export type TRegion = {
   attach: (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion) => void;
 };
 
+// @for가 순회하는 배열 하나의 요소 위치. elemSize = 요소 하나가 차지하는 leaf 수(스칼라 1, 객체는
+// 필드 수) - 요소 안은 시작에서 이만큼 연속. elemStartLeafIndex[i] = i번째 요소의 시작 leafIndex -
+// 요소가 흩어져 할당돼 연속을 못 믿으므로 회차마다 시작을 명시로 든다(요소 사이는 리스트, 요소
+// 안은 elemSize 산술). 요소 추가/제거 시 이 목록으로 유지·회수 대상을 가른다.
+export type TArrayInfo = {
+  elemSize: number;
+  elemStartLeafIndex: number[];
+};
+
 export const THEN_INDEX = 0;
 export const ELSE_INDEX = 1;
+
+// arrayPool에 빈 배열정보를 alloc하고 그 arrayInfoIndex를 돌려준다.
+export const appendArrayInfo = (arrayPool: TArrayInfo[], freeArrays: number[], elemSize: number): number =>
+  allocInPool(arrayPool, freeArrays, { elemSize, elemStartLeafIndex: [] });
 
 // branchPool에 빈 Branch를 alloc(빈 칸 재사용 or append)하고 그 branchIndex를 돌려준다.
 const appendBranch = (branchPool: TBranch[], freeBranches: number[]): number =>

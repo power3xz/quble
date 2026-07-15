@@ -51,6 +51,14 @@ const createLeafStore = (rootValue: unknown) => {
     return leafIndex;
   };
 
+  // path 없이 값을 새 leaf로 할당하고 그 leafIndex를 돌려준다. path 캐시를 거치지 않는다 -
+  // @for 배열 요소처럼 path가 동적이라 leafOf(path)로 못 잡는 값을 심는 데 쓴다.
+  const allocLeaf = (value: unknown): LeafIndex => {
+    const leafIndex = leaves.length;
+    leaves[leafIndex] = value;
+    return leafIndex;
+  };
+
   // leafIndex로 값 읽기. 미설정이면 undefined(JS 기본 - 없는 값은 undefined).
   const get = (leafIndex: LeafIndex): unknown => leaves[leafIndex];
 
@@ -59,7 +67,7 @@ const createLeafStore = (rootValue: unknown) => {
     leaves[leafIndex] = value;
   };
 
-  return { leafOf, get, set };
+  return { leafOf, allocLeaf, get, set };
 };
 
 // ── leafStoreSubject (leafStore + 반응성) ────────────────────────────
@@ -71,6 +79,7 @@ const createLeafStore = (rootValue: unknown) => {
 // @returns         { leafOf, get, set, setPath, subscribe, unsubscribe }
 export type LeafStoreSubject = {
   leafOf: (path: string) => LeafIndex;
+  allocLeaf: (value: unknown) => LeafIndex;
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
   setPath: (path: string, value: unknown) => void;
@@ -110,6 +119,7 @@ export const createLeafStoreSubject = (rootValue: unknown): LeafStoreSubject => 
 
   return {
     leafOf: leafStore.leafOf,
+    allocLeaf: leafStore.allocLeaf,
     get: leafStore.get,
     set,
     setPath,

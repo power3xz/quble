@@ -25,11 +25,13 @@ type TIndexSymbol = `$${TDigitString}`;
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
 import {
   activateIf,
+  appendArrayInfo,
   appendBranchOfForRegion,
   appendForRegion,
   appendIfRegion,
   attachForIteration,
   ELSE_INDEX,
+  type TArrayInfo,
   type TBranch,
   THEN_INDEX,
   type TRegion,
@@ -88,7 +90,7 @@ const OP = {
   TEXT_VAR: 0x08,
   ATTR_G_VAR: 0x09,
   ATTR_L_VAR: 0x0a,
-  PUSH_ARG: 0x0b,
+  PUSH_THROUGH: 0x0b,
   IF: 0x0c,
   ELSE: 0x0d,
   IF_END: 0x0e,
@@ -102,6 +104,7 @@ const OP = {
   FOR_SCOPE_INDEX: 0x16,
   FOR_END: 0x17,
   PUSH_PATH_INDEX_SEGMENT: 0x18,
+  PUSH_FIELD: 0x19,
 } as const;
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -121,14 +124,16 @@ const operandLen = (op: number) => {
     case OP.EXIT_CONTEXT:
     case OP.FOR_END:
       return 0;
+    case OP.PUSH_THROUGH: // scope_index: u8
+      return 1;
     case OP.ELEM_OPEN:
     case OP.TEXT:
-    case OP.TEXT_VAR:
+    case OP.TEXT_VAR: // scope_index: u8, offset: u8
     case OP.RENDER:
-    case OP.PUSH_ARG:
+    case OP.PUSH_FIELD: // scope_index: u8, offset: u8
     case OP.PUSH_ARG_LIT:
     case OP.PUSH_PATH_SEGMENT:
-    case OP.IF:
+    case OP.IF: // scope_index: u8, offset: u8
     case OP.LOAD_RES:
     case OP.ENTER_CONTEXT:
     case OP.FOR_RAW:
@@ -137,8 +142,8 @@ const operandLen = (op: number) => {
       return 2;
     case OP.ATTR_G:
     case OP.ATTR_L:
-    case OP.ATTR_G_VAR:
-    case OP.ATTR_L_VAR:
+    case OP.ATTR_G_VAR: // name: u16, scope_index: u8, offset: u8
+    case OP.ATTR_L_VAR: // name: u16, scope_index: u8, offset: u8
     case OP.BIND_EVENT:
       return 4;
     default:
@@ -280,17 +285,10 @@ class Reader {
 const STORE = 0;
 const CONST = 1;
 
-// FieldValue 인코딩(Rust FieldValue::encode/decode와 대칭). u16 한 칸을 비대칭으로 나눈다:
-//   0xxxxxxxxxxxxxxx  Const  (15비트)
-//   10xxxxxxxxxxxxxx  Scope  (14비트)
-//   11xxxxxxxxxxxxxx  Raw    (14비트)
-// 이 비트연산/마스킹은 readFields 한 곳에만 둔다(소비부는 kind + index만 본다).
-const FV_TAG_HI = 0x8000; // 최상위: 0=Const, 1=Scope/Raw
-const FV_TAG_LO = 0x4000; // 최상위가 1일 때 둘째: 0=Scope, 1=Raw
-const FV_INDEX_MASK = 0x3fff; // Scope/Raw 태그를 벗겨 인덱스만
-// FieldValue kind(readFields 결과). 슬롯 해석방법(STORE/CONST)과 다른 층이다.
-const FV_CONST = 0;
-const FV_SCOPE = 1;
+// FieldValue ref 출처 태그(Rust serialize <REF>와 대칭). ref마다 태그 1바이트 + payload.
+// 슬롯 해석방법(STORE/CONST)과 다른 층이다 - Scope 슬롯의 실제 kind는 argumentSourcePairs가 정한다.
+const FV_SCOPE = 0;
+const FV_CONST = 1;
 const FV_RAW = 2;
 
 // 타입 테이블 엔트리 태그(BYTECODE.md §4). Rust read_type 대칭.
@@ -320,68 +318,72 @@ const readType = (reader: Reader): TType => {
   throw new Error(`bad type tag ${tag}`);
 };
 
-// FieldValue u16 하나를 kind + ref로 디코드한다(Rust FieldValue::decode 대칭). ref는 kind마다
-// 가리키는 게 다르다 - Const는 상수풀 인덱스, Scope는 scope offset, Raw는 @for 런타임값 참조.
-//
-// @param raw u16
-// @returns { kind: FV_CONST|FV_SCOPE|FV_RAW, ref }
-const decodeFieldValue = (raw: number) => {
-  if ((raw & FV_TAG_HI) === 0) {
-    return { kind: FV_CONST, ref: raw };
-  }
-  if ((raw & FV_TAG_LO) === 0) {
-    return { kind: FV_SCOPE, ref: raw & FV_INDEX_MASK };
-  }
-  return { kind: FV_RAW, ref: raw & FV_INDEX_MASK };
-};
-
-// 필드 목록을 읽는다 - field_count, [(nameConstIndex, typeRef, ref_count, [ref])]. ref는
-// FieldValue u16. 이벤트 payload와 컨텍스트가 같은 인코딩(Rust read_fields 대칭).
+// field ref 하나를 읽는다 - 태그 1바이트 + payload(Rust read_ref 대칭). Scope는 부모 슬롯
+// 위치(scopeIndex, offset), Const/Raw는 값 하나(u16). offset은 Scope만 의미 있어 나머진 0.
 //
 // @param r Reader
-// @returns [{ nameConstIndex, typeRef, refs: [{ kind, ref }] }]
+// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값
+const readRef = (reader: Reader): TRef => {
+  const tag = reader.u8();
+  if (tag === FV_SCOPE) {
+    return { kind: FV_SCOPE, ref: reader.u8(), offset: reader.u8() };
+  }
+  if (tag === FV_CONST) {
+    return { kind: FV_CONST, ref: reader.u16(), offset: 0 };
+  }
+  if (tag === FV_RAW) {
+    return { kind: FV_RAW, ref: reader.u16(), offset: 0 };
+  }
+  throw new Error(`bad ref tag ${tag}`);
+};
+
+// 필드 목록을 읽는다 - field_count, [(nameConstIndex, typeRef, ref)]. 이벤트 payload와
+// 컨텍스트가 같은 인코딩(Rust read_fields 대칭). 슬롯을 안 펼쳐 field당 ref 하나.
+//
+// @param r Reader
+// @returns [{ nameConstIndex, typeRef, ref }]
 const readFields = (reader: Reader): TFieldEntry[] => {
   const count = reader.u16();
   const fields: TFieldEntry[] = [];
   for (let f = 0; f < count; f++) {
     const nameConstIndex = reader.u16();
     const typeRef = reader.u16();
-    const refCount = reader.u16();
-    const refs: TRef[] = [];
-    for (let l = 0; l < refCount; l++) {
-      refs.push(decodeFieldValue(reader.u16()));
-    }
-    fields.push({ nameConstIndex, typeRef, refs });
+    const ref = readRef(reader);
+    fields.push({ nameConstIndex, typeRef, ref });
   }
   return fields;
 };
 
-// field의 refs를 flat 값-소스 열 [kind, ref, kind, ref, …]로 푼다(바인딩 때 1회). 소스는
-// 슬롯과 같은 (해석방법, 참조) 쌍: STORE는 ref가 미리 푼 leafIndex(store.get용), CONST는
-// ref가 상수풀 인덱스(module.constpool용). assemble이 발생 때 kind 보고 갈라 읽는다.
+// field ref 하나를 assemble이 커서로 소비할 [kind, ref, …] 열로 푼다(바인딩 때 1회). 한 field는
+// 단일 출처다 - 리터럴이면 CONST 쌍 하나, 변수면 그 슬롯의 kind. 객체 변수는 store에 연속으로
+// 깔려(base부터 재귀적으로 이어짐) base+offset부터 leaf 개수만큼 STORE 쌍으로 펼친다. leaf
+// 개수 = steps의 STEP_LEAF 수. assemble이 이 열을 steps 따라 소비해 (중첩) 객체를 조립한다.
 //
-// 값이 CONST로 합류하는 두 길: FieldValue가 리터럴(FV_CONST, payload에 직접 박힘)이거나,
-// FV_SCOPE가 가리킨 슬롯이 CONST(부모가 리터럴로 준 prop)거나.
-//
-// @param refs  field.refs - [{ kind, ref }]
+// @param ref       field.ref
+// @param leafCount  field.typeRef의 leaf 칸 수(객체를 몇 칸 펼칠지)
 // @param argumentSourcePairs flat 슬롯 배열
-// @returns     [kind, ref, …] flat sourcePair 열
-type TRef = { kind: number; ref: number };
-const refsToSourcePairs = (refs: TRef[], argumentSourcePairs: (string | number)[], store: TLeafStoreSubject) => {
-  const sourcePairs: number[] = [];
-  for (const r of refs) {
-    if (r.kind === FV_CONST) {
-      sourcePairs.push(CONST, r.ref);
-    } else if (r.kind === FV_SCOPE && argumentSourcePairs[2 * r.ref] === CONST) {
-      // CONST 슬롯의 참조는 상수풀 인덱스(number).
-      sourcePairs.push(CONST, argumentSourcePairs[2 * r.ref + 1] as number);
-    } else if (r.kind === FV_SCOPE) {
-      sourcePairs.push(STORE, store.leafOf(argumentSourcePairs[2 * r.ref + 1] as string));
-    } else {
-      throw new Error("FV_RAW는 아직 미구현(@for)");
-    }
+// @returns          [kind, ref, …] 열
+type TRef = { kind: number; ref: number; offset: number };
+const refToSourcePairs = (ref: TRef, leafCount: number, argumentSourcePairs: (string | number)[]): number[] => {
+  if (ref.kind === FV_CONST) {
+    return [CONST, ref.ref];
   }
-  return sourcePairs;
+  if (ref.kind === FV_RAW) {
+    throw new Error("FV_RAW는 아직 미구현(@for)");
+  }
+  // FV_SCOPE - 슬롯의 kind를 물려받는다. CONST 슬롯(부모가 리터럴로 준 prop)은 상수 하나.
+  const kind = argumentSourcePairs[2 * ref.ref] as number;
+  const slotRef = argumentSourcePairs[2 * ref.ref + 1] as number;
+  if (kind === CONST) {
+    return [CONST, slotRef];
+  }
+  // STORE 슬롯 - base(slotRef+offset)부터 leaf 개수만큼 연속 칸을 STORE 쌍으로 펼친다.
+  const base = slotRef + ref.offset;
+  const pairs: number[] = [];
+  for (let i = 0; i < leafCount; i++) {
+    pairs.push(STORE, base + i);
+  }
+  return pairs;
 };
 
 // 조립 step - 런타임 내부 미니 명령(바이트코드 opcode와 다른 층). type_ref 구조를 평탄한 step
@@ -484,6 +486,25 @@ const compiledStepsOf = (module: TModule, typeRef: number) => {
     module.compiledSteps[typeRef] = compileType(module.types, typeRef, module.constpool);
   }
   return module.compiledSteps[typeRef];
+};
+
+// type_ref가 store에서 차지하는 leaf 칸 수(스칼라 1, 객체 필드 합). Rust store_size의 JS판.
+// 재귀가 leafCountOf를 다시 부르므로 만난 하위 type_ref도 같이 캐시된다(dedup 이점을 count까지).
+const leafCountOf = (module: TModule, typeRef: number): number => {
+  const cached = module.leafCounts[typeRef];
+  if (cached !== undefined) {
+    return cached;
+  }
+  const t = module.types[typeRef];
+  let count = 1; // 스칼라
+  if (t.tag === "object") {
+    count = 0;
+    for (const [, childTypeRef] of t.fields) {
+      count += leafCountOf(module, childTypeRef);
+    }
+  }
+  module.leafCounts[typeRef] = count;
+  return count;
 };
 
 // ── 이벤트 위임 ──────────────────────────────────────────────────────
@@ -594,9 +615,10 @@ const decode = (bytes: Uint8Array) => {
   const code = r.take(codeLen);
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
-  return { constpool, types, defs, code, compiledSteps: [] };
+  // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
+  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [] };
 };
-type TFieldEntry = { nameConstIndex: number; typeRef: number; refs: TRef[] };
+type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
 type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
 type TDef = {
   nameConstIndex: number;
@@ -610,6 +632,7 @@ type TModule = {
   constpool: (string | number | boolean)[];
   types: TType[];
   compiledSteps: TStep[][];
+  leafCounts: number[];
   defs: TDef[];
 };
 // 발생 시점에 조립할 준비물(payload/컨텍스트 공용) - field.refs를 바인딩 때 flat sourcePairs로 미리 푼 것.
@@ -658,6 +681,8 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     const freeRegions: number[] = []; // regionPool의 빈 칸 인덱스(freelist). alloc이 재사용한다.
     const branchPool: TBranch[] = []; // 한 인스턴스의 모든 Branch. alloc/free(@for 회차 제거 시 반납).
     const freeBranches: number[] = []; // branchPool의 빈 칸 인덱스(freelist). alloc이 재사용한다.
+    const arrayPool: TArrayInfo[] = []; // @for가 순회하는 배열마다 요소 leaf 위치. 요소 추가/제거 시 참조.
+    const freeArrays: number[] = []; // arrayPool의 빈 칸 인덱스(freelist).
     // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
     // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
     // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
@@ -713,6 +738,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         pc += 2;
         return v;
       };
+      const u8at = () => code[pc++];
       const nodeTop = () => nodeStack[nodeStack.length - 1];
 
       // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드·구독·자식region은
@@ -756,12 +782,12 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         }
       };
 
-      // 반응 @for(FOR_SCOPE_INDEX+STORE) - 전용 region을 만들어 회차마다 branch 하나에 노드·구독·
-      // 자식region을 격리한다(count 줄 때 그 회차만 통째로 떼기 위함). anchor를 지금 가지에 남기고
-      // 회차 노드는 anchor 뒤에 붙는다. 초기엔 branch.nodes만 채운다(부모 attachIf가 루트부터 일괄
-      // attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일). count leaf
-      // 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
-      const reactiveFor = (countLeafIndex: number, bodyStart: number, forEndPc: number) => {
+      // 숫자 count 반응 @for(FOR_SCOPE_INDEX+STORE, 값이 숫자) - 전용 region을 만들어 회차마다 branch
+      // 하나에 노드·구독·자식region을 격리한다(count 줄 때 그 회차만 통째로 떼기 위함). anchor를 지금
+      // 가지에 남기고 회차 노드는 anchor 뒤에 붙는다. 초기엔 branch.nodes만 채운다(부모 attachIf가
+      // 루트부터 일괄 attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일).
+      // count leaf 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
+      const reactiveCountFor = (countLeafIndex: number, bodyStart: number, forEndPc: number) => {
         const forRegionIndex = appendForRegion(regionPool, freeRegions, countLeafIndex);
         const region = regionPool[forRegionIndex];
         branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
@@ -804,16 +830,18 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       // 구독은 즉시 걸지 않고 현재 가지에 모은다 - attach가 그 가지를 켤 때 건다
       // (안 보이는 가지는 구독 0).
       //
-      // @param offset 컴포넌트 로컬 offset(flat 슬롯 argumentSourcePairs[2*offset]/[2*offset+1]로 해석)
-      // @param update 값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
-      // @returns      현재 값(없으면 "")
-      const bindVar = (offset: number, update: (v: unknown) => void) => {
-        const ref = argumentSourcePairs[2 * offset + 1];
-        if (argumentSourcePairs[2 * offset] === CONST) {
+      // @param scopeIndex 슬롯 번호(argumentSourcePairs[2*scopeIndex]=kind, [2*scopeIndex+1]=ref)
+      // @param offset     슬롯이 객체 base일 때 필드까지의 store 칸 거리(leaf/const면 0)
+      // @param update     값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
+      // @returns          현재 값(없으면 "")
+      const bindVar = (scopeIndex: number, offset: number, update: (v: unknown) => void) => {
+        const ref = argumentSourcePairs[2 * scopeIndex + 1];
+        if (argumentSourcePairs[2 * scopeIndex] === CONST) {
           // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
           return module.constpool[ref as number] ?? "";
         }
-        const leafIndex = store.leafOf(ref as string);
+        // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
+        const leafIndex = (ref as number) + offset;
         const initial = store.get(leafIndex) ?? "";
         branch.leafIndices.push(leafIndex);
         branch.updateFns.push(update);
@@ -860,17 +888,21 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           }
           case OP.ATTR_G_VAR: {
             const name = ATTRS[u16at()];
+            const scopeIndex = u8at();
+            const offset = u8at();
             // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             const el = pending!;
-            const v = bindVar(u16at(), (v) => el.setAttribute(name, v as string));
+            const v = bindVar(scopeIndex, offset, (v) => el.setAttribute(name, v as string));
             el.setAttribute(name, v as string);
             break;
           }
           case OP.ATTR_L_VAR: {
             const name = module.constpool[u16at()] as string;
+            const scopeIndex = u8at();
+            const offset = u8at();
             // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             const el = pending!;
-            const v = bindVar(u16at(), (v) => el.setAttribute(name, v as string));
+            const v = bindVar(scopeIndex, offset, (v) => el.setAttribute(name, v as string));
             el.setAttribute(name, v as string);
             break;
           }
@@ -893,7 +925,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             const payload: TAssembled[] = event.fields.map((field) => ({
               name: module.constpool[field.nameConstIndex] as string,
               typeRef: field.typeRef,
-              fieldSourcePairs: refsToSourcePairs(field.refs, argumentSourcePairs, store),
+              fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(module, field.typeRef), argumentSourcePairs),
             }));
             // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field 중 STORE만 - 상수
             // 슬롯은 불변이라 set 대상이 못 된다. 객체의 set 의미는 미정(ISSUES). data(읽기)는
@@ -953,7 +985,9 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           }
           case OP.TEXT_VAR: {
             const node = document.createTextNode("");
-            node.textContent = bindVar(u16at(), (v) => (node.textContent = v as string)) as string;
+            const scopeIndex = u8at();
+            const offset = u8at();
+            node.textContent = bindVar(scopeIndex, offset, (v) => (node.textContent = v as string)) as string;
             nodeTop().appendChild(node);
             break;
           }
@@ -961,14 +995,19 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             nodeStack.pop();
             break;
           }
-          case OP.PUSH_ARG: {
-            // 부모 슬롯 하나를 자식에게 넘긴다. 부모 슬롯의 (해석방법, 참조)를 그대로 전파해
-            // kind를 보존한다 - 부모가 또 그 위에서 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
-            const parentOffset = u16at();
-            if (argumentSourcePairs[2 * parentOffset] === undefined) {
-              throw new Error(`no path for offset ${parentOffset}`);
-            }
-            args.push(argumentSourcePairs[2 * parentOffset], argumentSourcePairs[2 * parentOffset + 1]);
+          case OP.PUSH_THROUGH: {
+            // 경로 없는 참조 - 부모 슬롯 (kind, ref)를 편집 없이 그대로 자식에 넘긴다. kind를
+            // 보존해 부모가 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
+            const scopeIndex = u8at();
+            args.push(argumentSourcePairs[2 * scopeIndex], argumentSourcePairs[2 * scopeIndex + 1]);
+            break;
+          }
+          case OP.PUSH_FIELD: {
+            // 필드 참조 - 부모 슬롯 base에 offset을 더해 자식에 넘긴다. kind는 그대로 전파,
+            // 위치만 옮긴다. CONST 슬롯은 필드가 없어(리터럴은 객체 아님) FIELD로 오지 않는다.
+            const scopeIndex = u8at();
+            const offset = u8at();
+            args.push(argumentSourcePairs[2 * scopeIndex], (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset);
             break;
           }
           case OP.PUSH_ARG_LIT: {
@@ -1001,7 +1040,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             const fields: TAssembled[] = contextDef.fields.map((field) => ({
               name: module.constpool[field.nameConstIndex] as string,
               typeRef: field.typeRef,
-              fieldSourcePairs: refsToSourcePairs(field.refs, argumentSourcePairs, store),
+              fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(module, field.typeRef), argumentSourcePairs),
             }));
             // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
             // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
@@ -1053,12 +1092,13 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             break;
           }
           case OP.IF: {
-            const condOffset = u16at();
+            const condScopeIndex = u8at();
+            const condOffset = u8at();
             // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
             // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
-            const condIsConst = argumentSourcePairs[2 * condOffset] === CONST;
-            const condRef = argumentSourcePairs[2 * condOffset + 1];
-            const condLeafIndex = condIsConst ? -1 : store.leafOf(condRef as string);
+            const condIsConst = argumentSourcePairs[2 * condScopeIndex] === CONST;
+            const condRef = argumentSourcePairs[2 * condScopeIndex + 1];
+            const condLeafIndex = condIsConst ? -1 : (condRef as number) + condOffset;
             const regionIndex = appendIfRegion(regionPool, freeRegions, branchPool, freeBranches, condLeafIndex);
             const region = regionPool[regionIndex];
             branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
@@ -1152,14 +1192,14 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           case OP.FOR_SCOPE_INDEX: {
             // 슬롯 위임(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
             // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다.
-            const offset = u16at();
-            const ref = argumentSourcePairs[2 * offset + 1];
+            const scopeIndex = u16at();
+            const ref = argumentSourcePairs[2 * scopeIndex + 1];
             const bodyStart = pc;
             const forEndPc = forBodyEnd(code, bodyStart);
-            if (argumentSourcePairs[2 * offset] === CONST) {
+            if (argumentSourcePairs[2 * scopeIndex] === CONST) {
               inlineFor(Number(module.constpool[ref as number]) || 0, bodyStart, forEndPc);
             } else {
-              reactiveFor(store.leafOf(ref as string), bodyStart, forEndPc);
+              reactiveCountFor(ref as number, bodyStart, forEndPc);
             }
             pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
             break;
