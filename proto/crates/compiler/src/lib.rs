@@ -336,17 +336,17 @@ mod tests {
         let area = &def.contexts[0];
         assert_eq!(str_at(&module, area.name_const_index), Some("Area"));
         assert_eq!(area.fields.len(), 2);
-        // section: "actions" -> 스칼라 field, leaf 하나가 Const(상수풀이 "actions"를 가리킴).
+        // section: "actions" -> 스칼라 field, ref가 Const(상수풀이 "actions"를 가리킴).
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("section"));
-        match area.fields[0].refs.as_slice() {
-            [FieldValue::Const(actions_index)] => {
-                assert_eq!(str_at(&module, *actions_index), Some("actions"));
+        match area.fields[0].value {
+            FieldValue::Const(actions_index) => {
+                assert_eq!(str_at(&module, actions_index), Some("actions"));
             }
-            other => panic!("section은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
+            other => panic!("section은 리터럴 스칼라라 Const ref여야: {other:?}"),
         }
-        // userId: assignee -> 스칼라 field, leaf 하나가 Scope(assignee의 scope 인덱스 0).
+        // userId: assignee -> 스칼라 field, ref가 Scope(assignee 슬롯 0, offset 0).
         assert_eq!(str_at(&module, area.fields[1].name_const_index), Some("userId"));
-        assert_eq!(area.fields[1].refs.as_slice(), &[FieldValue::Scope(0)]);
+        assert_eq!(area.fields[1].value, FieldValue::Scope(0, 0));
 
         // 코드: EnterContext context_index=0 ... ExitContext.
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
@@ -481,12 +481,12 @@ mod tests {
         let def = module.def(1).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // title={tag} - 회차변수 tag(offset 1)가 PushArg에 실린다.
-        let mut push_arg = vec![Op::PushThrough as u8];
-        push_arg.extend_from_slice(&1u16.to_le_bytes());
+        // title={tag} - 경로 없는 회차변수 tag를 통째로 THROUGH. tag 슬롯 = props(tags:0) 뒤
+        // 회차변수 자리라 순번 1. THROUGH operand는 scope_index u8 하나.
+        let push_arg = vec![Op::PushThrough as u8, 1u8];
         assert!(
             code.windows(push_arg.len()).any(|w| w == push_arg.as_slice()),
-            "PushArg(회차변수 tag=1)가 있어야:\n{code:?}",
+            "PushThrough(회차변수 tag=1)가 있어야:\n{code:?}",
         );
     }
 
@@ -692,9 +692,9 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let area = &module.def(0).unwrap().contexts[0];
-        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0). 스칼라라 leaf 하나.
+        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0, offset 0). 스칼라.
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("tier"));
-        assert_eq!(area.fields[0].refs.as_slice(), &[FieldValue::Scope(0)]);
+        assert_eq!(area.fields[0].value, FieldValue::Scope(0, 0));
     }
 
     /// events 페이로드 값도 리터럴(Const)을 받는다 - contexts와 같은 arg_to_field_value 경로.
@@ -712,15 +712,15 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let event = &module.def(0).unwrap().events[0];
-        // count: 단축형 -> Scope(0). label: "clicks" -> Const. 둘 다 스칼라라 leaf 하나씩.
+        // count: 단축형 -> Scope(0, 0). label: "clicks" -> Const. 둘 다 스칼라.
         assert_eq!(str_at(&module, event.fields[0].name_const_index), Some("count"));
-        assert_eq!(event.fields[0].refs.as_slice(), &[FieldValue::Scope(0)]);
+        assert_eq!(event.fields[0].value, FieldValue::Scope(0, 0));
         assert_eq!(str_at(&module, event.fields[1].name_const_index), Some("label"));
-        match event.fields[1].refs.as_slice() {
-            [FieldValue::Const(clicks_index)] => {
-                assert_eq!(str_at(&module, *clicks_index), Some("clicks"));
+        match event.fields[1].value {
+            FieldValue::Const(clicks_index) => {
+                assert_eq!(str_at(&module, clicks_index), Some("clicks"));
             }
-            other => panic!("label은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
+            other => panic!("label은 리터럴 스칼라라 Const ref여야: {other:?}"),
         }
     }
 
@@ -739,10 +739,10 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let fields = &module.def(0).unwrap().events[0].fields;
-        // 각 필드가 스칼라(leaf 하나)이고 그 leaf가 Const를 가리키며, 그 상수가 타입대로다.
-        let const_of = |i: usize| match fields[i].refs.as_slice() {
-            [FieldValue::Const(idx)] => module.pool.get(*idx).cloned(),
-            other => panic!("리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
+        // 각 필드가 스칼라이고 그 ref가 Const를 가리키며, 그 상수가 타입대로다.
+        let const_of = |i: usize| match fields[i].value {
+            FieldValue::Const(idx) => module.pool.get(idx).cloned(),
+            other => panic!("리터럴 스칼라라 Const ref여야: {other:?}"),
         };
         assert_eq!(const_of(0), Some(Const::Num(42.0)));
         assert_eq!(const_of(1), Some(Const::Num(3.5)));
@@ -751,7 +751,7 @@ mod tests {
     }
 
     /// payload에 객체를 담으면(`SAVE({ user })`, user가 객체) field가 Object type_ref +
-    /// 그 아래 leaf들의 scope 인덱스 목록으로 인코딩된다. 타입 테이블에 구조가 실린다.
+    /// 그 슬롯 위치(Scope ref 하나)로 인코딩된다(안 펼침). 타입 테이블에 구조가 실린다.
     #[test]
     fn object_payload_encodes_type_tree_and_leaves() {
         use bytecode::{decode, FieldValue, TypeEntry};
@@ -767,9 +767,9 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let field = &module.def(0).unwrap().events[0].fields[0];
 
-        // field 이름은 user, leaf는 name(0)·age(1) 두 개(연속).
+        // field 이름은 user, ref는 user 슬롯 하나(Scope(0, 0)) - 안 펼쳐 객체도 슬롯 하나.
         assert_eq!(str_at(&module, field.name_const_index), Some("user"));
-        assert_eq!(field.refs.as_slice(), &[FieldValue::Scope(0), FieldValue::Scope(1)]);
+        assert_eq!(field.value, FieldValue::Scope(0, 0));
 
         // type_ref가 Object이고, 필드가 (name, age) 순으로 각각 Scalar를 가리킨다.
         match &module.types[field.type_ref as usize] {
@@ -1010,8 +1010,8 @@ mod tests {
         );
     }
 
-    /// 펼친 leaf 경로의 인덱스 = 그 경로를 보간했을 때 codegen이 내는 scope 인덱스여야 한다.
-    /// `general.a.on`이 props[4]면 TEXT_VAR 인덱스도 4.
+    /// 객체 필드 참조의 TEXT_VAR = (root 슬롯 순번, root 안 필드까지의 store 칸 offset).
+    /// props 순번 heading=0, dirty=1, general=2. general 안 general.a.on offset = open(1)+title(1)=2.
     #[test]
     fn props_index_matches_scope_index() {
         use bytecode::{decode, Op};
@@ -1025,21 +1025,18 @@ mod tests {
             }
         "#;
         let out = compile_src("entry", src, &(|_: &str, _: &str| None)).unwrap();
-        let expected = out.props.iter().position(|p| p == "general.a.on").unwrap() as u16;
 
         let module = decode(&out.bytecode).unwrap();
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
         let pos = code.iter().position(|&b| b == Op::TextVar as u8).unwrap();
-        let idx = u16::from_le_bytes([code[pos + 1], code[pos + 2]]);
-        assert_eq!(idx, expected, "TEXT_VAR 인덱스 = props에서의 위치");
+        assert_eq!((code[pos + 1], code[pos + 2]), (2, 2), "TEXT_VAR = (general 슬롯 2, a.on offset 2)");
     }
 
-    /// 객체 통째 전달(`row={a}`) - 부모 객체 prop을 자식 객체 prop에 통째로 넘기면 자식 leaf마다
-    /// PushArg 하나로 쪼개진다. 자식 Row는 leaf 2개(label/on)라 PushArg 2개, scope index는
-    /// 부모 `a.label`(1)·`a.on`(2)에서 연속으로 온다.
+    /// 객체 통째 전달(`row={a}`) - 부모 객체 prop을 자식 객체 prop에 통째로 넘긴다. 안 펼치므로
+    /// 객체도 슬롯 하나라 THROUGH 하나. a 슬롯 = title(0) 뒤 순번 1.
     #[test]
-    fn compiles_whole_object_arg_splits_to_leaf_pusharg() {
+    fn compiles_whole_object_arg_passes_slot_through() {
         use bytecode::{decode, Op};
         let src = r#"
             component C {
@@ -1056,14 +1053,14 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // 부모 scope: title=0, a.label=1, a.on=2. row={a} -> PushArg 1, PushArg 2.
-        let pushes: Vec<u16> = code
+        // 부모 슬롯: title=0, a=1. row={a} -> THROUGH 1 하나(펼치지 않음). operand는 u8.
+        let pushes: Vec<u8> = code
             .iter()
             .enumerate()
             .filter(|(_, &b)| b == Op::PushThrough as u8)
-            .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
+            .map(|(i, _)| code[i + 1])
             .collect();
-        assert_eq!(pushes, vec![1, 2], "자식 leaf(label/on)마다 부모 a.label/a.on scope index");
+        assert_eq!(pushes, vec![1], "객체 통째는 그 슬롯(a=1) 하나를 THROUGH");
     }
 
     /// 통째 전달인데 도달 타입과 자식 prop 타입 구조가 다르면(필드 이름 불일치) PropTypeMismatch.
@@ -1549,7 +1546,8 @@ mod tests {
     }
 
     /// 객체 경로 보간 `{user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
-    /// title=0, user{name=1, contact{email=2}}, done=3. 경로가 앞 형제 필드를 건너뛴 offset을 준다.
+    /// 값 자리 TEXT_VAR는 (scope_index, offset) 두 u8. 슬롯 순번 title=0, user=1, done=2.
+    /// 객체 필드는 root 슬롯 + 필드까지의 store 칸 offset: user.name=(1,0), user.contact.email=(1,1).
     #[test]
     fn object_path_flat_scope_index() {
         use bytecode::{decode, Op};
@@ -1570,13 +1568,13 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // TEXT_VAR의 scope index만 순서대로 뽑아 검증한다.
+        // TEXT_VAR의 (scope_index, offset) 쌍을 순서대로 뽑아 검증한다.
         let mut vars = Vec::new();
         let mut i = 0;
         while i < code.len() {
             let op = code[i];
             if op == Op::TextVar as u8 {
-                vars.push(u16::from_le_bytes([code[i + 1], code[i + 2]]));
+                vars.push((code[i + 1], code[i + 2]));
                 i += 3;
             } else if op == Op::ElemOpen as u8 {
                 i += 3;
@@ -1584,8 +1582,8 @@ mod tests {
                 i += 1;
             }
         }
-        // title=0, user.name=1, user.contact.email=2
-        assert_eq!(vars, vec![0, 1, 2]);
+        // title=(0,0), user.name=(1,0), user.contact.email=(1,1)
+        assert_eq!(vars, vec![(0, 0), (1, 0), (1, 1)]);
     }
 
     /// 값 자리(보간)에 leaf가 아닌 객체 경로가 오면 NotLeaf 에러. 객체 통째는 안 넘긴다.

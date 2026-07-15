@@ -147,13 +147,17 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   // FIELDS - 이벤트 payload와 컨텍스트가 공유하는 필드 목록 인코딩
   <FIELDS> = field_count : u16
              fields      : field_count x (
-               name_const_index : u16  // 필드명("title") 상수풀
-               type_ref         : u16  // 타입 테이블 인덱스 - 이 leaf들을 어떤 구조로 조립할지
-               leaf_count       : u16
-               leaves           : leaf_count x u16  // leaf 하나. MSB=const 여부(1=상수풀 값,
-                                       //   0=scope index), 하위 15비트=index. 깊이우선 순서로
-                                       //   type_ref 구조를 채운다. scalar field는 leaf 하나.
+               name_const_index : u16   // 필드명("title") 상수풀
+               type_ref         : u16   // 타입 테이블 인덱스 - 이 슬롯을 어떤 구조로 조립할지
+               ref              : <REF>  // 이 field를 채울 값 하나(객체도 슬롯 하나 - 안 펼친다)
              )
+
+  // REF - field 값 하나의 출처. 태그 1바이트로 세 종류를 가른다. 슬롯을 펼치지 않으므로 Scope는
+  //   (scope_index, offset) 위치만 담고, 슬롯의 실제 kind(store/const)는 런타임이 정한다.
+  <REF> = tag : u8   // 0=Scope, 1=Const, 2=Raw
+          tag 0 (Scope) : scope_index:u8, offset:u8  // 부모 scope[scope_index]의 base+offset
+          tag 1 (Const) : const_index:u16            // 컴포넌트 상수풀 리터럴
+          tag 2 (Raw)   : value:u16                  // @for 런타임 원시값(지금은 @for 인덱스)
 [ 코드 ]
   len        : u32
   code       : [u8; len]   // 모든 정의의 코드가 이어짐. 테이블의 off/len으로 구획.
@@ -163,8 +167,9 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   결정한다고 본다.
 - **타입 테이블은 모듈 전역·dedup.** payload/context가 실제로 담는 객체 타입만 등록한다(props
   전체가 아니라). Object 필드가 자식을 `type_ref`로 가리켜 중첩·공유를 표현한다. field는
-  `type_ref`로 이 테이블을 참조하고 leaf만 따로 싣는다 - 구조는 전역에, 인스턴스(leaf)는
-  컴포넌트 field에. 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
+  `type_ref`로 이 테이블을 참조하고 값 출처(`ref`)만 따로 싣는다 - 구조는 전역에, 인스턴스는
+  컴포넌트 field에. 슬롯을 펼치지 않으므로 객체 field도 ref 하나로 그 슬롯을 가리킨다(런타임이
+  type_ref 구조로 store에서 조립). 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
 - **`elem_type_ref`/`type_ref`는 말단(Scalar)으로 내려가는 하위 참조만.** 자기/조상 인덱스를
   가리키는 재귀 타입(`type Tree = Tree[]`)은 미지원 - 컴파일러가 그런 엔트리를 내지 않는다
   (내면 순회가 무한). 필요해지면 사이클 검출을 그때 추가.
@@ -262,18 +267,19 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
 - **이벤트 - `BIND_EVENT` + 컴포넌트 이벤트 테이블.** 정의와 발생이 나뉜다.
   - **정의**는 컴포넌트 테이블(§4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
-    이벤트명/fields(필드명 + type_ref + leaf 목록)가 그 컴포넌트의 이벤트 배열에 들어간다.
+    이벤트명/fields(필드명 + type_ref + ref)가 그 컴포넌트의 이벤트 배열에 들어간다.
     `event_index`는 이 배열의 인덱스(0,1,2…). 각 field는 `type_ref`(타입 테이블)로 조립 구조를,
-    **leaf 목록**으로 그 구조를 채울 값을 가리킨다. **leaf 하나는 MSB로 갈린다** - scope(그 prop의
-    scope index) 또는 const(리터럴, 상수풀 인덱스). 스칼라 field는 Scalar type_ref + leaf 하나
-    (옛 단일 값의 상위집합). 객체 field는 leaf 여러 개(깊이우선). 컨텍스트와 같은 인코딩(<FIELDS>, §4).
+    **ref**로 그 구조를 채울 값 하나를 가리킨다(슬롯을 안 펼쳐 객체도 ref 하나). ref는 태그로
+    Scope(부모 슬롯의 scope_index+offset) / Const(리터럴) / Raw(@for)를 가른다. 컨텍스트와 같은
+    인코딩(<FIELDS>, §4).
   - **발생 배선**은 코드의 `BIND_EVENT`다. `button(@click:TOGGLE)`은 그 요소에
     `BIND_EVENT click, 0`(click이 일어나면 0번 이벤트)을 낸다. 속성처럼 `ELEM_OPEN`과
     `ELEM_CLOSE_OPEN` 사이에 온다.
-  - **발생 시 런타임**: 0번 이벤트 정의를 보고, 각 field의 leaf 목록을 현재값으로 읽어 `type_ref`
+  - **발생 시 런타임**: 0번 이벤트 정의를 보고, 각 field의 ref를 현재값으로 읽어 `type_ref`
     구조대로 **조립**해 `data = { title: … }`를 만들고, 핸들러(fullname으로 찾음)에 넘긴다.
-    스칼라 field는 leaf 하나가 값이 되고, 객체 field는 leaf들이 중첩 객체로 조립된다(조립 절차는
-    런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다. 같은 fullname = 같은 핸들러.
+    스칼라 field는 그 슬롯이 값이 되고, 객체 field는 슬롯의 store 위치부터 구조대로 중첩 객체로
+    조립된다(조립 절차는 런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다.
+    같은 fullname = 같은 핸들러.
   - 핸들러 본문/`set`은 바이트코드에 없다 - 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
     낸다. 본문은 호스트 JS에 위임(DESIGN §5.4 방향).
 - **컨텍스트 - `ENTER_CONTEXT`/`EXIT_CONTEXT` + 컴포넌트 컨텍스트 테이블.** `@with`로 주입하는

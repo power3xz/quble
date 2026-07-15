@@ -16,6 +16,11 @@ const TAG_SCALAR: u8 = 0;
 const TAG_OBJECT: u8 = 1;
 const TAG_ARRAY: u8 = 2;
 
+// field ref 출처 태그(BYTECODE.md §4 <REF>). ref마다 앞에 1바이트.
+const TAG_SCOPE: u8 = 0;
+const TAG_CONST: u8 = 1;
+const TAG_RAW: u8 = 2;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
     BadMagic,
@@ -24,6 +29,7 @@ pub enum DecodeError {
     BadUtf8,
     BadConstTag(u8),
     BadTypeTag(u8),
+    BadRefTag(u8),
 }
 
 // ---- 인코딩 ----
@@ -125,16 +131,32 @@ fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
     }
 }
 
-/// 필드 목록을 쓴다 - field_count, [(name_const_index, type_ref, ref_count, [ref])]. ref는
-/// FieldValue를 u16로 encode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 필드 목록을 쓴다 - field_count, [(name_const_index, type_ref, ref)]. 이벤트 payload와
+/// 컨텍스트가 같은 인코딩을 공유한다.
 fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
     put_u16(out, fields.len() as u16);
     for f in fields {
         put_u16(out, f.name_const_index);
         put_u16(out, f.type_ref);
-        put_u16(out, f.refs.len() as u16);
-        for r in &f.refs {
-            put_u16(out, r.encode());
+        put_ref(out, &f.value);
+    }
+}
+
+/// field ref 하나 - 태그 1바이트 + payload. Scope는 (scope_index, offset) 두 u8, Const/Raw는 u16.
+fn put_ref(out: &mut Vec<u8>, value: &FieldValue) {
+    match value {
+        FieldValue::Scope(scope_index, offset) => {
+            out.push(TAG_SCOPE);
+            out.push(*scope_index);
+            out.push(*offset);
+        }
+        FieldValue::Const(index) => {
+            out.push(TAG_CONST);
+            put_u16(out, *index);
+        }
+        FieldValue::Raw(value) => {
+            out.push(TAG_RAW);
+            put_u16(out, *value);
         }
     }
 }
@@ -216,22 +238,28 @@ fn read_type(r: &mut Reader) -> Result<TypeEntry, DecodeError> {
     }
 }
 
-/// 필드 목록을 읽는다 - field_count, [(name_const_index, type_ref, ref_count, [ref])]. ref는
-/// u16를 FieldValue로 decode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 필드 목록을 읽는다 - field_count, [(name_const_index, type_ref, ref)]. put_fields 대칭.
 fn read_fields(r: &mut Reader) -> Result<Vec<Field>, DecodeError> {
     let field_count = r.u16()?;
     let mut fields = Vec::with_capacity(field_count as usize);
     for _ in 0..field_count {
         let name_const_index = r.u16()?;
         let type_ref = r.u16()?;
-        let ref_count = r.u16()?;
-        let mut refs = Vec::with_capacity(ref_count as usize);
-        for _ in 0..ref_count {
-            refs.push(FieldValue::decode(r.u16()?));
-        }
-        fields.push(Field { name_const_index, type_ref, refs });
+        let value = read_ref(r)?;
+        fields.push(Field { name_const_index, type_ref, value });
     }
     Ok(fields)
+}
+
+/// field ref 하나 - 태그 1바이트 + payload(put_ref 대칭). 알 수 없는 태그는 거부.
+fn read_ref(r: &mut Reader) -> Result<FieldValue, DecodeError> {
+    let tag = r.u8()?;
+    match tag {
+        TAG_SCOPE => Ok(FieldValue::Scope(r.u8()?, r.u8()?)),
+        TAG_CONST => Ok(FieldValue::Const(r.u16()?)),
+        TAG_RAW => Ok(FieldValue::Raw(r.u16()?)),
+        other => Err(DecodeError::BadRefTag(other)),
+    }
 }
 
 struct Reader<'a> {

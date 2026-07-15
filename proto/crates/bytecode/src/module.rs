@@ -2,76 +2,17 @@
 
 use crate::pool::ConstPool;
 
-/// field 값 하나의 출처. field.refs의 각 원소.
-/// - Scope: 런타임 슬롯을 거쳐 읽는 값(반응/상수/원시 - 슬롯 kind가 최종 결정).
+/// field 값 하나의 출처. field.ref.
+/// - Scope: 부모 슬롯 위치(scope_index, offset). 슬롯의 실제 kind(store/const)는 런타임이 정한다
+///   - 부모가 그 슬롯을 어디서 받았느냐에 달려 컴파일이 못 박는다. object/array면 base+offset.
 /// - Const: 컴포넌트 상수풀 인덱스. 리터럴 값(payload에 직접 박힘).
-/// - Raw: @for 등이 런타임에 만든 원시값. 지금은 number only(@for 인덱스). 스택이 아니라
-///   슬롯 인라인 값이다(회차 프레임 유지 시 메모리 폭발 회피). 실사용은 @for 착수 때.
-/// 바이트코드 u16과의 변환은 encode/decode에 가둔다.
+/// - Raw: @for 등이 런타임에 만든 원시값. 지금은 number only(@for 인덱스). 실사용은 @for 착수 때.
+/// 직렬화는 태그 1바이트 + payload(serialize.rs). variant가 곧 태그라 enum엔 태그 필드가 없다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldValue {
-    Scope(u16),
-    Const(u16),
-    Raw(u16),
-}
-
-impl FieldValue {
-    /// u16 한 칸을 비대칭으로 나눈다 - 상한 리스크가 큰 Const에 15비트를 온전히 주고
-    /// (상수풀은 문자열 전반을 공유해 큰 컴포넌트에서 빨리 찬다), 여유 있는 Scope/Raw는
-    /// 최상위 2비트를 태그로 쓰고 14비트 인덱스:
-    ///   0 xxxxxxxxxxxxxxx  Const  (15비트, 0x7fff)
-    ///   1 0 xxxxxxxxxxxxxx  Scope  (14비트, 0x3fff)
-    ///   1 1 xxxxxxxxxxxxxx  Raw    (14비트, 0x3fff)
-    const TAG_HI: u16 = 0x8000; // 최상위: 0=Const, 1=Scope/Raw
-    const TAG_LO: u16 = 0x4000; // 최상위가 1일 때 둘째: 0=Scope, 1=Raw
-    /// 축별 인덱스 상한(encode가 넘으면 패닉). Const 15비트, Scope/Raw는 태그 2비트를 빼 14비트.
-    pub const CONST_MAX: u16 = 0x7fff;
-    pub const SCOPE_MAX: u16 = 0x3fff;
-    pub const RAW_MAX: u16 = 0x3fff;
-    /// decode에서 태그 2비트를 벗겨 인덱스만 꺼내는 마스크(Scope/Raw 공용, 하위 14비트).
-    const INDEX_MASK: u16 = 0x3fff;
-
-    /// 검증 생성자 - 인덱스가 축별 상한 이내면 Ok, 초과면 그 값을 Err로. codegen이 발급
-    /// 지점에서 이걸로 만들어 상한을 컴파일 에러로 거르고, encode의 assert는 최후 방어로 남긴다.
-    pub fn try_scope(index: u16) -> Result<Self, u16> {
-        if index > Self::SCOPE_MAX { Err(index) } else { Ok(FieldValue::Scope(index)) }
-    }
-    pub fn try_const(index: u16) -> Result<Self, u16> {
-        if index > Self::CONST_MAX { Err(index) } else { Ok(FieldValue::Const(index)) }
-    }
-    pub fn try_raw(index: u16) -> Result<Self, u16> {
-        if index > Self::RAW_MAX { Err(index) } else { Ok(FieldValue::Raw(index)) }
-    }
-
-    /// 바이트코드 u16으로. 상한 초과면 패닉 - codegen 가드가 앞서 걸러야 한다(ISSUES).
-    pub fn encode(self) -> u16 {
-        match self {
-            FieldValue::Const(index) => {
-                assert!(index <= Self::CONST_MAX, "Const 인덱스 상한 초과: {index}");
-                index
-            }
-            FieldValue::Scope(index) => {
-                assert!(index <= Self::SCOPE_MAX, "Scope 인덱스 상한 초과: {index}");
-                Self::TAG_HI | index
-            }
-            FieldValue::Raw(index) => {
-                assert!(index <= Self::RAW_MAX, "Raw 인덱스 상한 초과: {index}");
-                Self::TAG_HI | Self::TAG_LO | index
-            }
-        }
-    }
-
-    /// 바이트코드 u16에서. 최상위 0이면 Const(태그 없음, raw 그대로), 1이면 둘째 비트로
-    /// Scope/Raw를 가르고 INDEX_MASK로 태그를 벗긴다. 모든 u16이 유효(무효 조합 없음).
-    pub fn decode(raw: u16) -> FieldValue {
-        if raw & Self::TAG_HI == 0 {
-            FieldValue::Const(raw)
-        } else if raw & Self::TAG_LO == 0 {
-            FieldValue::Scope(raw & Self::INDEX_MASK)
-        } else {
-            FieldValue::Raw(raw & Self::INDEX_MASK)
-        }
-    }
+    Scope(/* scope_index */ u8, /* offset */ u8),
+    Const(/* const_index */ u16),
+    Raw(/* value */ u16),
 }
 
 /// payload/context가 담는 객체 타입의 구조. 모듈 전역 테이블(Module.types)에 dedup 저장.
@@ -88,16 +29,16 @@ pub enum TypeEntry {
     Array(u16),
 }
 
-/// 필드 하나 = 필드명 + 조립 구조(type_ref) + 채울 값 출처 목록. 이벤트 payload와 컨텍스트가
-/// 공유하는 명세. 스칼라 field는 type_ref가 Scalar 엔트리 + refs 하나(지금 동작의 상위집합).
+/// 필드 하나 = 필드명 + 조립 구조(type_ref) + 채울 값 출처 하나. 이벤트 payload와 컨텍스트가
+/// 공유하는 명세. 슬롯을 안 펼치므로 객체 field도 ref 하나가 그 슬롯을 가리킨다(런타임이 조립).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     /// 필드명("title")의 컴포넌트 상수풀 인덱스.
     pub name_const_index: u16,
-    /// 모듈 전역 타입 테이블 인덱스. 이 refs를 어떤 구조로 조립할지.
+    /// 모듈 전역 타입 테이블 인덱스. 이 ref를 어떤 구조로 조립할지.
     pub type_ref: u16,
-    /// 조립에 채울 값 출처 목록(깊이우선 순서). 스칼라는 하나, 객체는 값 수만큼.
-    pub refs: Vec<FieldValue>,
+    /// 조립에 채울 값 출처 하나.
+    pub value: FieldValue,
 }
 
 /// 컴포넌트가 선언한 이벤트 하나. `event_index`는 이 항목이 CompDef.events에서 갖는 배열 인덱스
@@ -154,66 +95,3 @@ impl Module {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 세 variant가 u16 인코딩을 라운드트립한다. 최상위 2비트가 축을 가른다.
-    #[test]
-    fn field_value_roundtrips() {
-        for v in [
-            FieldValue::Const(0),
-            FieldValue::Const(5),
-            FieldValue::Scope(0),
-            FieldValue::Scope(42),
-            FieldValue::Raw(0),
-            FieldValue::Raw(7),
-        ] {
-            assert_eq!(FieldValue::decode(v.encode()), v);
-        }
-    }
-
-    /// 태그 비트 배치. Const는 최상위 0, Scope는 10, Raw는 11.
-    #[test]
-    fn field_value_tag_bits() {
-        assert_eq!(FieldValue::Const(3).encode(), 0x0003);
-        assert_eq!(FieldValue::Scope(3).encode(), 0x8003);
-        assert_eq!(FieldValue::Raw(3).encode(), 0xc003);
-    }
-
-    /// 축별 상한값까지 인덱스가 보존된다(Const 15비트, Scope/Raw 14비트).
-    #[test]
-    fn field_value_max_index() {
-        for v in [
-            FieldValue::Const(FieldValue::CONST_MAX),
-            FieldValue::Scope(FieldValue::SCOPE_MAX),
-            FieldValue::Raw(FieldValue::RAW_MAX),
-        ] {
-            assert_eq!(FieldValue::decode(v.encode()), v);
-        }
-    }
-
-    /// 상한 초과는 encode에서 패닉한다(codegen 가드가 앞서 걸러야 하나, 최후 방어).
-    #[test]
-    #[should_panic(expected = "Scope 인덱스 상한 초과")]
-    fn field_value_scope_over_max_panics() {
-        FieldValue::Scope(FieldValue::SCOPE_MAX + 1).encode();
-    }
-
-    #[test]
-    #[should_panic(expected = "Const 인덱스 상한 초과")]
-    fn field_value_const_over_max_panics() {
-        FieldValue::Const(FieldValue::CONST_MAX + 1).encode();
-    }
-
-    /// 검증 생성자는 상한 이내면 Ok, 초과면 그 값을 Err로(codegen 발급 지점 가드용).
-    #[test]
-    fn try_ctors_guard_max() {
-        assert_eq!(FieldValue::try_scope(FieldValue::SCOPE_MAX), Ok(FieldValue::Scope(FieldValue::SCOPE_MAX)));
-        assert_eq!(FieldValue::try_scope(FieldValue::SCOPE_MAX + 1), Err(FieldValue::SCOPE_MAX + 1));
-        assert_eq!(FieldValue::try_const(FieldValue::CONST_MAX), Ok(FieldValue::Const(FieldValue::CONST_MAX)));
-        assert_eq!(FieldValue::try_const(FieldValue::CONST_MAX + 1), Err(FieldValue::CONST_MAX + 1));
-        assert_eq!(FieldValue::try_raw(FieldValue::RAW_MAX), Ok(FieldValue::Raw(FieldValue::RAW_MAX)));
-        assert_eq!(FieldValue::try_raw(FieldValue::RAW_MAX + 1), Err(FieldValue::RAW_MAX + 1));
-    }
-}
