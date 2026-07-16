@@ -8,16 +8,19 @@ import { before, test } from "node:test";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
 
-const { compile } = await import("./runtime.ts");
+import type { TTestHandlers } from "./test-helpers/handlers.ts";
 
-let qubb;
+const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
+
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("array_payload");
 });
 
-const instantiate = (values, handlers) => {
-  const inst = compile(qubb)(0)(values, handlers);
-  const button = mount(inst).querySelector("button");
+const instantiate = (values: unknown, handlers: TTestHandlers = {}) => {
+  const inst = compile(qubb)(0)(values, handlers as unknown as THandlers);
+  const button = mount(inst).querySelector("button")!;
   return { store: inst.store, button };
 };
 
@@ -30,7 +33,7 @@ const sample = () => ({
 });
 
 test("객체 배열 payload가 배열로 조립돼 핸들러 data에 닿는다", () => {
-  let received = null;
+  let received: any = null;
   const { button } = instantiate(sample(), { SAVE: (data) => (received = data) });
   button.click();
   assert.deepEqual(received, {
@@ -43,7 +46,7 @@ test("객체 배열 payload가 배열로 조립돼 핸들러 data에 닿는다",
 });
 
 test("스칼라 배열은 값 배열, 객체 배열은 요소별 중첩 구조로 온다", () => {
-  let received = null;
+  let received: any = null;
   const { button } = instantiate(sample(), { SAVE: (data) => (received = data) });
   button.click();
   assert.deepEqual(received.tags, ["vip", "new"]);
@@ -51,7 +54,7 @@ test("스칼라 배열은 값 배열, 객체 배열은 요소별 중첩 구조�
 });
 
 test("빈 배열도 빈 배열로 조립된다", () => {
-  let received = null;
+  let received: any = null;
   const { button } = instantiate({ items: [], tags: [] }, { SAVE: (data) => (received = data) });
   button.click();
   assert.deepEqual(received, { items: [], tags: [] });

@@ -9,7 +9,7 @@ import { mount } from "./test-helpers/dom.ts";
 
 const { compile } = await import("./runtime.ts");
 
-let qubb;
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("lit_arg");
 });

@@ -8,8 +8,9 @@ import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
 
 const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
 
-const qubb = {};
+const qubb: Record<string, Uint8Array> = {};
 before(() => {
   for (const name of [
     "for_literal",
@@ -26,13 +27,13 @@ before(() => {
 });
 
 // 루트 prop leafIndex는 선언 순서(plant 순서): n=0, flag=1, c.count=0.
-const instantiate = (name, values, handlers) => {
+const instantiate = (name: string, values: unknown, handlers: THandlers = {}) => {
   const inst = compile(qubb[name])(0)(values, handlers);
   const host = mount(inst);
   return { store: inst.store, inst, host };
 };
 
-const paras = (host) => [...host.querySelectorAll("p")].map((p) => p.textContent);
+const paras = (host: ParentNode) => [...host.querySelectorAll("p")].map((p) => p.textContent);
 
 // -- 반복 렌더 --------------------------------------------------------
 test("리터럴 count: @for (x of 3)이 몸체를 3회 렌더", () => {
@@ -52,7 +53,7 @@ test("count 0이면 몸체 렌더 없음", () => {
 
 // -- 이벤트 fullname [$n] + 회차 인덱스 -------------------------------
 test("@for 안 자식 컴포넌트: fullname Item[$0], 발화 시 $0 회차 인덱스", () => {
-  const picks = [];
+  const picks: unknown[] = [];
   const { host } = instantiate(
     "for_event_component",
     {},
@@ -73,7 +74,7 @@ test("@for 안 자식 컴포넌트: fullname Item[$0], 발화 시 $0 회차 인�
 // for-of로 돌며 appendChild하면 컬렉션이 실시간으로 줄어 인덱스가 밀려 노드를 건너뛰던 회귀
 // (ISSUES.md 해결됨 참고). 3x4=12장이 전부 렌더되고 두 뎁스 인덱스가 12조합 다 나와야 한다.
 test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누락 없음", () => {
-  const fired = [];
+  const fired: unknown[] = [];
   const { host } = instantiate(
     "for_nested_render",
     {},
@@ -88,7 +89,7 @@ test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누
   buttons.forEach((b) => {
     b.click();
   });
-  const expected = [];
+  const expected: unknown[] = [];
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < 4; j++) {
       expected.push([i, j]);
@@ -98,7 +99,7 @@ test("중첩 @for(자식 RENDER 경유): 12장 전부 + 두 뎁스 인덱스 누
 });
 
 test("@for 직속 element: fullname 익명 [$0], 발화 시 $0", () => {
-  const sels = [];
+  const sels: unknown[] = [];
   const { host } = instantiate(
     "for_event_element",
     {},
@@ -140,7 +141,7 @@ test("count 0으로 갔다 다시 늘려도 회차가 복원된다", () => {
 // 반응으로 늘린 회차도 이벤트가 붙고 회차 인덱스($0)가 자기 자리로 온다 - prop count(n) fixture로
 // 늘린 뒤 새로 생긴 마지막 회차 버튼을 클릭한다.
 test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () => {
-  const picks = [];
+  const picks: unknown[] = [];
   const { host, store } = instantiate(
     "for_event_count",
     { n: 1 },
@@ -161,7 +162,7 @@ test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () =
 // 회차를 줄여 떼어낸 뒤 다시 늘려 새로 build된 회차의 이벤트·$값이 옛 회차 잔재 없이 정상인지 -
 // 떼어낸 회차의 구독/바인딩이 남아 잘못 발화하거나 $값이 어긋나면 안 된다.
 test("회차 제거 후 재추가한 회차의 이벤트·$값이 정상", () => {
-  const picks = [];
+  const picks: unknown[] = [];
   const { host, store } = instantiate(
     "for_event_count",
     { n: 3 },

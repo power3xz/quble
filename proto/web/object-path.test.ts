@@ -9,7 +9,7 @@ import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(�
 
 const { compile } = await import("./runtime.ts");
 
-let qubb;
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("object_path");
 });
@@ -17,7 +17,7 @@ before(() => {
 // props: title, user{ name, contact{ email } }.
 // 평탄 leaf 순서 = 선언 순서로 펼침: title=0, user.name=1, user.contact.email=2.
 // blueprint가 값 객체를 이 순서로 store에 펴 심는다(plant).
-const instantiate = (values) => {
+const instantiate = (values: unknown) => {
   const inst = compile(qubb)(0)(values);
   const host = mount(inst);
   return { store: inst.store, host };
@@ -29,7 +29,7 @@ test("중첩 객체 leaf가 평탄 scope index로 올바르게 렌더된다", ()
     user: { name: "김철수", contact: { email: "kim@ex.com" } },
   });
   const spans = host.querySelectorAll("span");
-  assert.equal(host.querySelector("h1").textContent, "제목");
+  assert.equal(host.querySelector("h1")!.textContent, "제목");
   assert.equal(spans[0].textContent, "김철수"); // user.name
   assert.equal(spans[1].textContent, "kim@ex.com"); // user.contact.email
 });

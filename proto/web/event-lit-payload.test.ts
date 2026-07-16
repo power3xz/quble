@@ -7,19 +7,22 @@ import { before, test } from "node:test";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
 
-const { compile } = await import("./runtime.ts");
+import type { TTestHandlers } from "./test-helpers/handlers.ts";
 
-let qubb;
+const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
+
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("event_lit_payload");
 });
 
 // C 인스턴스 하나. props [count].
-const instantiate = (values, handlers) => {
-  const inst = compile(qubb)(0)(values, handlers);
+const instantiate = (values: unknown, handlers: TTestHandlers = {}) => {
+  const inst = compile(qubb)(0)(values, handlers as unknown as THandlers);
   const store = inst.store;
   const host = mount(inst);
-  const button = host.querySelector("button");
+  const button = host.querySelector("button")!;
   return { store, button };
 };
 

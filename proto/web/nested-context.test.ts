@@ -8,17 +8,20 @@ import { test } from "node:test";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
 
-const { compile } = await import("./runtime.ts");
+import type { TTestHandlers } from "./test-helpers/handlers.ts";
 
-const fireToggle = (qubb, values, handlers) => {
-  const inst = compile(qubb)(0)(values, handlers);
-  const button = mount(inst).querySelector("button");
+const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
+
+const fireToggle = (qubb: Uint8Array, values: unknown, handlers: TTestHandlers) => {
+  const inst = compile(qubb)(0)(values, handlers as unknown as THandlers);
+  const button = mount(inst).querySelector("button")!;
   button.click();
 };
 
 test("다른 이름 중첩 - context에 바깥/안쪽 컨텍스트가 모두 담긴다", () => {
   const qubb = buildFixture("nested_context");
-  let received = null;
+  let received: any = null;
   fireToggle(
     qubb,
     { userId: 7 },
@@ -36,11 +39,11 @@ test("다른 이름 중첩 - context에 바깥/안쪽 컨텍스트가 모두 담
 
 test("같은 이름 합성 중첩 - 자식이 부모를 통째 덮고(필드 머지 아님) 워닝을 띄운다", () => {
   const qubb = buildFixture("dup_context");
-  const warnings = [];
+  const warnings: string[] = [];
   const origWarn = console.warn;
-  console.warn = (msg) => warnings.push(msg);
+  console.warn = (msg: string) => warnings.push(msg);
 
-  let received = null;
+  let received: any = null;
   try {
     // 부모 props [userId]. Child(userId={userId})로 물려준다.
     // 버튼은 자식 안 - 별칭 없는 합성이라 fullname은 Child.TOGGLE.

@@ -10,12 +10,9 @@
     "includes": [
       "proto/web/**",
       "proto/build/**",
-      "proto/examples/**",
       "!**/node_modules",
       "!**/dist",
-      "!**/*.qubc.d.ts",
-      "!proto/web/fixtures/**/*.json",
-      "!proto/web/fixtures/**/*.css"
+      "!**/*.qubc.d.ts"
     ]
   },
   "formatter": {
@@ -30,6 +27,17 @@
       "preset": "recommended"
     }
   },
+  "overrides": [
+    {
+      "includes": ["proto/web/**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": { "noNonNullAssertion": "off" },
+          "suspicious": { "noExplicitAny": "off" }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double"

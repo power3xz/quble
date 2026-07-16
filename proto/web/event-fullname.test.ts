@@ -7,18 +7,21 @@ import { before, test } from "node:test";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
 
-const { compile } = await import("./runtime.ts");
+import type { TTestHandlers } from "./test-helpers/handlers.ts";
 
-let qubb;
+const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
+
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("event_fullname");
 });
 
 // Card(부모, props 없음) 인스턴스 - 내부에서 Toggle을 합성. 클릭할 button을 돌려준다.
-const instantiate = (handlers) => {
-  const inst = compile(qubb)(0)({}, handlers); // Card = comp 0, props 없음
+const instantiate = (handlers: TTestHandlers = {}) => {
+  const inst = compile(qubb)(0)({}, handlers as unknown as THandlers); // Card = comp 0, props 없음
   const host = mount(inst);
-  return host.querySelector("button");
+  return host.querySelector("button")!;
 };
 
 test("합성된 자식의 이벤트는 fullname(자식 type-name 누적)으로 핸들러를 부른다", () => {

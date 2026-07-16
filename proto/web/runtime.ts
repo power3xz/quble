@@ -303,10 +303,7 @@ const TYPE_ARRAY = 2;
 //
 // @param r Reader
 // @returns { tag: "scalar" } | { tag: "object", fields } | { tag: "array", elemTypeRef }
-type TType =
-  | { tag: "scalar" }
-  | { tag: "object"; fields: TField[] }
-  | { tag: "array"; elemTypeRef: number };
+type TType = { tag: "scalar" } | { tag: "object"; fields: TField[] } | { tag: "array"; elemTypeRef: number };
 type TField = [number, number];
 const readType = (reader: Reader): TType => {
   const tag = reader.u8();
@@ -592,12 +589,7 @@ const plantFixed = (
 // rootFlat([STORE, base, …])을 진입점 argumentSourcePairs로 쓴다. 루트 슬롯은 정의상 전부
 // 외부 데이터 바인딩이라 kind가 늘 STORE. 루트 고정부를 다 심은 뒤(base가 고정 칸을 가리켜야
 // 한다) 배열 요소를 store 끝에 몰아 심는다(drainArrays).
-const plantRoot = (
-  module: TModule,
-  rootValue: unknown,
-  arrayPool: TArrayInfo[],
-  freeArrays: number[],
-) => {
+const plantRoot = (module: TModule, rootValue: unknown, arrayPool: TArrayInfo[], freeArrays: number[]) => {
   const rootType = module.types[module.rootPropsTypeRef];
   const leaves: unknown[] = [];
   const rootFlat: number[] = [];
@@ -1162,7 +1154,10 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             // 위치만 옮긴다. CONST 슬롯은 필드가 없어(리터럴은 객체 아님) FIELD로 오지 않는다.
             const scopeIndex = u8at();
             const offset = u8at();
-            args.push(argumentSourcePairs[2 * scopeIndex], (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset);
+            args.push(
+              argumentSourcePairs[2 * scopeIndex],
+              (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset,
+            );
             break;
           }
           case OP.PUSH_ARG_LIT: {

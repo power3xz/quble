@@ -14,7 +14,7 @@ import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(�
 const { compile } = await import("./runtime.ts");
 
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
-const qubb = {};
+const qubb: Record<string, Uint8Array> = {};
 before(() => {
   for (const name of [
     "single_if",
@@ -32,22 +32,22 @@ before(() => {
 
 // 한 인스턴스를 만들어 { store, inst, host, set } 묶음으로. leafNames는 평탄 leaf 선언 순서라
 // 인덱스가 곧 leafIndex - set은 이름을 그 leafIndex로 풀어 쓰게(테스트 가독성용 매핑표).
-const instantiate = (name, leafNames, values) => {
+const instantiate = (name: string, leafNames: string[], values: unknown) => {
   const inst = compile(qubb[name])(0)(values);
   const host = mount(inst);
-  const set = (leafName, value) => inst.store.set(leafNames.indexOf(leafName), value);
+  const set = (leafName: string, value: unknown) => inst.store.set(leafNames.indexOf(leafName), value);
   return { store: inst.store, inst, host, set };
 };
 
 // region 트리 탐색. branchOf: region의 슬롯(THEN/ELSE)을 전역 branchPool에서 Branch 객체로 푼다.
 const THEN = 0;
 const ELSE = 1;
-const branchOf = (inst, region, slot) => inst.branchPool[region.branchIndices[slot]];
-const childRegion = (inst, regionIndex, slot, nth = 0) =>
+const branchOf = (inst: any, region: any, slot: number) => inst.branchPool[region.branchIndices[slot]];
+const childRegion = (inst: any, regionIndex: number, slot: number, nth = 0) =>
   inst.regionPool[branchOf(inst, inst.regionPool[regionIndex], slot).childRegionIndices[nth]];
 
 // 텍스트만 추출(주석 anchor·태그 제외) - swap 가시화 확인용.
-const texts = (host) => [...host.querySelectorAll("p")].map((p) => p.textContent);
+const texts = (host: ParentNode) => [...host.querySelectorAll("p")].map((p) => p.textContent);
 
 // ── 단일 if ──────────────────────────────────────────────────────────
 test("단일 if: 초기 then 렌더, anchor 유지", () => {

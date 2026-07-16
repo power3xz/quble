@@ -9,7 +9,7 @@ import { mount } from "./test-helpers/dom.ts";
 
 const { compile } = await import("./runtime.ts");
 
-let qubb;
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("typed_lit_arg");
 });
@@ -19,5 +19,5 @@ before(() => {
 test("typed literals render as text", () => {
   const inst = compile(qubb)(0)({});
   const host = mount(inst);
-  assert.equal(host.querySelector("span").textContent, "42trues");
+  assert.equal(host.querySelector("span")!.textContent, "42trues");
 });

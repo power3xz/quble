@@ -7,17 +7,20 @@ import { before, test } from "node:test";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
 
-const { compile } = await import("./runtime.ts");
+import type { TTestHandlers } from "./test-helpers/handlers.ts";
 
-let qubb;
+const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
+
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("event_nested");
 });
 
-const instantiate = (handlers) => {
-  const inst = compile(qubb)(0)({ label: "X" }, handlers);
+const instantiate = (handlers: TTestHandlers = {}) => {
+  const inst = compile(qubb)(0)({ label: "X" }, handlers as unknown as THandlers);
   const host = mount(inst);
-  return host.querySelector("button");
+  return host.querySelector("button")!;
 };
 
 test("자식 클릭은 자기 핸들러만 부르고 부모로 버블하지 않는다", () => {

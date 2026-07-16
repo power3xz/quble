@@ -7,19 +7,23 @@ import { before, test } from "node:test";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
 
-const { compile } = await import("./runtime.ts");
+import type { TTestHandlers } from "./test-helpers/handlers.ts";
 
-let qubb;
+const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
+
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("event_toggle");
 });
 
 // Toggle 인스턴스 하나 - { store, host, button }. props [label, on].
-const instantiate = (values, handlers) => {
-  const inst = compile(qubb)(0)(values, handlers);
+const instantiate = (values: unknown, handlers: TTestHandlers = {}) => {
+  // 테스트용 구체 ctx 타입이라 runtime의 헐거운 THandlers와 반공변 충돌 - 경계에서 한 번 캐스트.
+  const inst = compile(qubb)(0)(values, handlers as unknown as THandlers);
   const store = inst.store;
   const host = mount(inst);
-  const button = host.querySelector("button");
+  const button = host.querySelector("button")!;
   return { store, host, button };
 };
 
@@ -38,7 +42,7 @@ test("클릭하면 이벤트명으로 등록한 핸들러가 호출된다", () =
 });
 
 test("핸들러 data에 payload 필드의 현재값이 필드명 키로 담긴다", () => {
-  let received = null;
+  let received: unknown = null;
   const { button } = instantiate(
     { label: "할일", on: true },
     {
@@ -80,7 +84,7 @@ test("둘째 인자 set/props로 상태를 바꾸면 DOM이 갱신된다", () =>
 });
 
 test("둘째 인자 get으로 현재값을 읽는다", () => {
-  let read = null;
+  let read: unknown = null;
   const { button } = instantiate(
     { label: "현재값", on: false },
     {
@@ -94,7 +98,7 @@ test("둘째 인자 get으로 현재값을 읽는다", () => {
 });
 
 test("둘째 인자 event로 DOM 이벤트 객체를 받는다", () => {
-  let received = null;
+  let received: Event | null = null;
   const { button } = instantiate(
     { label: "A", on: false },
     {
@@ -104,7 +108,7 @@ test("둘째 인자 event로 DOM 이벤트 객체를 받는다", () => {
     },
   );
   button.click();
-  assert.equal(received?.type, "click", "DOM click 이벤트 객체 전달");
+  assert.equal(received!.type, "click", "DOM click 이벤트 객체 전달");
 });
 
 test("핸들러 없는 이벤트는 무시된다(에러 없음)", () => {

@@ -7,17 +7,20 @@ import { before, test } from "node:test";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
 
-const { compile } = await import("./runtime.ts");
+import type { TTestHandlers } from "./test-helpers/handlers.ts";
 
-let qubb;
+const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
+
+let qubb: Uint8Array;
 before(() => {
   qubb = buildFixture("object_payload");
 });
 
 // props 평탄 leaf 순서: user.name.short=0, user.name.long=1, user.email=2, tag=3.
-const instantiate = (values, handlers) => {
-  const inst = compile(qubb)(0)(values, handlers);
-  const button = mount(inst).querySelector("button");
+const instantiate = (values: unknown, handlers: TTestHandlers = {}) => {
+  const inst = compile(qubb)(0)(values, handlers as unknown as THandlers);
+  const button = mount(inst).querySelector("button")!;
   return { store: inst.store, button };
 };
 
@@ -27,7 +30,7 @@ const sample = () => ({
 });
 
 test("객체 payload가 중첩 객체로 조립돼 핸들러 data에 닿는다", () => {
-  let received = null;
+  let received: any = null;
   const { button } = instantiate(sample(), { SAVE: (data) => (received = data) });
   button.click();
   assert.deepEqual(received, {
@@ -37,7 +40,7 @@ test("객체 payload가 중첩 객체로 조립돼 핸들러 data에 닿는다",
 });
 
 test("스칼라 field는 값 그대로, 객체 field는 중첩 구조로 온다", () => {
-  let received = null;
+  let received: any = null;
   const { button } = instantiate(sample(), { SAVE: (data) => (received = data) });
   button.click();
   assert.equal(received.tag, "vip"); // 스칼라는 값 그대로
@@ -45,7 +48,7 @@ test("스칼라 field는 값 그대로, 객체 field는 중첩 구조로 온다"
 });
 
 test("leaf 갱신이 발생 시점 조립값에 반영된다", () => {
-  let received = null;
+  let received: any = null;
   const { store, button } = instantiate(sample(), { SAVE: (data) => (received = data) });
   store.set(0, "lee"); // user.name.short(leafIndex 0): 발생 전에 안쪽 leaf 하나 변경
   button.click();
@@ -54,7 +57,7 @@ test("leaf 갱신이 발생 시점 조립값에 반영된다", () => {
 });
 
 test("빈 값(미설정 leaf)도 undefined로 조립된다", () => {
-  let received = null;
+  let received: any = null;
   // user 아래 값 없이 tag만. user leaf들은 undefined.
   const { button } = instantiate({ tag: "x" }, { SAVE: (data) => (received = data) });
   button.click();
