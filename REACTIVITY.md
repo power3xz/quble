@@ -17,6 +17,7 @@ swap 등)뿐이다.
 ## 1. pub/sub, 리프 = 토픽
 
 반응성의 단위는 **원시 리프값**(문자열·숫자·불리언)뿐이다. 객체·배열 자체는 **추적하지 않는다**
+
 - 경로일 뿐이다. 각 리프가 하나의 토픽(시그널)이고, 구독/발행하는 pub/sub 구조다.
 
 - 토픽 = 리프 하나 (leafIndex로 식별)
@@ -40,7 +41,7 @@ Svelte 5는 Proxy로 **런타임에** "무엇을 구독할지" 알아낸다 - �
 
 주의 - 이건 **"연결이 정적"이라는 뜻이 아니다.** leafIndex 수치는 렌더 시 정해진다(§3). 정적인
 것은 **무엇을 구독하는가(리프 식별·상대 offset·바인딩)**이고, **인덱스 수치는 렌더 시점**이다.
-즉 *무엇을 구독할지는 컴파일타임, 등록·인덱스는 렌더 시점*.
+즉 _무엇을 구독할지는 컴파일타임, 등록·인덱스는 렌더 시점_.
 
 주된 동기는 **런타임 크기**(Proxy·시그널·의존추적 시스템 코드를 안 실음). 성능은 부수적으로 약간
 나은 정도다 - Proxy 오버헤드 자체는 대부분 앱에서 체감 수준이 아니다(Vue 3·Svelte 5가 증명).
@@ -119,8 +120,26 @@ store 칸 = arrayInfoIndex ──> arrayPool[arrayInfoIndex] = {
 ```
 
 배열의 배열은 **색인 연쇄** - store 칸에 안쪽 배열의 arrayInfoIndex가 값으로 들어, `leafIndex ->
-색인 -> arrayInfo`가 번갈아 이어진다(path처럼 안 끊김). 객체는 이 앵커를 안 쓴다(필드 수 고정,
-필드마다 출처가 달라 산술이 안 맞음) - 필드마다 슬롯.
+색인 -> arrayInfo`가 번갈아 이어진다(path처럼 안 끊김).
+
+```
+grid = { rows: { cells: string[] }[] },  rows = [ {cells:[a,b]}, {cells:[c,d,e]} ]
+
+store.leaves               arrayPool
+--------------------       -----------------------------------------------
+0: arrayInfoIndex 0  ─┐    0 (rows)         elemStartLeafIndices [1, 4]
+1: arrayInfoIndex 1  ←┘    1 (rows[0].cells)                     [2, 3]
+2: 'a'                     2 (rows[1].cells)                     [5, 6, 7]
+3: 'b'
+4: arrayInfoIndex 2
+5: 'c'
+6: 'd'
+7: 'e'
+
+rows[1].cells[2]:  pool[0].elemStart[1]=4 -> store.get(4)=색인2 -> pool[2].elemStart[2]=7 -> 'e'
+```
+
+객체는 이 앵커를 안 쓴다(필드 수 고정, 필드마다 출처가 달라 산술이 안 맞음) - 필드마다 슬롯.
 
 ### plant - 진입 때 store에 다 채운다
 
@@ -139,9 +158,9 @@ leaves:  [ title  tags색인  title  tags색인 │ tags[0]원소…  tags[1]원
 
 `list.length`(원시 숫자)도 추적한다. 단 구독자가 다르다:
 
-| 토픽 | 구독자 | 갱신 |
-|---|---|---|
-| `store.user.name` | 텍스트 노드 핸들러 | textContent 교체 |
+| 토픽                | 구독자                 | 갱신                                                  |
+| ------------------- | ---------------------- | ----------------------------------------------------- |
+| `store.user.name`   | 텍스트 노드 핸들러     | textContent 교체                                      |
 | `store.list.length` | **`@for` 블록 핸들러** | 항목 노드 추가/제거 + 파생 리프 인덱스 동적 할당/해제 |
 
 push/pop = length 변경 → `@for` 재구성. length가 **항목 인스턴스의 생애주기를 관장**한다 -
@@ -171,12 +190,12 @@ store가 가벼워지고(set은 대입+통지뿐) 책임이 한 곳에 모인다
 
 하나의 인덱스 체계가 셋을 관통한다:
 
-| 용도 | 활용 |
-|---|---|
-| 반응성 | `set(leafIndex, v)` → 구독 노드 갱신 |
-| store 조회 | `get()[leafIndex]` |
+| 용도           | 활용                                                                       |
+| -------------- | -------------------------------------------------------------------------- |
+| 반응성         | `set(leafIndex, v)` → 구독 노드 갱신                                       |
+| store 조회     | `get()[leafIndex]`                                                         |
 | 배열 요소 식별 | leafIndex로 인스턴스 식별 (같은 fullname의 두 인스턴스는 leafIndex가 다름) |
-| 이벤트 | 발생 인스턴스의 leafIndex를 페이로드에 실음 |
+| 이벤트         | 발생 인스턴스의 leafIndex를 페이로드에 실음                                |
 
 DESIGN §5.1의 배열 요소 식별 슬롯(이름 미정)이 식별해야 할 "인스턴스 구분"이
 **leafIndex(인스턴스 베이스)**로 풀린다. 컨텍스트 메타데이터는 별개(`context`, leafIndex와 무관).
@@ -316,15 +335,15 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 - [x] props 변수 보간 - 텍스트(`TEXT_VAR`)·속성(`ATTR_*_VAR`). 같은 scope offset 공간.
 - [x] 스칼라 반응성 - `subscribers[leafIndex]`(구독자=함수) + `set(leafIndex, v)`. 렌더 시 구독 등록.
 - [x] 슬롯 (kind, ref) / 공유(§3.1) - `argumentSourcePairs`에 STORE/CONST. 부모·자식이 같은 store
-  리프(같은 base+offset)를 가리키면 공유. CONST는 구독 스킵.
+      리프(같은 base+offset)를 가리키면 공유. CONST는 구독 스킵.
 - [x] 합성 시 자식 슬롯 주입 - `PUSH_THROUGH`(슬롯 통째)·`PUSH_FIELD`(base+offset)·`PUSH_ARG_LIT`
-  (const) + `RENDER`. kind는 전파, 위치만 넘기고 타입은 자식이 안다.
+      (const) + `RENDER`. kind는 전파, 위치만 넘기고 타입은 자식이 안다.
 - [x] 배열 = arrayPool 앵커 + plant(§3.2) - store에 색인 1칸, 원소는 arrayPool로. 진입 때 다 채움.
 - [x] `@for` - `FOR_RAW`/`FOR_COUNT_VAR`(숫자)/`FOR_ARRAY_VAR`(배열). 회차변수 `{item}`·`{item.f}`
-  보간, 회차변수 객체 필드 자식 전달, fullname `[$n]` 인덱스.
+      보간, 회차변수 객체 필드 자식 전달, fullname `[$n]` 인덱스.
 - [x] `@if` Region + 재진입 `interpret` + lazy build(§8) - 활성 가지만 build·구독, 비활성은 첫 swap
-  때 build. 단일·중첩·형제 if, 합성 경계 넘는 if. (`proto/web/runtime.ts`, `region.ts`)
+      때 build. 단일·중첩·형제 if, 합성 경계 넘는 if. (`proto/web/runtime.ts`, `region.ts`)
 - [x] free list - `@for` 회차 제거 시 branch/region/arrayPool 칸을 freelist로 회수·재사용
-  (`freeBranches`/`freeRegions`/`freeArrays`, `truncateFor`).
+      (`freeBranches`/`freeRegions`/`freeArrays`, `truncateFor`).
 - [ ] 배열 length 토픽·push/pop 반응 - 지금 배열은 정적(초기 요소만). §4는 목표.
 - [ ] 객체 일괄 set(§5 동적 인덱스), 핸들러가 set할 수 있는 범위(ISSUES.md).
