@@ -22,7 +22,7 @@ const QUBLE_BIN = join(PROTO, "target", "debug", "quble");
 const COMPONENTS = join(PROTO, "..", "components");
 
 // components/<name>.fixture.qubc를 컴파일하고 dist/<name>.fixture.qubb 바이트(Uint8Array)를 돌려준다.
-export const buildFixture = (name) => {
+export const buildFixture = (name: string): Uint8Array => {
   if (!existsSync(QUBLE_BIN)) {
     throw new Error(`quble 바이너리 없음(${QUBLE_BIN}). 테스트 전에 'cargo build'를 실행하세요.`);
   }
@@ -35,7 +35,7 @@ export const buildFixture = (name) => {
 
 // 위와 같이 빌드하되 { qubb, resmap }를 돌려준다. resmap은 manifest의 resources 배열
 // (dist/<name>.fixture.manifest.json). manifest는 항상 생성되고, 리소스 없으면 resources는 빈 배열.
-export const buildFixtureWithResmap = (name) => {
+export const buildFixtureWithResmap = (name: string) => {
   const qubb = buildFixture(name);
   const manifestPath = join(PROTO, "dist", `${name}.fixture.manifest.json`);
   const resmap = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")).resources : [];

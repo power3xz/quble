@@ -3,8 +3,8 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { buildFixture } from "./fixtures/build.js";
-import { mount } from "./fixtures/dom.js";
+import { buildFixture } from "./fixtures/build.ts";
+import { mount } from "./fixtures/dom.ts";
 
 const { compile } = await import("./runtime.ts");
 

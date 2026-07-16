@@ -4,8 +4,8 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { buildFixture } from "./fixtures/build.js";
-import { mount } from "./fixtures/dom.js"; // jsdom 전역 document 주입
+import { buildFixture } from "./fixtures/build.ts";
+import { mount } from "./fixtures/dom.ts"; // jsdom 전역 document 주입
 
 const { compile } = await import("./runtime.ts");
 
