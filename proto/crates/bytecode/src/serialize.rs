@@ -1,6 +1,6 @@
 //! 모듈 ↔ 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
 
-use crate::module::{CompDef, ContextDef, EventDef, Field, Leaf, Module, TypeEntry};
+use crate::module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
 use crate::pool::{Const, ConstPool};
 
 const MAGIC: &[u8; 4] = b"QBL\0";
@@ -14,6 +14,12 @@ const TAG_BOOL: u8 = 2;
 // 타입 테이블 엔트리 태그(BYTECODE.md §4). 엔트리마다 앞에 1바이트.
 const TAG_SCALAR: u8 = 0;
 const TAG_OBJECT: u8 = 1;
+const TAG_ARRAY: u8 = 2;
+
+// field ref 출처 태그(BYTECODE.md §4 <REF>). ref마다 앞에 1바이트.
+const TAG_SCOPE: u8 = 0;
+const TAG_CONST: u8 = 1;
+const TAG_RAW: u8 = 2;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -23,6 +29,7 @@ pub enum DecodeError {
     BadUtf8,
     BadConstTag(u8),
     BadTypeTag(u8),
+    BadRefTag(u8),
 }
 
 // ---- 인코딩 ----
@@ -43,6 +50,9 @@ pub fn encode(m: &Module) -> Vec<u8> {
     for t in &m.types {
         put_type(&mut out, t);
     }
+
+    // 루트 props 객체 타입 인덱스 - 진입점이 rootValue를 이 구조로 풀필한다.
+    put_u16(&mut out, m.root_props_type_ref);
 
     // 컴포넌트 테이블
     put_u16(&mut out, m.defs.len() as u16);
@@ -104,7 +114,8 @@ fn put_const(out: &mut Vec<u8>, c: &Const) {
 }
 
 /// 타입 테이블 엔트리: 태그 1바이트 + payload. Scalar는 payload 없음, Object는 field_count +
-/// [(name_const_index, type_ref)]. type_ref로 자식을 가리켜 중첩·공유를 표현(BYTECODE.md §4).
+/// [(name_const_index, type_ref)], Array는 elem_type_ref. type_ref로 자식을 가리켜 중첩·공유를
+/// 표현(BYTECODE.md §4).
 fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
     match t {
         TypeEntry::Scalar => out.push(TAG_SCALAR),
@@ -116,19 +127,39 @@ fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
                 put_u16(out, *type_ref);
             }
         }
+        TypeEntry::Array(elem_type_ref) => {
+            out.push(TAG_ARRAY);
+            put_u16(out, *elem_type_ref);
+        }
     }
 }
 
-/// 필드 목록을 쓴다 - field_count, [(name_const_index, type_ref, leaf_count, [leaf])]. leaf는
-/// Leaf를 u16로 encode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 필드 목록을 쓴다 - field_count, [(name_const_index, type_ref, ref)]. 이벤트 payload와
+/// 컨텍스트가 같은 인코딩을 공유한다.
 fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
     put_u16(out, fields.len() as u16);
     for f in fields {
         put_u16(out, f.name_const_index);
         put_u16(out, f.type_ref);
-        put_u16(out, f.leaves.len() as u16);
-        for leaf in &f.leaves {
-            put_u16(out, leaf.encode());
+        put_ref(out, &f.value);
+    }
+}
+
+/// field ref 하나 - 태그 1바이트 + payload. Scope는 (scope_index, offset) 두 u8, Const/Raw는 u16.
+fn put_ref(out: &mut Vec<u8>, value: &FieldValue) {
+    match value {
+        FieldValue::Scope(scope_index, offset) => {
+            out.push(TAG_SCOPE);
+            out.push(*scope_index);
+            out.push(*offset);
+        }
+        FieldValue::Const(index) => {
+            out.push(TAG_CONST);
+            put_u16(out, *index);
+        }
+        FieldValue::Raw(value) => {
+            out.push(TAG_RAW);
+            put_u16(out, *value);
         }
     }
 }
@@ -161,6 +192,8 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
         types.push(read_type(&mut r)?);
     }
 
+    let root_props_type_ref = r.u16()?;
+
     // 컴포넌트 테이블
     let def_count = r.u16()?;
     let mut defs = Vec::with_capacity(def_count as usize);
@@ -187,7 +220,7 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
     let code_len = r.u32()? as usize;
     let code = r.take(code_len)?.to_vec();
 
-    Ok(Module::new(pool, types, defs, code))
+    Ok(Module::new(pool, types, root_props_type_ref, defs, code))
 }
 
 /// 타입 테이블 엔트리를 읽는다 - 태그 1바이트 + payload(put_type 대응). 알 수 없는 태그는 거부.
@@ -205,26 +238,33 @@ fn read_type(r: &mut Reader) -> Result<TypeEntry, DecodeError> {
             }
             Ok(TypeEntry::Object(fields))
         }
+        TAG_ARRAY => Ok(TypeEntry::Array(r.u16()?)),
         other => Err(DecodeError::BadTypeTag(other)),
     }
 }
 
-/// 필드 목록을 읽는다 - field_count, [(name_const_index, type_ref, leaf_count, [leaf])]. leaf는
-/// u16를 Leaf로 decode(MSB=const 여부). 이벤트 payload와 컨텍스트가 같은 인코딩을 공유한다.
+/// 필드 목록을 읽는다 - field_count, [(name_const_index, type_ref, ref)]. put_fields 대칭.
 fn read_fields(r: &mut Reader) -> Result<Vec<Field>, DecodeError> {
     let field_count = r.u16()?;
     let mut fields = Vec::with_capacity(field_count as usize);
     for _ in 0..field_count {
         let name_const_index = r.u16()?;
         let type_ref = r.u16()?;
-        let leaf_count = r.u16()?;
-        let mut leaves = Vec::with_capacity(leaf_count as usize);
-        for _ in 0..leaf_count {
-            leaves.push(Leaf::decode(r.u16()?));
-        }
-        fields.push(Field { name_const_index, type_ref, leaves });
+        let value = read_ref(r)?;
+        fields.push(Field { name_const_index, type_ref, value });
     }
     Ok(fields)
+}
+
+/// field ref 하나 - 태그 1바이트 + payload(put_ref 대칭). 알 수 없는 태그는 거부.
+fn read_ref(r: &mut Reader) -> Result<FieldValue, DecodeError> {
+    let tag = r.u8()?;
+    match tag {
+        TAG_SCOPE => Ok(FieldValue::Scope(r.u8()?, r.u8()?)),
+        TAG_CONST => Ok(FieldValue::Const(r.u16()?)),
+        TAG_RAW => Ok(FieldValue::Raw(r.u16()?)),
+        other => Err(DecodeError::BadRefTag(other)),
+    }
 }
 
 struct Reader<'a> {

@@ -8,9 +8,9 @@
 // 락을 잡지 않는다. 바이너리 보장은 호출자 몫 - 없으면 안내와 함께 실패한다(테스트 전 `cargo build`).
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // proto/web/fixtures
 const PROTO = join(HERE, "..", ".."); // proto
@@ -33,8 +33,6 @@ export const buildFixture = (name) => {
 export const buildFixtureWithResmap = (name) => {
   const qubb = buildFixture(name);
   const manifestPath = join(PROTO, "dist", `${name}.manifest.json`);
-  const resmap = existsSync(manifestPath)
-    ? JSON.parse(readFileSync(manifestPath, "utf8")).resources
-    : [];
+  const resmap = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")).resources : [];
   return { qubb, resmap };
 };

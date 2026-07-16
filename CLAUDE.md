@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Response Style
+
+핵심만 간략히. 서론·중복·안 할 선택지 나열 금지.
+
 ## Read First (new session / after compact)
 
 The docs below are authoritative and out-rank any conversation summary - when a summary and

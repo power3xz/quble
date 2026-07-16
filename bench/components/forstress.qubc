@@ -1,0 +1,46 @@
+use "./forstress.css"
+
+component Depth1 {
+  props { rows: number }
+  events {
+    ADD({ n: rows })
+    REMOVE({ n: rows })
+  }
+  template {
+    div(class="stress") {
+      h1() { "quble @for 부하: rows x 50 x 100 카드" }
+      button(class="stress__add" @click:ADD) { "행 추가 (+5,000 카드)" }
+      button(class="stress__remove" @click:REMOVE) { "행 제거 (-5,000 카드)" }
+      @for (a of rows) {
+        Row: Depth2() {}
+      }
+    }
+  }
+}
+
+component Depth2 {
+  template {
+    @for (b of 50) {
+      Col: Depth3() {}
+    }
+  }
+}
+
+component Depth3 {
+  template {
+    @for (c of 100) {
+      Card: ProfileCard() {}
+    }
+  }
+}
+
+component ProfileCard {
+  events { PICK({ label: "card" }) }
+  template {
+    div(class="card" @click:PICK) {
+      div(class="card__name") { "Jane Doe" }
+      div(class="card__job") { "Engineer" }
+      div(class="card__loc") { "Seoul" }
+    }
+  }
+}

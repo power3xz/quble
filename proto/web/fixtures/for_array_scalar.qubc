@@ -1,0 +1,10 @@
+component ForArrayScalar {
+  props { tags: string[] }
+  template {
+    ul() {
+      @for (tag of tags) {
+        li() { {tag} }
+      }
+    }
+  }
+}

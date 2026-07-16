@@ -2,12 +2,12 @@
 // 걸렸을 때, 자식 클릭이 자기 핸들러만 부르고 부모 핸들러로 버블하지 않는지.
 // runtime.js의 위임 리스너가 stopPropagation을 디폴트로 호출한다.
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "./fixtures/dom.js";
+import { before, test } from "node:test";
 import { buildFixture } from "./fixtures/build.js";
+import { mount } from "./fixtures/dom.js";
 
-const { compile, createLeafStoreSubject } = await import("./runtime.js");
+const { compile } = await import("./runtime.ts");
 
 let qubb;
 before(() => {
@@ -15,8 +15,7 @@ before(() => {
 });
 
 const instantiate = (handlers) => {
-  const store = createLeafStoreSubject({ label: "X" });
-  const inst = compile(qubb)(0)(store, ["label"], handlers);
+  const inst = compile(qubb)(0)({ label: "X" }, handlers);
   const host = mount(inst);
   return host.querySelector("button");
 };

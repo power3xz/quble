@@ -1,7 +1,12 @@
 // Quble 앱 진입점 - 배포된 산출물(qubb + manifest)을 fetch해 브라우저에 마운트한다.
-// qubc 컴파일은 빌드가 이미 끝냈고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
+// qubc 컴파일은 빌드가 이미 끝났고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
 
-import { compile, createLeafStoreSubject } from "./runtime.js";
+import { compile, type THandlers } from "./runtime.ts";
+
+type TManifest = {
+  resources: string[];
+  handlers?: string;
+};
 
 /**
  * manifest.handlers가 가리키는 JS를 로드해 fullname -> handler 맵(default export)을 돌려준다.
@@ -10,7 +15,7 @@ import { compile, createLeafStoreSubject } from "./runtime.js";
  * @param base      manifest.handlers 상대경로 해소 기준 URL
  * @returns         fullname -> handler 맵 (핸들러 없으면 {})
  */
-export const loadHandlers = async (manifest, base) => {
+export const loadHandlers = async (manifest: TManifest, base: string | URL): Promise<THandlers> => {
   if (!manifest.handlers) {
     return {};
   }
@@ -21,16 +26,16 @@ export const loadHandlers = async (manifest, base) => {
 
 /**
  * 배포된 qubb 앱을 rootEl에 마운트한다. manifest fetch -> qubb 디코드 -> 핸들러 로드 ->
- * 루트(comp 0) 인스턴스화. data는 이름 맵({heading, title})으로 그대로 store가 되고,
- * paths[i]=manifest.props[i](이름)라 런타임의 scope index 접근이 그 이름 경로에 닿는다.
+ * 루트(comp 0) 인스턴스화. blueprint가 data를 루트 props 타입 구조대로 store에 펴 심는다(plant).
  * @param qubbUrl  .qubb URL (manifest는 확장자만 .manifest.json으로 바꿔 유도)
  * @param rootEl   마운트 대상 DOM 요소
- * @param data     props명 -> 초기값. 그대로 store 루트가 된다(자식도 이름 경로로 참조).
+ * @param data     루트 props 초기값 객체. blueprint가 타입 구조대로 store에 편다.
+ * @returns        인스턴스({ nodes, store, … }) - store로 반응성을 건다.
  */
-export const mount = async (qubbUrl, rootEl, data) => {
+export const mount = async (qubbUrl: string, rootEl: Element, data: unknown) => {
   const base = new URL(qubbUrl, location.href);
-  const manifestUrl = qubbUrl.replace(/\.qubb$/, "") + ".manifest.json";
-  const manifest = await fetch(manifestUrl).then((r) => r.json());
+  const manifestUrl = `${qubbUrl.replace(/\.qubb$/, "")}.manifest.json`;
+  const manifest: TManifest = await fetch(manifestUrl).then((r) => r.json());
 
   // manifest만 있으면 qubb fetch와 핸들러 로드는 서로 독립 - 병렬로.
   const [bytesBuf, handlers] = await Promise.all([
@@ -42,9 +47,8 @@ export const mount = async (qubbUrl, rootEl, data) => {
   const resources = manifest.resources.map((path) => new URL(path, base).href);
   const blueprintOf = compile(new Uint8Array(bytesBuf), resources);
 
-  // store는 이름 기반(data 그대로). paths[i]=props[i]로 scope index -> 이름 경로를 잇는다.
-  const store = createLeafStoreSubject(data);
-  const inst = blueprintOf(0)(store, manifest.props, handlers);
+  // blueprint가 data를 루트 props 타입대로 store에 펴 심고(plant) 인스턴스에 store를 실어 준다.
+  const inst = blueprintOf(0)(data, handlers);
   rootEl.replaceChildren(...inst.nodes);
-  return { store, inst };
+  return inst;
 };

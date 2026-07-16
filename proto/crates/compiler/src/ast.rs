@@ -20,17 +20,17 @@ pub struct Use {
 #[derive(Debug, PartialEq)]
 pub struct Component {
     pub name: String,
-    pub props: Vec<Prop>,        // 선언 순서 = scope 인덱스
-    pub events: Vec<Event>,      // 선언 순서 = event_index (BIND_EVENT가 참조)
-    pub contexts: Vec<Context>,  // 선언 순서 = context_index (EnterContext가 참조)
-    pub template: Vec<Node>,     // 루트 노드들 (fragment 허용)
+    pub props: Vec<Prop>,       // 선언 순서 = scope 인덱스
+    pub events: Vec<Event>,     // 선언 순서 = event_index (BIND_EVENT가 참조)
+    pub contexts: Vec<Context>, // 선언 순서 = context_index (EnterContext가 참조)
+    pub template: Vec<Node>,    // 루트 노드들 (fragment 허용)
 }
 
 /// `props { name: type }` 한 항목. 타입은 필수(표기 강제). 선언 순서가 scope 인덱스.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Prop {
     pub name: String,
-    pub ty: Type,
+    pub type_: Type,
 }
 
 /// prop 타입. quble이 온전히 소유하는 재귀 구조 - 원시 3종을 잎으로 배열·객체를 조합한다.
@@ -46,7 +46,7 @@ pub enum Type {
     Number,
     String,
     Array(Box<Type>),
-    Object(Vec<(String, Type)>),  // 필드 선언 순서 보존(d.ts 방출 안정성)
+    Object(Vec<(String, Type)>), // 필드 선언 순서 보존(d.ts 방출 안정성)
     /// `general: Section` - 다른 컴포넌트(대문자명)의 props를 타입으로 참조. resolve가
     /// 평탄화 후 그 컴포넌트 props를 Object로 환원해 치환한다(codegen엔 Ref가 안 남는다).
     Ref(String),
@@ -103,12 +103,28 @@ pub enum Node {
         then: Vec<Node>,
         else_: Vec<Node>,
     },
+    /// `@for (item of count) { body }` - count 회 반복 렌더. count는 정수 리터럴 또는 숫자 prop
+    /// 참조(ForCount). item(반복 변수)은 파싱만, 몸체 참조는 다음 단계.
+    For {
+        item: String,
+        count: ForCount,
+        body: Vec<Node>,
+    },
     /// `@with Context { children }` - 자식들을 그 컨텍스트 범위로 감싼다. context는 이 컴포넌트
     /// contexts에 선언된 이름(codegen이 context_index로 해석). codegen이 EnterContext/ExitContext로 감싼다.
     With {
         context: String,
         children: Vec<Node>,
     },
+}
+
+/// `@for`의 반복 횟수 출처. codegen이 이걸로 ForRaw(리터럴) / ForScopeIndex(prop) opcode를 가른다.
+/// - Literal: 소스에 직접 박은 정수(`of 3`). 슬롯 안 거치고 opcode에 값 인라인.
+/// - Var: 숫자 prop 참조(`of count`). 슬롯 offset을 거쳐 런타임이 값을 읽는다(STORE/CONST 위임).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ForCount {
+    Literal(u16),
+    Var(VarRef),
 }
 
 /// 속성값: 정적 문자열(`class="card"`) 또는 변수 참조(`class={x}`).

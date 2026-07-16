@@ -1,0 +1,17 @@
+component ForEventCount {
+  props { n: number }
+  template {
+    div() {
+      @for (item of n) {
+        Item: Row() {}
+      }
+    }
+  }
+}
+
+component Row {
+  events { PICK({ id: "x" }) }
+  template {
+    button(@click:PICK) { "pick" }
+  }
+}

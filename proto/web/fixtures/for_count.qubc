@@ -1,0 +1,10 @@
+component ForCount {
+  props { n: number }
+  template {
+    div() {
+      @for (item of n) {
+        p() { "row" }
+      }
+    }
+  }
+}

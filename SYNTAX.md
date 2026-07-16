@@ -39,7 +39,9 @@ props {
 }
 ```
 
-쉼표로 구분된 `이름: 타입` 목록. 타입은 **필수**(표기 강제).
+쉼표로 구분된 `이름: 타입` 목록. 타입은 **필수**(표기 강제). 구분자 쉼표는 필드 사이에
+**필수**이나 마지막 필드 뒤는 생략 가능하고 trailing 쉼표도 허용한다(TS 규칙). 객체 타입의
+필드도 같다.
 
 타입은 quble이 온전히 소유하는 재귀 문법이다:
 
@@ -47,7 +49,7 @@ props {
 Type   = Prim | Array | Object | Ref | Util
 Prim   = "bool" | "number" | "string"
 Array  = Type "[]"                              // string[], number[][]
-Object = "{" (이름 ":" Type ("," 이름 ":" Type)*)? "}"
+Object = "{" (이름 ":" Type ("," 이름 ":" Type)* ","?)? "}"
 Ref    = 컴포넌트이름                            // 그 컴포넌트의 props를 객체로 참조
 Util   = ("Omit" | "Pick") "<" Type "," 키 ("|" 키)* ">"   // 키는 '작은따옴표'
 ```
@@ -158,7 +160,7 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
 | `@with Context { … }` | 블록 내 이벤트에 컨텍스트 메타데이터 주입 |
 | `@if (EXPR) { … }` | 조건부 렌더링 |
 | `@if (EXPR) { … } @else { … }` | 조건부 + 대체 |
-| `@for (IDENT in EXPR) { … }` | 반복 렌더링 |
+| `@for (IDENT of EXPR) { … }` | 반복 렌더링 (EXPR = 정수, 숫자 prop, 또는 배열) |
 | `@click:EVENT` | DOM 이벤트 → 컴포넌트 이벤트 위임 (속성 위치) |
 | `{EXPR}` | 표현식 보간 (자식 위치 또는 문자열 내부) |
 
@@ -171,7 +173,7 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
     @if (description) { p() { {description} } }
     @if (tags.length > 0) {
       div(class="tags") {
-        @for (tag in tags) {
+        @for (tag of tags) {
           TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK)
         }
       }
@@ -200,7 +202,7 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
 1. `{EXPR}` - template 자식 보간
 2. `"… {EXPR} …"` - 문자열 리터럴 내 보간
 3. `attr={EXPR}` - 속성 값
-4. `@if (EXPR)` / `@for (_ in EXPR)` - 디렉티브 조건/이터러블
+4. `@if (EXPR)` / `@for (_ of EXPR)` - 디렉티브 조건/이터러블
 5. `key: EXPR` - contexts 값, events 페이로드 값
 
 관찰된 식 형태: prop 참조(`title`), 멤버 접근(`styles.variant`, `tags.length`),

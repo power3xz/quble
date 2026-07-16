@@ -1,9 +1,9 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
-use crate::ast::{ArgValue, AttrValue, Context, Event, LitValue, Node, Prop, Type, VarRef};
+use crate::ast::{ArgValue, AttrValue, Context, Event, ForCount, LitValue, Node, Prop, Type, VarRef};
 use crate::resolve::FlatComp;
 use bytecode::{
-    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, Leaf, Module, Op,
+    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
     TypeEntry,
 };
 
@@ -29,6 +29,14 @@ pub enum CodegenError {
     /// 객체 통째 전달(`user={user}`)에서 넘긴 경로의 도달 타입이 자식 prop 타입과 구조가 다르다.
     /// leaf를 순서로 짝지으므로 필드 이름·순서·타입이 일치해야 한다.
     PropTypeMismatch { comp: String, prop: String },
+    /// scope_index/offset이 u8(255)를 넘었다(BYTECODE.md - 둘 다 u8 operand). 안 펼쳐 슬롯 =
+    /// props/for_var 개수라 정상 컴포넌트는 안 넘지만, 넘으면 넘친 변수 참조를 담아 위치를 알린다.
+    SlotOverflow(String),
+    /// @for 회차변수 이름이 prop 또는 바깥 회차변수와 겹친다. 섀도잉을 막아 이름 조회를
+    /// 순서 무관하게(매치 최대 하나) 유지한다 - 다른 이름을 쓰라는 컴파일 에러.
+    DuplicateBinding(String),
+    /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
+    ForCountNotIterable(String),
 }
 
 /// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
@@ -84,6 +92,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 &comp.events,
                 &comp.contexts,
                 &comp_lookup,
+                ForScope::ROOT,
                 &mut pool,
                 &mut code,
             )?;
@@ -135,7 +144,15 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
         });
     }
 
-    let module = Module::new(pool, types.into_entries(), defs, code);
+    // 루트 컴포넌트(#0) props를 하나의 객체 타입으로 intern - 진입점이 rootValue를 이 구조로 풀필.
+    // props 없는(빈) 파일은 없다는 전제(FlatComp가 최소 하나) - comps[0]을 루트로 본다.
+    let root_props = &comps[0].comp.props;
+    let root_props_ty = Type::Object(
+        root_props.iter().map(|p| (p.name.clone(), p.type_.clone())).collect(),
+    );
+    let root_props_type_ref = types.intern(&root_props_ty, &mut pool);
+
+    let module = Module::new(pool, types.into_entries(), root_props_type_ref, defs, code);
     Ok((encode(&module).into_boxed_slice(), res_ids))
 }
 
@@ -148,40 +165,55 @@ fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
     (res_ids.len() - 1) as u16
 }
 
-/// 타입의 leaf(원시) 개수. 객체·배열은 펼친 leaf 수의 합. 원시는 1.
-/// scope 인덱스는 props를 선언 순서로 펼친 평탄 leaf 번호라, 앞 prop들이 차지하는 칸을
-/// 세려면 타입별 leaf 수가 필요하다. (배열은 요소 타입 leaf 수 - `@for` 회수 전까지 요소 1벌.)
-fn leaf_count(ty: &Type) -> u16 {
+/// 타입이 store에서 차지하는 칸 수. 객체 안 필드 offset을 누적할 때 앞 형제 필드가 먹는 칸을
+/// 세는 데 쓴다. 원시는 1(leaf), 배열은 1(칸 하나에 arrayPoolIndex로 앉고 요소는 arrayPool에
+/// 산다), 객체는 필드 칸의 합(base부터 필드들이 연속으로 깔린다).
+fn store_size(ty: &Type) -> u16 {
     match ty {
         Type::Bool | Type::Number | Type::String => 1,
-        Type::Array(inner) => leaf_count(inner),
-        Type::Object(fields) => fields.iter().map(|(_, t)| leaf_count(t)).sum(),
+        Type::Array(_) => 1,
+        Type::Object(fields) => fields.iter().map(|(_, t)| store_size(t)).sum(),
         Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
         Type::Omit(..) | Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
     }
 }
 
-/// prop 참조(root + 객체 경로)를 경로 따라 걸어 도달 타입과 그 아래 leaf들의 scope 인덱스로
-/// 쪼갠다. scope 인덱스는 props를 선언 순서로 펼친 leaf 번호다. 도달 타입이 leaf(원시)면 길이
-/// 1(그 offset 하나), 객체/배열이면 펼친 leaf 수만큼(연속) - 객체 통째 전달(`user={user}`)이
-/// 자식 leaf마다 PushArg 하나로 쪼개진다.
-fn split_var_ref_to_scope_indices<'a>(
+/// prop 참조(root + 필드 경로)를 슬롯 위치로 짚는다 - scope_index(넘길 슬롯 번호) + offset
+/// (root 안에서 도달 필드까지의 store 칸 거리) + 도달 타입. 객체를 펼치지 않으므로 scope_index는
+/// props/for_var를 하나씩 센 순번이고(객체·배열도 슬롯 하나), offset은 root가 객체일 때 그 필드
+/// 위치다. path가 비면 offset 0(THROUGH), 있으면 필드 거리(FIELD). u8 상한 가드는 emit이 건다.
+///
+///   {tag}        root=tag(for_var)   path=[]       -> (for_var 슬롯, 0)
+///   {item.title} root=item(for_var)  path=[title]  -> (for_var 슬롯, title 거리)
+///   {user.name}  root=user(prop)     path=[name]   -> (prop 순번, name 거리)
+fn var_ref_to_slot<'a>(
     var: &VarRef,
     props: &'a [Prop],
-) -> Result<(&'a Type, Vec<u16>), CodegenError> {
-    // root prop까지의 평탄 offset(앞 prop들의 leaf 수 합)을 세며 root prop을 찾는다.
-    let mut base = 0u16;
-    let mut ty = None;
-    for p in props {
-        if p.name == var.root {
-            ty = Some(&p.ty);
-            break;
-        }
-        base += leaf_count(&p.ty);
-    }
-    let mut ty = ty.ok_or_else(|| CodegenError::UnknownProp(var.root.clone()))?;
+    for_vars: &'a [ForVar],
+) -> Result<(u8, u8, &'a Type), CodegenError> {
+    let overflow = || CodegenError::SlotOverflow(var_ref_display(var));
 
-    // 경로를 타입 따라 내려가며 offset을 누적한다. 각 단계에서 앞 형제 필드의 leaf 수를 더한다.
+    // root를 회차변수에서 먼저 찾는다. props와 이름이 겹칠 수 없어(@for 진입에서 충돌을 에러로
+    // 건다) 조회 순서는 무관. for_var는 자기 슬롯 번호를 이미 갖고 있고, prop은 선언 순번이 슬롯.
+    let (scope_index, mut ty) = match for_vars.iter().find(|fv| fv.name == var.root) {
+        Some(fv) => (u8::try_from(fv.offset).map_err(|_| overflow())?, &fv.type_),
+        None => {
+            let mut ty = None;
+            let mut scope_index = 0u8;
+            for (i, p) in props.iter().enumerate() {
+                if p.name == var.root {
+                    ty = Some(&p.type_);
+                    scope_index = u8::try_from(i).map_err(|_| overflow())?;
+                    break;
+                }
+            }
+            (scope_index, ty.ok_or_else(|| CodegenError::UnknownProp(var.root.clone()))?)
+        }
+    };
+
+    // 필드 경로를 타입 따라 내려가며 offset을 누적한다. 앞 형제 필드가 먹는 store 칸을 더한다.
+    // checked_add로 넘치는 그 필드에서 즉시 감지한다(사후 검사는 넘친 지점을 잃는다).
+    let mut offset = 0u8;
     for key in &var.path {
         let fields = match ty {
             Type::Object(fields) => fields,
@@ -198,7 +230,8 @@ fn split_var_ref_to_scope_indices<'a>(
                 found = Some(field_ty);
                 break;
             }
-            base += leaf_count(field_ty);
+            let size = u8::try_from(store_size(field_ty)).map_err(|_| overflow())?;
+            offset = offset.checked_add(size).ok_or_else(overflow)?;
         }
         ty = found.ok_or_else(|| CodegenError::UnknownField {
             root: var.root.clone(),
@@ -206,18 +239,19 @@ fn split_var_ref_to_scope_indices<'a>(
         })?;
     }
 
-    // 도달 타입의 leaf들은 base부터 연속이다(같은 순회로 offset을 매겼으므로).
-    let indices = (base..base + leaf_count(ty)).collect();
-    Ok((ty, indices))
+    Ok((scope_index, offset, ty))
 }
 
-/// prop 참조를 단일 leaf(원시)의 scope 인덱스로. 값·반응성 자리(보간·속성·payload·context·@if
-/// 조건)엔 leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `split_var_ref_to_scope_indices` 위
-/// leaf-only 래퍼.
-fn var_ref_to_scope_index(var: &VarRef, props: &[Prop]) -> Result<u16, CodegenError> {
-    let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
+/// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. 값·반응성 자리(보간·속성·@if 조건)엔
+/// leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `var_ref_to_slot` 위 leaf-only 래퍼.
+fn var_ref_to_leaf_slot(
+    var: &VarRef,
+    props: &[Prop],
+    for_vars: &[ForVar],
+) -> Result<(u8, u8), CodegenError> {
+    let (scope_index, offset, ty) = var_ref_to_slot(var, props, for_vars)?;
     match ty {
-        Type::Bool | Type::Number | Type::String => Ok(indices[0]),
+        Type::Bool | Type::Number | Type::String => Ok((scope_index, offset)),
         _ => Err(CodegenError::NotLeaf(var_ref_display(var))),
     }
 }
@@ -248,13 +282,13 @@ fn types_match(a: &Type, b: &Type) -> bool {
 pub fn flatten_prop_paths(props: &[Prop]) -> Vec<String> {
     let mut paths = Vec::new();
     for p in props {
-        push_leaf_paths(&p.name, &p.ty, &mut paths);
+        push_leaf_paths(&p.name, &p.type_, &mut paths);
     }
     paths
 }
 
 /// 한 타입의 leaf 경로들을 prefix 아래로 펼쳐 push. 객체는 필드 선언 순서로 재귀.
-/// (배열은 요소 타입으로 - leaf_count와 동일하게 요소 1벌 취급.)
+/// (배열은 요소 타입으로 - 요소 1벌 취급.)
 fn push_leaf_paths(prefix: &str, ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Bool | Type::Number | Type::String => out.push(prefix.to_string()),
@@ -296,7 +330,7 @@ impl TypeTable {
     fn intern(&mut self, ty: &Type, pool: &mut ConstPool) -> u16 {
         let entry = match ty {
             Type::Bool | Type::Number | Type::String => TypeEntry::Scalar,
-            Type::Array(inner) => return self.intern(inner, pool),
+            Type::Array(inner) => TypeEntry::Array(self.intern(inner, pool)),
             Type::Object(fields) => {
                 let fields = fields
                     .iter()
@@ -321,9 +355,9 @@ impl TypeTable {
     }
 }
 
-/// payload/context field 명세 하나 = 필드명 + 조립 구조(type_ref) + 채울 leaf 목록.
-/// Var는 도달 타입을 테이블에 intern하고 그 아래 leaf들의 scope 인덱스를 싣는다(객체면 여럿,
-/// 스칼라면 하나). Literal은 스칼라 type_ref + Const leaf 하나(객체 리터럴은 문법상 없다).
+/// payload/context field 명세 하나 = 필드명 + 조립 구조(type_ref) + 채울 값 하나(ref).
+/// Var는 도달 타입을 테이블에 intern하고 그 슬롯 위치(scope_index, offset)를 Scope ref로 싣는다
+/// (안 펼쳐 객체도 하나). Literal은 스칼라 type_ref + Const ref 하나(객체 리터럴은 문법상 없다).
 fn arg_to_field(
     field: &str,
     value: &ArgValue,
@@ -331,20 +365,20 @@ fn arg_to_field(
     pool: &mut ConstPool,
     types: &mut TypeTable,
 ) -> Result<Field, CodegenError> {
-    let (type_ref, leaves) = match value {
+    let (type_ref, ref_value) = match value {
         ArgValue::Var(var) => {
-            let (ty, indices) = split_var_ref_to_scope_indices(var, props)?;
+            // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
+            let (scope_index, offset, ty) = var_ref_to_slot(var, props, &[])?;
             let type_ref = types.intern(ty, pool);
-            let leaves = indices.into_iter().map(Leaf::Scope).collect();
-            (type_ref, leaves)
+            (type_ref, FieldValue::Scope(scope_index, offset))
         }
         ArgValue::Literal(lit) => {
             // 리터럴은 항상 스칼라(객체 리터럴 없음). Scalar 엔트리 하나를 intern해 공유.
             let type_ref = types.intern(&lit_type(lit), pool);
-            (type_ref, vec![Leaf::Const(pool.intern(lit_to_const(lit)))])
+            (type_ref, FieldValue::Const(pool.intern(lit_to_const(lit))))
         }
     };
-    Ok(Field { name_const_index: pool.intern_str(field), type_ref, leaves })
+    Ok(Field { name_const_index: pool.intern_str(field), type_ref, value: ref_value })
 }
 
 /// 리터럴의 quble 타입. 리터럴은 스칼라라 Bool/Number/String 중 하나(intern은 모두 Scalar 엔트리).
@@ -365,12 +399,39 @@ fn lit_to_const(lit: &LitValue) -> Const {
     }
 }
 
+/// @for 세그먼트 상태. pending: 아직 세그먼트에 못 실은 @for 깊이들(다음 PushPathSegment/이벤트가
+/// 접미로 소비, 소비되면 비움). depth_base: 다음 @for가 쓸 깊이(use-site부터 누적 - 컴포넌트가
+/// pending을 소비해도 이어진다). dts.rs walk_nodes와 같은 규칙 - 문자열 대신 PushPathIndexSegment로 낸다.
+#[derive(Clone, Copy)]
+struct ForScope<'a> {
+    pending: &'a [u16],
+    depth_base: u16,
+    /// 이 지점에서 보이는 @for 회차변수들(바깥->안쪽 누적). props와 별개 scope 층 -
+    /// 이름 조회는 props보다 먼저 봐(안쪽 우선/섀도잉), 값 kind는 다르다(회차값은 런타임 RAW).
+    /// 컴포넌트 경계(RENDER)에서 소멸 - 자식 def는 자기 ROOT부터(pending과 동일 수명).
+    for_vars: &'a [ForVar],
+}
+
+impl ForScope<'_> {
+    const ROOT: ForScope<'static> = ForScope { pending: &[], depth_base: 0, for_vars: &[] };
+}
+
+/// @for 회차변수 하나. name = 루프 변수명(`@for (tag of ..)`의 tag), offset = 이 변수가
+/// 앉는 scope 슬롯(props leaf 뒤에 회차 진입 순서로 이어짐), type_ = 요소 타입(배열 inner).
+#[derive(Clone)]
+struct ForVar {
+    name: String,
+    offset: u16,
+    type_: Type,
+}
+
 fn emit_node(
     node: &Node,
     props: &[Prop],
     events: &[Event],
     contexts: &[Context],
     comp_lookup: &CompLookup,
+    for_scope: ForScope,
     pool: &mut ConstPool,
     code: &mut Vec<u8>,
 ) -> Result<(), CodegenError> {
@@ -381,9 +442,10 @@ fn emit_node(
             code.extend_from_slice(&index.to_le_bytes());
         }
         Node::Var(var) => {
-            let index = var_ref_to_scope_index(var, props)?;
+            let (scope_index, offset) = var_ref_to_leaf_slot(var, props, for_scope.for_vars)?;
             code.push(Op::TextVar as u8);
-            code.extend_from_slice(&index.to_le_bytes());
+            code.push(scope_index);
+            code.push(offset);
         }
         Node::Element {
             tag,
@@ -395,6 +457,16 @@ fn emit_node(
 
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
+
+            // @for 직속 element(세그먼트 만드는 컴포넌트 없이)에서 이벤트가 나면 익명 인덱스
+            // 세그먼트를 먼저 민다([$0].SELECT). pending의 각 깊이마다 하나씩 - 발화 시 런타임이
+            // 직전 이름 세그먼트가 없어 익명으로 조립한다. 이벤트가 없으면 굳이 안 낸다.
+            if !event_bindings.is_empty() {
+                for depth in for_scope.pending {
+                    code.push(Op::PushPathIndexSegment as u8);
+                    code.extend_from_slice(&depth.to_le_bytes());
+                }
+            }
 
             // 이벤트 바인딩 - 속성과 같은 자리(여는 태그 진행 중). event_index는 이 컴포넌트
             // events에서 이벤트명으로 찾는다(선언 순서 = index).
@@ -424,19 +496,28 @@ fn emit_node(
                         pool.intern_str(name),
                     ),
                 };
-                let value_operand = match value {
-                    AttrValue::Static(s) => pool.intern_str(s),
-                    AttrValue::Var(v) => var_ref_to_scope_index(v, props)?,
-                };
                 code.push(op as u8);
                 code.extend_from_slice(&name_operand.to_le_bytes());
-                code.extend_from_slice(&value_operand.to_le_bytes());
+                match value {
+                    // 정적 값은 상수풀 인덱스 u16.
+                    AttrValue::Static(s) => {
+                        code.extend_from_slice(&pool.intern_str(s).to_le_bytes());
+                    }
+                    // 변수 값은 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
+                    AttrValue::Var(v) => {
+                        let (scope_index, offset) = var_ref_to_leaf_slot(v, props, for_scope.for_vars)?;
+                        code.push(scope_index);
+                        code.push(offset);
+                    }
+                }
             }
 
             code.push(Op::ElemCloseOpen as u8);
 
+            // element는 세그먼트를 안 만든다 - 자식으로 for_scope를 그대로 흘려보낸다
+            // (같은 @for 안 중첩 element가 같은 인덱스를 이벤트에 실을 수 있게 pending 유지).
             for child in children {
-                emit_node(child, props, events, contexts, comp_lookup, pool, code)?;
+                emit_node(child, props, events, contexts, comp_lookup, for_scope, pool, code)?;
             }
 
             // END는 operand 없음 - 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
@@ -462,19 +543,24 @@ fn emit_node(
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
-                        // 도달 타입이 자식 prop 타입과 구조가 같아야 leaf를 순서로 짝짓는다.
-                        // 스칼라면 leaf 1개 - 지금까지와 동일하게 PushArg 하나.
-                        let (reached_ty, scope_indices) =
-                            split_var_ref_to_scope_indices(parent_var, props)?;
-                        if !types_match(reached_ty, &child_prop.ty) {
+                        // 도달 타입이 자식 prop 타입과 구조가 같아야 한다.
+                        let (scope_index, offset, reached_ty) =
+                            var_ref_to_slot(parent_var, props, for_scope.for_vars)?;
+                        if !types_match(reached_ty, &child_prop.type_) {
                             return Err(CodegenError::PropTypeMismatch {
                                 comp: name.clone(),
                                 prop: child_prop.name.clone(),
                             });
                         }
-                        for scope_index in scope_indices {
-                            code.push(Op::PushArg as u8);
-                            code.extend_from_slice(&scope_index.to_le_bytes());
+                        // 경로 없는 참조(`{a}`)는 슬롯 통째로 THROUGH, 필드 참조(`{user.name}`)는
+                        // (슬롯, offset)으로 FIELD - kind는 슬롯이 갖고 자식이 타입을 안다.
+                        if parent_var.path.is_empty() {
+                            code.push(Op::PushThrough as u8);
+                            code.push(scope_index);
+                        } else {
+                            code.push(Op::PushField as u8);
+                            code.push(scope_index);
+                            code.push(offset);
                         }
                     }
                     ArgValue::Literal(literal) => {
@@ -493,27 +579,96 @@ fn emit_node(
             code.push(Op::PushPathSegment as u8);
             code.extend_from_slice(&segment_index.to_le_bytes());
 
+            // @for 안이면 이 세그먼트가 pending 인덱스를 접미한다(VideoItem[$0]). 깊이는 컴포넌트-로컬
+            // (자기 컴포넌트 안 @for만 0,1,2). use-site 누적은 런타임 loopIndexStack이 합성한다.
+            for depth in for_scope.pending {
+                code.push(Op::PushPathIndexSegment as u8);
+                code.extend_from_slice(&depth.to_le_bytes());
+            }
+
+            // RENDER는 자식 def(별도 코드)로 넘어간다 - for_scope는 안 흐른다(자식은 자기 ROOT부터).
             code.push(Op::Render as u8);
             code.extend_from_slice(&child_id.to_le_bytes());
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop 참조 - 경로를 평탄 scope index로. leaf여야 한다. (표현식은 이후 단계)
-            let scope_index = var_ref_to_scope_index(cond, props)?;
+            // cond는 불리언 prop 참조 - (scope_index, offset)으로. leaf여야 한다. (표현식은 이후 단계)
+            let (scope_index, offset) = var_ref_to_leaf_slot(cond, props, for_scope.for_vars)?;
             code.push(Op::If as u8);
-            code.extend_from_slice(&scope_index.to_le_bytes());
+            code.push(scope_index);
+            code.push(offset);
 
             for node in then {
-                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
             }
 
             if !else_.is_empty() {
                 code.push(Op::Else as u8);
                 for node in else_ {
-                    emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+                    emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
                 }
             }
 
             code.push(Op::IfEnd as u8);
+        }
+        Node::For { item, count, body } => {
+            // count 출처·타입으로 opcode를 가른다(컴파일타임 타입으로 구별 - 런타임이 값만 보고 안
+            // 헷갈리게). 리터럴 숫자=ForRaw, 숫자 slot=ForCountVar, 배열 slot=ForArrayVar.
+            // slot 참조는 (scope_index:u8, offset:u8) - count가 필드(a.count)면 offset이 산다.
+            let mut new_for_var = None;
+            match count {
+                ForCount::Literal(n) => {
+                    code.push(Op::ForRaw as u8);
+                    code.extend_from_slice(&n.to_le_bytes());
+                }
+                ForCount::Var(var) => {
+                    let (scope_index, offset, ty) =
+                        var_ref_to_slot(var, props, for_scope.for_vars)?;
+                    match ty {
+                        Type::Number => {
+                            code.push(Op::ForCountVar as u8);
+                            code.push(scope_index);
+                            code.push(offset);
+                        }
+                        Type::Array(inner) => {
+                            // 이름 충돌은 에러(섀도잉 금지 - 조회를 순서 무관하게 유지).
+                            if props.iter().any(|p| &p.name == item)
+                                || for_scope.for_vars.iter().any(|fv| &fv.name == item)
+                            {
+                                return Err(CodegenError::DuplicateBinding(item.clone()));
+                            }
+                            // 요소값이 앉을 슬롯 - props 뒤에 바깥 회차변수까지 이어 붙인 자리(안 펼쳐 슬롯=개수).
+                            // 런타임도 같은 규칙(props 슬롯 수 + loopIndexStack 깊이)으로 계산하므로 operand엔 안 싣는다.
+                            new_for_var = Some(ForVar {
+                                name: item.clone(),
+                                offset: (props.len() + for_scope.for_vars.len()) as u16,
+                                type_: (**inner).clone(),
+                            });
+                            code.push(Op::ForArrayVar as u8);
+                            code.push(scope_index);
+                            code.push(offset);
+                        }
+                        _ => return Err(CodegenError::ForCountNotIterable(var_ref_display(var))),
+                    }
+                }
+            }
+
+            // @for 진입 - depth_base를 pending에 추가(다음 세그먼트/이벤트가 접미), 다음 @for는
+            // depth_base+1. 컴포넌트-로컬 깊이라 자식 컴포넌트로 안 넘어간다(RENDER가 경계).
+            let mut nested = for_scope.pending.to_vec();
+            nested.push(for_scope.depth_base);
+            // 회차변수도 바깥 것에 이어 붙여 전파(pending과 동일 누적 - 안쪽일수록 쌓임).
+            let mut nested_vars = for_scope.for_vars.to_vec();
+            nested_vars.extend(new_for_var);
+            let body_scope = ForScope {
+                pending: &nested,
+                depth_base: for_scope.depth_base + 1,
+                for_vars: &nested_vars,
+            };
+            for node in body {
+                emit_node(node, props, events, contexts, comp_lookup, body_scope, pool, code)?;
+            }
+
+            code.push(Op::ForEnd as u8);
         }
         Node::With { context, children } => {
             // context_index는 이 컴포넌트 contexts에서 이름으로 찾는다(선언 순서 = index,
@@ -527,7 +682,7 @@ fn emit_node(
             code.extend_from_slice(&context_index.to_le_bytes());
 
             for node in children {
-                emit_node(node, props, events, contexts, comp_lookup, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
             }
 
             // ExitContext는 operand 없는 마커(IfEnd 동형).

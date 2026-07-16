@@ -1,0 +1,10 @@
+component ForMenu {
+  events { SELECT({ i: "x" }) }
+  template {
+    div() {
+      @for (item of 3) {
+        button(@click:SELECT) { "sel" }
+      }
+    }
+  }
+}

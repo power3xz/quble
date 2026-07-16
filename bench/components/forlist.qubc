@@ -1,0 +1,18 @@
+component ForList {
+  props { count: number }
+  template {
+    div(class="forlist") {
+      h1() { "quble @for 데모" }
+      @for (item of count) {
+        Row: ForRow() {}
+      }
+    }
+  }
+}
+
+component ForRow {
+  events { CLICK({ label: "row" }) }
+  template {
+    button(class="forlist__row" @click:CLICK) { "클릭하면 회차 인덱스" }
+  }
+}

@@ -217,7 +217,9 @@ mod tests {
 
         let expected = Module::new(
             pool,
-            vec![],
+            // props 없는 컴포넌트라도 루트 props를 빈 객체 타입으로 intern한다(엔트리 #0).
+            vec![bytecode::TypeEntry::Object(vec![])],
+            0,
             vec![CompDef {
                 name_const_index: hello,
                 code_off: 0,
@@ -314,7 +316,7 @@ mod tests {
     /// Var(Scope)/Literal(Const)로 들어가고, 코드에 EnterContext/ExitContext가 나는지 직접 검사.
     #[test]
     fn compiles_with_context() {
-        use bytecode::{decode, Leaf, Op};
+        use bytecode::{decode, FieldValue, Op};
 
         let src = r#"
             component C {
@@ -336,17 +338,17 @@ mod tests {
         let area = &def.contexts[0];
         assert_eq!(str_at(&module, area.name_const_index), Some("Area"));
         assert_eq!(area.fields.len(), 2);
-        // section: "actions" -> 스칼라 field, leaf 하나가 Const(상수풀이 "actions"를 가리킴).
+        // section: "actions" -> 스칼라 field, ref가 Const(상수풀이 "actions"를 가리킴).
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("section"));
-        match area.fields[0].leaves.as_slice() {
-            [Leaf::Const(actions_index)] => {
-                assert_eq!(str_at(&module, *actions_index), Some("actions"));
+        match area.fields[0].value {
+            FieldValue::Const(actions_index) => {
+                assert_eq!(str_at(&module, actions_index), Some("actions"));
             }
-            other => panic!("section은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
+            other => panic!("section은 리터럴 스칼라라 Const ref여야: {other:?}"),
         }
-        // userId: assignee -> 스칼라 field, leaf 하나가 Scope(assignee의 scope 인덱스 0).
+        // userId: assignee -> 스칼라 field, ref가 Scope(assignee 슬롯 0, offset 0).
         assert_eq!(str_at(&module, area.fields[1].name_const_index), Some("userId"));
-        assert_eq!(area.fields[1].leaves.as_slice(), &[Leaf::Scope(0)]);
+        assert_eq!(area.fields[1].value, FieldValue::Scope(0, 0));
 
         // 코드: EnterContext context_index=0 ... ExitContext.
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
@@ -362,10 +364,322 @@ mod tests {
         );
     }
 
+    /// `@for (x of N)` 리터럴 count가 끝까지(렉서 -> 파서 -> codegen) 흐르는지.
+    /// ForRaw operand에 count 값이 직접 실리고 FOR_END로 닫힌다.
+    #[test]
+    fn compiles_for_literal_count() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              template {
+                @for (item of 3) {
+                  div() { "x" }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        let mut for_raw = vec![Op::ForRaw as u8];
+        for_raw.extend_from_slice(&3u16.to_le_bytes());
+        assert!(
+            code.windows(for_raw.len()).any(|w| w == for_raw.as_slice()),
+            "ForRaw count=3 이 코드에 있어야",
+        );
+        assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
+    }
+
+    /// `@for (x of count)` 숫자 prop count는 ForCountVar + (scope_index, offset).
+    #[test]
+    fn compiles_for_prop_count() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { count: number }
+              template {
+                @for (item of count) {
+                  div() { "x" }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // count는 유일한 prop이라 scope index 0, root 참조라 offset 0.
+        let for_op = vec![Op::ForCountVar as u8, 0, 0];
+        assert!(
+            code.windows(for_op.len()).any(|w| w == for_op.as_slice()),
+            "ForCountVar scope=0 offset=0 이 코드에 있어야",
+        );
+        assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
+    }
+
+    /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개라 ForArrayVar (scope=0, offset=0).
+    /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 {tag}가 TextVar 1을 낸다.
+    #[test]
+    fn compiles_for_scalar_array() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag of tags) {
+                  p() { {tag} }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // 배열은 슬롯 0(유일 prop), root 참조라 offset 0.
+        let for_op = vec![Op::ForArrayVar as u8, 0, 0];
+        assert!(
+            code.windows(for_op.len()).any(|w| w == for_op.as_slice()),
+            "ForArrayVar(배열 scope=0 offset=0)이 있어야:\n{code:?}",
+        );
+        // {tag} 회차변수는 props 슬롯(1개) 뒤 scope_index 1, 요소가 스칼라라 offset 0.
+        let text_var = vec![Op::TextVar as u8, 1, 0];
+        assert!(
+            code.windows(text_var.len()).any(|w| w == text_var.as_slice()),
+            "TextVar(회차변수 tag scope=1 offset=0)가 있어야:\n{code:?}",
+        );
+    }
+
+    /// 회차변수를 자식 컴포넌트 인자로 넘긴다(`Card(title={tag})`). 회차변수 offset(1)이
+    /// PushArg에 실려 자식 prop으로 전달된다.
+    #[test]
+    fn for_item_passed_to_child_component() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Card { props { title: string } template { p() { {title} } } }
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag of tags) {
+                  Card(title={tag}) {}
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        // C는 두 번째 정의(id 1).
+        let def = module.def(1).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // title={tag} - 경로 없는 회차변수 tag를 통째로 THROUGH. tag 슬롯 = props(tags:0) 뒤
+        // 회차변수 자리라 순번 1. THROUGH operand는 scope_index u8 하나.
+        let push_arg = vec![Op::PushThrough as u8, 1u8];
+        assert!(
+            code.windows(push_arg.len()).any(|w| w == push_arg.as_slice()),
+            "PushThrough(회차변수 tag=1)가 있어야:\n{code:?}",
+        );
+    }
+
+    /// 회차변수는 부모 값일 뿐 자식 props 인터페이스에 안 샌다 - 자식이 tag를 선언 안 하면
+    /// `Card(tag={tag})`는 UnknownArg(자식엔 그런 prop 없음).
+    #[test]
+    fn for_item_does_not_leak_into_child_props() {
+        let src = r#"
+            component Card { props { title: string } template { p() { {title} } } }
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag of tags) {
+                  Card(tag={tag}) {}
+                }
+              }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::UnknownArg { .. }))
+        ));
+    }
+
+    /// 회차변수 이름이 prop과 겹치면 에러(섀도잉 금지).
+    #[test]
+    fn for_item_name_collision_is_error() {
+        let src = r#"
+            component C {
+              props { tag: string, tags: string[] }
+              template {
+                @for (tag of tags) {
+                  p() { {tag} }
+                }
+              }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::DuplicateBinding(_)))
+        ));
+    }
+
+    /// 컴포넌트 상수풀에서 문자열의 인덱스를 찾는다(테스트용 - 세그먼트 operand 확인).
+    fn str_index(module: &bytecode::Module, s: &str) -> u16 {
+        (0..)
+            .find(|&i| str_at(module, i) == Some(s))
+            .expect("문자열이 상수풀에 있어야")
+    }
+
+    /// @for 안 자식 컴포넌트는 PushPathSegment(Row) 직후 PushPathIndexSegment(깊이 0)를 낸다
+    /// (런타임이 Row[$0]으로 접미 조립). 깊이는 컴포넌트-로컬.
+    #[test]
+    fn for_component_pushes_index_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component List { template { @for (item of 3) { Row: Inner() {} } } }
+            component Inner {
+              events { PICK({ id: "x" }) }
+              template { button(@click:PICK) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // PushPathSegment(Row) 다음 바로 PushPathIndexSegment(0) - 접미 관계.
+        let mut seq = vec![Op::PushPathSegment as u8];
+        seq.extend_from_slice(&str_index(&module, "Row").to_le_bytes());
+        seq.push(Op::PushPathIndexSegment as u8);
+        seq.extend_from_slice(&0u16.to_le_bytes());
+        assert!(
+            code.windows(seq.len()).any(|w| w == seq.as_slice()),
+            "PushPathSegment(Row) 직후 PushPathIndexSegment(0):\n{code:?}",
+        );
+    }
+
+    /// @for 안 중첩 @for는 컴포넌트-로컬 깊이 0,1을 각각 낸다 - Row 세그먼트가 [$0][$1] 둘 다 접미.
+    #[test]
+    fn nested_for_local_depths() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component List {
+              template {
+                @for (a of 3) { @for (b of 3) { Row: Inner() {} } }
+              }
+            }
+            component Inner {
+              events { PICK({ id: "x" }) }
+              template { button(@click:PICK) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // PushPathSegment(Row) 다음 PushPathIndexSegment(0) 그다음 (1) - 세그먼트가 둘 다 접미.
+        let mut seq = vec![Op::PushPathSegment as u8];
+        seq.extend_from_slice(&str_index(&module, "Row").to_le_bytes());
+        seq.push(Op::PushPathIndexSegment as u8);
+        seq.extend_from_slice(&0u16.to_le_bytes());
+        seq.push(Op::PushPathIndexSegment as u8);
+        seq.extend_from_slice(&1u16.to_le_bytes());
+        assert!(
+            code.windows(seq.len()).any(|w| w == seq.as_slice()),
+            "Row 세그먼트가 인덱스 0,1을 연달아 접미:\n{code:?}",
+        );
+    }
+
+    /// @for 직속 element 이벤트는 익명 인덱스 세그먼트를 낸다(런타임이 [$0]으로 조립).
+    #[test]
+    fn for_element_pushes_index_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Menu {
+              events { SELECT({ i: "x" }) }
+              template { @for (item of 3) { li(@click:SELECT) {} } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // 익명 PushPathIndexSegment(0) 직후 BindEvent - 이벤트 앞에 인덱스 세그먼트가 실린다.
+        let mut seq = vec![Op::PushPathIndexSegment as u8];
+        seq.extend_from_slice(&0u16.to_le_bytes());
+        seq.push(Op::BindEvent as u8);
+        assert!(
+            code.windows(seq.len()).any(|w| w == seq.as_slice()),
+            "익명 PushPathIndexSegment(0) 직후 BindEvent:\n{code:?}",
+        );
+    }
+
+    /// @for 밖 컴포넌트는 PushPathIndexSegment를 안 낸다(회귀).
+    #[test]
+    fn outside_for_no_index_segment() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component List { template { Row: Inner() {} } }
+            component Inner {
+              events { PICK({ id: "x" }) }
+              template { button(@click:PICK) {} }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        assert!(
+            !code.contains(&(Op::PushPathIndexSegment as u8)),
+            "@for 밖은 인덱스 세그먼트 없음:\n{code:?}",
+        );
+    }
+
+    /// count 리터럴이 u16 상한을 넘으면 파싱 에러(0..=65535).
+    #[test]
+    fn for_count_over_u16_rejected() {
+        let src = r#"
+            component C {
+              template { @for (x of 70000) { div() {} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// `of` 없이 쓰면 파싱 에러.
+    #[test]
+    fn for_missing_of_rejected() {
+        let src = r#"
+            component C {
+              template { @for (x 3) { div() {} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
     /// contexts 필드 단축형 `key`는 `key: key`(Scope)로 푼다 - payload 단축형과 같은 규칙.
     #[test]
     fn context_field_shorthand() {
-        use bytecode::{decode, Leaf};
+        use bytecode::{decode, FieldValue};
 
         let src = r#"
             component C {
@@ -377,15 +691,15 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let area = &module.def(0).unwrap().contexts[0];
-        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0). 스칼라라 leaf 하나.
+        // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0, offset 0). 스칼라.
         assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("tier"));
-        assert_eq!(area.fields[0].leaves.as_slice(), &[Leaf::Scope(0)]);
+        assert_eq!(area.fields[0].value, FieldValue::Scope(0, 0));
     }
 
     /// events 페이로드 값도 리터럴(Const)을 받는다 - contexts와 같은 arg_to_field_value 경로.
     #[test]
     fn event_payload_literal() {
-        use bytecode::{decode, Leaf};
+        use bytecode::{decode, FieldValue};
 
         let src = r#"
             component C {
@@ -397,15 +711,15 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let event = &module.def(0).unwrap().events[0];
-        // count: 단축형 -> Scope(0). label: "clicks" -> Const. 둘 다 스칼라라 leaf 하나씩.
+        // count: 단축형 -> Scope(0, 0). label: "clicks" -> Const. 둘 다 스칼라.
         assert_eq!(str_at(&module, event.fields[0].name_const_index), Some("count"));
-        assert_eq!(event.fields[0].leaves.as_slice(), &[Leaf::Scope(0)]);
+        assert_eq!(event.fields[0].value, FieldValue::Scope(0, 0));
         assert_eq!(str_at(&module, event.fields[1].name_const_index), Some("label"));
-        match event.fields[1].leaves.as_slice() {
-            [Leaf::Const(clicks_index)] => {
-                assert_eq!(str_at(&module, *clicks_index), Some("clicks"));
+        match event.fields[1].value {
+            FieldValue::Const(clicks_index) => {
+                assert_eq!(str_at(&module, clicks_index), Some("clicks"));
             }
-            other => panic!("label은 리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
+            other => panic!("label은 리터럴 스칼라라 Const ref여야: {other:?}"),
         }
     }
 
@@ -413,7 +727,7 @@ mod tests {
     /// 문자열은 Const::Str. 런타임이 인덱스로 꺼내면 이미 올바른 값이 되도록.
     #[test]
     fn literal_types_in_pool() {
-        use bytecode::{decode, Const, Leaf};
+        use bytecode::{decode, Const, FieldValue};
 
         let src = r#"
             component C {
@@ -424,10 +738,10 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let fields = &module.def(0).unwrap().events[0].fields;
-        // 각 필드가 스칼라(leaf 하나)이고 그 leaf가 Const를 가리키며, 그 상수가 타입대로다.
-        let const_of = |i: usize| match fields[i].leaves.as_slice() {
-            [Leaf::Const(idx)] => module.pool.get(*idx).cloned(),
-            other => panic!("리터럴 스칼라라 Const leaf 하나여야: {other:?}"),
+        // 각 필드가 스칼라이고 그 ref가 Const를 가리키며, 그 상수가 타입대로다.
+        let const_of = |i: usize| match fields[i].value {
+            FieldValue::Const(idx) => module.pool.get(idx).cloned(),
+            other => panic!("리터럴 스칼라라 Const ref여야: {other:?}"),
         };
         assert_eq!(const_of(0), Some(Const::Num(42.0)));
         assert_eq!(const_of(1), Some(Const::Num(3.5)));
@@ -436,10 +750,10 @@ mod tests {
     }
 
     /// payload에 객체를 담으면(`SAVE({ user })`, user가 객체) field가 Object type_ref +
-    /// 그 아래 leaf들의 scope 인덱스 목록으로 인코딩된다. 타입 테이블에 구조가 실린다.
+    /// 그 슬롯 위치(Scope ref 하나)로 인코딩된다(안 펼침). 타입 테이블에 구조가 실린다.
     #[test]
     fn object_payload_encodes_type_tree_and_leaves() {
-        use bytecode::{decode, Leaf, TypeEntry};
+        use bytecode::{decode, FieldValue, TypeEntry};
 
         let src = r#"
             component C {
@@ -452,9 +766,9 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let field = &module.def(0).unwrap().events[0].fields[0];
 
-        // field 이름은 user, leaf는 name(0)·age(1) 두 개(연속).
+        // field 이름은 user, ref는 user 슬롯 하나(Scope(0, 0)) - 안 펼쳐 객체도 슬롯 하나.
         assert_eq!(str_at(&module, field.name_const_index), Some("user"));
-        assert_eq!(field.leaves.as_slice(), &[Leaf::Scope(0), Leaf::Scope(1)]);
+        assert_eq!(field.value, FieldValue::Scope(0, 0));
 
         // type_ref가 Object이고, 필드가 (name, age) 순으로 각각 Scalar를 가리킨다.
         match &module.types[field.type_ref as usize] {
@@ -504,10 +818,11 @@ mod tests {
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
         let fields = &module.def(0).unwrap().events[0].fields;
-        // 두 스칼라 field가 같은 Scalar 엔트리를 가리킨다. 테이블엔 Scalar 하나뿐.
+        // 두 스칼라 field가 같은 Scalar 엔트리를 가리킨다.
         assert_eq!(fields[0].type_ref, fields[1].type_ref);
-        assert_eq!(module.types.len(), 1);
-        assert!(matches!(module.types[0], TypeEntry::Scalar));
+        assert!(matches!(module.types[fields[0].type_ref as usize], TypeEntry::Scalar));
+        // 테이블엔 Scalar 하나 + 루트 props 객체({a,b}) 하나뿐 - 두 스칼라 field는 Scalar를 공유.
+        assert_eq!(module.types.len(), 2);
     }
 
     /// 예약어(true/false/bool/number/string)는 prop 이름으로 못 쓴다 - 렉서가 토큰을 분리해
@@ -695,8 +1010,8 @@ mod tests {
         );
     }
 
-    /// 펼친 leaf 경로의 인덱스 = 그 경로를 보간했을 때 codegen이 내는 scope 인덱스여야 한다.
-    /// `general.a.on`이 props[4]면 TEXT_VAR 인덱스도 4.
+    /// 객체 필드 참조의 TEXT_VAR = (root 슬롯 순번, root 안 필드까지의 store 칸 offset).
+    /// props 순번 heading=0, dirty=1, general=2. general 안 general.a.on offset = open(1)+title(1)=2.
     #[test]
     fn props_index_matches_scope_index() {
         use bytecode::{decode, Op};
@@ -710,21 +1025,18 @@ mod tests {
             }
         "#;
         let out = compile_src("entry", src, &(|_: &str, _: &str| None)).unwrap();
-        let expected = out.props.iter().position(|p| p == "general.a.on").unwrap() as u16;
 
         let module = decode(&out.bytecode).unwrap();
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
         let pos = code.iter().position(|&b| b == Op::TextVar as u8).unwrap();
-        let idx = u16::from_le_bytes([code[pos + 1], code[pos + 2]]);
-        assert_eq!(idx, expected, "TEXT_VAR 인덱스 = props에서의 위치");
+        assert_eq!((code[pos + 1], code[pos + 2]), (2, 2), "TEXT_VAR = (general 슬롯 2, a.on offset 2)");
     }
 
-    /// 객체 통째 전달(`row={a}`) - 부모 객체 prop을 자식 객체 prop에 통째로 넘기면 자식 leaf마다
-    /// PushArg 하나로 쪼개진다. 자식 Row는 leaf 2개(label/on)라 PushArg 2개, scope index는
-    /// 부모 `a.label`(1)·`a.on`(2)에서 연속으로 온다.
+    /// 객체 통째 전달(`row={a}`) - 부모 객체 prop을 자식 객체 prop에 통째로 넘긴다. 안 펼치므로
+    /// 객체도 슬롯 하나라 THROUGH 하나. a 슬롯 = title(0) 뒤 순번 1.
     #[test]
-    fn compiles_whole_object_arg_splits_to_leaf_pusharg() {
+    fn compiles_whole_object_arg_passes_slot_through() {
         use bytecode::{decode, Op};
         let src = r#"
             component C {
@@ -741,14 +1053,14 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // 부모 scope: title=0, a.label=1, a.on=2. row={a} -> PushArg 1, PushArg 2.
-        let pushes: Vec<u16> = code
+        // 부모 슬롯: title=0, a=1. row={a} -> THROUGH 1 하나(펼치지 않음). operand는 u8.
+        let pushes: Vec<u8> = code
             .iter()
             .enumerate()
-            .filter(|(_, &b)| b == Op::PushArg as u8)
-            .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
+            .filter(|(_, &b)| b == Op::PushThrough as u8)
+            .map(|(i, _)| code[i + 1])
             .collect();
-        assert_eq!(pushes, vec![1, 2], "자식 leaf(label/on)마다 부모 a.label/a.on scope index");
+        assert_eq!(pushes, vec![1], "객체 통째는 그 슬롯(a=1) 하나를 THROUGH");
     }
 
     /// 통째 전달인데 도달 타입과 자식 prop 타입 구조가 다르면(필드 이름 불일치) PropTypeMismatch.
@@ -806,7 +1118,7 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
-        let count = code.iter().filter(|&&b| b == Op::PushArg as u8).count();
+        let count = code.iter().filter(|&&b| b == Op::PushThrough as u8).count();
         assert_eq!(count, 1, "스칼라는 PushArg 하나");
     }
 
@@ -1233,8 +1545,40 @@ mod tests {
         ));
     }
 
+    /// 타입 필드 구분자 콤마는 필수 - 누락하면 ParseError. (지금은 완전 optional이었다.)
+    #[test]
+    fn type_field_missing_comma_rejected() {
+        // props에서 콤마 누락.
+        let src = r#"component A { props { a: string b: number } template { div() {} } }"#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+        // 중첩 object 타입에서 콤마 누락.
+        let nested = r#"component B { props { o: { a: string b: number } } template { div() {} } }"#;
+        assert!(matches!(
+            compile(nested),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// 마지막 필드 뒤 콤마는 생략 가능하고 trailing 콤마도 허용(TS 규칙). 둘 다 컴파일 성공.
+    #[test]
+    fn type_field_last_comma_optional() {
+        // 마지막 생략.
+        let omitted = r#"component A { props { a: string, b: number } template { div() {} } }"#;
+        assert!(compile(omitted).is_ok());
+        // trailing 콤마.
+        let trailing = r#"component B { props { a: string, b: number, } template { div() {} } }"#;
+        assert!(compile(trailing).is_ok());
+        // 중첩 object에서도 동일.
+        let nested = r#"component C { props { o: { a: string, b: number, } } template { div() {} } }"#;
+        assert!(compile(nested).is_ok());
+    }
+
     /// 객체 경로 보간 `{user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
-    /// title=0, user{name=1, contact{email=2}}, done=3. 경로가 앞 형제 필드를 건너뛴 offset을 준다.
+    /// 값 자리 TEXT_VAR는 (scope_index, offset) 두 u8. 슬롯 순번 title=0, user=1, done=2.
+    /// 객체 필드는 root 슬롯 + 필드까지의 store 칸 offset: user.name=(1,0), user.contact.email=(1,1).
     #[test]
     fn object_path_flat_scope_index() {
         use bytecode::{decode, Op};
@@ -1255,13 +1599,13 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // TEXT_VAR의 scope index만 순서대로 뽑아 검증한다.
+        // TEXT_VAR의 (scope_index, offset) 쌍을 순서대로 뽑아 검증한다.
         let mut vars = Vec::new();
         let mut i = 0;
         while i < code.len() {
             let op = code[i];
             if op == Op::TextVar as u8 {
-                vars.push(u16::from_le_bytes([code[i + 1], code[i + 2]]));
+                vars.push((code[i + 1], code[i + 2]));
                 i += 3;
             } else if op == Op::ElemOpen as u8 {
                 i += 3;
@@ -1269,8 +1613,8 @@ mod tests {
                 i += 1;
             }
         }
-        // title=0, user.name=1, user.contact.email=2
-        assert_eq!(vars, vec![0, 1, 2]);
+        // title=(0,0), user.name=(1,0), user.contact.email=(1,1)
+        assert_eq!(vars, vec![(0, 0), (1, 0), (1, 1)]);
     }
 
     /// 값 자리(보간)에 leaf가 아닌 객체 경로가 오면 NotLeaf 에러. 객체 통째는 안 넘긴다.

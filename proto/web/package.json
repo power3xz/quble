@@ -2,11 +2,14 @@
   "name": "quble-web",
   "private": true,
   "type": "module",
-  "description": "Quble 클라이언트 런타임(실험) — runtime.js/region.js. 테스트는 node --test + jsdom.",
+  "description": "Quble 클라이언트 런타임(실험) — runtime.ts/region.ts. 테스트는 npm test(node --experimental-strip-types --test) + jsdom.",
   "scripts": {
-    "test": "node --test --test-concurrency=1"
+    "test": "node --experimental-strip-types --test --test-concurrency=1",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "jsdom": "^29.1.1"
+    "@types/node": "^22.20.1",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3"
   }
 }

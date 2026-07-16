@@ -87,7 +87,7 @@ fn resolve_type_refs(comps: &mut [FlatComp]) -> Result<(), ResolveError> {
 
     for c in comps.iter_mut() {
         for p in &mut c.comp.props {
-            resolve_type(&mut p.ty, &props_of, &mut Vec::new())?;
+            resolve_type(&mut p.type_, &props_of, &mut Vec::new())?;
         }
     }
     Ok(())
@@ -122,7 +122,7 @@ fn resolve_type(
             // 대상 props를 Object 필드로 펼치고, 그 안의 Ref도 재귀로 푼다.
             let mut fields = Vec::with_capacity(props.len());
             for p in props {
-                let mut field_ty = p.ty.clone();
+                let mut field_ty = p.type_.clone();
                 resolve_type(&mut field_ty, props_of, visiting)?;
                 fields.push((p.name.clone(), field_ty));
             }

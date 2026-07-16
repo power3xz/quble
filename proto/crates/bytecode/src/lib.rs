@@ -9,7 +9,7 @@ mod opcode;
 mod pool;
 mod serialize;
 
-pub use module::{CompDef, ContextDef, EventDef, Field, Leaf, Module, TypeEntry};
+pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
 pub use opcode::Op;
 pub use pool::{Const, ConstPool};
 pub use serialize::{decode, encode, DecodeError};
@@ -58,7 +58,7 @@ mod tests {
             events: vec![],
             contexts: vec![],
         }];
-        Module::new(pool, vec![], defs, code)
+        Module::new(pool, vec![], 0, defs, code)
     }
 
     fn emit_open(code: &mut Vec<u8>, tag: u16) {
@@ -118,7 +118,7 @@ mod tests {
         pool.intern(Const::Num(42.5));
         pool.intern(Const::Bool(false));
         pool.intern(Const::Bool(true));
-        let m = Module::new(pool, vec![], vec![], vec![]);
+        let m = Module::new(pool, vec![], 0, vec![], vec![]);
         let back = decode(&encode(&m)).unwrap();
         assert_eq!(m, back);
         assert_eq!(back.pool.get(0), Some(&Const::Str("hi".into())));
@@ -127,12 +127,41 @@ mod tests {
         assert_eq!(back.pool.get(3), Some(&Const::Bool(true)));
     }
 
+    /// 타입 테이블이 encode->decode로 복원된다. 배열의 배열을 담는다:
+    ///   #0 Array(1)  = string[][]  (원소가 #1)
+    ///   #1 Array(2)  = string[]    (원소가 #2)
+    ///   #2 Scalar    = string
+    /// 각 Array가 원소 타입을 인덱스로 가리켜 말단 Scalar까지 내려간다(재귀 없음).
+    /// #3 Object는 그 엔트리들을 필드로 참조 - 세 variant를 한 번에 태운다.
+    #[test]
+    fn roundtrip_types() {
+        let types = vec![
+            TypeEntry::Array(1),                       // string[][]
+            TypeEntry::Array(2),                       // string[]
+            TypeEntry::Scalar,                         // string
+            TypeEntry::Object(vec![(0, 0), (1, 2)]),   // { field0: string[][], field1: string }
+        ];
+        let m = Module::new(ConstPool::new(), types.clone(), 0, vec![], vec![]);
+        let back = decode(&encode(&m)).unwrap();
+        assert_eq!(back.types, types);
+    }
+
+    /// 알 수 없는 타입 태그는 BadTypeTag로 거부한다.
+    #[test]
+    fn decode_rejects_bad_type_tag() {
+        let m = Module::new(ConstPool::new(), vec![TypeEntry::Scalar], 0, vec![], vec![]);
+        let mut bytes = encode(&m);
+        // MAGIC(4) + VERSION(2) + pool_count(2)=0 + type_count(2)=1 다음이 첫 타입 태그.
+        bytes[10] = 0x7f;
+        assert_eq!(decode(&bytes), Err(DecodeError::BadTypeTag(0x7f)));
+    }
+
     /// 알 수 없는 상수 태그는 BadConstTag로 거부한다(첫 엔트리 태그 바이트를 오염).
     #[test]
     fn decode_rejects_bad_const_tag() {
         let mut pool = ConstPool::new();
         pool.intern_str("x");
-        let mut bytes = encode(&Module::new(pool, vec![], vec![], vec![]));
+        let mut bytes = encode(&Module::new(pool, vec![], 0, vec![], vec![]));
         // MAGIC(4) + VERSION(2) + pool_count(2) 다음이 첫 엔트리 태그.
         bytes[8] = 0x7f;
         assert_eq!(decode(&bytes), Err(DecodeError::BadConstTag(0x7f)));

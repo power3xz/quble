@@ -34,7 +34,7 @@ component Greeting {
 scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
 `{expr}` 전체 표현식은 아직 아니다.)
 
-아직 없는 것: 슬롯, `@for`, 전체 `{expr}`, 배열 타입.
+이 Hello 예시에 안 쓰인 것(뒤에서 다룬다): 슬롯, `@for`, 배열 타입. 아직 미구현: 전체 `{expr}`.
 
 ---
 
@@ -124,6 +124,11 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
                  tag 0 (Scalar) : payload 없음
                  tag 1 (Object) : field_count:u16, fields:field_count x ( name_const_index:u16, type_ref:u16 )
                                   // type_ref로 자식 타입을 가리켜 중첩·공유를 표현
+                 tag 2 (Array)  : elem_type_ref:u16   // 원소 타입. 배열의 배열은 elem이 다시 Array
+                                  //   (string[][] = #0 Array(1) -> #1 Array(2) -> #2 Scalar)
+[ 루트 props 타입 ]
+  root_props_type_ref : u16   // 루트 컴포넌트(#0) props의 객체 타입 인덱스. 진입점이 rootValue를
+                              //   이 구조로 store에 풀필. 비루트 props 타입은 안 쓰여 인코딩 안 함
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
   count      : u16
   defs       : count x (
@@ -145,13 +150,17 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   // FIELDS - 이벤트 payload와 컨텍스트가 공유하는 필드 목록 인코딩
   <FIELDS> = field_count : u16
              fields      : field_count x (
-               name_const_index : u16  // 필드명("title") 상수풀
-               type_ref         : u16  // 타입 테이블 인덱스 - 이 leaf들을 어떤 구조로 조립할지
-               leaf_count       : u16
-               leaves           : leaf_count x u16  // leaf 하나. MSB=const 여부(1=상수풀 값,
-                                       //   0=scope index), 하위 15비트=index. 깊이우선 순서로
-                                       //   type_ref 구조를 채운다. scalar field는 leaf 하나.
+               name_const_index : u16   // 필드명("title") 상수풀
+               type_ref         : u16   // 타입 테이블 인덱스 - 이 슬롯을 어떤 구조로 조립할지
+               ref              : <REF>  // 이 field를 채울 값 하나(객체도 슬롯 하나 - 안 펼친다)
              )
+
+  // REF - field 값 하나의 출처. 태그 1바이트로 세 종류를 가른다. 슬롯을 펼치지 않으므로 Scope는
+  //   (scope_index, offset) 위치만 담고, 슬롯의 실제 kind(store/const)는 런타임이 정한다.
+  <REF> = tag : u8   // 0=Scope, 1=Const, 2=Raw
+          tag 0 (Scope) : scope_index:u8, offset:u8  // 부모 scope[scope_index]의 base+offset
+          tag 1 (Const) : const_index:u16            // 컴포넌트 상수풀 리터럴
+          tag 2 (Raw)   : value:u16                  // @for 런타임 원시값(지금은 @for 인덱스)
 [ 코드 ]
   len        : u32
   code       : [u8; len]   // 모든 정의의 코드가 이어짐. 테이블의 off/len으로 구획.
@@ -161,8 +170,12 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   결정한다고 본다.
 - **타입 테이블은 모듈 전역·dedup.** payload/context가 실제로 담는 객체 타입만 등록한다(props
   전체가 아니라). Object 필드가 자식을 `type_ref`로 가리켜 중첩·공유를 표현한다. field는
-  `type_ref`로 이 테이블을 참조하고 leaf만 따로 싣는다 - 구조는 전역에, 인스턴스(leaf)는
-  컴포넌트 field에. 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
+  `type_ref`로 이 테이블을 참조하고 값 출처(`ref`)만 따로 싣는다 - 구조는 전역에, 인스턴스는
+  컴포넌트 field에. 슬롯을 펼치지 않으므로 객체 field도 ref 하나로 그 슬롯을 가리킨다(런타임이
+  type_ref 구조로 store에서 조립). 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
+- **`elem_type_ref`/`type_ref`는 말단(Scalar)으로 내려가는 하위 참조만.** 자기/조상 인덱스를
+  가리키는 재귀 타입(`type Tree = Tree[]`)은 미지원 - 컴파일러가 그런 엔트리를 내지 않는다
+  (내면 순회가 무한). 필요해지면 사이클 검출을 그때 추가.
 - **컴포넌트명은 상수풀에 둔다**(`name_const_index`로 참조).
 - **컴포넌트 ID = 테이블 배열 인덱스.** `RENDER`/합성은 이 ID로 정의를 직접 인덱싱한다.
 - 진입점(엔트리포인트) 정보는 파일에 없다 - `RENDER comp_id` 호출이 지정.
@@ -183,11 +196,11 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ELEM_END`        | 0x05 | -                     | -                         | 가장 최근에 연 태그를 닫는다(`</TAG>`). 닫을 태그는 스택 top으로 안다.   |
 | `RENDER`          | 0x06 | comp_id: u16          | -                         | 쌓인 인자를 자식 scope로 넘겨 comp_id 정의를 렌더(호출). 인자 버퍼를 비운다. |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
-| `TEXT_VAR`        | 0x08 | scope_index: u16      | scope                     | `scope[scope_index]`(런타임 주입 값)를 텍스트로 출력 (HTML 이스케이프).  |
-| `ATTR_G_VAR`      | 0x09 | name: u16, scope_index: u16 | name=전역, value=scope | ` name="scope[scope_index]"` 출력. name은 전역 상수풀 ID, 값은 변수(속성값 이스케이프). |
-| `ATTR_L_VAR`      | 0x0a | name: u16, scope_index: u16 | name=컴포넌트, value=scope | ` name="scope[scope_index]"` 출력. name은 컴포넌트 상수풀 인덱스, 값은 변수. |
-| `PUSH_ARG`        | 0x0b | scope_index: u16      | scope                     | 부모 `scope[scope_index]`을 자식 인자 버퍼에 push. 뒤따르는 `RENDER`가 소비. |
-| `IF`              | 0x0c | cond_scope_index: u16 | scope                     | `scope[cond_scope_index]`(불리언)으로 분기 시작. then 가지 코드가 이어진다. |
+| `TEXT_VAR`        | 0x08 | scope_index:u8, offset:u8 | scope                 | `scope[scope_index]` 슬롯 `(kind,base)`에서 `base+offset` 값을 텍스트로 출력 (HTML 이스케이프). 경로 없는 `{title}`은 offset 0, 객체 필드 `{user.name}`은 필드 거리. |
+| `ATTR_G_VAR`      | 0x09 | name:u16, scope_index:u8, offset:u8 | name=전역, value=scope | ` name="..."` 출력. name은 전역 상수풀 ID, 값은 `scope[scope_index]`의 `base+offset`(속성값 이스케이프). |
+| `ATTR_L_VAR`      | 0x0a | name:u16, scope_index:u8, offset:u8 | name=컴포넌트, value=scope | ` name="..."` 출력. name은 컴포넌트 상수풀 인덱스, 값은 `scope[scope_index]`의 `base+offset`. |
+| `PUSH_THROUGH`    | 0x0b | scope_index: u8       | scope                     | 부모 `scope[scope_index]` 슬롯 `(kind,index)`을 편집 없이 그대로 자식 인자 버퍼에 push(경로 없는 참조 `{a}`/`{user}`). 뒤따르는 `RENDER`가 소비. |
+| `IF`              | 0x0c | scope_index:u8, offset:u8 | scope                 | `scope[scope_index]`의 `base+offset`(불리언)으로 분기 시작. 경로 없는 조건은 offset 0. then 가지 코드가 이어진다. |
 | `ELSE`            | 0x0d | -                     | -                         | then 가지 끝, else 가지 시작. (else 있을 때만)                            |
 | `IF_END`          | 0x0e | -                     | -                         | if 블록 끝.                                                              |
 | `LOAD_RES`        | 0x0f | res: u16              | 모듈 전역 리소스          | `res`(resId)의 외부 리소스(CSS 등)를 로드. resId->URL은 런타임이 주입.    |
@@ -195,6 +208,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `PUSH_ARG_LIT`    | 0x11 | const_index: u16      | 컴포넌트 상수풀           | 리터럴 값을 자식 인자 버퍼에 push. 부모 슬롯과 분리된 독립 leaf(use-site `Comp(prop="lit")`). |
 | `PUSH_PATH_SEGMENT` | 0x12 | seg_index: u16      | 컴포넌트 상수풀           | 합성 경로(fullname)에 세그먼트 하나를 민다(자식 type-name/alias). 뒤따르는 `RENDER`가 소비. |
 | `ENTER_CONTEXT`   | 0x13 | context_index: u16    | 컴포넌트 컨텍스트 테이블   | `@with` 진입. `ContextDef.fields`를 읽어 활성 컨텍스트 스택에 push. 이후 코드가 그 범위. |
+| `PUSH_FIELD`      | 0x19 | scope_index:u8, offset:u8 | scope                 | 부모 `scope[scope_index]`에서 필드로 내려가 `(kind, base+offset)`을 자식에 push(경로 참조 `{user.name}`). kind(출처)는 부모 슬롯 그대로 전파, 위치만 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다(leaf면 `store.get`, object면 base+offset, array면 `arrayPool[store.get()]`). |
 | `EXIT_CONTEXT`    | 0x14 | -                     | -                         | `@with` 블록 끝(IF_END 동형 마커). 활성 컨텍스트 스택 pop.                 |
 
 설계 메모:
@@ -205,30 +219,52 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   복귀만 하면 돼 **DOM 노드 스택**을 유지한다. (이전엔 END가 tag ID를 들었으나 잉여라 제거.
   요소당 2B 절감 - grid raw −8.7% 실측.)
 - 빈 요소 `h1() {}`도 OPEN -> CLOSE_OPEN -> END (`<h1></h1>`). void element 최적화는 나중.
-- **합성 - `PUSH_ARG` + `RENDER`.** 부모가 자식을 호출할 때, use-site 바인딩
-  (`Comp(name={b})` - `b`는 부모 scope index)을 `PUSH_ARG scope_index`로 **자식 scope index 순서대로** 쌓고
-  `RENDER comp_id`가 그 인자 버퍼를 **자식 scope**로 넘긴다(그리고 비운다). `ATTR`이 `ELEM` 앞에
-  쌓이고 `CLOSE_OPEN`이 닫는 것과 같은 패턴 - 인자가 `RENDER` 앞에 쌓이고 `RENDER`가 흡수한다.
-  - `PUSH_ARG`가 싣는 건 **값이 아니라 부모 scope index**다. 부모 `scope[scope_index]`(SSR) /
-    `paths[scope_index]`(클라 반응성)을 **한 단계 풀어** 자식에게 준다. 그래서 leafIndex 같은 전역
-    인덱스를 넘기지 않는다 - 같은 컴포넌트가 use-site마다 다른 값을 받을 수 있기 때문(§ 정의 vs 사용).
-  - 인자는 **자식 scope index 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부** 바인딩한다고
-    보고 순서만으로 매핑한다. 일부 생략을 허용할 때 `PUSH_ARG`에 scope index를 명시하거나 빈 자리용 opcode를
-    더한다(미정).
+- **합성 - `PUSH_THROUGH`/`PUSH_FIELD`/`PUSH_ARG_LIT` + `RENDER`.** 부모가 자식을 호출할 때,
+  use-site 바인딩을 자식 scope index 순서대로 쌓고 `RENDER comp_id`가 그 인자 버퍼를 **자식
+  scope**로 넘긴다(그리고 비운다). `ATTR`이 `ELEM` 앞에 쌓이고 `CLOSE_OPEN`이 닫는 것과 같은
+  패턴 - 인자가 `RENDER` 앞에 쌓이고 `RENDER`가 흡수한다.
+  - 셋의 갈림 - **경로 유무 + 출처**다:
+    - `Comp(x={a})`(경로 없음) -> `PUSH_THROUGH scope_index`: 부모 슬롯 `(kind, index)`을 편집
+      없이 그대로. 넘기는 게 leaf든 object든 array든 슬롯을 통째로 전파한다.
+    - `Comp(x={user.name})`(경로 있음) -> `PUSH_FIELD scope_index, offset`: 부모 슬롯에서
+      `base+offset`으로 내려가 `(kind, base+offset)`을 넘긴다. kind는 그대로 전파, **위치만**
+      넘기고 결과 타입은 자식이 자기 선언으로 안다(array면 자식이 `arrayPool[store.get()]`).
+    - `Comp(x="lit")`(리터럴) -> `PUSH_ARG_LIT const_index`: 부모 슬롯과 분리된 독립 const.
+  - **싣는 건 값이 아니라 부모 scope의 (kind, index)**다. 같은 컴포넌트가 use-site마다 다른
+    값을 받을 수 있어(§ 정의 vs 사용) 전역 leafIndex가 아니라 부모 슬롯을 한 단계 풀어 준다.
+  - 인자는 **자식 scope index 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부**
+    바인딩한다고 보고 순서만으로 매핑한다. 일부 생략 허용은 미정(빈 자리용 opcode 등).
   - 진입점(최상위)은 외부에서 `render(qubb, comp_id, scope)`로 scope를 직접 준다. 인자 버퍼는
     `RENDER`로 합성할 때만 쓰인다.
 - `TEXT_VAR`는 런타임 주입 값을 가리킨다. 렌더 시 `render(qubb, comp_id, scope)`로 **scope**
-  (값 배열)를 넘기고, `TEXT_VAR scope_index`가 `scope[scope_index]`를 출력한다. 심볼 이름은 바이트코드에 없다
-  - 컴파일타임에 **scope 인덱스로 확정**되므로(정적 분석), 런타임은 배열 인덱스로 O(1) 접근한다.
-  (1단계: 값은 문자열. 객체/반응성은 이후 단계.)
+  (슬롯 배열)를 넘기고, `TEXT_VAR scope_index, offset`이 `scope[scope_index]` 슬롯의 `base+offset`을
+  출력한다. 심볼 이름은 바이트코드에 없다
+  - 값 자리(`TEXT_VAR`/`ATTR_*_VAR`/`IF`)는 **자기 scope**라 컴파일이 레이아웃을 안다. push와
+    달리 kind를 전파할 필요가 없어 `(scope_index, offset)` 한 형태로 통일한다 - 경로 없는
+    `{title}`은 offset 0, 객체 필드 `{user.name}`은 필드 거리. (push는 자식이 kind를 런타임에
+    받아야 해 `THROUGH`/`FIELD`로 갈리지만, 값 자리는 나눌 실익이 없어 offset을 항상 싣는다.)
 - 속성은 **두 축**으로 갈린다 - name(전역 `G` / 컴포넌트 `L`) x value(정적 / 변수 `_VAR`).
-  네 조합이 `ATTR_G`/`ATTR_L`/`ATTR_G_VAR`/`ATTR_L_VAR`. 변수 속성값의 scope index는 **`TEXT_VAR`와
-  같은 scope index 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 값 배열).
+  네 조합이 `ATTR_G`/`ATTR_L`/`ATTR_G_VAR`/`ATTR_L_VAR`. 변수 속성값의 `(scope_index, offset)`은
+  **`TEXT_VAR`와 같은 slot 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 슬롯 배열).
 - **분기 - `IF`/`ELSE`/`IF_END` (마커).** `@if`/`@else`를 세 마커로 감싼다. 형태와 "왜 점프가
   없어야 하는가"는 §5.1에서 따로 설명한다.
-- 반복(`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다. 방향만 - 점프 없이 **해석단이
-  본문 구간을 N회 반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계 표기/leafIndex 회수
-  (REACTIVITY.md §3)가 엮여 별도 작업.
+- **반복 - `FOR_* … FOR_END` (마커 경계).** `@for`는 점프가 아니라 **해석단이 본문 구간을 N회
+  반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계는 `FOR_END` 마커(IF_END와 동형,
+  중첩은 깊이로 짝짓기). 여는 opcode는 **count의 컴파일타임 타입**으로 갈린다 - 런타임이 값을 보고
+  추정하지 않는다.
+  - `FOR_RAW count:u16` - 리터럴 횟수(`@for (x of 3)`). 슬롯 안 거치고 직접 인라인.
+  - `FOR_COUNT_VAR scope_index:u8, offset:u8` - count가 숫자 슬롯(`@for (x of n)`, 필드면
+    `a.count`라 offset). 런타임이 그 leaf 값을 횟수로. STORE면 count leaf 구독으로 꼬리 회차를
+    늘리고/줄인다(전용 region). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인.
+  - `FOR_ARRAY_VAR scope_index:u8, offset:u8` - count가 배열 슬롯(`@for (item of arr)`). 배열
+    칸은 `arrayInfoIndex` 하나라(슬롯 안 펼침) 그 값으로 arrayPool에서 요소 수·위치를 얻어 요소
+    수만큼 반복한다. 회차마다 **회차변수(item)** 슬롯을 그 요소 leaf에 바인딩해 본문의
+    `TEXT_VAR`/push가 요소값을 쓴다.
+  - **회차변수 슬롯은 operand에 없다.** codegen이 `props 슬롯 수 + 바깥 @for 깊이`로 정해 `{item}`을
+    그 slot의 `TEXT_VAR`로 내고, 런타임도 같은 규칙으로 그 자리를 구해 회차 leaf를 꽂는다. 양쪽이
+    같은 식이라 operand로 나를 필요가 없다.
+  - **회차 인덱스**(fullname의 `[i]`)는 `PUSH_PATH_INDEX_SEGMENT depth:u16`로 별개 축. 런타임이
+    loopIndexStack의 그 깊이 값을 직전 이름 세그먼트에 접미한다.
 - **외부 리소스 - `LOAD_RES res`.** 파일이 `use "./style.css"`로 CSS를 참조하면, 그 파일의
   **모든 컴포넌트** 정의 앞머리에 `LOAD_RES resId`를 하나씩 낸다. 런타임이 resId를 URL로 풀어
   로드(클라: `<link>` 삽입, 중복 URL 스킵).
@@ -248,18 +284,19 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
 - **이벤트 - `BIND_EVENT` + 컴포넌트 이벤트 테이블.** 정의와 발생이 나뉜다.
   - **정의**는 컴포넌트 테이블(§4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
-    이벤트명/fields(필드명 + type_ref + leaf 목록)가 그 컴포넌트의 이벤트 배열에 들어간다.
+    이벤트명/fields(필드명 + type_ref + ref)가 그 컴포넌트의 이벤트 배열에 들어간다.
     `event_index`는 이 배열의 인덱스(0,1,2…). 각 field는 `type_ref`(타입 테이블)로 조립 구조를,
-    **leaf 목록**으로 그 구조를 채울 값을 가리킨다. **leaf 하나는 MSB로 갈린다** - scope(그 prop의
-    scope index) 또는 const(리터럴, 상수풀 인덱스). 스칼라 field는 Scalar type_ref + leaf 하나
-    (옛 단일 값의 상위집합). 객체 field는 leaf 여러 개(깊이우선). 컨텍스트와 같은 인코딩(<FIELDS>, §4).
+    **ref**로 그 구조를 채울 값 하나를 가리킨다(슬롯을 안 펼쳐 객체도 ref 하나). ref는 태그로
+    Scope(부모 슬롯의 scope_index+offset) / Const(리터럴) / Raw(@for)를 가른다. 컨텍스트와 같은
+    인코딩(<FIELDS>, §4).
   - **발생 배선**은 코드의 `BIND_EVENT`다. `button(@click:TOGGLE)`은 그 요소에
     `BIND_EVENT click, 0`(click이 일어나면 0번 이벤트)을 낸다. 속성처럼 `ELEM_OPEN`과
     `ELEM_CLOSE_OPEN` 사이에 온다.
-  - **발생 시 런타임**: 0번 이벤트 정의를 보고, 각 field의 leaf 목록을 현재값으로 읽어 `type_ref`
+  - **발생 시 런타임**: 0번 이벤트 정의를 보고, 각 field의 ref를 현재값으로 읽어 `type_ref`
     구조대로 **조립**해 `data = { title: … }`를 만들고, 핸들러(fullname으로 찾음)에 넘긴다.
-    스칼라 field는 leaf 하나가 값이 되고, 객체 field는 leaf들이 중첩 객체로 조립된다(조립 절차는
-    런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다. 같은 fullname = 같은 핸들러.
+    스칼라 field는 그 슬롯이 값이 되고, 객체 field는 슬롯의 store 위치부터 구조대로 중첩 객체로
+    조립된다(조립 절차는 런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다.
+    같은 fullname = 같은 핸들러.
   - 핸들러 본문/`set`은 바이트코드에 없다 - 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
     낸다. 본문은 호스트 JS에 위임(DESIGN §5.4 방향).
 - **컨텍스트 - `ENTER_CONTEXT`/`EXIT_CONTEXT` + 컴포넌트 컨텍스트 테이블.** `@with`로 주입하는

@@ -1,0 +1,10 @@
+component ForObjField {
+  props { c: { count: number } }
+  template {
+    div() {
+      @for (item of c.count) {
+        p() { {c.count} }
+      }
+    }
+  }
+}

@@ -43,6 +43,9 @@ struct Handler {
     props: Vec<Prop>,
     /// 발생 시점 활성 @with 컨텍스트: (컨텍스트명, 필드들). 안쪽 우선(뒤가 이김).
     contexts: Vec<(String, Vec<(String, ArgValue)>)>,
+    /// 이 이벤트에 누적된 @for 깊이 = 핸들러가 받는 회차 인덱스 개수($0..$(loop_depth-1)).
+    /// fullname의 [$n] 개수와 같다(Row[$0].Col[$1] -> 2).
+    loop_depth: u16,
 }
 
 /// d.ts 서두: 공통 타입. `Handler<Data, Props, Ctx>`가 핸들러 하나의 모양(params 배치, get/set)을
@@ -50,9 +53,9 @@ struct Handler {
 /// 퉁친다 - props에 타입 표기가 오면 분리가 필요해질 수 있다.
 const PRELUDE: &str = "\
 type LeafIndex<T> = number & { readonly __leaf: T };
-type Handler<Data, Props, Ctx> = (
+type Handler<Data, Props, Ctx, Loop> = (
   data: Data,
-  params: { context: Ctx; props: Props; get: <T>(k: LeafIndex<T>) => T; set: <T>(k: LeafIndex<T>, v: T) => void },
+  params: { context: Ctx; props: Props; get: <T>(k: LeafIndex<T>) => T; set: <T>(k: LeafIndex<T>, v: T) => void } & Loop,
 ) => void;
 ";
 
@@ -60,7 +63,7 @@ type Handler<Data, Props, Ctx> = (
 fn render(comps: &[FlatComp]) -> String {
     let mut handlers = Vec::new();
     let mut seen = Vec::new();
-    walk(comps, 0, "", &[], &mut handlers, &mut seen);
+    walk(comps, 0, "", &[], &[], 0, &mut handlers, &mut seen);
 
     let mut out = String::new();
     out.push_str(PRELUDE);
@@ -73,7 +76,8 @@ fn render(comps: &[FlatComp]) -> String {
     out
 }
 
-/// 핸들러 하나를 `Handler<Data, Props, Ctx>`로 낸다. context 없으면 Ctx는 `{}`.
+/// 핸들러 하나를 `Handler<Data, Props, Ctx, Loop>`로 낸다. context 없으면 Ctx는 `{}`,
+/// @for 밖이면 Loop는 `{}`.
 fn signature(h: &Handler) -> String {
     let data = format!("{{ {} }}", fields_type(&h.data, value_type));
     let props = format!(
@@ -81,7 +85,7 @@ fn signature(h: &Handler) -> String {
         join(
             h.props
                 .iter()
-                .map(|p| format!("{}: LeafIndex<{}>", p.name, type_to_ts(&p.ty)))
+                .map(|p| format!("{}: LeafIndex<{}>", p.name, type_to_ts(&p.type_)))
         )
     );
     let ctx = if h.contexts.is_empty() {
@@ -92,7 +96,16 @@ fn signature(h: &Handler) -> String {
         }));
         format!("{{ {fields} }}")
     };
-    format!("Handler<{data}, {props}, {ctx}>")
+    // Loop: 회차 인덱스 $0..$(loop_depth-1). 전부 number(회차 번호). @for 밖이면 {}.
+    let loops = if h.loop_depth == 0 {
+        "{}".to_string()
+    } else {
+        format!(
+            "{{ {} }}",
+            join((0..h.loop_depth).map(|i| format!("${i}: number")))
+        )
+    };
+    format!("Handler<{data}, {props}, {ctx}, {loops}>")
 }
 
 /// prop 선언 타입 -> TS 타입 문자열. 원시는 이름 매핑, 배열은 `T[]`, 객체는 `{ k: T; ... }`.
@@ -131,27 +144,44 @@ fn join(parts: impl Iterator<Item = String>) -> String {
     parts.collect::<Vec<_>>().join("; ")
 }
 
+/// @for 인덱스는 세그먼트에 접미한다(Mid[$0]) - fullname을 사람이 읽는 핸들러 키라 인덱스가
+/// 대상 뒤에 오는 게 자연스럽다(분리 세그먼트 [$0].Mid는 인덱스가 앞에 떠 안 읽힘). 대신 컴포넌트
+/// (세그먼트 접미)와 element 직속(익명 세그먼트 [$n])의 두 케이스가 생긴다.
+///
+/// pending: 아직 세그먼트에 못 붙인 @for 깊이들. @for 진입 시 push, 컴포넌트 세그먼트를 만나면
+/// 전부 그 이름에 접미하고 비운다. 세그먼트 없이 element에서 이벤트가 나면 익명 세그먼트로 싣는다.
+fn seg_index_suffix(pending: &[u16]) -> String {
+    pending.iter().map(|d| format!("[${d}]")).collect()
+}
+
 /// 합성 트리를 걷는다(disasm.js collectEventFullnames와 같은 규칙).
 /// path_prefix: alias/type-name 세그먼트 누적. context_stack: 활성 @with(바깥->안쪽).
+/// pending: 접미 대기 중인 @for 깊이(위 참고). 자식 컴포넌트 use-site의 @for 깊이를 이어받는다.
 /// @if는 then·else 둘 다 순회(어느 가지든 발생 가능). 같은 fullname은 한 번만(의도된 공유).
 fn walk(
     comps: &[FlatComp],
     comp_id: usize,
     path_prefix: &str,
     context_stack: &[(String, Vec<(String, ArgValue)>)],
+    pending: &[u16],
+    depth_base: u16,
     handlers: &mut Vec<Handler>,
     seen: &mut Vec<String>,
 ) {
     let comp = &comps[comp_id].comp;
-    walk_nodes(comps, comp, &comp.template, path_prefix, context_stack, handlers, seen);
+    walk_nodes(comps, comp, &comp.template, path_prefix, context_stack, pending, depth_base, handlers, seen);
 }
 
+/// depth_base: 다음 @for가 쓸 인덱스 번호(use-site부터 누적). pending을 컴포넌트가 소비해도
+/// 이어진다 - Mid[$0] 안의 @for는 depth_base 1이라 Inner[$1]이 된다(같은 컴포넌트 안 중첩과 동일).
 fn walk_nodes(
     comps: &[FlatComp],
     comp: &Component,
     nodes: &[Node],
     path_prefix: &str,
     context_stack: &[(String, Vec<(String, ArgValue)>)],
+    pending: &[u16],
+    depth_base: u16,
     handlers: &mut Vec<Handler>,
     seen: &mut Vec<String>,
 ) {
@@ -162,20 +192,34 @@ fn walk_nodes(
                 children,
                 ..
             } => {
+                // 이벤트가 @for 직속(세그먼트 만드는 컴포넌트 없이)이면 익명 세그먼트로 인덱스를
+                // 싣는다([$0].SELECT). element는 세그먼트를 안 만들어 pending을 소비하지 않는다 -
+                // 같은 @for 안 형제·중첩 element가 모두 같은 인덱스를 실을 수 있게 유지한다.
+                let suffix = seg_index_suffix(pending);
+                let event_prefix = if suffix.is_empty() {
+                    path_prefix.to_string()
+                } else if path_prefix.is_empty() {
+                    suffix
+                } else {
+                    format!("{path_prefix}.{suffix}")
+                };
                 for (_dom, event_name) in event_bindings {
-                    emit(comp, event_name, path_prefix, context_stack, handlers, seen);
+                    emit(comp, event_name, &event_prefix, context_stack, depth_base, handlers, seen);
                 }
-                walk_nodes(comps, comp, children, path_prefix, context_stack, handlers, seen);
+                walk_nodes(comps, comp, children, path_prefix, context_stack, pending, depth_base, handlers, seen);
             }
             Node::Component { alias, name, .. } => {
+                // 컴포넌트 세그먼트가 pending 인덱스를 전부 접미(Mid[$0]). 자식으로 내려가면 pending은
+                // 비우되(이미 실림) depth_base는 유지 - Mid[$0] 안 @for는 Inner[$1]로 이어진다.
                 let segment = alias.as_deref().unwrap_or(name);
+                let segment = format!("{segment}{}", seg_index_suffix(pending));
                 let child_prefix = if path_prefix.is_empty() {
-                    segment.to_string()
+                    segment
                 } else {
                     format!("{path_prefix}.{segment}")
                 };
                 if let Some(child_id) = comps.iter().position(|c| &c.comp.name == name) {
-                    walk(comps, child_id, &child_prefix, context_stack, handlers, seen);
+                    walk(comps, child_id, &child_prefix, context_stack, &[], depth_base, handlers, seen);
                 }
             }
             Node::With { context, children } => {
@@ -183,11 +227,18 @@ fn walk_nodes(
                 if let Some(def) = comp.contexts.iter().find(|c| &c.name == context) {
                     stack.push((def.name.clone(), def.fields.clone()));
                 }
-                walk_nodes(comps, comp, children, path_prefix, &stack, handlers, seen);
+                walk_nodes(comps, comp, children, path_prefix, &stack, pending, depth_base, handlers, seen);
             }
             Node::If { then, else_, .. } => {
-                walk_nodes(comps, comp, then, path_prefix, context_stack, handlers, seen);
-                walk_nodes(comps, comp, else_, path_prefix, context_stack, handlers, seen);
+                walk_nodes(comps, comp, then, path_prefix, context_stack, pending, depth_base, handlers, seen);
+                walk_nodes(comps, comp, else_, path_prefix, context_stack, pending, depth_base, handlers, seen);
+            }
+            Node::For { body, .. } => {
+                // @for 진입 - depth_base를 pending에 추가(다음 세그먼트/이벤트가 접미), 다음 @for는
+                // depth_base+1. 자식 컴포넌트 경계를 넘어도 depth_base로 이어진다(use-site 누적).
+                let mut nested = pending.to_vec();
+                nested.push(depth_base);
+                walk_nodes(comps, comp, body, path_prefix, context_stack, &nested, depth_base + 1, handlers, seen);
             }
             Node::Text(_) | Node::Var(_) => {}
         }
@@ -200,6 +251,7 @@ fn emit(
     event_name: &str,
     path_prefix: &str,
     context_stack: &[(String, Vec<(String, ArgValue)>)],
+    loop_depth: u16,
     handlers: &mut Vec<Handler>,
     seen: &mut Vec<String>,
 ) {
@@ -233,6 +285,7 @@ fn emit(
         data,
         props: comp.props.clone(),
         contexts,
+        loop_depth,
     });
 }
 
@@ -255,7 +308,7 @@ mod tests {
             }
         "#);
         assert!(out.contains("type LeafIndex<T> = number & { readonly __leaf: T };"));
-        assert!(out.contains("type Handler<Data, Props, Ctx> = ("));
+        assert!(out.contains("type Handler<Data, Props, Ctx, Loop> = ("));
     }
 
     /// 단순 event - data(값)·props(leafIndex). context 없으면 Ctx는 {}.
@@ -270,7 +323,7 @@ mod tests {
             }
         "#);
         assert!(out.contains(
-            "'CLICK': Handler<{ avatar: string }, { avatar: LeafIndex<string>; size: LeafIndex<number>; active: LeafIndex<boolean> }, {}>;"
+            "'CLICK': Handler<{ avatar: string }, { avatar: LeafIndex<string>; size: LeafIndex<number>; active: LeafIndex<boolean> }, {}, {}>;"
         ), "실제 출력:\n{out}");
     }
 
@@ -330,7 +383,7 @@ mod tests {
               }
             }
         "#);
-        assert!(out.contains(r#", { Area: { section: "actions"; user: string } }>"#), "실제 출력:\n{out}");
+        assert!(out.contains(r#", { Area: { section: "actions"; user: string } }, {}>"#), "실제 출력:\n{out}");
     }
 
     /// 리터럴 payload 필드는 그 값으로 좁혀지고, 변수 필드는 string.
@@ -375,5 +428,137 @@ mod tests {
         "#);
         assert!(out.contains("'A.TOGGLE':"), "then 가지 이벤트\n{out}");
         assert!(out.contains("'B.TOGGLE':"), "else 가지 이벤트\n{out}");
+    }
+
+    /// @for 몸체 자식 컴포넌트 세그먼트가 @for 인덱스를 접미(Row[$0]).
+    #[test]
+    fn for_component_segment_suffix() {
+        let out = dts(r#"
+            component List { template { @for (item of 3) { Row: Inner() {} } } }
+            component Inner {
+              events { PICK({ id }) }
+              template { button(@click:PICK) {} }
+            }
+        "#);
+        assert!(out.contains("'Row[$0].PICK':"), "실제 출력:\n{out}");
+    }
+
+    /// element 직속(세그먼트 만드는 컴포넌트 없음)은 익명 세그먼트로 인덱스를 싣는다([$0].SELECT).
+    #[test]
+    fn for_element_direct_anonymous_segment() {
+        let out = dts(r#"
+            component Menu {
+              events { SELECT({ i }) }
+              template { @for (item of 3) { li(@click:SELECT) {} } }
+            }
+        "#);
+        assert!(out.contains("'[$0].SELECT':"), "실제 출력:\n{out}");
+    }
+
+    /// 형제 자식 여럿 - 각자 제 세그먼트에 같은 @for 인덱스를 접미.
+    #[test]
+    fn for_siblings_share_index() {
+        let out = dts(r#"
+            component List {
+              template { @for (item of 3) { A: Inner() {} B: Inner() {} } }
+            }
+            component Inner {
+              events { CLICK({ id }) }
+              template { button(@click:CLICK) {} }
+            }
+        "#);
+        assert!(out.contains("'A[$0].CLICK':"), "실제 출력:\n{out}");
+        assert!(out.contains("'B[$0].CLICK':"), "실제 출력:\n{out}");
+    }
+
+    /// 같은 @for 안 중첩 element - 형제·중첩 모두 같은 회차라 같은 [$0]을 싣는다(소진 아님).
+    #[test]
+    fn for_nested_element_same_index() {
+        let out = dts(r#"
+            component Menu {
+              events { A({ x }) B({ y }) }
+              template {
+                @for (item of 3) {
+                  div(@click:A) { span(@click:B) {} }
+                }
+              }
+            }
+        "#);
+        assert!(out.contains("'[$0].A':"), "실제 출력:\n{out}");
+        assert!(out.contains("'[$0].B':"), "실제 출력:\n{out}");
+    }
+
+    /// 중첩 @for - 각 컴포넌트 세그먼트가 자기 @for 깊이를 접미(Row[$0].Cell[$1]).
+    /// @for가 서로 다른 컴포넌트에 있어도 use-site 깊이를 이어받는다(리셋 X).
+    #[test]
+    fn nested_for_depths_across_components() {
+        let out = dts(r#"
+            component List {
+              template {
+                @for (row of 3) { Row: Mid() {} }
+              }
+            }
+            component Mid {
+              template { @for (cell of 3) { Cell: Inner() {} } }
+            }
+            component Inner {
+              events { PICK({ id }) }
+              template { button(@click:PICK) {} }
+            }
+        "#);
+        assert!(out.contains("'Row[$0].Cell[$1].PICK':"), "실제 출력:\n{out}");
+    }
+
+    /// @for 안 @if는 깊이를 안 늘린다 - 가지 안 세그먼트도 같은 @for 인덱스.
+    #[test]
+    fn for_with_if_keeps_depth() {
+        let out = dts(r#"
+            component List {
+              props { flag: bool }
+              template {
+                @for (item of 3) { @if (flag) { Row: Inner() {} } }
+              }
+            }
+            component Inner {
+              events { PICK({ id }) }
+              template { button(@click:PICK) {} }
+            }
+        "#);
+        assert!(out.contains("'Row[$0].PICK':"), "실제 출력:\n{out}");
+    }
+
+    /// 같은 컴포넌트가 @for 안/밖에서 쓰이면 use-site 깊이에 따라 인덱스가 다르다.
+    #[test]
+    fn same_component_index_by_use_site() {
+        let out = dts(r#"
+            component Menu {
+              template {
+                @for (a of 3) { Mid() {} }
+                Mid() {}
+              }
+            }
+            component Mid { template { @for (b of 3) { Inner() {} } } }
+            component Inner {
+              events { PICK({ id }) }
+              template { button(@click:PICK) {} }
+            }
+        "#);
+        // @for 안 Mid: b가 [$1] (a 안). @for 밖 Mid: b가 [$0].
+        assert!(out.contains("'Mid[$0].Inner[$1].PICK':"), "@for 안 use-site\n{out}");
+        assert!(out.contains("'Mid.Inner[$0].PICK':"), "@for 밖 use-site\n{out}");
+    }
+
+    /// @for 밖 컴포넌트/이벤트는 [$n] 없음(회귀 - 반복 아니면 구분자 불필요).
+    #[test]
+    fn outside_for_no_index() {
+        let out = dts(r#"
+            component List { template { Row: Inner() {} } }
+            component Inner {
+              events { PICK({ id }) }
+              template { button(@click:PICK) {} }
+            }
+        "#);
+        assert!(out.contains("'Row.PICK':"), "실제 출력:\n{out}");
+        assert!(!out.contains("[$"), "@for 밖은 인덱스 없음\n{out}");
     }
 }

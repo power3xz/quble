@@ -1,0 +1,30 @@
+component Outer {
+  template {
+    div() {
+      Mid: Middle() {}
+    }
+  }
+}
+
+component Middle {
+  template {
+    @for (b of 3) {
+      Col: Inner() {}
+    }
+  }
+}
+
+component Inner {
+  template {
+    @for (c of 4) {
+      Card: Leaf() {}
+    }
+  }
+}
+
+component Leaf {
+  events { PICK({ label: "x" }) }
+  template {
+    button(@click:PICK) { "x" }
+  }
+}

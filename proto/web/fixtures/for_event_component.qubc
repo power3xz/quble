@@ -1,0 +1,16 @@
+component ForList {
+  template {
+    div() {
+      @for (item of 3) {
+        Item: Row() {}
+      }
+    }
+  }
+}
+
+component Row {
+  events { PICK({ id: "x" }) }
+  template {
+    button(@click:PICK) { "pick" }
+  }
+}

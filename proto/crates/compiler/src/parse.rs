@@ -10,8 +10,8 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, LitValue, Node, Prop, SourceFile, Type, Use,
-    VarRef,
+    ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, Prop, SourceFile,
+    Type, Use, VarRef,
 };
 use crate::lexer::{Directive, Token};
 
@@ -58,7 +58,11 @@ pub fn parse(tokens: &[Token]) -> Result<SourceFile, ParseError> {
             got: format!("{t:?}"),
         });
     }
-    Ok(SourceFile { uses, resources, comps })
+    Ok(SourceFile {
+        uses,
+        resources,
+        comps,
+    })
 }
 
 struct Parser<'a> {
@@ -133,12 +137,14 @@ impl<'a> Parser<'a> {
         match self.next()? {
             Token::Str(s) => Ok(LitValue::Str(s.clone())),
             Token::Bool(b) => Ok(LitValue::Bool(*b)),
-            Token::Num(n) => n.parse::<f64>().map(LitValue::Number).map_err(|_| {
-                ParseError::Expected {
-                    want: "number literal".into(),
-                    got: n.clone(),
-                }
-            }),
+            Token::Num(n) => {
+                n.parse::<f64>()
+                    .map(LitValue::Number)
+                    .map_err(|_| ParseError::Expected {
+                        want: "number literal".into(),
+                        got: n.clone(),
+                    })
+            }
             got => Err(ParseError::Expected {
                 want: "literal (\"str\", 42, true)".into(),
                 got: format!("{got:?}"),
@@ -158,7 +164,6 @@ impl<'a> Parser<'a> {
             })
         }
     }
-
 
     // 컴포넌트 import:  use IDENT (, IDENT)* from STRING
     // 리소스:           use STRING
@@ -221,7 +226,13 @@ impl<'a> Parser<'a> {
         let template = self.nodes()?;
         self.expect(&Token::RBrace)?; // template
         self.expect(&Token::RBrace)?; // component
-        Ok(Component { name, props, events, contexts, template })
+        Ok(Component {
+            name,
+            props,
+            events,
+            contexts,
+            template,
+        })
     }
 
     // props { IDENT : TYPE (, IDENT : TYPE)* }
@@ -229,25 +240,16 @@ impl<'a> Parser<'a> {
         self.keyword("props")?;
         self.expect(&Token::LBrace)?;
         let mut props = Vec::new();
-        loop {
-            match self.peek() {
-                Some(Token::RBrace) | None => break,
-                Some(Token::Comma) => {
-                    self.next()?;
-                }
-                Some(Token::Ident(_)) => {
-                    let name = self.ident()?;
-                    self.expect(&Token::Colon)?;
-                    let ty = self.type_expr()?;
-                    props.push(Prop { name, ty });
-                }
-                Some(t) => {
-                    return Err(ParseError::Expected {
-                        want: "prop name or }".into(),
-                        got: format!("{t:?}"),
-                    })
-                }
+        // 구분자 콤마 필수, 마지막 prop 뒤만 생략 가능(object_type과 동일 규칙).
+        while !matches!(self.peek(), Some(Token::RBrace) | None) {
+            let name = self.ident()?;
+            self.expect(&Token::Colon)?;
+            let ty = self.type_expr()?;
+            props.push(Prop { name, type_: ty });
+            if matches!(self.peek(), Some(Token::RBrace)) {
+                break;
             }
+            self.expect(&Token::Comma)?;
         }
         self.expect(&Token::RBrace)?;
         Ok(props)
@@ -326,29 +328,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // OBJECT = { (IDENT : TYPE (, IDENT : TYPE)*)? }  - 필드 선언 순서 보존.
+    // OBJECT = { (IDENT : TYPE (, IDENT : TYPE)* ,?)? }  - 필드 선언 순서 보존.
+    // 구분자 콤마 필수, 마지막 필드 뒤만 생략 가능(trailing 콤마 허용).
     fn object_type(&mut self) -> Result<Type, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut fields = Vec::new();
-        loop {
-            match self.peek() {
-                Some(Token::RBrace) | None => break,
-                Some(Token::Comma) => {
-                    self.next()?;
-                }
-                Some(Token::Ident(_)) => {
-                    let name = self.ident()?;
-                    self.expect(&Token::Colon)?;
-                    let ty = self.type_expr()?;
-                    fields.push((name, ty));
-                }
-                Some(t) => {
-                    return Err(ParseError::Expected {
-                        want: "field name or }".into(),
-                        got: format!("{t:?}"),
-                    })
-                }
+        while !matches!(self.peek(), Some(Token::RBrace) | None) {
+            let name = self.ident()?;
+            self.expect(&Token::Colon)?;
+            let ty = self.type_expr()?;
+            fields.push((name, ty));
+            // 필드 뒤가 }면 종료(마지막 생략), 아니면 콤마 필수(소비 후 계속).
+            // trailing 콤마는 다음 루프에서 }를 만나 종료한다.
+            if matches!(self.peek(), Some(Token::RBrace)) {
+                break;
             }
+            self.expect(&Token::Comma)?;
         }
         self.expect(&Token::RBrace)?;
         Ok(Type::Object(fields))
@@ -395,7 +390,10 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
-                        ArgValue::Var(VarRef { root: field.clone(), path: Vec::new() })
+                        ArgValue::Var(VarRef {
+                            root: field.clone(),
+                            path: Vec::new(),
+                        })
                     };
                     payload.push((field, value));
                 }
@@ -449,7 +447,10 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
-                        ArgValue::Var(VarRef { root: key.clone(), path: Vec::new() })
+                        ArgValue::Var(VarRef {
+                            root: key.clone(),
+                            path: Vec::new(),
+                        })
                     };
                     fields.push((key, value));
                 }
@@ -479,6 +480,8 @@ impl<'a> Parser<'a> {
                 Some(Token::LBrace) => nodes.push(self.var()?),
                 // @if 분기.
                 Some(Token::At(Directive::If)) => nodes.push(self.if_node()?),
+                // @for 반복.
+                Some(Token::At(Directive::For)) => nodes.push(self.for_node()?),
                 // @with 컨텍스트.
                 Some(Token::At(Directive::With)) => nodes.push(self.with_node()?),
                 // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
@@ -518,6 +521,39 @@ impl<'a> Parser<'a> {
         };
 
         Ok(Node::If { cond, then, else_ })
+    }
+
+    // @for ( IDENT of ( NUM | VAR_REF ) ) { NODE* }
+    // count는 정수 리터럴(of 3) 또는 숫자 prop 참조(of count). of는 문맥 키워드(Ident("of")).
+    fn for_node(&mut self) -> Result<Node, ParseError> {
+        self.expect(&Token::At(Directive::For))?;
+        self.expect(&Token::LParen)?;
+        let item = self.ident()?;
+        match self.next()? {
+            Token::Ident(s) if s == "of" => {}
+            got => {
+                return Err(ParseError::Expected {
+                    want: "of".into(),
+                    got: format!("{got:?}"),
+                })
+            }
+        }
+        let count = match self.peek() {
+            Some(Token::Num(n)) => {
+                let count = n.parse::<u16>().map_err(|_| ParseError::Expected {
+                    want: "0..=65535 정수 반복 횟수".into(),
+                    got: n.clone(),
+                })?;
+                self.next()?;
+                ForCount::Literal(count)
+            }
+            _ => ForCount::Var(self.var_ref()?),
+        };
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::LBrace)?;
+        let body = self.nodes()?;
+        self.expect(&Token::RBrace)?;
+        Ok(Node::For { item, count, body })
     }
 
     // @with CONTEXT { NODE* }   - context는 이 컴포넌트 contexts에 선언된 이름.
@@ -616,7 +652,12 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LBrace)?;
         let children = self.nodes()?;
         self.expect(&Token::RBrace)?;
-        Ok(Node::Element { tag, attrs, event_bindings, children })
+        Ok(Node::Element {
+            tag,
+            attrs,
+            event_bindings,
+            children,
+        })
     }
 
     // RParen 전까지 ATTR과 이벤트 바인딩(`@click:EVENT`)을 모은다. 콤마는 선택적 구분자.
