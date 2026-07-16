@@ -34,7 +34,7 @@ component Greeting {
 scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
 `{expr}` 전체 표현식은 아직 아니다.)
 
-아직 없는 것: 슬롯, `@for`, 전체 `{expr}`, 배열 타입.
+이 Hello 예시에 안 쓰인 것(뒤에서 다룬다): 슬롯, `@for`, 배열 타입. 아직 미구현: 전체 `{expr}`.
 
 ---
 
@@ -248,9 +248,23 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   **`TEXT_VAR`와 같은 slot 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 슬롯 배열).
 - **분기 - `IF`/`ELSE`/`IF_END` (마커).** `@if`/`@else`를 세 마커로 감싼다. 형태와 "왜 점프가
   없어야 하는가"는 §5.1에서 따로 설명한다.
-- 반복(`@for`)용 opcode는 형태가 미확정이라 지금 추가하지 않는다. 방향만 - 점프 없이 **해석단이
-  본문 구간을 N회 반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계 표기/leafIndex 회수
-  (REACTIVITY.md §3)가 엮여 별도 작업.
+- **반복 - `FOR_* … FOR_END` (마커 경계).** `@for`는 점프가 아니라 **해석단이 본문 구간을 N회
+  반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계는 `FOR_END` 마커(IF_END와 동형,
+  중첩은 깊이로 짝짓기). 여는 opcode는 **count의 컴파일타임 타입**으로 갈린다 - 런타임이 값을 보고
+  추정하지 않는다.
+  - `FOR_RAW count:u16` - 리터럴 횟수(`@for (x of 3)`). 슬롯 안 거치고 직접 인라인.
+  - `FOR_COUNT_VAR scope_index:u8, offset:u8` - count가 숫자 슬롯(`@for (x of n)`, 필드면
+    `a.count`라 offset). 런타임이 그 leaf 값을 횟수로. STORE면 count leaf 구독으로 꼬리 회차를
+    늘리고/줄인다(전용 region). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인.
+  - `FOR_ARRAY_VAR scope_index:u8, offset:u8` - count가 배열 슬롯(`@for (item of arr)`). 배열
+    칸은 `arrayInfoIndex` 하나라(슬롯 안 펼침) 그 값으로 arrayPool에서 요소 수·위치를 얻어 요소
+    수만큼 반복한다. 회차마다 **회차변수(item)** 슬롯을 그 요소 leaf에 바인딩해 본문의
+    `TEXT_VAR`/push가 요소값을 쓴다.
+  - **회차변수 슬롯은 operand에 없다.** codegen이 `props 슬롯 수 + 바깥 @for 깊이`로 정해 `{item}`을
+    그 slot의 `TEXT_VAR`로 내고, 런타임도 같은 규칙으로 그 자리를 구해 회차 leaf를 꽂는다. 양쪽이
+    같은 식이라 operand로 나를 필요가 없다.
+  - **회차 인덱스**(fullname의 `[i]`)는 `PUSH_PATH_INDEX_SEGMENT depth:u16`로 별개 축. 런타임이
+    loopIndexStack의 그 깊이 값을 직전 이름 세그먼트에 접미한다.
 - **외부 리소스 - `LOAD_RES res`.** 파일이 `use "./style.css"`로 CSS를 참조하면, 그 파일의
   **모든 컴포넌트** 정의 앞머리에 `LOAD_RES resId`를 하나씩 낸다. 런타임이 resId를 URL로 풀어
   로드(클라: `<link>` 삽입, 중복 URL 스킵).

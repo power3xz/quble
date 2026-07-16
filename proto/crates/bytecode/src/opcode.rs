@@ -48,8 +48,9 @@ pub enum Op {
     ExitContext = 0x14,
     /// `@for (x of N)` 반복. operand: 반복 횟수 u16(슬롯 안 거치고 직접 인라인). FOR_END까지가 몸체.
     ForRaw = 0x15,
-    /// `@for (x of count)` 반복. operand: count의 scope index u16. 런타임이 그 슬롯 값을 횟수로.
-    ForScopeIndex = 0x16,
+    /// `@for (x of n)` 반복 - count가 숫자 slot. operand: count의 scope index u16. 런타임이 그
+    /// 슬롯 값을 횟수로. count가 배열이면 ForArrayVar로 갈린다(컴파일타임 타입으로 구별).
+    ForCountVar = 0x16,
     /// `@for` 몸체 끝 마커(operand 없음, IfEnd 동형).
     ForEnd = 0x17,
     /// 합성 경로에 @for 인덱스 세그먼트를 민다. operand: @for 깊이 u16(loopIndexStack에서 읽을
@@ -60,6 +61,12 @@ pub enum Op {
     /// 경로 참조(`Comp(x={user.name})`)의 인코딩. kind(출처)는 부모 슬롯 그대로 전파, 위치만
     /// 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다. 뒤따르는 RENDER가 소비.
     PushField = 0x19,
+    /// `@for (item of arr)` 반복 - count가 배열 slot. operand: 배열의 scope index u8, offset u8
+    /// (배열이 필드면 base로부터의 거리). 런타임이 그 칸의 arrayInfoIndex로 요소 수·위치를 얻어
+    /// 요소 수만큼 반복하며, 회차마다 회차변수(item) slot을 그 요소 leaf에 바인딩한다. item slot은
+    /// operand에 없다 - 런타임이 codegen과 같은 규칙(props 슬롯 수 + 현재 @for 깊이)으로 구한다.
+    /// count가 숫자면 ForCountVar.
+    ForArrayVar = 0x1a,
 }
 
 impl Op {
@@ -88,10 +95,11 @@ impl Op {
             0x13 => Op::EnterContext,
             0x14 => Op::ExitContext,
             0x15 => Op::ForRaw,
-            0x16 => Op::ForScopeIndex,
+            0x16 => Op::ForCountVar,
             0x17 => Op::ForEnd,
             0x18 => Op::PushPathIndexSegment,
             0x19 => Op::PushField,
+            0x1a => Op::ForArrayVar,
             _ => return None,
         })
     }

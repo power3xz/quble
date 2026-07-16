@@ -101,10 +101,11 @@ const OP = {
   ENTER_CONTEXT: 0x13,
   EXIT_CONTEXT: 0x14,
   FOR_RAW: 0x15,
-  FOR_SCOPE_INDEX: 0x16,
+  FOR_COUNT_VAR: 0x16,
   FOR_END: 0x17,
   PUSH_PATH_INDEX_SEGMENT: 0x18,
   PUSH_FIELD: 0x19,
+  FOR_ARRAY_VAR: 0x1a,
 } as const;
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -137,7 +138,8 @@ const operandLen = (op: number) => {
     case OP.LOAD_RES:
     case OP.ENTER_CONTEXT:
     case OP.FOR_RAW:
-    case OP.FOR_SCOPE_INDEX:
+    case OP.FOR_COUNT_VAR: // scope_index: u8, offset: u8
+    case OP.FOR_ARRAY_VAR: // scope_index: u8, offset: u8
     case OP.PUSH_PATH_INDEX_SEGMENT:
       return 2;
     case OP.ATTR_G:
@@ -183,8 +185,8 @@ const skipBranch = (code: Uint8Array, startPc: number) => {
 };
 
 // @for 몸체 끝(FOR_END)의 pc를 찾는다. bodyStart부터 op 경계를 전진하며 중첩 @for 깊이를
-// 센다(같은 깊이 0의 FOR_END가 이 몸체 끝). IF는 몸체 안에 섞여도 여기선 무시 - FOR_RAW/
-// FOR_SCOPE_INDEX/FOR_END만 깊이에 관여한다.
+// 센다(같은 깊이 0의 FOR_END가 이 몸체 끝). IF는 몸체 안에 섞여도 여기선 무시 - @for 여는
+// opcode(FOR_RAW/FOR_COUNT_VAR/FOR_ARRAY_VAR)와 FOR_END만 깊이에 관여한다.
 //
 // @param code      def 바이트코드
 // @param bodyStart 몸체 첫 op 위치(FOR operand 직후)
@@ -195,7 +197,7 @@ const forBodyEnd = (code: Uint8Array, bodyStart: number) => {
   while (pc < code.length) {
     const markerPc = pc;
     const op = code[pc++];
-    if (op === OP.FOR_RAW || op === OP.FOR_SCOPE_INDEX) {
+    if (op === OP.FOR_RAW || op === OP.FOR_COUNT_VAR || op === OP.FOR_ARRAY_VAR) {
       depth += 1;
       pc += operandLen(op);
     } else if (op === OP.FOR_END) {
@@ -922,6 +924,30 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         store.subscribe(countLeafIndex, onCount);
       };
 
+      // 배열 @for - 배열 칸(arrayLeafIndex)의 arrayInfoIndex로 요소 위치(elemStartLeafIndices)를
+      // 얻어, 요소 수만큼 지금 가지에 인라인한다. 회차마다 회차변수(item) slot을 그 요소 leaf에
+      // STORE로 바인딩한다 - item slot은 codegen과 같은 규칙(props 슬롯 수 + 현재 @for 깊이)이며,
+      // 그 값이 지금 argumentSourcePairs.length/2다(props 뒤로 바깥 @for들의 item만 쌓여서). 회차변수
+      // 슬롯은 buildIteration 전에 맨 끝에 push하고(몸체 TEXT_VAR가 읽는다) 루프 뒤 두 칸 pop해
+      // 되돌린다 - bindVar가 build 시점에 leafIndex를 branch.leafIndices로 스냅샷하므로 공유 pairs를
+      // 되돌려도 안전하다. 요소는 정적이라(배열 grow/shrink API 없음) FOR_RAW처럼 인라인이면 충분하다.
+      const reactiveArrayFor = (arrayLeafIndex: number, bodyStart: number, forEndPc: number) => {
+        const arrayInfoIndex = Number(store.get(arrayLeafIndex));
+        const info = arrayPool[arrayInfoIndex];
+        const count = info.elemStartLeafIndices.length;
+        if (count === 0) {
+          return;
+        }
+        const itemSlot = argumentSourcePairs.length / 2;
+        for (let i = 0; i < count; i++) {
+          argumentSourcePairs[2 * itemSlot] = STORE;
+          argumentSourcePairs[2 * itemSlot + 1] = info.elemStartLeafIndices[i];
+          nodeTop().appendChild(buildIteration(i, bodyStart, forEndPc, startRegionIndex, startBranchIndex));
+        }
+        argumentSourcePairs.pop(); // 회차변수 ref
+        argumentSourcePairs.pop(); // 회차변수 kind
+      };
+
       // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
       //
       // 구독은 즉시 걸지 않고 현재 가지에 모은다 - attach가 그 가지를 켤 때 건다
@@ -1286,18 +1312,33 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
             pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
             break;
           }
-          case OP.FOR_SCOPE_INDEX: {
-            // 슬롯 위임(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
-            // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다.
-            const scopeIndex = u16at();
+          case OP.FOR_COUNT_VAR: {
+            // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
+            // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다. count가
+            // 필드(a.count)면 base+offset이 그 leaf.
+            const scopeIndex = u8at();
+            const offset = u8at();
             const ref = argumentSourcePairs[2 * scopeIndex + 1];
             const bodyStart = pc;
             const forEndPc = forBodyEnd(code, bodyStart);
             if (argumentSourcePairs[2 * scopeIndex] === CONST) {
               inlineFor(Number(module.constpool[ref as number]) || 0, bodyStart, forEndPc);
             } else {
-              reactiveCountFor(ref as number, bodyStart, forEndPc);
+              reactiveCountFor((ref as number) + offset, bodyStart, forEndPc);
             }
+            pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
+            break;
+          }
+          case OP.FOR_ARRAY_VAR: {
+            // 배열 count slot. 배열 칸에 든 arrayInfoIndex로 요소 수·요소 위치를 얻어, 회차마다
+            // 회차변수(item) slot을 그 요소 leaf로 바인딩하며 반복한다. item slot은 codegen과 같은
+            // 규칙(props 슬롯 수 + 현재 @for 깊이)으로 계산한다. base+offset이 배열 칸의 leaf.
+            const scopeIndex = u8at();
+            const offset = u8at();
+            const arrayLeafIndex = (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset;
+            const bodyStart = pc;
+            const forEndPc = forBodyEnd(code, bodyStart);
+            reactiveArrayFor(arrayLeafIndex, bodyStart, forEndPc);
             pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
             break;
           }

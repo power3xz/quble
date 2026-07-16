@@ -393,7 +393,7 @@ mod tests {
         assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
     }
 
-    /// `@for (x of count)` prop count는 ForScopeIndex + count의 scope index.
+    /// `@for (x of count)` 숫자 prop count는 ForCountVar + (scope_index, offset).
     #[test]
     fn compiles_for_prop_count() {
         use bytecode::{decode, Op};
@@ -413,18 +413,17 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // count는 유일한 prop이라 scope index 0.
-        let mut for_scope = vec![Op::ForScopeIndex as u8];
-        for_scope.extend_from_slice(&0u16.to_le_bytes());
+        // count는 유일한 prop이라 scope index 0, root 참조라 offset 0.
+        let for_op = vec![Op::ForCountVar as u8, 0, 0];
         assert!(
-            code.windows(for_scope.len()).any(|w| w == for_scope.as_slice()),
-            "ForScopeIndex index=0 이 코드에 있어야",
+            code.windows(for_op.len()).any(|w| w == for_op.as_slice()),
+            "ForCountVar scope=0 offset=0 이 코드에 있어야",
         );
         assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
     }
 
-    /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개(앵커)라 ForScopeIndex
-    /// operand=0. 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 {tag}가 TextVar 1을 낸다.
+    /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개라 ForArrayVar (scope=0, offset=0).
+    /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 {tag}가 TextVar 1을 낸다.
     #[test]
     fn compiles_for_scalar_array() {
         use bytecode::{decode, Op};
@@ -444,19 +443,17 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // 배열 앵커는 슬롯 0(유일 prop).
-        let mut for_scope = vec![Op::ForScopeIndex as u8];
-        for_scope.extend_from_slice(&0u16.to_le_bytes());
+        // 배열은 슬롯 0(유일 prop), root 참조라 offset 0.
+        let for_op = vec![Op::ForArrayVar as u8, 0, 0];
         assert!(
-            code.windows(for_scope.len()).any(|w| w == for_scope.as_slice()),
-            "ForScopeIndex(배열 앵커=0)이 있어야:\n{code:?}",
+            code.windows(for_op.len()).any(|w| w == for_op.as_slice()),
+            "ForArrayVar(배열 scope=0 offset=0)이 있어야:\n{code:?}",
         );
-        // {tag} 회차변수는 props 슬롯(1개) 뒤 offset 1.
-        let mut text_var = vec![Op::TextVar as u8];
-        text_var.extend_from_slice(&1u16.to_le_bytes());
+        // {tag} 회차변수는 props 슬롯(1개) 뒤 scope_index 1, 요소가 스칼라라 offset 0.
+        let text_var = vec![Op::TextVar as u8, 1, 0];
         assert!(
             code.windows(text_var.len()).any(|w| w == text_var.as_slice()),
-            "TextVar(회차변수 tag=1)가 있어야:\n{code:?}",
+            "TextVar(회차변수 tag scope=1 offset=0)가 있어야:\n{code:?}",
         );
     }
 

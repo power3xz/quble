@@ -611,8 +611,9 @@ fn emit_node(
             code.push(Op::IfEnd as u8);
         }
         Node::For { item, count, body } => {
-            // count 출처로 opcode를 가른다 - 리터럴은 값 직접(ForRaw), prop 참조는 ForScopeIndex.
-            // prop이 숫자면 반복 횟수(item 무의미), 배열이면 순회(item을 회차변수로 등록).
+            // count 출처·타입으로 opcode를 가른다(컴파일타임 타입으로 구별 - 런타임이 값만 보고 안
+            // 헷갈리게). 리터럴 숫자=ForRaw, 숫자 slot=ForCountVar, 배열 slot=ForArrayVar.
+            // slot 참조는 (scope_index:u8, offset:u8) - count가 필드(a.count)면 offset이 산다.
             let mut new_for_var = None;
             match count {
                 ForCount::Literal(n) => {
@@ -620,11 +621,14 @@ fn emit_node(
                     code.extend_from_slice(&n.to_le_bytes());
                 }
                 ForCount::Var(var) => {
-                    // count는 root 참조(배열/숫자 통째, 필드 경로 없음)라 offset 0, scope_index만 쓴다.
-                    let (scope_index, _offset, ty) =
+                    let (scope_index, offset, ty) =
                         var_ref_to_slot(var, props, for_scope.for_vars)?;
                     match ty {
-                        Type::Number => {}
+                        Type::Number => {
+                            code.push(Op::ForCountVar as u8);
+                            code.push(scope_index);
+                            code.push(offset);
+                        }
                         Type::Array(inner) => {
                             // 이름 충돌은 에러(섀도잉 금지 - 조회를 순서 무관하게 유지).
                             if props.iter().any(|p| &p.name == item)
@@ -633,16 +637,18 @@ fn emit_node(
                                 return Err(CodegenError::DuplicateBinding(item.clone()));
                             }
                             // 요소값이 앉을 슬롯 - props 뒤에 바깥 회차변수까지 이어 붙인 자리(안 펼쳐 슬롯=개수).
+                            // 런타임도 같은 규칙(props 슬롯 수 + loopIndexStack 깊이)으로 계산하므로 operand엔 안 싣는다.
                             new_for_var = Some(ForVar {
                                 name: item.clone(),
                                 offset: (props.len() + for_scope.for_vars.len()) as u16,
                                 type_: (**inner).clone(),
                             });
+                            code.push(Op::ForArrayVar as u8);
+                            code.push(scope_index);
+                            code.push(offset);
                         }
                         _ => return Err(CodegenError::ForCountNotIterable(var_ref_display(var))),
                     }
-                    code.push(Op::ForScopeIndex as u8);
-                    code.extend_from_slice(&(scope_index as u16).to_le_bytes());
                 }
             }
 
