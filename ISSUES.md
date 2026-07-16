@@ -4,12 +4,12 @@
 
 ## 해결됨
 
-- **라이브 NodeList 순회로 노드 누락 (@for 다중 노드에서 발각)** - runtime.js가 fragment의
+- **라이브 NodeList 순회로 노드 누락 (@for 다중 노드에서 발각)** - runtime.ts가 fragment의
   자식을 부모에 붙일 때 `for (const node of fragment.childNodes) parent.appendChild(node)`로
   돌았다. `childNodes`는 라이브라 `appendChild`가 노드를 fragment에서 떼어낼 때마다 컬렉션이
   줄어 인덱스가 밀리고, 매 순회 한 노드씩 건너뛴다. 단일 노드 컴포넌트에선 안 드러났고, `@for`가
   여러 노드를 조립하면서 발각됐다. 중첩마다 누락이 곱해져 10x100x100=10만이 6250으로, 발화
-  인덱스도 `$2`가 건너뛴 값으로 나왔다. (재현: `bench/components/forstress.qubc` 또는 RENDER로
+  인덱스도 `$2`가 건너뛴 값으로 나왔다. (재현: `components/forstress.qubc` 또는 RENDER로
   진입한 자식의 최상위 `@for`가 여러 카드를 낼 때.) **해결:** 두 조립 지점(RENDER 자식 붙이기,
   `@for` 회차 붙이기)을 `while (fragment.firstChild) parent.appendChild(fragment.firstChild)`
   스냅샷 순회로 바꿨다. 다른 `childNodes` 사용처는 이미 `Array.from`으로 스냅샷을 떠 안전했다.
@@ -23,7 +23,7 @@
   render_source/render_with와 tests/end_to_end.rs(SSR 통합 테스트)도 제거했다.
 
 - **핸들러가 set/get할 수 있는 prop이 이벤트 payload에 선언한 것뿐** - 핸들러의 `set`/`get`은
-  `props.<이름>`으로 prop을 가리키는데, 런타임(runtime.js BIND_EVENT)이 그 `props` 맵을 이벤트
+  `props.<이름>`으로 prop을 가리키는데, 런타임(runtime.ts BIND_EVENT)이 그 `props` 맵을 이벤트
   payload 필드로만 채운다. 그래서 payload에 없는 prop은 핸들러에서 못 바꾼다. (재현:
   `TOGGLE_SECTION({ title, open })`처럼 payload에 `dirty`가 없으면, 컴포넌트가 `dirty`를 prop으로
   받아도 `set(props.dirty, ...)`가 undefined를 건드려 아무 일도 안 일어난다.) d.ts는 이와 어긋나게
@@ -36,7 +36,7 @@
     scope index+paths 폐기하고 이름 기반으로 복귀.)
 
 - **안 쓰는 `use`가 트리셰이킹 안 됨** - `use`로 import했지만 template에서 합성(RENDER)하지
-  않는 컴포넌트가 qubb에 def로 포함된다. (재현: `bench/components/profilecard.qubc`의 `Tag`는
+  않는 컴포넌트가 qubb에 def로 포함된다. (재현: `components/profilecard.qubc`의 `Tag`는
   use만 하고 미사용인데, 컴파일 결과 qubb에 def로 들어간다.) 컴파일러가 도달성 분석 없이 use된
   컴포넌트를 전부 방출하는 것으로 보인다.
 
@@ -45,10 +45,10 @@
   런타임이 void 집합을 모른다.
 
 - **버블 차단 끄는 옵션 미정** - 위임 리스너는 `stopPropagation`을 디폴트로 호출해 버블을
-  끊는다(runtime.js). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
+  끊는다(runtime.ts). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
   필요가 구체화되면 그 모양에 맞춰 설계한다.
 
-- **pathCache 문자열 키 메모리 (실제 문제 아닐 수 있음)** - `leaf-store.js`의 pathCache는
+- **pathCache 문자열 키 메모리 (실제 문제 아닐 수 있음)** - `leaf-store.ts`의 pathCache는
   `Map<path-string, leafIndex>`라, 배열 요소마다 `organizations.0...members.M.profileDetails.name`
   같은 경로 문자열을 키로 영구 보관한다. 요소가 많고 중첩이 깊으면 문자열 키가 쌓인다. **실측**
   (node --expose-gc): 5만 경로 1.75MB, 12만 3.5MB, 120만 56MB (경로당 ~47B - 정수 leafIndex만이면
@@ -96,7 +96,7 @@
   리터럴은 literal type). 한계: (1) import 한 줄이 필요하다 - `.ts`<->`.d.ts` 같은 basename
   자동 짝은 TS가 안 묶고(실험으로 확인), Svelte식 "옆에 두면 자동"은 비-TS 소스(`.svelte`)
   모듈 해석이라 우리 `.ts` 핸들러엔 안 통한다. (2) d.ts가 디스크 부산물이다(gitignore). (3)
-  생성이 handlers.ts 열림·`.qubc` 저장 시 매번 풀 컴파일이고, 컴파일러/disasm 경로가 워크스페이스
+  생성이 handlers.ts 열림·`.qubc` 저장 시 매번 풀 컴파일이고, 컴파일러 경로가 워크스페이스
   루트 기준 하드코딩이다(다른 레포에서 쓰려면 못 씀). 더 깔끔한 길은 **TS Language Service
   plugin(또는 LSP)** 으로 메모리상 가상 타입을 주입하는 것 - import도 파일도 없이 `handlers`에
   타입이 붙는다(Svelte의 `svelte2tsx`+`svelte-language-server`가 이 층위). 비용이 커서

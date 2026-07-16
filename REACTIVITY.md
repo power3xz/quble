@@ -314,7 +314,7 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 - **비활성 가지 안의 중첩 if는 skip돼 Region이 안 생긴다** → 그 가지를 swap으로 처음 build할 때
   비로소 생성된다. 그래서 `regions` 수 = 실제로 build된 가지들이 품은 IF 수.
 - swap 시 노드는 가지 루트에서만 detach/attach(자손 DOM은 따라온다), 구독은 자식 Region까지
-  **재귀로** 끊고/복원한다(`shownIndex`로 활성 자식만). off/on 비대칭은 region.js 참고.
+  **재귀로** 끊고/복원한다(`shownIndex`로 활성 자식만). off/on 비대칭은 region.ts 참고.
 
 ### 거부한 대안
 

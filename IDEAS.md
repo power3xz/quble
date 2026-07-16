@@ -8,7 +8,7 @@
 
 ### 런타임 트리셰이킹 (필요한 opcode 핸들러만 구성)
 
-지금 runtime.js는 작지만(~5KB), `@for`·`@if`·이벤트·반응성이 들어오면 계속 커져 React 런타임
+지금 runtime.ts는 작지만(~5KB), `@for`·`@if`·이벤트·반응성이 들어오면 계속 커져 React 런타임
 (46KB gzip)을 향해 간다. "런타임이 작다"는 강점이 희석된다. 해결: **페이지가 실제로 쓰는
 기능(opcode)만 든 런타임을 구성**한다.
 
@@ -226,25 +226,20 @@ opcode를 재해석해 노드를 새로 조립하는 대신, 뼈대를 한 번 �
 
 ### 컴포넌트 뷰어 (스토리북류) - qubb 인스펙터
 
-→ **구현 완료. `bench/server/public/inspector.html` + `proto/web/disasm.js`** (`bench/server`에서
-`cargo run` 후 /public/inspector.html). 아래는 원래 아이디어와 그보다 더 간 부분의 기록.
-
 빌드 산출물 .qubb를 **클라에서 그대로 로드**해 컴포넌트를 골라 확인하는 도구. 별도 빌드 단계 없이
-runtime.js로 즉시 인스턴스화하는 강점을 그대로 활용한다 - Storybook이 번들러·메타 파일을 요구하는
+runtime으로 즉시 인스턴스화하는 강점을 그대로 활용한다 - Storybook이 번들러·메타 파일을 요구하는
 것과 달리 산출물 하나로 끝난다. 흐름: ① .qubb 디코드해 컴포넌트 목록(defs) 표시 ② 선택하면 props
 입력 필드 자동 생성 ③ 값 입력 -> `ctx.set`으로 반영(반응 갱신).
 
-**아이디어보다 더 간 부분:**
-- **디컴파일(qubb -> qubc)** 추가 - 목록만이 아니라 선택한 컴포넌트를 qubc 소스로 복원해 보여준다
-  (`disasm.js`: `inspect`/`decompileComponent`/`componentArgs`). 변수·prop명은 바이트코드에 없어
-  `arg0`·`arg1`…로, 합성은 `Child(arg0={arg1}…) {}` 키워드 바인딩으로, use는 `./<Name>.qubc`로 복원.
-- **props 타입 단서 미결을 용도 추론으로 해결** - 원래 "타입 단서 없음 -> 입력 위젯 뭘 줄지 미결,
-  1차 텍스트 단일"이었으나, opcode 사용처로 추론한다: `IF`->bool(체크박스), `FOR`->number(숫자),
-  그 외->string(텍스트). 바이트코드 포맷은 안 바꿨다(qubb에 props명·타입 안 넣음 - 그 결정 유지).
+**더 갈 수 있는 부분:**
+- **디컴파일(qubb -> qubc)** - 목록만이 아니라 선택한 컴포넌트를 qubc 소스로 복원해 보여준다.
+  변수·prop명은 바이트코드에 없어 `arg0`·`arg1`…로, 합성은 `Child(arg0={arg1}…) {}` 키워드
+  바인딩으로, use는 `./<Name>.qubc`로 복원.
+- **props 타입 단서 미결을 용도 추론으로 해결** - "타입 단서 없음 -> 입력 위젯 뭘 줄지 미결"을,
+  opcode 사용처로 추론해 푼다: `IF`->bool(체크박스), `FOR`->number(숫자), 그 외->string(텍스트).
+  바이트코드 포맷은 안 바꾼다(qubb에 props명·타입 안 넣음 - 그 결정 유지).
 
-**한계(원리적):** number(`@for` count)는 set으로 반영 안 됨(런타임 @for 미완) - 첫 렌더만. 별칭·
-슬롯·진짜 변수명은 바이트코드에 없어 복원 불가. 트리셰이킹 안 되는 use도 def 목록에 그대로 보인다
-(인스펙터로 그 버그를 발견 - ISSUES.md).
+**한계(원리적):** 별칭·슬롯·진짜 변수명은 바이트코드에 없어 복원 불가.
 
 ### @if swap 시 비활성 가지 lazy build (클라 region)
 
@@ -276,4 +271,4 @@ interpret(startPc, endPc, regionIndex, branchIndex)
 
 검증 순서: ① 스킵 없는 버전(양쪽 다 build, IF_END에서 비활성 구독 해제)으로 뼈대 확인 →
 ② cond 변경 swap 동작 확인 → ③ skip + lazy build 도입. **①·②·③ 모두 완료**
-(`proto/web/compile.js`, `region.js`, `region-build.test.js` 8 테스트).
+(`proto/web/runtime.ts` 해석, `region.ts`, 테스트는 `if-integration.test.ts`로 이관).
