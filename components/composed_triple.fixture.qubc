@@ -1,4 +1,4 @@
-use InnerPair from "./inner_pair.qubc"
+use InnerPair from "./inner_pair.fixture.qubc"
 
 component ComposedTriple {
   props { c1: bool, c2: bool, c3: bool, a: string, b: string, c: string, d: string }

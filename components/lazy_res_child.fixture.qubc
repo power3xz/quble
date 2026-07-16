@@ -1,4 +1,4 @@
-use "./styled_res.css"
+use "./styled_res.fixture.css"
 
 component Styled {
   template { span(class="s") {} }

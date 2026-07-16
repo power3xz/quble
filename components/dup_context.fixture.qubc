@@ -1,4 +1,4 @@
-use Child from "./dup_context_child.qubc"
+use Child from "./dup_context_child.fixture.qubc"
 
 component Parent {
   props { userId: string }

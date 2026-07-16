@@ -1,4 +1,4 @@
-use Styled from "./lazy_res_child.qubc"
+use Styled from "./lazy_res_child.fixture.qubc"
 
 component Outer {
   props { show: bool }
