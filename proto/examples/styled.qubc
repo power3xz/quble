@@ -1,7 +1,0 @@
-use "./styled.css"
-
-component Badge {
-  template {
-    span(class="badge") { "NEW" }
-  }
-}

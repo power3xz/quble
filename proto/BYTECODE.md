@@ -391,7 +391,6 @@ proto/
     bytecode/   # opcode, 내장 태그 테이블, 전역 상수풀(속성명), 컴포넌트 상수풀, 직렬화/역직렬화 (컴파일러/렌더러 공용)
     compiler/   # .qubc 소스 -> bytecode. 프론트엔드(lexer/parse->ast) + 백엔드(codegen)
     renderer/   # bytecode -> HTML 문자열 (SSR, render_to_string)
-  examples/hello.qubc
   src/main.rs           # .qubc -> 컴파일 -> 실행 -> stdout
 ```
 

@@ -1,7 +1,0 @@
-component Switch {
-  props { title, isOn }
-  events { TOGGLE({ title, on: isOn }) }
-  template {
-    button(@click:TOGGLE) { "스위치" }
-  }
-}
