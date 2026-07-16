@@ -276,33 +276,6 @@ fn types_match(a: &Type, b: &Type) -> bool {
     }
 }
 
-/// props를 선언 순서로 펼친 leaf 경로들. `var_ref_to_scope_index`와 같은 순회라
-/// 결과 벡터의 인덱스 = scope 인덱스다. 스칼라는 이름 그대로(`heading`), 객체는 필드까지
-/// 점 경로(`general.a.title`). manifest.props가 되어 런타임 paths[i]를 store 경로에 잇는다.
-pub fn flatten_prop_paths(props: &[Prop]) -> Vec<String> {
-    let mut paths = Vec::new();
-    for p in props {
-        push_leaf_paths(&p.name, &p.type_, &mut paths);
-    }
-    paths
-}
-
-/// 한 타입의 leaf 경로들을 prefix 아래로 펼쳐 push. 객체는 필드 선언 순서로 재귀.
-/// (배열은 요소 타입으로 - 요소 1벌 취급.)
-fn push_leaf_paths(prefix: &str, ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Bool | Type::Number | Type::String => out.push(prefix.to_string()),
-        Type::Array(inner) => push_leaf_paths(prefix, inner, out),
-        Type::Object(fields) => {
-            for (name, field_ty) in fields {
-                push_leaf_paths(&format!("{prefix}.{name}"), field_ty, out);
-            }
-        }
-        Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
-        Type::Omit(..) | Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
-    }
-}
-
 /// 에러 메시지용 경로 표기: `root.a.b`.
 fn var_ref_display(var: &VarRef) -> String {
     if var.path.is_empty() {

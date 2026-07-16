@@ -26,10 +26,6 @@ pub struct CompileOutput {
     pub bytecode: Box<[u8]>,
     /// 인덱스 = 모듈 전역 resId, 값 = 리소스 정규화 경로.
     pub resources: Vec<String>,
-    /// 루트(comp 0) props를 선언 순서로 펼친 leaf 경로들. 인덱스 = scope 인덱스라
-    /// mount가 paths[i]=props[i]로 scope index를 store 경로에 잇는다. 객체는 leaf까지
-    /// 점 경로로 펼친다(`general.a.title`) - scope index 공간이 leaf 펼침이라 맞춘다.
-    pub props: Vec<String>,
 }
 
 /// 엔트리 소스를 직렬화된 바이트코드로 컴파일. use 그래프를 resolver로 따라가
@@ -41,13 +37,8 @@ pub fn compile_src(
     resolver: &impl Resolver,
 ) -> Result<CompileOutput, CompileError> {
     let comps = resolve::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
-    let props = codegen::flatten_prop_paths(&comps[0].comp.props);
     let (bytecode, resources) = codegen::generate(&comps).map_err(CompileError::Codegen)?;
-    Ok(CompileOutput {
-        bytecode,
-        resources,
-        props,
-    })
+    Ok(CompileOutput { bytecode, resources })
 }
 
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
@@ -877,10 +868,29 @@ mod tests {
         ));
     }
 
-    /// CompileOutput.props - 루트 props를 leaf 경로로 펼친다(객체는 필드까지). 인덱스가
-    /// scope 인덱스와 같아야 런타임 paths[i]가 맞으므로, 선언 순서·객체 재귀 순서를 검증.
+    /// resolve가 푼 루트 props를 leaf 경로로 펼쳐(객체는 필드까지, 배열은 요소 타입) 유틸
+    /// 타입(Ref/Omit/Pick) 해소·선언 순서·객체 재귀 순서를 검증한다. 펼침은 이 검증만의 관찰
+    /// 창이라 테스트 지역에 둔다(런타임은 타입 테이블로 심어 이 leaf 경로를 안 쓴다).
     fn compile_props(src: &str) -> Vec<String> {
-        compile_src("entry", src, &(|_: &str, _: &str| None)).unwrap().props
+        let comps = resolve::flatten("entry", src, &(|_: &str, _: &str| None)).unwrap();
+        fn push_leaf_paths(prefix: &str, ty: &ast::Type, out: &mut Vec<String>) {
+            match ty {
+                ast::Type::Bool | ast::Type::Number | ast::Type::String => out.push(prefix.to_string()),
+                ast::Type::Array(inner) => push_leaf_paths(prefix, inner, out),
+                ast::Type::Object(fields) => {
+                    for (name, field_ty) in fields {
+                        push_leaf_paths(&format!("{prefix}.{name}"), field_ty, out);
+                    }
+                }
+                ast::Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
+                ast::Type::Omit(..) | ast::Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
+            }
+        }
+        let mut paths = Vec::new();
+        for p in &comps[0].comp.props {
+            push_leaf_paths(&p.name, &p.type_, &mut paths);
+        }
+        paths
     }
 
     /// prop 타입에 컴포넌트명 참조(`sec: Section`)를 쓰면 그 컴포넌트 props가 Object로
