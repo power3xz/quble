@@ -400,9 +400,12 @@ const refToSourcePairs = (ref: TRef, leafCount: number, argumentSourcePairs: (st
 //   STEP_ENTER key : 새 객체를 만들어 부모[key]에 걸고 내려간다
 //   STEP_LEAF  key : 부모[key] = 다음 leaf 값
 //   STEP_EXIT      : 부모로 돌아온다
+//   STEP_ARRAY key : 부모[key] = 배열. source 한 쌍(arrayInfoIndex 슬롯)을 소비해 요소 위치를
+//                    얻고, 요소 타입 step을 요소마다 그 base에서 재적용한다(요소 수는 런타임 동적).
 const STEP_ENTER = 0;
 const STEP_LEAF = 1;
 const STEP_EXIT = 2;
+const STEP_ARRAY = 3;
 
 // type_ref 구조를 조립 step 열로 컴파일한다(type_ref별 1회, dedup되니 공유 가능). 명시적 스택
 // 반복이라 깊은 타입에도 콜스택 안전. leaf 자리엔 인덱스를 안 박고 STEP_LEAF로 "다음 leaf 소비"만
@@ -411,8 +414,9 @@ const STEP_EXIT = 2;
 // @param types   타입 테이블
 // @param typeRef 시작 타입
 // @param constpool 상수풀(필드명 해석)
-// @returns       [[STEP_*, key]] 평탄 열. 루트 key=null.
-type TStep = [number, string | null];
+// @returns       [[STEP_*, key, elemSteps?]] 평탄 열. 루트 key=null. STEP_ARRAY만 elemSteps(요소
+//                타입 step 열)를 셋째로 싣는다 - 요소는 store 끝 별도 base에 살아 인라인이 안 되므로.
+type TStep = [number, string | null, TStep[]?];
 const compileType = (types: TType[], typeRef: number, constpool: (string | number | boolean)[]): TStep[] => {
   const steps: TStep[] = [];
   // 한 노드로 내려간다: 스칼라면 LEAF 하나로 끝, 객체면 ENTER를 내고 남은 자식 큐를 돌려준다.
@@ -424,8 +428,10 @@ const compileType = (types: TType[], typeRef: number, constpool: (string | numbe
       return null;
     }
     if (t.tag === "array") {
-      // payload/context에 배열 통째 전달은 아직 없다 - 값 자리엔 leaf만(컴파일러 NotLeaf로 거른다).
-      throw new Error("배열 타입 조립은 미구현(payload/context 배열 전달)");
+      // 배열 칸은 source 한 쌍(arrayInfoIndex 슬롯)뿐 - 요소 수는 런타임에만 안다. 요소 타입 step을
+      // 셋째에 실어(요소 1벌 구조) assemble이 요소마다 그 base에서 재적용한다. leaf처럼 소비 끝(null).
+      steps.push([STEP_ARRAY, key, compileType(types, t.elemTypeRef, constpool)]);
+      return null;
     }
     steps.push([STEP_ENTER, key]);
     return t.fields.map(([nameConst, childRef]: TField): [string, number] => [
@@ -464,11 +470,17 @@ const compileType = (types: TType[], typeRef: number, constpool: (string | numbe
 // @param steps   compileType 결과
 // @param fieldSourcePairs 이 field의 flat 값-소스 [kind, ref, …](깊이우선, step의 LEAF 순서와 일치)
 
-const assemble = (steps: TStep[], fieldSourcePairs: number[], store: TLeafStoreSubject, module: TModule) => {
+const assemble = (
+  steps: TStep[],
+  fieldSourcePairs: number[],
+  store: TLeafStoreSubject,
+  module: TModule,
+  arrayPool: TArrayInfo[],
+): unknown => {
   let cursor = 0;
   const root: Record<string, unknown> = {};
   const stack: Record<string, unknown>[] = [root];
-  for (const [step, key] of steps) {
+  for (const [step, key, elemSteps] of steps) {
     const top = stack[stack.length - 1];
     if (step === STEP_LEAF) {
       const kind = fieldSourcePairs[cursor++];
@@ -478,6 +490,24 @@ const assemble = (steps: TStep[], fieldSourcePairs: number[], store: TLeafStoreS
         return value; // 루트가 스칼라 - 객체로 안 감싼다
       }
       top[key] = value;
+    } else if (step === STEP_ARRAY) {
+      // source 한 쌍(arrayInfoIndex 슬롯)을 소비. 배열은 컴파일러가 Scope(STORE)로만 싣는다.
+      cursor++; // kind(STORE) 건너뜀
+      const arrayInfoIndex = store.get(fieldSourcePairs[cursor++]) as number;
+      const info = arrayPool[arrayInfoIndex];
+      // 요소마다 base(elemStartLeafIndices[i])부터 elemSize칸 연속을 STORE 쌍으로 펴 재조립한다.
+      const arr: unknown[] = info.elemStartLeafIndices.map((base) => {
+        const elemPairs: number[] = [];
+        for (let i = 0; i < info.elemSize; i++) {
+          elemPairs.push(STORE, base + i);
+        }
+        // biome-ignore lint/style/noNonNullAssertion: STEP_ARRAY는 compileType에서 항상 elemSteps를 싣는다
+        return assemble(elemSteps!, elemPairs, store, module, arrayPool);
+      });
+      if (key === null) {
+        return arr; // 루트가 배열 - 객체로 안 감싼다
+      }
+      top[key] = arr;
     } else if (step === STEP_ENTER) {
       if (key === null) {
         continue; // 루트 객체는 root 그대로 - 새로 만들지 않는다
@@ -609,16 +639,16 @@ const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 �
 
 // 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
 const dispatchBinding = (b: TBinding, domEventObject: Event) => {
-  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module } = b;
+  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module, arrayPool } = b;
   const data: Record<string, unknown> = {};
   for (const p of payload) {
-    data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
+    data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
   }
   const context: Record<string, Record<string, unknown>> = {};
   for (const ctxName in contextLeaves) {
     const values: Record<string, unknown> = {};
     for (const p of contextLeaves[ctxName]) {
-      values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module);
+      values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
     }
     context[ctxName] = values;
   }
@@ -749,6 +779,7 @@ type TBinding = {
   loopIndices: Partial<{ [key in TIndexSymbol]: number }>;
   store: TLeafStoreSubject;
   module: TModule;
+  arrayPool: TArrayInfo[];
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -1090,6 +1121,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
               loopIndices,
               store,
               module,
+              arrayPool,
             };
             ensureDelegate(domEvent);
             break;
