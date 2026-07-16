@@ -39,7 +39,9 @@ props {
 }
 ```
 
-쉼표로 구분된 `이름: 타입` 목록. 타입은 **필수**(표기 강제).
+쉼표로 구분된 `이름: 타입` 목록. 타입은 **필수**(표기 강제). 구분자 쉼표는 필드 사이에
+**필수**이나 마지막 필드 뒤는 생략 가능하고 trailing 쉼표도 허용한다(TS 규칙). 객체 타입의
+필드도 같다.
 
 타입은 quble이 온전히 소유하는 재귀 문법이다:
 
@@ -47,7 +49,7 @@ props {
 Type   = Prim | Array | Object | Ref | Util
 Prim   = "bool" | "number" | "string"
 Array  = Type "[]"                              // string[], number[][]
-Object = "{" (이름 ":" Type ("," 이름 ":" Type)*)? "}"
+Object = "{" (이름 ":" Type ("," 이름 ":" Type)* ","?)? "}"
 Ref    = 컴포넌트이름                            // 그 컴포넌트의 props를 객체로 참조
 Util   = ("Omit" | "Pick") "<" Type "," 키 ("|" 키)* ">"   // 키는 '작은따옴표'
 ```

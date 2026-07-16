@@ -1545,6 +1545,37 @@ mod tests {
         ));
     }
 
+    /// 타입 필드 구분자 콤마는 필수 - 누락하면 ParseError. (지금은 완전 optional이었다.)
+    #[test]
+    fn type_field_missing_comma_rejected() {
+        // props에서 콤마 누락.
+        let src = r#"component A { props { a: string b: number } template { div() {} } }"#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+        // 중첩 object 타입에서 콤마 누락.
+        let nested = r#"component B { props { o: { a: string b: number } } template { div() {} } }"#;
+        assert!(matches!(
+            compile(nested),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// 마지막 필드 뒤 콤마는 생략 가능하고 trailing 콤마도 허용(TS 규칙). 둘 다 컴파일 성공.
+    #[test]
+    fn type_field_last_comma_optional() {
+        // 마지막 생략.
+        let omitted = r#"component A { props { a: string, b: number } template { div() {} } }"#;
+        assert!(compile(omitted).is_ok());
+        // trailing 콤마.
+        let trailing = r#"component B { props { a: string, b: number, } template { div() {} } }"#;
+        assert!(compile(trailing).is_ok());
+        // 중첩 object에서도 동일.
+        let nested = r#"component C { props { o: { a: string, b: number, } } template { div() {} } }"#;
+        assert!(compile(nested).is_ok());
+    }
+
     /// 객체 경로 보간 `{user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
     /// 값 자리 TEXT_VAR는 (scope_index, offset) 두 u8. 슬롯 순번 title=0, user=1, done=2.
     /// 객체 필드는 root 슬롯 + 필드까지의 store 칸 offset: user.name=(1,0), user.contact.email=(1,1).

@@ -240,25 +240,16 @@ impl<'a> Parser<'a> {
         self.keyword("props")?;
         self.expect(&Token::LBrace)?;
         let mut props = Vec::new();
-        loop {
-            match self.peek() {
-                Some(Token::RBrace) | None => break,
-                Some(Token::Comma) => {
-                    self.next()?;
-                }
-                Some(Token::Ident(_)) => {
-                    let name = self.ident()?;
-                    self.expect(&Token::Colon)?;
-                    let ty = self.type_expr()?;
-                    props.push(Prop { name, type_: ty });
-                }
-                Some(t) => {
-                    return Err(ParseError::Expected {
-                        want: "prop name or }".into(),
-                        got: format!("{t:?}"),
-                    })
-                }
+        // 구분자 콤마 필수, 마지막 prop 뒤만 생략 가능(object_type과 동일 규칙).
+        while !matches!(self.peek(), Some(Token::RBrace) | None) {
+            let name = self.ident()?;
+            self.expect(&Token::Colon)?;
+            let ty = self.type_expr()?;
+            props.push(Prop { name, type_: ty });
+            if matches!(self.peek(), Some(Token::RBrace)) {
+                break;
             }
+            self.expect(&Token::Comma)?;
         }
         self.expect(&Token::RBrace)?;
         Ok(props)
@@ -337,29 +328,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // OBJECT = { (IDENT : TYPE (, IDENT : TYPE)*)? }  - 필드 선언 순서 보존.
+    // OBJECT = { (IDENT : TYPE (, IDENT : TYPE)* ,?)? }  - 필드 선언 순서 보존.
+    // 구분자 콤마 필수, 마지막 필드 뒤만 생략 가능(trailing 콤마 허용).
     fn object_type(&mut self) -> Result<Type, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut fields = Vec::new();
-        loop {
-            match self.peek() {
-                Some(Token::RBrace) | None => break,
-                Some(Token::Comma) => {
-                    self.next()?;
-                }
-                Some(Token::Ident(_)) => {
-                    let name = self.ident()?;
-                    self.expect(&Token::Colon)?;
-                    let ty = self.type_expr()?;
-                    fields.push((name, ty));
-                }
-                Some(t) => {
-                    return Err(ParseError::Expected {
-                        want: "field name or }".into(),
-                        got: format!("{t:?}"),
-                    })
-                }
+        while !matches!(self.peek(), Some(Token::RBrace) | None) {
+            let name = self.ident()?;
+            self.expect(&Token::Colon)?;
+            let ty = self.type_expr()?;
+            fields.push((name, ty));
+            // 필드 뒤가 }면 종료(마지막 생략), 아니면 콤마 필수(소비 후 계속).
+            // trailing 콤마는 다음 루프에서 }를 만나 종료한다.
+            if matches!(self.peek(), Some(Token::RBrace)) {
+                break;
             }
+            self.expect(&Token::Comma)?;
         }
         self.expect(&Token::RBrace)?;
         Ok(Type::Object(fields))
