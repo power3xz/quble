@@ -2,7 +2,13 @@
 # 컴포넌트를 브라우저에서 확인한다: quble 컴파일 -> build.mjs로 dist 빌드 -> 고정 포트 정적 서버.
 # 서버가 이미 그 포트에 떠 있으면 내리고 다시 올린다. data는 dist/data.json으로 서빙돼 런타임이 fetch한다.
 #
+# 컴포넌트 소스(.qubc)는 레포 루트의 /components 아래에 있다 - proto/ 아래가 아니다.
+# 초기 data가 필요한 컴포넌트는 짝 파일 <name>.data.json을 같은 폴더에 두는 게 관례다
+# (예: components/forstress.qubc <-> components/forstress.data.json). --data로 그 짝을 넘긴다.
+# 서빙되는 건 proto/dist 하나뿐 - build.mjs가 여기에 <name>.qubb·data.json·index.html을 낸다.
+#
 # 사용: ./quble-preview.sh <component.qubc> [--data <data.json>]
+#   예: ./quble-preview.sh components/forstress.qubc --data components/forstress.data.json
 set -euo pipefail
 
 PORT=8140
