@@ -8,7 +8,7 @@
 //   (예: forstress.qubc <-> forstress.data.json). entry 빌드 전 짝 data.json 유무를 확인할 것.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { build } from "esbuild";
 
@@ -43,6 +43,10 @@ if (!existsSync(quble)) {
 
 const distDir = join("dist");
 const stem = basename(entry).replace(/\.qubc$/, "");
+
+// dist를 비우고 시작한다 - 프리뷰는 한 컴포넌트만 담는다(이전 빌드가 누적돼 남지 않게).
+rmSync(distDir, { recursive: true, force: true });
+mkdirSync(distDir, { recursive: true });
 
 // 1. quble 컴파일 - .qubb + res/*.css + dist/<stem>.manifest.json({"resources":[...],"props":[...]})
 const compiled = spawnSync(quble, [entry], { stdio: "inherit" });
@@ -99,12 +103,16 @@ writeFileSync(join(distDir, "quble-runtime.js"), runtimeBundle.outputFiles[0].te
 //    구동 크리티컬 체인(runtime -> manifest -> qubb -> handlers)은 순차 발견이라 폭포수가 된다.
 //    빌드가 그 경로들을 알므로 preload로 심어 HTML 파싱 시점에 병렬로 받게 한다(CSS는 렌더 중
 //    LOAD_RES가 삽입하니 크리티컬 패스 아님 - 제외).
+// 초기 data는 dist/data.json으로 떨구고 런타임이 HTTP로 fetch한다(인라인 아님) - 큰 data를
+// HTML에 박지 않고, 프리뷰 서버가 파일로 서빙한다. --data 없으면 빈 객체.
 const data = dataFile ? readFileSync(dataFile, "utf8") : "{}";
+writeFileSync(join(distDir, "data.json"), data);
 const finalManifest = JSON.parse(readFileSync(join(distDir, `${stem}.manifest.json`), "utf8"));
 const preloads = [
   `  <link rel="modulepreload" href="./quble-runtime.js">`,
   `  <link rel="preload" href="./${stem}.qubb" as="fetch" crossorigin>`,
   `  <link rel="preload" href="./${stem}.manifest.json" as="fetch" crossorigin>`,
+  `  <link rel="preload" href="./data.json" as="fetch" crossorigin>`,
 ];
 if (finalManifest.handlers) {
   preloads.push(`  <link rel="modulepreload" href="./${finalManifest.handlers}">`);
@@ -123,9 +131,11 @@ ${preloads.join("\n")}
     // 초기 렌더 계측: mount 시작 -> 반환(디코드+인스턴스화+부착) -> rAF(페인트 후).
     // React/Svelte 데모와 같은 방식으로 재 나란히 비교한다.
     const t0 = performance.now();
+    // 초기 data를 HTTP로 fetch(인라인 아님). 프리뷰 서버가 dist/data.json을 서빙한다.
+    const data = await fetch("./data.json").then((r) => r.json());
     // 디버깅용: mount 결과({ store, inst })를 window에 노출한다. inst.regionPool은 이 인스턴스의
     // 모든 Region(@if swap/@for 회차 경계)이라, 콘솔에서 __quble.inst.regionPool.length로 누수를 잰다.
-    window.__quble = await mount("./${stem}.qubb", document.getElementById("quble-app"), ${data});
+    window.__quble = await mount("./${stem}.qubb", document.getElementById("quble-app"), data);
     const mounted = performance.now();
     requestAnimationFrame(() => {
       const painted = performance.now();
