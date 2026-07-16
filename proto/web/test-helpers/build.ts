@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const HERE = dirname(fileURLToPath(import.meta.url)); // proto/web/fixtures
+const HERE = dirname(fileURLToPath(import.meta.url)); // proto/web/test-helpers
 const PROTO = join(HERE, "..", ".."); // proto
 const QUBLE_BIN = join(PROTO, "target", "debug", "quble");
 

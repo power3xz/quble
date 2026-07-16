@@ -4,8 +4,8 @@
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import "./fixtures/dom.ts"; // jsdom 전역 document 주입(첫 import). 심볼은 안 쓰고 부수효과만 필요.
-import { buildFixture, buildFixtureWithResmap } from "./fixtures/build.ts";
+import "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import). 심볼은 안 쓰고 부수효과만 필요.
+import { buildFixture, buildFixtureWithResmap } from "./test-helpers/build.ts";
 
 const { compile } = await import("./runtime.ts");
 

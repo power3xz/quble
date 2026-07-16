@@ -7,8 +7,8 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { buildFixture } from "./fixtures/build.ts";
-import { mount } from "./fixtures/dom.ts"; // jsdom 전역 document 주입(첫 import)
+import { buildFixture } from "./test-helpers/build.ts";
+import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
 
 // dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
 const { compile } = await import("./runtime.ts");
