@@ -10,11 +10,11 @@ use LinkButton from "./linkbutton.qubc"
 component ProfileCard {
   props {
     name: string, role: string, bio: string, avatar: string, link: string, theme: string,
-    followersLabel: string, followers: string, followingLabel: string, following: string, postsLabel: string, posts: string,
-    locationIcon: string, location: string, companyIcon: string, company: string,
-    site: string, github: string, twitter: string,
-    act1Icon: string, act1Text: string, act1Time: string, act2Icon: string, act2Text: string, act2Time: string, act3Icon: string, act3Text: string, act3Time: string,
-    tag1: string, tag2: string, tag3: string, tag4: string
+    stats: { label: string, value: string }[],
+    meta: { icon: string, text: string }[],
+    activities: { icon: string, text: string, time: string }[],
+    tags: string[],
+    links: string[]
   }
   template {
     article(class={theme}) {
@@ -27,29 +27,29 @@ component ProfileCard {
       }
       p(class="bio") { {bio} }
       div(class="stats") {
-        Stat(label={followersLabel} value={followers}) {}
-        Stat(label={followingLabel} value={following}) {}
-        Stat(label={postsLabel} value={posts}) {}
+        @for (stat of stats) {
+          Stat(label={stat.label} value={stat.value}) {}
+        }
       }
       div(class="meta") {
-        MetaRow(icon={locationIcon} text={location}) {}
-        MetaRow(icon={companyIcon} text={company}) {}
+        @for (row of meta) {
+          MetaRow(icon={row.icon} text={row.text}) {}
+        }
       }
       div(class="activity") {
-        Activity(icon={act1Icon} text={act1Text} time={act1Time}) {}
-        Activity(icon={act2Icon} text={act2Text} time={act2Time}) {}
-        Activity(icon={act3Icon} text={act3Text} time={act3Time}) {}
+        @for (act of activities) {
+          Activity(icon={act.icon} text={act.text} time={act.time}) {}
+        }
       }
       div(class="tags") {
-        Tag(text={tag1} theme={theme}) {}
-        Tag(text={tag2} theme={theme}) {}
-        Tag(text={tag3} theme={theme}) {}
-        Tag(text={tag4} theme={theme}) {}
+        @for (tag of tags) {
+          Tag(text={tag} theme={theme}) {}
+        }
       }
       div(class="links") {
-        LinkButton(link={site} theme={theme}) {}
-        LinkButton(link={github} theme={theme}) {}
-        LinkButton(link={twitter} theme={theme}) {}
+        @for (url of links) {
+          LinkButton(link={url} theme={theme}) {}
+        }
       }
       a(class="profile" href={link}) { "전체 프로필 보기" }
     }

@@ -1,0 +1,24 @@
+{
+  "name": "김도현",
+  "role": "프론트엔드 엔지니어",
+  "bio": "컴파일러와 UI 언어를 만듭니다. quble로 실험 중.",
+  "avatar": "🧑‍💻",
+  "link": "#",
+  "theme": "dark",
+  "stats": [
+    { "label": "팔로워", "value": "1.2k" },
+    { "label": "팔로잉", "value": "318" },
+    { "label": "게시물", "value": "94" }
+  ],
+  "meta": [
+    { "icon": "📍", "text": "서울" },
+    { "icon": "🏢", "text": "Quble Labs" }
+  ],
+  "activities": [
+    { "icon": "🚀", "text": "self-close 문법 확정", "time": "2일 전" },
+    { "icon": "🔧", "text": "@for 배열 변형 데모", "time": "5일 전" },
+    { "icon": "📝", "text": "DESIGN.md §4.5 정리", "time": "1주 전" }
+  ],
+  "tags": ["rust", "bytecode", "ui", "compiler"],
+  "links": ["https://example.com", "https://github.com", "https://twitter.com"]
+}
