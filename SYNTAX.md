@@ -126,6 +126,29 @@ span() { "담당자: {assignee}" }             // 문자열 안 보간 허용
 - 속성 값: 문자열 `"…"`, 표현식 `{EXPR}`, 배열 `[…]`
 - 클래스 배열: `div(class=["card", styles.variant, styles.priority])`
 
+### 3.1.1 self-close (자식 없는 요소)
+
+자식이 없는 요소는 여는 태그 안 끝에 `/`를 두어 self-close로 닫는다. 자식 블록(`{}`)을
+쓰지 않는다.
+
+```
+img(src="a.png" alt="사진" /)
+input(type="text" @input:EDIT /)
+br( /)                                      // 속성 없어도 ( /)
+hr( /)
+```
+
+- **`/` 앞 공백 필수** - 속성 유무와 무관하게 예외 없다(`img(… /)`, `br( /)`). 괄호 안은
+  공백 구분이라(`attr @event` 사이 공백처럼) `/`도 한 토큰이라 앞 공백으로 가른다. (처음엔
+  엄격하게 강제하고, 필요가 생기면 나중에 완화 - DESIGN §4.5.)
+- **축약 없음** - 속성이 없어도 `()`를 생략하지 않는다(`br(/)`가 아니라 `br( /)`).
+- `/`는 여는 태그(괄호) 안 마지막 토큰이다. 속성은 `이름=값`/`@event:NAME` 형태라 단독
+  `/`와 안 겹쳐 파싱 모호성이 없다.
+
+**void 요소**(`area base br col embed hr img input link meta source track wbr`)는 self-close가
+**필수**다 - 자식 블록을 쓰면 **컴파일 에러**(컴파일러가 void 집합을 안다). void가 아닌 일반
+태그도 자식이 없으면 self-close로 쓸 수 있다(`div(class="x" /)`); 자식이 있으면 `{}`를 쓴다.
+
 ### 3.2 컴포넌트 합성 / 별칭
 
 ```
