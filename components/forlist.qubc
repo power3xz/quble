@@ -4,7 +4,7 @@ component ForList {
     div(class="forlist") {
       h1() { "quble @for 데모" }
       @for (item of count) {
-        Row: ForRow() {}
+        Row: ForRow( /)
       }
     }
   }

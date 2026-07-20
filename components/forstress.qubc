@@ -12,7 +12,7 @@ component Depth1 {
       button(class="stress__add" @click:ADD) { "행 추가 (+5,000 카드)" }
       button(class="stress__remove" @click:REMOVE) { "행 제거 (-5,000 카드)" }
       @for (a of rows) {
-        Row: Depth2() {}
+        Row: Depth2( /)
       }
     }
   }
@@ -21,7 +21,7 @@ component Depth1 {
 component Depth2 {
   template {
     @for (b of 50) {
-      Col: Depth3() {}
+      Col: Depth3( /)
     }
   }
 }
@@ -29,7 +29,7 @@ component Depth2 {
 component Depth3 {
   template {
     @for (c of 100) {
-      Card: ProfileCard() {}
+      Card: ProfileCard( /)
     }
   }
 }

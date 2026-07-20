@@ -15,7 +15,7 @@ component TicketCard {
       @with Header {
         div(class="ticket__head") {
           h3(class="ticket__title") { "로그인 후 리다이렉트 깨짐" }
-          Badge(role="긴급" theme="dark") {}
+          Badge(role="긴급" theme="dark" /)
         }
       }
       p(class="ticket__body") { "OAuth 콜백에서 state 불일치로 401이 발생합니다. 재현 100%." }

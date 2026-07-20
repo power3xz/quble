@@ -1,7 +1,7 @@
 component Outer {
   template {
     div() {
-      Mid: Middle() {}
+      Mid: Middle( /)
     }
   }
 }
@@ -9,7 +9,7 @@ component Outer {
 component Middle {
   template {
     @for (b of 3) {
-      Col: Inner() {}
+      Col: Inner( /)
     }
   }
 }
@@ -17,7 +17,7 @@ component Middle {
 component Inner {
   template {
     @for (c of 4) {
-      Card: Leaf() {}
+      Card: Leaf( /)
     }
   }
 }

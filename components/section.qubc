@@ -25,8 +25,8 @@ component Section {
       @if (open) {
         @with SectionMeta {
           div(class="section__body") {
-            FirstRow: SettingRow(label={a.label} desc={a.desc} badge={a.badge} enabled={a.enabled}) {}
-            SecondRow: SettingRow(label={b.label} desc={b.desc} badge={b.badge} enabled={b.enabled}) {}
+            FirstRow: SettingRow(label={a.label} desc={a.desc} badge={a.badge} enabled={a.enabled} /)
+            SecondRow: SettingRow(label={b.label} desc={b.desc} badge={b.badge} enabled={b.enabled} /)
           }
         }
       }

@@ -31,22 +31,22 @@ component SettingsPanel {
         }
       }
 
-      General: Section(title="일반" open={general.open} a={general.a} b={general.b}) {}
+      General: Section(title="일반" open={general.open} a={general.a} b={general.b} /)
 
-      Privacy: Section(title="개인정보" open={privacy.open} a={privacy.a} b={privacy.b}) {}
+      Privacy: Section(title="개인정보" open={privacy.open} a={privacy.a} b={privacy.b} /)
 
       @with PlanContext {
         div(class="panel__premium") {
           div(class="panel__premium-head") {
             h2(class="panel__premium-title") { "프리미엄" }
-            Badge(role={plan} theme="badge--pro") {}
+            Badge(role={plan} theme="badge--pro" /)
           }
-          Premium: Section(title="프리미엄 기능" open={premium.open} a={premium.a} b={premium.b}) {}
+          Premium: Section(title="프리미엄 기능" open={premium.open} a={premium.a} b={premium.b} /)
         }
       }
 
       footer(class="panel__foot" @click:SAVE) {
-        LinkButton(link={docsLink} theme="btn--link") {}
+        LinkButton(link={docsLink} theme="btn--link" /)
       }
     }
   }

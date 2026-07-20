@@ -5,7 +5,7 @@ component Outer {
   template {
     div() {
       @if (show) {
-        Styled() {}
+        Styled( /)
       }
     }
   }

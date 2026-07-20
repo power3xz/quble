@@ -2,7 +2,7 @@ component ForList {
   template {
     div() {
       @for (item of 3) {
-        Item: Row() {}
+        Item: Row( /)
       }
     }
   }

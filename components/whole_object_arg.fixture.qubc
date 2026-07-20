@@ -3,7 +3,7 @@ component WholeObjectArg {
   template {
     div() {
       h1() { {title} }
-      Child(row={row}) {}
+      Child(row={row} /)
     }
   }
 }

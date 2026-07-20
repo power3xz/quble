@@ -19,36 +19,36 @@ component ProfileCard {
   template {
     article(class={theme}) {
       div(class="header") {
-        Thumbnail(avatar={avatar} name={name}) {}
+        Thumbnail(avatar={avatar} name={name} /)
         div(class="ident") {
           h3(class="name") { {name} }
-          Badge(role={role} theme={theme}) {}
+          Badge(role={role} theme={theme} /)
         }
       }
       p(class="bio") { {bio} }
       div(class="stats") {
         @for (stat of stats) {
-          Stat(label={stat.label} value={stat.value}) {}
+          Stat(label={stat.label} value={stat.value} /)
         }
       }
       div(class="meta") {
         @for (row of meta) {
-          MetaRow(icon={row.icon} text={row.text}) {}
+          MetaRow(icon={row.icon} text={row.text} /)
         }
       }
       div(class="activity") {
         @for (act of activities) {
-          Activity(icon={act.icon} text={act.text} time={act.time}) {}
+          Activity(icon={act.icon} text={act.text} time={act.time} /)
         }
       }
       div(class="tags") {
         @for (tag of tags) {
-          Tag(text={tag} theme={theme}) {}
+          Tag(text={tag} theme={theme} /)
         }
       }
       div(class="links") {
         @for (url of links) {
-          LinkButton(link={url} theme={theme}) {}
+          LinkButton(link={url} theme={theme} /)
         }
       }
       a(class="profile" href={link}) { "전체 프로필 보기" }

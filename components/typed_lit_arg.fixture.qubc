@@ -1,7 +1,7 @@
 component TypedLitArg {
   template {
     div() {
-      Field(count=42 active=true label="s") {}
+      Field(count=42 active=true label="s" /)
     }
   }
 }

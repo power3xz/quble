@@ -4,8 +4,8 @@ component LitBadge {
   props { primaryRole: string, secondaryRole: string }
   template {
     div(class="litbadge") {
-      Badge(role={primaryRole} theme="light") {}
-      Badge(role={secondaryRole} theme="light") {}
+      Badge(role={primaryRole} theme="light" /)
+      Badge(role={secondaryRole} theme="light" /)
     }
   }
 }

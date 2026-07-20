@@ -5,7 +5,7 @@ component ComposedTriple {
   template {
     div() {
       @if (c1) {
-        InnerPair(c2={c2} c3={c3} a={a} b={b} c={c}) {}
+        InnerPair(c2={c2} c3={c3} a={a} b={b} c={c} /)
       }
       @else {
         p() { {d} }

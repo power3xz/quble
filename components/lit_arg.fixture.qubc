@@ -1,8 +1,8 @@
 component LitArg {
   template {
     div() {
-      Label(text="고정") {}
-      Label(text="고정") {}
+      Label(text="고정" /)
+      Label(text="고정" /)
     }
   }
 }

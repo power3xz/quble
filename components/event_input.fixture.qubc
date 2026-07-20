@@ -2,6 +2,6 @@ component Field {
   props { value: string }
   events { EDIT({ value }) }
   template {
-    input(@input:EDIT) { {value} }
+    input(@input:EDIT /)
   }
 }

@@ -1,9 +1,9 @@
 component Bar {
   template {
     div() {
-      Save: Button(label="저장") {}
-      Cancel: Button(label="취소") {}
-      Button(label="더보기") {}
+      Save: Button(label="저장" /)
+      Cancel: Button(label="취소" /)
+      Button(label="더보기" /)
     }
   }
 }

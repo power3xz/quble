@@ -3,7 +3,7 @@ component List {
   template {
     div(class="list") {
       @for (item of items) {
-        Card(info={item.detail}) {}
+        Card(info={item.detail} /)
       }
     }
   }

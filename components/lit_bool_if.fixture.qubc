@@ -1,7 +1,7 @@
 component LitBoolIf {
   template {
     div() {
-      Gate(cond=false a="A" b="B") {}
+      Gate(cond=false a="A" b="B" /)
     }
   }
 }

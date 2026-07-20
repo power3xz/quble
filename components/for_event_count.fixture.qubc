@@ -3,7 +3,7 @@ component ForEventCount {
   template {
     div() {
       @for (item of n) {
-        Item: Row() {}
+        Item: Row( /)
       }
     }
   }

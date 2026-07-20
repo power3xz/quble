@@ -2,7 +2,7 @@ component ProductGrid {
   template {
     div(class="grid") {
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-100.jpg" alt="프리미엄 헤드폰 100") {} }
+        div(class="thumb") { img(src="/img/product-100.jpg" alt="프리미엄 헤드폰 100" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "프리미엄 헤드폰 100" }
         div(class="meta") {
@@ -13,7 +13,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-101.jpg" alt="클래식 백팩 101") {} }
+        div(class="thumb") { img(src="/img/product-101.jpg" alt="클래식 백팩 101" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "클래식 백팩 101" }
         div(class="meta") {
@@ -24,7 +24,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-102.jpg" alt="모던 키보드 102") {} }
+        div(class="thumb") { img(src="/img/product-102.jpg" alt="모던 키보드 102" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "모던 키보드 102" }
         div(class="meta") {
@@ -35,7 +35,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-103.jpg" alt="빈티지 텀블러 103") {} }
+        div(class="thumb") { img(src="/img/product-103.jpg" alt="빈티지 텀블러 103" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "빈티지 텀블러 103" }
         div(class="meta") {
@@ -46,7 +46,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-104.jpg" alt="에코 스니커즈 104") {} }
+        div(class="thumb") { img(src="/img/product-104.jpg" alt="에코 스니커즈 104" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "에코 스니커즈 104" }
         div(class="meta") {
@@ -57,7 +57,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-105.jpg" alt="스마트 데스크램프 105") {} }
+        div(class="thumb") { img(src="/img/product-105.jpg" alt="스마트 데스크램프 105" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "스마트 데스크램프 105" }
         div(class="meta") {
@@ -68,7 +68,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-106.jpg" alt="컴팩트 노트북 스탠드 106") {} }
+        div(class="thumb") { img(src="/img/product-106.jpg" alt="컴팩트 노트북 스탠드 106" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "컴팩트 노트북 스탠드 106" }
         div(class="meta") {
@@ -79,7 +79,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-107.jpg" alt="라이트 블루투스 스피커 107") {} }
+        div(class="thumb") { img(src="/img/product-107.jpg" alt="라이트 블루투스 스피커 107" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "라이트 블루투스 스피커 107" }
         div(class="meta") {
@@ -90,7 +90,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-108.jpg" alt="프로 기계식 마우스 108") {} }
+        div(class="thumb") { img(src="/img/product-108.jpg" alt="프로 기계식 마우스 108" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "프로 기계식 마우스 108" }
         div(class="meta") {
@@ -101,7 +101,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-109.jpg" alt="베이직 캔버스 토트백 109") {} }
+        div(class="thumb") { img(src="/img/product-109.jpg" alt="베이직 캔버스 토트백 109" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "베이직 캔버스 토트백 109" }
         div(class="meta") {
@@ -112,7 +112,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-110.jpg" alt="프리미엄 헤드폰 110") {} }
+        div(class="thumb") { img(src="/img/product-110.jpg" alt="프리미엄 헤드폰 110" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "프리미엄 헤드폰 110" }
         div(class="meta") {
@@ -123,7 +123,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-111.jpg" alt="클래식 백팩 111") {} }
+        div(class="thumb") { img(src="/img/product-111.jpg" alt="클래식 백팩 111" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "클래식 백팩 111" }
         div(class="meta") {
@@ -134,7 +134,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-112.jpg" alt="모던 키보드 112") {} }
+        div(class="thumb") { img(src="/img/product-112.jpg" alt="모던 키보드 112" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "모던 키보드 112" }
         div(class="meta") {
@@ -145,7 +145,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-113.jpg" alt="빈티지 텀블러 113") {} }
+        div(class="thumb") { img(src="/img/product-113.jpg" alt="빈티지 텀블러 113" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "빈티지 텀블러 113" }
         div(class="meta") {
@@ -156,7 +156,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-114.jpg" alt="에코 스니커즈 114") {} }
+        div(class="thumb") { img(src="/img/product-114.jpg" alt="에코 스니커즈 114" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "에코 스니커즈 114" }
         div(class="meta") {
@@ -167,7 +167,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-115.jpg" alt="스마트 데스크램프 115") {} }
+        div(class="thumb") { img(src="/img/product-115.jpg" alt="스마트 데스크램프 115" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "스마트 데스크램프 115" }
         div(class="meta") {
@@ -178,7 +178,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-116.jpg" alt="컴팩트 노트북 스탠드 116") {} }
+        div(class="thumb") { img(src="/img/product-116.jpg" alt="컴팩트 노트북 스탠드 116" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "컴팩트 노트북 스탠드 116" }
         div(class="meta") {
@@ -189,7 +189,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-117.jpg" alt="라이트 블루투스 스피커 117") {} }
+        div(class="thumb") { img(src="/img/product-117.jpg" alt="라이트 블루투스 스피커 117" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "라이트 블루투스 스피커 117" }
         div(class="meta") {
@@ -200,7 +200,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-118.jpg" alt="프로 기계식 마우스 118") {} }
+        div(class="thumb") { img(src="/img/product-118.jpg" alt="프로 기계식 마우스 118" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "프로 기계식 마우스 118" }
         div(class="meta") {
@@ -211,7 +211,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-119.jpg" alt="베이직 캔버스 토트백 119") {} }
+        div(class="thumb") { img(src="/img/product-119.jpg" alt="베이직 캔버스 토트백 119" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "베이직 캔버스 토트백 119" }
         div(class="meta") {
@@ -222,7 +222,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-120.jpg" alt="프리미엄 헤드폰 120") {} }
+        div(class="thumb") { img(src="/img/product-120.jpg" alt="프리미엄 헤드폰 120" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "프리미엄 헤드폰 120" }
         div(class="meta") {
@@ -233,7 +233,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-121.jpg" alt="클래식 백팩 121") {} }
+        div(class="thumb") { img(src="/img/product-121.jpg" alt="클래식 백팩 121" /) }
         span(class="badge") { "베스트" }
         h3(class="name") { "클래식 백팩 121" }
         div(class="meta") {
@@ -244,7 +244,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-122.jpg" alt="모던 키보드 122") {} }
+        div(class="thumb") { img(src="/img/product-122.jpg" alt="모던 키보드 122" /) }
         span(class="badge") { "신상품" }
         h3(class="name") { "모던 키보드 122" }
         div(class="meta") {
@@ -255,7 +255,7 @@ component ProductGrid {
         button(class="buy") { "장바구니 담기" }
       }
       div(class="card") {
-        div(class="thumb") { img(src="/img/product-123.jpg" alt="빈티지 텀블러 123") {} }
+        div(class="thumb") { img(src="/img/product-123.jpg" alt="빈티지 텀블러 123" /) }
         span(class="badge") { "할인" }
         h3(class="name") { "빈티지 텀블러 123" }
         div(class="meta") {

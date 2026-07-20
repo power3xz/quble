@@ -1,7 +1,7 @@
 component Card {
   template {
     div() {
-      Toggle(label="A" on="off") {}
+      Toggle(label="A" on="off" /)
     }
   }
 }

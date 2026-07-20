@@ -4,6 +4,6 @@ component Thumbnail {
   props { avatar: string, name: string }
   events { CLICK_THUMBNAIL({ name, avatar }) }
   template {
-    img(class="avatar" src={avatar} alt={name} @click:CLICK_THUMBNAIL) {}
+    img(class="avatar" src={avatar} alt={name} @click:CLICK_THUMBNAIL /)
   }
 }

@@ -3,8 +3,8 @@ component ProductCard {
   template {
     div(class="card") {
       h3(class="name") { {name} }
-      PriceTag(price={price}) {}
-      BuyButton(price={price}) {}
+      PriceTag(price={price} /)
+      BuyButton(price={price} /)
     }
   }
 }

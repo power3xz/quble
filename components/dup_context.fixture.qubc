@@ -5,7 +5,7 @@ component Parent {
   contexts { Area { tier: "silver", scope: "page" } }
   template {
     @with Area {
-      Child(userId={userId}) {}
+      Child(userId={userId} /)
     }
   }
 }

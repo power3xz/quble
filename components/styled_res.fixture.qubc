@@ -2,6 +2,6 @@ use "./styled_res.fixture.css"
 
 component StyledRes {
   template {
-    div(class="box") {}
+    div(class="box" /)
   }
 }
