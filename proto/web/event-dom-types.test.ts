@@ -54,9 +54,17 @@ test("@input 핸들러는 click에는 반응하지 않는다(이벤트 종류 �
 });
 
 // self-close된 void 요소(input)는 자식 없이 렌더된다 - 옛 `<input>value</input>` 버그가
-// 사라졌는지(ISSUES.md "void 요소 구분 없음"). fixture는 `input(@input:EDIT /)`.
+// 사라졌는지(ISSUES.md "void 요소 구분 없음"). fixture는 `input(value={value} @input:EDIT /)`.
 test("self-close input은 자식 없이 렌더된다", () => {
   const { input } = instantiate({ value: "A" });
   assert.equal(input.childNodes.length, 0, "input은 자식 노드가 없어야");
   assert.equal(input.textContent, "", "input 텍스트 내용이 비어야");
+});
+
+// value 속성으로 초기값이 실제 <input>에 꽂히는지 - `input(value={value} /)`가
+// setAttribute("value")를 내고, 그게 DOM의 초기 표시값(input.value)이 되는지.
+test("input value 속성으로 초기값이 렌더된다", () => {
+  const { input } = instantiate({ value: "초기값" });
+  assert.equal(input.getAttribute("value"), "초기값", "value 속성이 설정돼야");
+  assert.equal((input as HTMLInputElement).value, "초기값", "input의 초기 표시값이어야");
 });
