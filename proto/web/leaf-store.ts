@@ -36,6 +36,7 @@ const createLeafStore = (leaves: unknown[]) => {
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
+  alloc: (values: unknown[]) => LeafIndex;
   subscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
   unsubscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
 };
@@ -57,6 +58,17 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     }
   };
 
+  // 값 뭉치(values)를 store에 심고 시작 leafIndex를 돌려준다 - 배열 요소 추가(push)가 요소를 타입대로 펴
+  // 넘긴다(해석은 호출부, store는 값만 심는다). 통지 안 함(새 칸이라 구독자 없음). 지금은 뒤에만 심는다 -
+  // 요소 회수(remove)가 크기별 free list를 채우면, 여기에 "그 크기 빈 블록 있으면 그 start 재사용" 분기가 붙는다.
+  const alloc = (values: unknown[]): LeafIndex => {
+    const start = leaves.length;
+    for (let i = 0; i < values.length; i++) {
+      leaves[start + i] = values[i]; // push(...values) 대신 인덱스 대입 - 큰 요소도 콜스택 스프레드 없이 안전.
+    }
+    return start;
+  };
+
   const subscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {
     subscribers[leafIndex] ??= new Set();
     subscribers[leafIndex].add(fn);
@@ -69,6 +81,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   return {
     get: leafStore.get,
     set,
+    alloc,
     subscribe,
     unsubscribe,
   };

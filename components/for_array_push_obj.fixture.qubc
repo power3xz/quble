@@ -1,0 +1,14 @@
+component StatList {
+  props { stats: { label: string, value: string }[] }
+  events { ADD({ stats }) }
+  template {
+    div(class="statlist") {
+      button(class="add" @click:ADD) { "+" }
+      ul() {
+        @for (stat of stats) {
+          li(class="stat") { {stat.label} ": " {stat.value} }
+        }
+      }
+    }
+  }
+}

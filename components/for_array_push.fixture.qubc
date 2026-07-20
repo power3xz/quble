@@ -1,0 +1,14 @@
+component TagList {
+  props { tags: string[] }
+  events { ADD({ tags }) }
+  template {
+    div(class="taglist") {
+      button(class="add" @click:ADD) { "+" }
+      ul() {
+        @for (tag of tags) {
+          li(class="tag") { {tag} }
+        }
+      }
+    }
+  }
+}

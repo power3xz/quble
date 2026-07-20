@@ -46,15 +46,21 @@ export type TRegion = {
 // 안은 elemSize 산술). 요소 추가/제거 시 이 목록으로 유지·회수 대상을 가른다.
 export type TArrayInfo = {
   elemSize: number;
+  elemTypeRef: number; // 요소 하나의 타입 - 요소 추가(push)가 값을 이 타입대로 store에 펴 심는다.
   elemStartLeafIndices: number[];
+  sizeLeafIndex: number | null; // 이 배열이 @for 순회 대상이 되면(그때만) 요소 수를 담는 store 칸을 lazy 확보 - 그 칸 구독이 grow/shrink 발화. @for에 안 쓰이면 null(길이 칸 낭비 없음).
 };
 
 export const THEN_INDEX = 0;
 export const ELSE_INDEX = 1;
 
 // arrayPool에 빈 배열정보를 alloc하고 그 arrayInfoIndex를 돌려준다.
-export const appendArrayInfo = (arrayPool: TArrayInfo[], freeArrays: number[], elemSize: number): number =>
-  allocInPool(arrayPool, freeArrays, { elemSize, elemStartLeafIndices: [] });
+export const appendArrayInfo = (
+  arrayPool: TArrayInfo[],
+  freeArrays: number[],
+  elemSize: number,
+  elemTypeRef: number,
+): number => allocInPool(arrayPool, freeArrays, { elemSize, elemTypeRef, elemStartLeafIndices: [], sizeLeafIndex: null });
 
 // branchPool에 빈 Branch를 alloc(빈 칸 재사용 or append)하고 그 branchIndex를 돌려준다.
 const appendBranch = (branchPool: TBranch[], freeBranches: number[]): number =>

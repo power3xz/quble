@@ -573,7 +573,7 @@ const plantFixed = (
   if (t.tag === "array") {
     // 배열 칸 = arrayInfoIndex 하나. 요소 심기는 미룬다(고정부 연속 유지).
     const elemSize = leafCountOf(module, t.elemTypeRef);
-    const arrayInfoIndex = appendArrayInfo(arrayPool, freeArrays, elemSize);
+    const arrayInfoIndex = appendArrayInfo(arrayPool, freeArrays, elemSize, t.elemTypeRef);
     leaves.push(arrayInfoIndex);
     return [{ arrayInfoIndex, value, elemTypeRef: t.elemTypeRef }];
   }
@@ -633,7 +633,7 @@ const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 �
 
 // 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
 const dispatchBinding = (b: TBinding, domEventObject: Event) => {
-  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module, arrayPool } = b;
+  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module, arrayPool, freeArrays } = b;
   const data: Record<string, unknown> = {};
   for (const p of payload) {
     data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
@@ -646,10 +646,35 @@ const dispatchBinding = (b: TBinding, domEventObject: Event) => {
     }
     context[ctxName] = values;
   }
+  // 배열 요소 추가 - props의 배열 필드(arrayLeafIndex) 칸 값이 arrayInfoIndex다. 요소를 타입대로 store에 심고
+  // (plantFixed로 로컬에 펴 store.alloc으로 삽입, 요소 안 중첩 배열은 plantRoot처럼 레벨별로 마저 심음),
+  // 그 시작 leaf를 elemStartLeafIndices에 잇고 길이 칸(sizeLeafIndex)을 set해 @for grow를 깨운다. sizeLeafIndex가
+  // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
+  const push = (arrayLeafIndex: number, elem: unknown): void => {
+    const info = arrayPool[Number(store.get(arrayLeafIndex))];
+    // 한 요소를 이 arrayInfo에 심는다: 고정부를 local에 펴(plantFixed) store.alloc으로 삽입하고 그 base를
+    // elemStartLeafIndices에 잇는다. 요소 안 중첩 배열은 plantFixed가 deferred로 돌려주니, 그 배열들의 요소도
+    // 같은 방식으로 재귀해 마저 심는다(plantRoot의 레벨 심기와 같되 store.alloc 삽입).
+    const plantElem = (value: unknown, target: TArrayInfo): void => {
+      const local: unknown[] = [];
+      const deferred = plantFixed(value, target.elemTypeRef, module, local, arrayPool, freeArrays);
+      target.elemStartLeafIndices.push(store.alloc(local));
+      for (const d of deferred) {
+        for (const child of d.value as unknown[]) {
+          plantElem(child, arrayPool[d.arrayInfoIndex]);
+        }
+      }
+    };
+    plantElem(elem, info);
+    if (info.sizeLeafIndex !== null) {
+      store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
+    }
+  };
   handlers[fullName]?.(data, {
     event: domEventObject,
     set: store.set,
     get: store.get,
+    push,
     props,
     context,
     ...loopIndices,
@@ -774,6 +799,7 @@ type TBinding = {
   store: TLeafStoreSubject;
   module: TModule;
   arrayPool: TArrayInfo[];
+  freeArrays: number[];
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -954,28 +980,54 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         store.subscribe(countLeafIndex, onCount);
       };
 
-      // 배열 @for - 배열 칸(arrayLeafIndex)의 arrayInfoIndex로 요소 위치(elemStartLeafIndices)를
-      // 얻어, 요소 수만큼 지금 가지에 인라인한다. 회차마다 회차변수(item) slot을 그 요소 leaf에
-      // STORE로 바인딩한다 - item slot은 codegen과 같은 규칙(props 슬롯 수 + 현재 @for 깊이)이며,
-      // 그 값이 지금 argumentSourcePairs.length/2다(props 뒤로 바깥 @for들의 item만 쌓여서). 회차변수
-      // 슬롯은 buildIteration 전에 맨 끝에 push하고(몸체 TEXT_VAR가 읽는다) 루프 뒤 두 칸 pop해
-      // 되돌린다 - bindVar가 build 시점에 leafIndex를 branch.leafIndices로 스냅샷하므로 공유 pairs를
-      // 되돌려도 안전하다. 요소는 정적이라(배열 grow/shrink API 없음) FOR_RAW처럼 인라인이면 충분하다.
+      // 배열 반응 @for - reactiveCountFor와 같은 구조(전용 region + 회차 branch + 길이 구독으로 grow/shrink)로,
+      // 다른 점은 회차변수 slot이 count처럼 [RAW, i]가 아니라 그 요소 leaf에 [STORE, elemStartLeafIndices[i]]로
+      // 붙는다는 것뿐이다(몸체가 요소 필드를 store에서 읽는다). 배열 요소 수는 store 값이 아니라
+      // info.elemStartLeafIndices.length가 진실이라, 발화용 길이 칸(sizeLeafIndex)을 여기서 lazy 확보해
+      // (이 배열이 @for에 쓰일 때만) 요소 수를 심고 구독한다. push가 요소를 elemStartLeafIndices에 넣고
+      // 그 칸을 set하면 이 구독이 깨어 늘어난 꼬리만 build+attach한다.
       const reactiveArrayFor = (arrayLeafIndex: number, bodyStart: number, forEndPc: number) => {
-        const arrayInfoIndex = Number(store.get(arrayLeafIndex));
-        const info = arrayPool[arrayInfoIndex];
-        const count = info.elemStartLeafIndices.length;
-        if (count === 0) {
-          return;
+        const info = arrayPool[Number(store.get(arrayLeafIndex))];
+        if (info.sizeLeafIndex === null) {
+          info.sizeLeafIndex = store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
         }
-        const itemSlot = argumentSourcePairs.length / 2;
-        for (let i = 0; i < count; i++) {
-          argumentSourcePairs[2 * itemSlot] = STORE;
-          argumentSourcePairs[2 * itemSlot + 1] = info.elemStartLeafIndices[i];
-          nodeTop().appendChild(buildIteration(i, bodyStart, forEndPc, startRegionIndex, startBranchIndex));
+        const sizeLeafIndex = info.sizeLeafIndex;
+
+        const forRegionIndex = appendForRegion(regionPool, freeRegions, sizeLeafIndex);
+        const region = regionPool[forRegionIndex];
+        branch.childRegionIndices.push(forRegionIndex);
+        nodeTop().appendChild(region.anchor);
+
+        // 회차변수 슬롯을 그 요소 leaf에 [STORE, elemStartLeafIndices[i]]로 밀고 build 후 되돌린다
+        // (count-for의 [RAW, i]와 같은 push/pop 규칙). 슬롯 번호 = props + 바깥 회차변수 뒤.
+        const addIterationBranch = (i: number) => {
+          const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
+          argumentSourcePairs.push(STORE, info.elemStartLeafIndices[i]);
+          branchPool[newBranchIndex].nodes = Array.from(
+            buildIteration(i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
+          );
+          argumentSourcePairs.pop(); // 회차변수 ref
+          argumentSourcePairs.pop(); // 회차변수 kind
+          return newBranchIndex;
+        };
+
+        for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+          addIterationBranch(i);
         }
-        argumentSourcePairs.pop(); // 회차변수 ref
-        argumentSourcePairs.pop(); // 회차변수 kind
+
+        const onSize = () => {
+          const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
+          const cur = region.branchIndices.length;
+          for (let i = cur; i < next; i++) {
+            attachForIteration(store, regionPool, branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+          }
+          if (next < cur) {
+            truncateFor(store, regionPool, freeRegions, branchPool, freeBranches, region, next); // 줄어든 꼬리 제거
+          }
+        };
+        branch.leafIndices.push(sizeLeafIndex);
+        branch.updateFns.push(onSize);
+        store.subscribe(sizeLeafIndex, onSize);
       };
 
       // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
@@ -1085,12 +1137,13 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
               typeRef: field.typeRef,
               fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(module, field.typeRef), argumentSourcePairs),
             }));
-            // props: 핸들러의 set/get 대상(필드명 -> leafIndex). 스칼라 field 중 STORE만 - 상수
-            // 슬롯은 불변이라 set 대상이 못 된다. 객체의 set 의미는 미정(ISSUES). data(읽기)는
-            // 객체까지 조립된다.
+            // props: 핸들러의 상태변경 대상(필드명 -> leafIndex). STORE 슬롯만 - 상수 슬롯은 불변이라 대상이
+            // 못 된다. 스칼라는 그 leaf(set/get 대상), 배열은 배열 칸 leaf(push 대상 - 그 값이 arrayInfoIndex).
+            // 객체의 set 의미는 미정(ISSUES). data(읽기)는 객체까지 조립된다.
             const props: Record<string, number> = {};
             for (const p of payload) {
-              if (module.types[p.typeRef].tag === "scalar" && p.fieldSourcePairs[0] === STORE) {
+              const tag = module.types[p.typeRef].tag;
+              if ((tag === "scalar" || tag === "array") && p.fieldSourcePairs[0] === STORE) {
                 props[p.name] = p.fieldSourcePairs[1];
               }
             }
@@ -1126,6 +1179,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
               store,
               module,
               arrayPool,
+              freeArrays,
             };
             ensureDelegate(domEvent);
             break;

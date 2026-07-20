@@ -53,15 +53,20 @@ test("arrayPool이 요소 시작 leafIndex와 elemSize를 등록한다", () => {
   mount(inst);
   const pool = inst.arrayPool;
 
+  const sizeAndStarts = (info: (typeof pool)[number]) => ({
+    elemSize: info.elemSize,
+    elemStartLeafIndices: info.elemStartLeafIndices,
+  });
+
   // #0 tags(string[]): 요소 스칼라라 elemSize=1, 요소 2개가 leafIndex 3,4에서 시작.
-  assert.deepEqual(pool[0], { elemSize: 1, elemStartLeafIndices: [3, 4] }, "tags");
+  assert.deepEqual(sizeAndStarts(pool[0]), { elemSize: 1, elemStartLeafIndices: [3, 4] }, "tags");
 
   // #1 rows({label,cells}[]): 요소가 label(1)+cells칸(1)=2칸이라 elemSize=2, 요소 2개가 5,7에서 시작.
-  assert.deepEqual(pool[1], { elemSize: 2, elemStartLeafIndices: [5, 7] }, "rows");
+  assert.deepEqual(sizeAndStarts(pool[1]), { elemSize: 2, elemStartLeafIndices: [5, 7] }, "rows");
 
   // #2 rows[0].cells: 요소 "x" 하나가 9에서.
-  assert.deepEqual(pool[2], { elemSize: 1, elemStartLeafIndices: [9] }, "rows[0].cells");
+  assert.deepEqual(sizeAndStarts(pool[2]), { elemSize: 1, elemStartLeafIndices: [9] }, "rows[0].cells");
 
   // #3 rows[1].cells: 요소 "y","z"가 10,11에서.
-  assert.deepEqual(pool[3], { elemSize: 1, elemStartLeafIndices: [10, 11] }, "rows[1].cells");
+  assert.deepEqual(sizeAndStarts(pool[3]), { elemSize: 1, elemStartLeafIndices: [10, 11] }, "rows[1].cells");
 });
