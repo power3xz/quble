@@ -598,6 +598,19 @@ fn emit_node(
                         var_ref_to_slot(var, props, for_scope.for_vars)?;
                     match ty {
                         Type::Number => {
+                            // 이름 충돌은 에러(섀도잉 금지 - array 경로와 동일).
+                            if props.iter().any(|p| &p.name == item)
+                                || for_scope.for_vars.iter().any(|fv| &fv.name == item)
+                            {
+                                return Err(CodegenError::DuplicateBinding(item.clone()));
+                            }
+                            // 회차변수 = 회차 인덱스(숫자). 슬롯만 잡고(props 뒤 바깥 회차변수까지 이어),
+                            // 그 슬롯 kind=RAW·값=회차 인덱스는 런타임이 채운다(바이트코드엔 슬롯 번호만).
+                            new_for_var = Some(ForVar {
+                                name: item.clone(),
+                                offset: (props.len() + for_scope.for_vars.len()) as u16,
+                                type_: Type::Number,
+                            });
                             code.push(Op::ForCountVar as u8);
                             code.push(scope_index);
                             code.push(offset);

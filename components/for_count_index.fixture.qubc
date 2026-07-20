@@ -1,0 +1,12 @@
+component Counter {
+  props { count: number }
+  events { ADD({ count: count }) }
+  template {
+    div(class="counter") {
+      button(class="add" @click:ADD) { "+" }
+      @for (i of count) {
+        div(class="row") { "인덱스 " {i} }
+      }
+    }
+  }
+}

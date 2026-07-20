@@ -283,9 +283,11 @@ class Reader {
 
 // 슬롯 해석방법. argumentSourcePairs는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
 // argumentSourcePairs[2*offset](해석방법) / argumentSourcePairs[2*offset+1](참조)로 읽는다. STORE는 참조가 store
-// 경로(반응값, 구독), CONST는 참조가 상수풀 인덱스(불변, 구독 스킵). (RAW는 @for 때 추가.)
+// 경로(반응값, 구독), CONST는 참조가 상수풀 인덱스(불변, 구독 스킵), RAW는 참조가 값 자체
+// (count @for의 회차 인덱스 - store에 안 앉는 회차 상수, 구독 스킵).
 const STORE = 0;
 const CONST = 1;
+const RAW = 2;
 
 // FieldValue ref 출처 태그(Rust serialize <REF>와 대칭). ref마다 태그 1바이트 + payload.
 // 슬롯 해석방법(STORE/CONST)과 다른 층이다 - Scope 슬롯의 실제 kind는 argumentSourcePairs가 정한다.
@@ -918,11 +920,16 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
         // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
         // 새 회차의 전역 branchIndex를 돌려준다.
+        // 몸체 `{i}`가 읽을 회차변수(인덱스) 슬롯을 [RAW, i]로 밀고 build 후 되돌린다
+        // (array-for와 같은 push/pop 규칙). 슬롯 번호는 그 시점 pairs 길이/2 = props+바깥 회차변수 뒤.
         const addIterationBranch = (i: number) => {
           const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
+          argumentSourcePairs.push(RAW, i);
           branchPool[newBranchIndex].nodes = Array.from(
             buildIteration(i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
           );
+          argumentSourcePairs.pop(); // 회차변수 ref
+          argumentSourcePairs.pop(); // 회차변수 kind
           return newBranchIndex;
         };
 
@@ -982,9 +989,14 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       // @returns          현재 값(없으면 "")
       const bindVar = (scopeIndex: number, offset: number, update: (v: unknown) => void) => {
         const ref = argumentSourcePairs[2 * scopeIndex + 1];
-        if (argumentSourcePairs[2 * scopeIndex] === CONST) {
+        const kind = argumentSourcePairs[2 * scopeIndex];
+        if (kind === CONST) {
           // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
           return module.constpool[ref as number] ?? "";
+        }
+        if (kind === RAW) {
+          // 회차 상수(count @for 인덱스): 참조가 값 자체. store에 없어 구독도 없다.
+          return ref;
         }
         // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
         const leafIndex = (ref as number) + offset;
