@@ -190,10 +190,16 @@ const detachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], r
   }
 };
 
-// region을 받아 회차 전부를 붙인다.
+// region을 받아 회차 전부를 붙인다. 각 회차는 직전 회차의 마지막 노드 뒤에 이어 붙인다
+// (전부 anchor 바로 뒤에 넣으면 나중 회차가 앞서 들어가 역순이 된다). 첫 회차는 anchor 뒤.
 const attachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
+  let after: ChildNode = region.anchor;
   for (const branchIndex of region.branchIndices) {
-    attachOneBranch(store, regionPool, branchPool, region.anchor, branchIndex);
+    attachOneBranch(store, regionPool, branchPool, after, branchIndex);
+    const nodes = branchPool[branchIndex].nodes;
+    if (nodes.length) {
+      after = nodes[nodes.length - 1] as ChildNode;
+    }
   }
 };
 
