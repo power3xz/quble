@@ -23,6 +23,9 @@ pub enum Token {
     Lt,     // < (제네릭 타입 `Omit<Section, 'a'>`)
     Gt,     // >
     Pipe,   // | (유니온 키 리스트 `'a' | 'b'`)
+    /// `/` - self-close 표기(`tag(attrs /)`). bool = 직전에 공백이 있었나. 확정 문법이
+    /// `/` 앞 공백을 강제하므로(SYNTAX §3.1.1) 렉서가 공백 유무를 실어 파서가 검증한다.
+    Slash(bool),
     /// `@` 뒤에 오는 디렉티브. `@if` -> `At(Directive::If)`.
     At(Directive),
 }
@@ -83,11 +86,22 @@ pub enum LexError {
 pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
     let mut toks = Vec::new();
     let mut chars = src.chars().peekable();
+    // 직전 문자가 공백이었나 - `/`(self-close)의 앞 공백 강제 검증용. 공백 분기에서 세우고
+    // 그 외 토큰을 낼 때마다 리셋한다.
+    let mut prev_ws = false;
 
     while let Some(&c) = chars.peek() {
+        // `/`만 prev_ws를 읽는다. 아래에서 self-close 판단에 쓰고, 이 분기 밖 토큰은 모두 리셋.
+        let ws_before = prev_ws;
+        prev_ws = false;
         match c {
             c if c.is_whitespace() => {
                 chars.next();
+                prev_ws = true;
+            }
+            '/' => {
+                chars.next();
+                toks.push(Token::Slash(ws_before));
             }
             '{' => {
                 chars.next();

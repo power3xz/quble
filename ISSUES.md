@@ -14,6 +14,14 @@
   `@for` 회차 붙이기)을 `while (fragment.firstChild) parent.appendChild(fragment.firstChild)`
   스냅샷 순회로 바꿨다. 다른 `childNodes` 사용처는 이미 `Array.from`으로 스냅샷을 떠 안전했다.
 
+- **void 요소 구분 없음** - `input`·`img` 등 void 요소도 자식·닫는 태그를 갖는 일반 요소처럼
+  렌더됐다(`input(@input:EDIT) { {value} }` -> `<input>A</input>`). **해결:** self-close 문법
+  (`tag(attrs /)`, SYNTAX §3.1.1)을 구현하고 void 집합을 컴파일러가 알게 했다. void 요소는
+  self-close 필수 - 자식 블록/무슨 자식이든 컴파일 에러. 자식 없는 요소·컴포넌트는 모두
+  self-close로만 쓴다(빈 블록 `{}` 금지, 처음엔 엄격하게 - DESIGN §4.5). 자식 없는 요소는
+  `ELEM_OPEN..ELEM_CLOSE_OPEN..ELEM_END`로 그대로 나가 새 opcode 없이 `<input>`(내용 없음)으로
+  렌더된다.
+
 ## 미해결
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
@@ -39,10 +47,6 @@
   않는 컴포넌트가 qubb에 def로 포함된다. (재현: `components/profilecard.qubc`의 `Tag`는
   use만 하고 미사용인데, 컴파일 결과 qubb에 def로 들어간다.) 컴파일러가 도달성 분석 없이 use된
   컴포넌트를 전부 방출하는 것으로 보인다.
-
-- **void 요소 구분 없음** - `input`·`img` 등 HTML void 요소도 자식·닫는 태그를 갖는 일반
-  요소처럼 렌더된다. (재현: `input(@input:EDIT) { {value} }` -> `<input>A</input>`.) 렌더러·
-  런타임이 void 집합을 모른다.
 
 - **버블 차단 끄는 옵션 미정** - 위임 리스너는 `stopPropagation`을 디폴트로 호출해 버블을
   끊는다(runtime.ts). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -

@@ -574,7 +574,7 @@ impl<'a> Parser<'a> {
         Ok(Node::Var(var))
     }
 
-    // [ALIAS :] COMP ( ARG* ) { }   - 대문자 컴포넌트 호출. ARG = prop = { var }.
+    // [ALIAS :] COMP ( ARG*  /)   - 대문자 컴포넌트 호출. ARG = prop = { var }.
     // `Alias: Comp(...)`면 앞 Ident가 use-site 별칭(fullname 세그먼트). 없으면 type-name.
     // node 자리의 `대문자Ident :`는 alias뿐이라, 한 칸 앞 콜론으로 갈리고 모호하지 않다.
     // 슬롯(자식 노드)은 아직 미지원 - 블록은 비어야 한다.
@@ -589,16 +589,26 @@ impl<'a> Parser<'a> {
         let name = self.ident()?;
         self.expect(&Token::LParen)?;
         let args = self.component_args()?;
-        self.expect(&Token::RParen)?;
-        self.expect(&Token::LBrace)?;
-        let children = self.nodes()?;
-        if !children.is_empty() {
-            return Err(ParseError::Expected {
-                want: "empty component body (슬롯 미지원)".into(),
-                got: format!("{} child node(s)", children.len()),
-            });
+        // 슬롯 미지원이라 컴포넌트 합성은 자식이 없다 - self-close 필수(빈 블록 `{}` 금지).
+        // `/` 앞 공백 강제(SYNTAX §3.1.1, DESIGN §4.5).
+        match self.peek() {
+            Some(Token::Slash(spaced)) => {
+                if !spaced {
+                    return Err(ParseError::Expected {
+                        want: "space before '/' (self-close)".into(),
+                        got: "'/' without preceding space".into(),
+                    });
+                }
+                self.next()?; // /
+                self.expect(&Token::RParen)?;
+            }
+            _ => {
+                return Err(ParseError::Expected {
+                    want: format!("self-close ({name}( … /)) - 컴포넌트는 슬롯 미지원이라 자식 블록 불가"),
+                    got: format!("{:?}", self.peek()),
+                });
+            }
         }
-        self.expect(&Token::RBrace)?;
         Ok(Node::Component { alias, name, args })
     }
 
@@ -608,7 +618,8 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
         loop {
             match self.peek() {
-                Some(Token::RParen) | None => break,
+                // Slash = self-close 마커(args 끝). 여기서 멈춰 component_call이 처리한다.
+                Some(Token::RParen | Token::Slash(_)) | None => break,
                 Some(Token::Ident(_)) => {
                     let prop = self.ident()?;
                     self.expect(&Token::Eq)?;
@@ -643,15 +654,51 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    // IDENT ( (ATTR | @click:EVENT)* ) { NODE* }
+    // IDENT ( (ATTR | @click:EVENT)* [/] ) [{ NODE* }]
+    // self-close(`tag(attrs /)`)면 자식 블록을 안 읽는다. void 요소(input·img 등)는
+    // self-close가 필수 - 아니면 에러(SYNTAX §3.1.1, DESIGN §4.5).
     fn element(&mut self) -> Result<Node, ParseError> {
         let tag = self.ident()?;
         self.expect(&Token::LParen)?;
         let (attrs, event_bindings) = self.attrs()?;
+        // attrs 뒤가 `/`면 self-close. 확정 문법상 `/` 앞 공백 필수.
+        let self_close = match self.peek() {
+            Some(Token::Slash(spaced)) => {
+                if !spaced {
+                    return Err(ParseError::Expected {
+                        want: "space before '/' (self-close)".into(),
+                        got: "'/' without preceding space".into(),
+                    });
+                }
+                self.next()?; // /
+                true
+            }
+            _ => false,
+        };
         self.expect(&Token::RParen)?;
-        self.expect(&Token::LBrace)?;
-        let children = self.nodes()?;
-        self.expect(&Token::RBrace)?;
+
+        if is_void_tag(&tag) && !self_close {
+            return Err(ParseError::Expected {
+                want: format!("self-close for void element ({tag}( … /))"),
+                got: format!("void element '{tag}' with child block"),
+            });
+        }
+
+        let children = if self_close {
+            Vec::new()
+        } else {
+            self.expect(&Token::LBrace)?;
+            let children = self.nodes()?;
+            self.expect(&Token::RBrace)?;
+            // 자식 없으면 self-close 필수 - 빈 블록 금지(SYNTAX §3.1.1, DESIGN §4.5).
+            if children.is_empty() {
+                return Err(ParseError::Expected {
+                    want: format!("self-close for childless element ({tag}( … /))"),
+                    got: "empty child block {}".into(),
+                });
+            }
+            children
+        };
         Ok(Node::Element {
             tag,
             attrs,
@@ -668,7 +715,8 @@ impl<'a> Parser<'a> {
         let mut event_bindings = Vec::new();
         loop {
             match self.peek() {
-                Some(Token::RParen) | None => break,
+                // Slash = self-close 마커. attrs 끝(여는 태그 마지막 토큰)이므로 여기서 멈춘다.
+                Some(Token::RParen | Token::Slash(_)) | None => break,
                 // `@click:EVENT` - DOM 이벤트 바인딩. 디렉티브는 닫힌 집합(Directive).
                 Some(Token::At(_)) => {
                     let dom_event = match self.next()? {
@@ -731,4 +779,13 @@ impl<'a> Parser<'a> {
 /// 식별자가 대문자로 시작하나 - 컴포넌트 호출(true) vs HTML 태그(false) 구분.
 fn starts_upper(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_uppercase())
+}
+
+/// HTML void 요소(자식을 못 갖는 태그). self-close가 필수다(SYNTAX §3.1.1).
+fn is_void_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta"
+            | "source" | "track" | "wbr"
+    )
 }

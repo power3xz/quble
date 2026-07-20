@@ -145,21 +145,23 @@ hr( /)
 - `/`는 여는 태그(괄호) 안 마지막 토큰이다. 속성은 `이름=값`/`@event:NAME` 형태라 단독
   `/`와 안 겹쳐 파싱 모호성이 없다.
 
-**void 요소**(`area base br col embed hr img input link meta source track wbr`)는 self-close가
-**필수**다 - 자식 블록을 쓰면 **컴파일 에러**(컴파일러가 void 집합을 안다). void가 아닌 일반
-태그도 자식이 없으면 self-close로 쓸 수 있다(`div(class="x" /)`); 자식이 있으면 `{}`를 쓴다.
+**자식이 없으면 self-close가 필수** - 요소·컴포넌트 모두. 빈 블록(`div() {}`,
+`Comp() {}`)은 **컴파일 에러**다(처음엔 엄격하게, 필요가 생기면 나중에 완화 - DESIGN §4.5).
+자식이 있으면 `{}`를 쓴다. **void 요소**(`area base br col embed hr img input link meta source
+track wbr`)는 애초에 자식을 못 가지므로 항상 self-close이고, 자식 블록을 쓰면 컴파일
+에러(컴파일러가 void 집합을 안다).
 
 ### 3.2 컴포넌트 합성 / 별칭
 
 ```
-Component(…)                 // 별칭 없음 → 타입명이 경로 마디
-Alias: Component(…)          // 별칭 바인딩 → Alias가 경로 마디
+Component( /)                // 별칭 없음 → 타입명이 경로 마디
+Alias: Component( /)         // 별칭 바인딩 → Alias가 경로 마디
 
-CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE)
-TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK)
+CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE /)
+TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK /)
 ```
 
-합성된 컴포넌트도 자식 블록을 가질 수 있다(슬롯으로 들어감):
+자식(슬롯) 없는 합성은 self-close로 닫는다(§3.1.1). 자식 블록을 가질 수도 있다(슬롯으로 들어감):
 
 ```
 MyTodoCard: Card(title="할일 목록" variant="primary") {

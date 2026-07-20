@@ -234,7 +234,7 @@ mod tests {
         let src = r#"
             component C {
               props { c: string, d: string }
-              template { div(class={c} data-x={d}) {} }
+              template { div(class={c} data-x={d} /) }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -267,11 +267,92 @@ mod tests {
 
     #[test]
     fn unknown_tag_errors() {
-        let src = r#"component C { template { table() {} } }"#;
+        let src = r#"component C { template { table( /) } }"#;
         assert!(matches!(
             compile(src),
             Err(CompileError::Codegen(codegen::CodegenError::UnknownTag(_)))
         ));
+    }
+
+    /// self-close(`tag(attrs /)`)는 자식 없는 요소를 낸다 - void 요소가 자식 없이
+    /// ELEM_OPEN..ELEM_CLOSE_OPEN..ELEM_END로 닫히는지(사이에 자식 opcode 없음).
+    #[test]
+    fn self_close_emits_childless_element() {
+        use bytecode::{decode, Op};
+
+        let src = r#"component C { template { img(src="a.png" /) } }"#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // CLOSE_OPEN 바로 뒤가 END여야 한다(그 사이에 자식 opcode가 없음 = 자식 없는 요소).
+        let close = code.iter().position(|&b| b == Op::ElemCloseOpen as u8).unwrap();
+        assert_eq!(
+            code[close + 1],
+            Op::ElemEnd as u8,
+            "self-close는 CLOSE_OPEN 직후 END여야(자식 없음)",
+        );
+    }
+
+    /// void 요소(img·input 등)는 self-close가 필수 - 자식 블록을 쓰면 파스 에러.
+    #[test]
+    fn void_element_with_child_block_errors() {
+        let src = r#"component C { template { img(src="a.png") {} } }"#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// `/` 앞 공백 강제 - 붙여 쓰면(`img(.../)`) 파스 에러(SYNTAX §3.1.1).
+    #[test]
+    fn self_close_requires_space_before_slash() {
+        let src = r#"component C { template { img(src="a.png"/) } }"#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// void가 아닌 일반 태그도 자식이 없으면 self-close로 쓸 수 있다(`div(class="x" /)`).
+    #[test]
+    fn non_void_tag_may_self_close() {
+        let src = r#"component C { template { div(class="x" /) } }"#;
+        assert!(compile(src).is_ok());
+    }
+
+    /// 자식 없으면 self-close 필수 - 빈 블록(`div( /)`)은 에러(요소).
+    #[test]
+    fn empty_element_block_errors() {
+        let src = r#"component C { template { div() {} } }"#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// 컴포넌트 합성도 자식 없으면 self-close 필수 - 빈 블록(`Comp() {}`)은 에러.
+    #[test]
+    fn empty_component_block_errors() {
+        let src = r#"
+            component C { template { Inner() {} } }
+            component Inner { template { span() { "x" } } }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Resolve(ResolveError::Parse(_)))
+        ));
+    }
+
+    /// 컴포넌트 합성 self-close(`Comp( /)`)는 정상 컴파일된다.
+    #[test]
+    fn component_self_close_ok() {
+        let src = r#"
+            component C { template { Inner( /) } }
+            component Inner { template { span() { "x" } } }
+        "#;
+        assert!(compile(src).is_ok());
     }
 
     /// `@input:EVENT`이 닫힌 DOM 이벤트 집합의 input ID(1)로 BIND_EVENT를 낸다.
@@ -284,7 +365,7 @@ mod tests {
             component C {
               props { value: string }
               events { EDIT({ value }) }
-              template { input(@input:EDIT) {} }
+              template { input(@input:EDIT /) }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -460,7 +541,7 @@ mod tests {
               props { tags: string[] }
               template {
                 @for (tag of tags) {
-                  Card(title={tag}) {}
+                  Card(title={tag} /)
                 }
               }
             }
@@ -490,7 +571,7 @@ mod tests {
               props { tags: string[] }
               template {
                 @for (tag of tags) {
-                  Card(tag={tag}) {}
+                  Card(tag={tag} /)
                 }
               }
             }
@@ -534,10 +615,10 @@ mod tests {
         use bytecode::{decode, Op};
 
         let src = r#"
-            component List { template { @for (item of 3) { Row: Inner() {} } } }
+            component List { template { @for (item of 3) { Row: Inner( /) } } }
             component Inner {
               events { PICK({ id: "x" }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -564,12 +645,12 @@ mod tests {
         let src = r#"
             component List {
               template {
-                @for (a of 3) { @for (b of 3) { Row: Inner() {} } }
+                @for (a of 3) { @for (b of 3) { Row: Inner( /) } }
               }
             }
             component Inner {
               events { PICK({ id: "x" }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -598,7 +679,7 @@ mod tests {
         let src = r#"
             component Menu {
               events { SELECT({ i: "x" }) }
-              template { @for (item of 3) { li(@click:SELECT) {} } }
+              template { @for (item of 3) { li(@click:SELECT /) } }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -622,10 +703,10 @@ mod tests {
         use bytecode::{decode, Op};
 
         let src = r#"
-            component List { template { Row: Inner() {} } }
+            component List { template { Row: Inner( /) } }
             component Inner {
               events { PICK({ id: "x" }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -644,7 +725,7 @@ mod tests {
     fn for_count_over_u16_rejected() {
         let src = r#"
             component C {
-              template { @for (x of 70000) { div() {} } }
+              template { @for (x of 70000) { div( /) } }
             }
         "#;
         assert!(matches!(
@@ -658,7 +739,7 @@ mod tests {
     fn for_missing_of_rejected() {
         let src = r#"
             component C {
-              template { @for (x 3) { div() {} } }
+              template { @for (x 3) { div( /) } }
             }
         "#;
         assert!(matches!(
@@ -676,7 +757,7 @@ mod tests {
             component C {
               props { tier: string }
               contexts { Area { tier } }
-              template { @with Area { div() {} } }
+              template { @with Area { div( /) } }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -823,7 +904,7 @@ mod tests {
         let src = r#"
             component C {
               props { true: bool }
-              template { div() {} }
+              template { div( /) }
             }
         "#;
         assert!(compile(src).is_err());
@@ -835,7 +916,7 @@ mod tests {
         let src = r#"
             component C {
               contexts { Area { userId: missing } }
-              template { @with Area { div() {} } }
+              template { @with Area { div( /) } }
             }
         "#;
         assert!(matches!(
@@ -850,7 +931,7 @@ mod tests {
         let src = r#"
             component C {
               events { X({ a }) }
-              template { div(@hover:X) {} }
+              template { div(@hover:X /) }
             }
         "#;
         assert!(matches!(
@@ -904,7 +985,7 @@ mod tests {
             }
             component Section {
               props { title: string, on: bool }
-              template { div() {} }
+              template { div( /) }
             }
         "#);
         let inline_props = compile_props(r#"
@@ -923,11 +1004,11 @@ mod tests {
         let props = compile_props(r#"
             component C {
               props { sec: Omit<Section, 'title'> }
-              template { div() {} }
+              template { div( /) }
             }
             component Section {
               props { title: string, desc: string, on: bool }
-              template { div() {} }
+              template { div( /) }
             }
         "#);
         assert_eq!(props, vec!["sec.desc", "sec.on"]);
@@ -939,11 +1020,11 @@ mod tests {
         let props = compile_props(r#"
             component C {
               props { sec: Pick<Section, 'title' | 'on'> }
-              template { div() {} }
+              template { div( /) }
             }
             component Section {
               props { title: string, desc: string, on: bool }
-              template { div() {} }
+              template { div( /) }
             }
         "#);
         assert_eq!(props, vec!["sec.title", "sec.on"]);
@@ -955,8 +1036,8 @@ mod tests {
         let err = compile_src(
             "entry",
             r#"
-                component C { props { s: Omit<Section, 'nope'> } template { div() {} } }
-                component Section { props { title: string } template { div() {} } }
+                component C { props { s: Omit<Section, 'nope'> } template { div( /) } }
+                component Section { props { title: string } template { div( /) } }
             "#,
             &(|_: &str, _: &str| None),
         );
@@ -971,7 +1052,7 @@ mod tests {
     fn prop_type_ref_unknown_errors() {
         let err = compile_src(
             "entry",
-            r#"component C { props { x: Nope } template { div() {} } }"#,
+            r#"component C { props { x: Nope } template { div( /) } }"#,
             &(|_: &str, _: &str| None),
         );
         assert!(matches!(
@@ -986,8 +1067,8 @@ mod tests {
         let err = compile_src(
             "entry",
             r#"
-                component A { props { b: B } template { div() {} } }
-                component B { props { a: A } template { div() {} } }
+                component A { props { b: B } template { div( /) } }
+                component B { props { a: A } template { div( /) } }
             "#,
             &(|_: &str, _: &str| None),
         );
@@ -1051,7 +1132,7 @@ mod tests {
         let src = r#"
             component C {
               props { title: string, a: { label: string, on: bool } }
-              template { div() { Row(row={a}) {} } }
+              template { div() { Row(row={a} /) } }
             }
             component Row {
               props { row: { label: string, on: bool } }
@@ -1079,7 +1160,7 @@ mod tests {
         let src = r#"
             component C {
               props { a: { label: string, on: bool } }
-              template { div() { Row(row={a}) {} } }
+              template { div() { Row(row={a} /) } }
             }
             component Row {
               props { row: { text: string, on: bool } }
@@ -1117,7 +1198,7 @@ mod tests {
         let src = r#"
             component C {
               props { name: string }
-              template { div() { Row(label={name}) {} } }
+              template { div() { Row(label={name} /) } }
             }
             component Row {
               props { label: string }
@@ -1142,13 +1223,13 @@ mod tests {
             use Thumb, Badge from "./parts.qubc"
             component Card {
               props { img: string, role: string }
-              template { div() { Thumb(src={img}) {} Badge(text={role}) {} } }
+              template { div() { Thumb(src={img} /) Badge(text={role} /) } }
             }
         "#;
         let parts = r#"
             component Thumb {
               props { src: string }
-              template { img(src={src}) {} }
+              template { img(src={src} /) }
             }
             component Badge {
               props { text: string }
@@ -1179,7 +1260,7 @@ mod tests {
 
         let entry = r#"
             use "./card.css"
-            component Card { template { div() {} } }
+            component Card { template { div( /) } }
         "#;
         // 정규화 경로를 직접 매핑("./card.css" -> "/abs/card.css"). 소스는 빈 문자열(컴파일러가 안 씀).
         let resolver = |_base: &str, target: &str| match target {
@@ -1206,8 +1287,8 @@ mod tests {
 
         let entry = r#"
             use "./shared.css"
-            component A { template { div() {} } }
-            component B { template { span() {} } }
+            component A { template { div( /) } }
+            component B { template { span( /) } }
         "#;
         let resolver = |_base: &str, target: &str| match target {
             "./shared.css" => Some(("/abs/shared.css".to_string(), String::new())),
@@ -1240,22 +1321,22 @@ mod tests {
             use A from "./a.qubc"
             use B from "./b.qubc"
             use C from "./c.qubc"
-            component App { template { div() { A() {} B() {} C() {} } } }
+            component App { template { div() { A( /) B( /) C( /) } } }
         "#;
         let a = r#"
             use "./a.css"
-            component A { template { span() {} } }
+            component A { template { span( /) } }
         "#;
         let b = r#"
             use "./b.css"
-            component B { template { p() {} } }
+            component B { template { p( /) } }
         "#;
         // C는 여러 CSS를 use - app·b는 이미 발급된 resId 재사용, c만 신규.
         let c = r#"
             use "./app.css"
             use "./b.css"
             use "./c.css"
-            component C { template { a() {} } }
+            component C { template { a( /) } }
         "#;
         // .qubc는 소스를, .css는 정규화 경로 + 빈 소스를 돌려준다.
         let resolver = |_base: &str, target: &str| match target {
@@ -1313,7 +1394,7 @@ mod tests {
     fn use_unresolved_path_errors() {
         let entry = r#"
             use Label from "./missing.qubc"
-            component Card { template { Label() {} } }
+            component Card { template { Label( /) } }
         "#;
         assert!(matches!(
             compile_map(entry, &[]),
@@ -1326,9 +1407,9 @@ mod tests {
     fn use_missing_export_errors() {
         let entry = r#"
             use Nope from "./parts.qubc"
-            component Card { template { div() {} } }
+            component Card { template { div( /) } }
         "#;
-        let parts = r#"component Label { template { span() {} } }"#;
+        let parts = r#"component Label { template { span( /) } }"#;
         assert!(matches!(
             compile_map(entry, &[("./parts.qubc", parts)]),
             Err(CompileError::Resolve(ResolveError::MissingExport { .. }))
@@ -1340,9 +1421,9 @@ mod tests {
     fn use_duplicate_component_errors() {
         let entry = r#"
             use Card from "./other.qubc"
-            component Card { template { div() {} } }
+            component Card { template { div( /) } }
         "#;
-        let other = r#"component Card { template { span() {} } }"#;
+        let other = r#"component Card { template { span( /) } }"#;
         assert!(matches!(
             compile_map(entry, &[("./other.qubc", other)]),
             Err(CompileError::Resolve(ResolveError::DuplicateComponent(_)))
@@ -1354,12 +1435,12 @@ mod tests {
     fn use_cycle_errors() {
         let entry = r#"
             use A from "./a.qubc"
-            component Entry { template { A() {} } }
+            component Entry { template { A( /) } }
         "#;
         // a가 다시 entry를 use. resolver는 "entry"(엔트리 path)도 매핑한다.
         let a = r#"
             use Entry from "./entry.qubc"
-            component A { template { Entry() {} } }
+            component A { template { Entry( /) } }
         "#;
         let resolver = move |_base: &str, target: &str| match target {
             "./a.qubc" => Some(("./a.qubc".to_string(), a.to_string())),
@@ -1390,11 +1471,11 @@ mod tests {
     fn use_excludes_unlisted_components() {
         let entry = r#"
             use Used from "./parts.qubc"
-            component Card { template { Used() {} } }
+            component Card { template { Used( /) } }
         "#;
         let parts = r#"
-            component Used { template { span() {} } }
-            component Unused { template { div() {} } }
+            component Used { template { span( /) } }
+            component Unused { template { div( /) } }
         "#;
         let bytes = compile_map(entry, &[("./parts.qubc", parts)]).unwrap();
         let names = component_names(&bytes);
@@ -1407,21 +1488,21 @@ mod tests {
         let entry = r#"
             use Left from "./left.qubc"
             use Right from "./right.qubc"
-            component Card { template { Left() {} Right() {} } }
+            component Card { template { Left( /) Right( /) } }
         "#;
         // Left·Right는 같은 parts에서 각각 X·Y를 use한다.
         let left = r#"
             use X from "./parts.qubc"
-            component Left { template { X() {} } }
+            component Left { template { X( /) } }
         "#;
         let right = r#"
             use Y from "./parts.qubc"
-            component Right { template { Y() {} } }
+            component Right { template { Y( /) } }
         "#;
         let parts = r#"
-            component X { template { span() {} } }
-            component Y { template { div() {} } }
-            component Z { template { p() {} } }
+            component X { template { span( /) } }
+            component Y { template { div( /) } }
+            component Z { template { p( /) } }
         "#;
         let bytes = compile_map(
             entry,
@@ -1445,8 +1526,8 @@ mod tests {
         use bytecode::{decode, Op};
 
         let src = r#"
-            component Outer { template { div() { Inner() {} } } }
-            component Inner { template { span() {} } }
+            component Outer { template { div() { Inner( /) } } }
+            component Inner { template { span( /) } }
         "#;
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
@@ -1474,8 +1555,8 @@ mod tests {
         use bytecode::{decode, Op};
 
         let src = r#"
-            component Outer { template { div() { Inner() {} Inner() {} } } }
-            component Inner { template { span() {} } }
+            component Outer { template { div() { Inner( /) Inner( /) } } }
+            component Inner { template { span( /) } }
         "#;
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
@@ -1500,8 +1581,8 @@ mod tests {
         use bytecode::{decode, Op};
 
         let src = r#"
-            component Outer { template { div() { Done: Inner() {} } } }
-            component Inner { template { span() {} } }
+            component Outer { template { div() { Done: Inner( /) } } }
+            component Inner { template { span( /) } }
         "#;
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
@@ -1524,8 +1605,8 @@ mod tests {
         use bytecode::{decode, Op};
 
         let src = r#"
-            component Outer { template { div() { Save: Inner() {} Cancel: Inner() {} } } }
-            component Inner { template { span() {} } }
+            component Outer { template { div() { Save: Inner( /) Cancel: Inner( /) } } }
+            component Inner { template { span( /) } }
         "#;
         let bytes = compile(src).unwrap();
         let module = decode(&bytes).unwrap();
@@ -1548,7 +1629,7 @@ mod tests {
     /// 요소 속성은 공백 구분 - 속성 사이 콤마는 우리 문법이 아니라 ParseError로 거부한다.
     #[test]
     fn element_attrs_reject_comma_separator() {
-        let src = r#"component A { template { div(class="x", id="y") {} } }"#;
+        let src = r#"component A { template { div(class="x", id="y" /) } }"#;
         assert!(matches!(
             compile(src),
             Err(CompileError::Resolve(ResolveError::Parse(_)))
@@ -1559,13 +1640,13 @@ mod tests {
     #[test]
     fn type_field_missing_comma_rejected() {
         // props에서 콤마 누락.
-        let src = r#"component A { props { a: string b: number } template { div() {} } }"#;
+        let src = r#"component A { props { a: string b: number } template { div( /) } }"#;
         assert!(matches!(
             compile(src),
             Err(CompileError::Resolve(ResolveError::Parse(_)))
         ));
         // 중첩 object 타입에서 콤마 누락.
-        let nested = r#"component B { props { o: { a: string b: number } } template { div() {} } }"#;
+        let nested = r#"component B { props { o: { a: string b: number } } template { div( /) } }"#;
         assert!(matches!(
             compile(nested),
             Err(CompileError::Resolve(ResolveError::Parse(_)))
@@ -1576,13 +1657,13 @@ mod tests {
     #[test]
     fn type_field_last_comma_optional() {
         // 마지막 생략.
-        let omitted = r#"component A { props { a: string, b: number } template { div() {} } }"#;
+        let omitted = r#"component A { props { a: string, b: number } template { div( /) } }"#;
         assert!(compile(omitted).is_ok());
         // trailing 콤마.
-        let trailing = r#"component B { props { a: string, b: number, } template { div() {} } }"#;
+        let trailing = r#"component B { props { a: string, b: number, } template { div( /) } }"#;
         assert!(compile(trailing).is_ok());
         // 중첩 object에서도 동일.
-        let nested = r#"component C { props { o: { a: string, b: number, } } template { div() {} } }"#;
+        let nested = r#"component C { props { o: { a: string, b: number, } } template { div( /) } }"#;
         assert!(compile(nested).is_ok());
     }
 

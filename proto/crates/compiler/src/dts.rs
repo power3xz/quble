@@ -304,7 +304,7 @@ mod tests {
         let out = dts(r#"
             component Thumb {
               events { CLICK({ x }) }
-              template { img(@click:CLICK) {} }
+              template { img(@click:CLICK /) }
             }
         "#);
         assert!(out.contains("type LeafIndex<T> = number & { readonly __leaf: T };"));
@@ -319,7 +319,7 @@ mod tests {
             component Thumb {
               props { avatar: string, size: number, active: bool }
               events { CLICK({ avatar }) }
-              template { img(@click:CLICK) {} }
+              template { img(@click:CLICK /) }
             }
         "#);
         assert!(out.contains(
@@ -334,7 +334,7 @@ mod tests {
             component C {
               props { tags: string[], owner: { name: string, id: number } }
               events { GO({ tags }) }
-              template { button(@click:GO) {} }
+              template { button(@click:GO /) }
             }
         "#);
         assert!(out.contains(
@@ -346,10 +346,10 @@ mod tests {
     #[test]
     fn alias_becomes_fullname_segment() {
         let out = dts(r#"
-            component Outer { template { div() { Done: Inner() {} } } }
+            component Outer { template { div() { Done: Inner( /) } } }
             component Inner {
               events { TOGGLE({ on }) }
-              template { button(@click:TOGGLE) {} }
+              template { button(@click:TOGGLE /) }
             }
         "#);
         assert!(out.contains("'Done.TOGGLE':"), "실제 출력:\n{out}");
@@ -359,10 +359,10 @@ mod tests {
     #[test]
     fn unaliased_type_name_shared_once() {
         let out = dts(r#"
-            component Outer { template { div() { Inner() {} Inner() {} } } }
+            component Outer { template { div() { Inner( /) Inner( /) } } }
             component Inner {
               events { TOGGLE({ on }) }
-              template { button(@click:TOGGLE) {} }
+              template { button(@click:TOGGLE /) }
             }
         "#);
         assert_eq!(out.matches("'Inner.TOGGLE':").count(), 1, "실제 출력:\n{out}");
@@ -378,7 +378,7 @@ mod tests {
               events { GO({ userId }) }
               template {
                 @with Area {
-                  button(@click:GO) {}
+                  button(@click:GO /)
                 }
               }
             }
@@ -393,7 +393,7 @@ mod tests {
             component C {
               props { count: number }
               events { BUMP({ count, label: "clicks" }) }
-              template { button(@click:BUMP) {} }
+              template { button(@click:BUMP /) }
             }
         "#);
         assert!(out.contains(r#"Handler<{ count: string; label: "clicks" }"#), "실제 출력:\n{out}");
@@ -405,7 +405,7 @@ mod tests {
         let out = dts(r#"
             component C {
               events { E({ n: 42, b: true, s: "hi" }) }
-              template { button(@click:E) {} }
+              template { button(@click:E /) }
             }
         "#);
         assert!(out.contains(r#"Handler<{ n: 42; b: true; s: "hi" }"#), "실제 출력:\n{out}");
@@ -418,12 +418,12 @@ mod tests {
             component Outer {
               props { flag: bool }
               template {
-                @if (flag) { A: Inner() {} } @else { B: Inner() {} }
+                @if (flag) { A: Inner( /) } @else { B: Inner( /) }
               }
             }
             component Inner {
               events { TOGGLE({ on }) }
-              template { button(@click:TOGGLE) {} }
+              template { button(@click:TOGGLE /) }
             }
         "#);
         assert!(out.contains("'A.TOGGLE':"), "then 가지 이벤트\n{out}");
@@ -434,10 +434,10 @@ mod tests {
     #[test]
     fn for_component_segment_suffix() {
         let out = dts(r#"
-            component List { template { @for (item of 3) { Row: Inner() {} } } }
+            component List { template { @for (item of 3) { Row: Inner( /) } } }
             component Inner {
               events { PICK({ id }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#);
         assert!(out.contains("'Row[$0].PICK':"), "실제 출력:\n{out}");
@@ -449,7 +449,7 @@ mod tests {
         let out = dts(r#"
             component Menu {
               events { SELECT({ i }) }
-              template { @for (item of 3) { li(@click:SELECT) {} } }
+              template { @for (item of 3) { li(@click:SELECT /) } }
             }
         "#);
         assert!(out.contains("'[$0].SELECT':"), "실제 출력:\n{out}");
@@ -460,11 +460,11 @@ mod tests {
     fn for_siblings_share_index() {
         let out = dts(r#"
             component List {
-              template { @for (item of 3) { A: Inner() {} B: Inner() {} } }
+              template { @for (item of 3) { A: Inner( /) B: Inner( /) } }
             }
             component Inner {
               events { CLICK({ id }) }
-              template { button(@click:CLICK) {} }
+              template { button(@click:CLICK /) }
             }
         "#);
         assert!(out.contains("'A[$0].CLICK':"), "실제 출력:\n{out}");
@@ -479,7 +479,7 @@ mod tests {
               events { A({ x }) B({ y }) }
               template {
                 @for (item of 3) {
-                  div(@click:A) { span(@click:B) {} }
+                  div(@click:A) { span(@click:B /) }
                 }
               }
             }
@@ -495,15 +495,15 @@ mod tests {
         let out = dts(r#"
             component List {
               template {
-                @for (row of 3) { Row: Mid() {} }
+                @for (row of 3) { Row: Mid( /) }
               }
             }
             component Mid {
-              template { @for (cell of 3) { Cell: Inner() {} } }
+              template { @for (cell of 3) { Cell: Inner( /) } }
             }
             component Inner {
               events { PICK({ id }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#);
         assert!(out.contains("'Row[$0].Cell[$1].PICK':"), "실제 출력:\n{out}");
@@ -516,12 +516,12 @@ mod tests {
             component List {
               props { flag: bool }
               template {
-                @for (item of 3) { @if (flag) { Row: Inner() {} } }
+                @for (item of 3) { @if (flag) { Row: Inner( /) } }
               }
             }
             component Inner {
               events { PICK({ id }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#);
         assert!(out.contains("'Row[$0].PICK':"), "실제 출력:\n{out}");
@@ -533,14 +533,14 @@ mod tests {
         let out = dts(r#"
             component Menu {
               template {
-                @for (a of 3) { Mid() {} }
-                Mid() {}
+                @for (a of 3) { Mid( /) }
+                Mid( /)
               }
             }
-            component Mid { template { @for (b of 3) { Inner() {} } } }
+            component Mid { template { @for (b of 3) { Inner( /) } } }
             component Inner {
               events { PICK({ id }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#);
         // @for 안 Mid: b가 [$1] (a 안). @for 밖 Mid: b가 [$0].
@@ -552,10 +552,10 @@ mod tests {
     #[test]
     fn outside_for_no_index() {
         let out = dts(r#"
-            component List { template { Row: Inner() {} } }
+            component List { template { Row: Inner( /) } }
             component Inner {
               events { PICK({ id }) }
-              template { button(@click:PICK) {} }
+              template { button(@click:PICK /) }
             }
         "#);
         assert!(out.contains("'Row.PICK':"), "실제 출력:\n{out}");
