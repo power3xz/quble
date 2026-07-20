@@ -1,0 +1,23 @@
+component RowList {
+  props { rows: { label: string, cells: string[] }[] }
+  events {
+    ADD({ rows })
+    DEL({ rows })
+  }
+  template {
+    div(class="rowlist") {
+      button(class="add" @click:ADD) { "+" }
+      button(class="del" @click:DEL) { "-" }
+      ul() {
+        @for (row of rows) {
+          li(class="row") {
+            {row.label}
+            @for (cell of row.cells) {
+              span(class="cell") { {cell} }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+component TagList {
+  props { tags: string[] }
+  events {
+    ADD({ tags })
+    DEL({ tags })
+  }
+  template {
+    div(class="taglist") {
+      button(class="add" @click:ADD) { "+" }
+      button(class="del" @click:DEL) { "-" }
+      ul() {
+        @for (tag of tags) {
+          li(class="tag") { {tag} }
+        }
+      }
+    }
+  }
+}

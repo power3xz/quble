@@ -31,6 +31,8 @@ import {
   appendIfRegion,
   attachForIteration,
   ELSE_INDEX,
+  freeArrayInfo,
+  removeBranchAt,
   type TArrayInfo,
   type TBranch,
   THEN_INDEX,
@@ -633,7 +635,7 @@ const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 �
 
 // 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
 const dispatchBinding = (b: TBinding, domEventObject: Event) => {
-  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module, arrayPool, freeArrays } = b;
+  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module, arrayPool, freeArrays, regionPool, freeRegions, branchPool, freeBranches } = b;
   const data: Record<string, unknown> = {};
   for (const p of payload) {
     data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
@@ -670,11 +672,56 @@ const dispatchBinding = (b: TBinding, domEventObject: Event) => {
       store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
     }
   };
+  // 요소 하나(start, typeRef)를 회수한다 - 고정부를 타입대로 걸어 배열 칸(offset)을 만나면 그 자식 배열의 요소를
+  // 재귀 회수하고 arrayInfo·길이 칸을 반납한다. 걷기가 끝나면 이 요소 고정 블록을 store.free. 제거된 요소의
+  // 서브트리는 어디서도 참조되지 않으므로 안쪽까지 전부 반납해야 한다(누수 방지). 배열 칸 값이 arrayInfoIndex.
+  const freeElem = (start: number, typeRef: number): void => {
+    let cursor = start;
+    const walk = (ref: number): void => {
+      const t = module.types[ref];
+      if (t.tag === "object") {
+        for (const [, childTypeRef] of t.fields) {
+          walk(childTypeRef);
+        }
+        return;
+      }
+      if (t.tag === "array") {
+        const child = arrayPool[Number(store.get(cursor))];
+        for (const elemStart of child.elemStartLeafIndices) {
+          freeElem(elemStart, child.elemTypeRef);
+        }
+        if (child.sizeLeafIndex !== null) {
+          store.free(child.sizeLeafIndex, 1); // @for에 쓰였으면 길이 칸도 회수(region은 removeBranchAt 재귀가 뗌)
+        }
+        freeArrayInfo(arrayPool, freeArrays, Number(store.get(cursor)));
+      }
+      cursor += 1; // 스칼라·배열 칸 하나 소비
+    };
+    walk(typeRef);
+    store.free(start, leafCountOf(module, typeRef));
+  };
+  // 배열 요소 제거 - i번째 요소를 재귀 회수(freeElem)하고 목록(elemStartLeafIndices)에서 뺀다. @for에 쓰였으면
+  // (forRegionIndex) 그 region의 i번째 회차 DOM만 뗀다 - 나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상
+  // (재빌드·재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
+  // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
+  // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
+  const removeAt = (arrayLeafIndex: number, i: number): void => {
+    const info = arrayPool[Number(store.get(arrayLeafIndex))];
+    if (info.forRegionIndex !== null) {
+      removeBranchAt(store, regionPool, freeRegions, branchPool, freeBranches, info.forRegionIndex, i);
+    }
+    freeElem(info.elemStartLeafIndices[i], info.elemTypeRef);
+    info.elemStartLeafIndices.splice(i, 1);
+    if (info.sizeLeafIndex !== null) {
+      store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
+    }
+  };
   handlers[fullName]?.(data, {
     event: domEventObject,
     set: store.set,
     get: store.get,
     push,
+    removeAt,
     props,
     context,
     ...loopIndices,
@@ -800,6 +847,10 @@ type TBinding = {
   module: TModule;
   arrayPool: TArrayInfo[];
   freeArrays: number[];
+  regionPool: TRegion[]; // removeAt이 요소 회차 DOM(region)을 뗄 때 필요
+  freeRegions: number[];
+  branchPool: TBranch[];
+  freeBranches: number[];
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -994,6 +1045,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         const sizeLeafIndex = info.sizeLeafIndex;
 
         const forRegionIndex = appendForRegion(regionPool, freeRegions, sizeLeafIndex);
+        info.forRegionIndex = forRegionIndex; // removeAt이 이 region의 회차 DOM을 뗀다
         const region = regionPool[forRegionIndex];
         branch.childRegionIndices.push(forRegionIndex);
         nodeTop().appendChild(region.anchor);
@@ -1180,6 +1232,10 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
               module,
               arrayPool,
               freeArrays,
+              regionPool,
+              freeRegions,
+              branchPool,
+              freeBranches,
             };
             ensureDelegate(domEvent);
             break;

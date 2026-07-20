@@ -37,12 +37,16 @@ export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
   alloc: (values: unknown[]) => LeafIndex;
+  free: (start: LeafIndex, size: number) => void;
   subscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
   unsubscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
   const subscribers: Array<Set<(v: unknown) => void> | undefined> = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
+  // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
+  // 정적·유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합·split·정렬 없이 O(1) 재사용/반납.
+  const freeBySize = new Map<number, LeafIndex[]>();
 
   const set = (leafIndex: LeafIndex, value: unknown): void => {
     if (leafStore.get(leafIndex) === value) {
@@ -59,14 +63,30 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   };
 
   // 값 뭉치(values)를 store에 심고 시작 leafIndex를 돌려준다 - 배열 요소 추가(push)가 요소를 타입대로 펴
-  // 넘긴다(해석은 호출부, store는 값만 심는다). 통지 안 함(새 칸이라 구독자 없음). 지금은 뒤에만 심는다 -
-  // 요소 회수(remove)가 크기별 free list를 채우면, 여기에 "그 크기 빈 블록 있으면 그 start 재사용" 분기가 붙는다.
+  // 넘긴다(해석은 호출부, store는 값만 심는다). 통지 안 함(새 칸이라 구독자 없음). 같은 크기 빈 블록이
+  // free list에 있으면 그 자리를 재사용하고(뒤로 안 늘림), 없으면 leaves 끝에 확보한다. 둘 다 O(1).
   const alloc = (values: unknown[]): LeafIndex => {
-    const start = leaves.length;
+    const reused = freeBySize.get(values.length)?.pop();
+    const start = reused ?? leaves.length;
     for (let i = 0; i < values.length; i++) {
       leaves[start + i] = values[i]; // push(...values) 대신 인덱스 대입 - 큰 요소도 콜스택 스프레드 없이 안전.
     }
     return start;
+  };
+
+  // 요소 하나의 고정 칸([start, start+size))을 회수한다 - 배열 요소 제거(removeAt)가 부른다. 그 블록이 leaves
+  // 끝이면 length를 줄여 실제로 되감고(pool 축소), 중간이면 크기별 free list에 반납해 다음 alloc이 재사용한다.
+  const free = (start: LeafIndex, size: number): void => {
+    if (start + size === leaves.length) {
+      leaves.length = start; // 꼬리 회수 - 크기 무관, pool 실제 축소
+      return;
+    }
+    let bucket = freeBySize.get(size);
+    if (!bucket) {
+      bucket = [];
+      freeBySize.set(size, bucket);
+    }
+    bucket.push(start);
   };
 
   const subscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {
@@ -82,6 +102,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     get: leafStore.get,
     set,
     alloc,
+    free,
     subscribe,
     unsubscribe,
   };

@@ -49,6 +49,7 @@ export type TArrayInfo = {
   elemTypeRef: number; // 요소 하나의 타입 - 요소 추가(push)가 값을 이 타입대로 store에 펴 심는다.
   elemStartLeafIndices: number[];
   sizeLeafIndex: number | null; // 이 배열이 @for 순회 대상이 되면(그때만) 요소 수를 담는 store 칸을 lazy 확보 - 그 칸 구독이 grow/shrink 발화. @for에 안 쓰이면 null(길이 칸 낭비 없음).
+  forRegionIndex: number | null; // 이 배열을 순회하는 @for region. 요소 중간 제거(removeAt)가 이 region의 i번째 회차 DOM을 뗀다. @for에 안 쓰이면 null(뗄 DOM 없음).
 };
 
 export const THEN_INDEX = 0;
@@ -60,7 +61,18 @@ export const appendArrayInfo = (
   freeArrays: number[],
   elemSize: number,
   elemTypeRef: number,
-): number => allocInPool(arrayPool, freeArrays, { elemSize, elemTypeRef, elemStartLeafIndices: [], sizeLeafIndex: null });
+): number =>
+  allocInPool(arrayPool, freeArrays, {
+    elemSize,
+    elemTypeRef,
+    elemStartLeafIndices: [],
+    sizeLeafIndex: null,
+    forRegionIndex: null,
+  });
+
+// arrayPool의 arrayInfo 칸을 반납한다 - 요소 제거(removeAt)가 중첩 배열을 재귀 회수할 때 그 배열의 arrayInfo를 반납.
+export const freeArrayInfo = (arrayPool: TArrayInfo[], freeArrays: number[], arrayInfoIndex: number): void =>
+  freeInPool(arrayPool, freeArrays, arrayInfoIndex);
 
 // branchPool에 빈 Branch를 alloc(빈 칸 재사용 or append)하고 그 branchIndex를 돌려준다.
 const appendBranch = (branchPool: TBranch[], freeBranches: number[]): number =>
@@ -307,4 +319,22 @@ export const truncateFor = (
     freeBranchTree(branchPool, freeBranches, regionPool, freeRegions, branchIndices[i]);
   }
   branchIndices.length = count;
+};
+
+// @for region(regionIndex)의 i번째 회차만 떼어낸다(배열 요소 중간 제거). truncateFor가 꼬리에 하던
+// detach+반납을 임의 i 하나에 하고 branchIndices에서 그 자리를 뺀다. 나머지 회차는 자기 요소 leaf를 그대로
+// 보므로 무손상이다(요소는 store에서 안 움직이고 목록만 당겨진다) - 재빌드·재바인딩 없음.
+export const removeBranchAt = (
+  store: Store,
+  regionPool: TRegion[],
+  freeRegions: number[],
+  branchPool: TBranch[],
+  freeBranches: number[],
+  regionIndex: number,
+  i: number,
+): void => {
+  const branchIndices = regionPool[regionIndex].branchIndices;
+  detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
+  freeBranchTree(branchPool, freeBranches, regionPool, freeRegions, branchIndices[i]);
+  branchIndices.splice(i, 1);
 };
