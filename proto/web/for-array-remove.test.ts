@@ -75,16 +75,20 @@ test("연속 제거로 빈 배열까지", () => {
   assert.deepEqual(tags(host), [], "모두 제거");
 });
 
-test("중간 제거 후 push는 free된 leaf 자리를 재사용한다", () => {
-  const { del, add, arrayPool } = instantiate({ tags: ["a", "b", "c"] }, ["d"], [1]);
+test("중간 제거 후 push는 free된 leaf 자리를 재사용한다(pool 안 커짐)", () => {
+  const { host, del, add, arrayPool } = instantiate({ tags: ["a", "b", "c"] }, ["d"], [1]);
   const info = arrayPool[0];
-  const freedLeaf = info.elemStartLeafIndices[1]; // b의 leaf
-  del.click(); // b 제거 -> freedLeaf가 free list(size 1)로
-  add.click(); // d push -> 같은 크기라 freedLeaf 재사용
-  assert.ok(
-    info.elemStartLeafIndices.includes(freedLeaf),
-    `push가 free된 leaf(${freedLeaf})를 재사용해야: ${JSON.stringify(info.elemStartLeafIndices)}`,
-  );
+  // 요소 leaf와 인덱스 leaf는 크기가 같아(둘 다 1) 같은 free 버킷을 공유한다 - b 제거로 두 자리가 반납되고
+  // d push의 두 alloc(요소·인덱스)이 그 자리를 재사용한다. 어느 자리가 어느 용도로 가는지는 free list LIFO라
+  // 특정하지 않는다(자리 번호가 아니라 "새 칸을 안 늘렸는지"가 재사용의 참 조건). 최대 leaf가 제거 전을 안 넘으면
+  // 두 반납분을 다시 썼다는 뜻이다. free list 메커니즘 자체는 leaf-store-alloc.test.ts가 단위로 보장한다.
+  const maxBefore = Math.max(...info.elemStartLeafIndices, ...info.indexLeafIndices);
+  del.click(); // b 제거 -> 요소·인덱스 두 자리가 free list(size 1)로
+  add.click(); // d push -> 두 반납분 재사용(새 칸 안 늘림)
+  const maxAfter = Math.max(...info.elemStartLeafIndices, ...info.indexLeafIndices);
+  assert.ok(maxAfter <= maxBefore, `재사용으로 최대 leaf가 안 늘어야: before=${maxBefore} after=${maxAfter}`);
+  // 자리를 바꿔 재사용돼도 각 요소가 자기 값을 정확히 렌더해야 한다(재사용이 값 오염을 안 일으키는지). a,c,d.
+  assert.deepEqual(tags(host), ["a", "c", "d"], "자리 교차 재사용 후에도 값 정확");
 });
 
 test("끝 제거는 pool을 되감아 다음 push가 그 자리를 다시 쓴다", () => {

@@ -668,6 +668,13 @@ const dispatchBinding = (b: TBinding, domEventObject: Event) => {
       }
     };
     plantElem(elem, info);
+    // 인덱스 leaf도 동기로 하나 잇는다 - 단 @for로 순회돼 이미 채워진 경우만(비었으면 아직 순회 전이라
+    // reactiveArrayFor의 lazy 채움에 맡긴다). 새 요소는 꼬리라 인덱스 = 마지막 자리. 접근자 대입으로 그
+    // 자리에 놓는다(push 스프레드 없이). plantElem 밖 최상위 info에만 - 중첩 안쪽은 각자 @for 순회 시 lazy.
+    const tail = info.elemStartLeafIndices.length - 1;
+    if (info.indexLeafIndices.length !== 0) {
+      info.indexLeafIndices[tail] = store.alloc([tail]);
+    }
     if (info.sizeLeafIndex !== null) {
       store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
     }
@@ -712,10 +719,29 @@ const dispatchBinding = (b: TBinding, domEventObject: Event) => {
     }
     freeElem(info.elemStartLeafIndices[i], info.elemTypeRef);
     info.elemStartLeafIndices.splice(i, 1);
+    // 인덱스 leaf 처리(@for로 순회돼 채워졌을 때만) - i번째 인덱스 칸을 회수하고 목록에서 뺀 뒤, 뒤로 당겨진
+    // 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고 $n이 발화 시 읽으므로,
+    // 중간 제거로 뒤가 당겨져도 표시·이벤트 인덱스가 자동 정합한다(값 고정·위치 이동 설계의 인덱스 반응성).
+    if (info.indexLeafIndices.length !== 0) {
+      store.free(info.indexLeafIndices[i], 1);
+      info.indexLeafIndices.splice(i, 1);
+      for (let k = i; k < info.indexLeafIndices.length; k++) {
+        store.set(info.indexLeafIndices[k], k); // 뒤 인덱스 당김 발화
+      }
+    }
     if (info.sizeLeafIndex !== null) {
       store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
     }
   };
+  // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
+  // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
+  const currentIndices: Record<string, number> = {};
+  for (const key in loopIndices) {
+    const src = loopIndices[key as TIndexSymbol];
+    if (src) {
+      currentIndices[key] = src.kind === STORE ? (store.get(src.ref) as number) : src.ref;
+    }
+  }
   handlers[fullName]?.(data, {
     event: domEventObject,
     set: store.set,
@@ -724,7 +750,7 @@ const dispatchBinding = (b: TBinding, domEventObject: Event) => {
     removeAt,
     props,
     context,
-    ...loopIndices,
+    ...currentIndices,
   });
 };
 
@@ -842,7 +868,8 @@ type TBinding = {
   payload: TAssembled[];
   contextLeaves: Record<string, TAssembled[]>;
   props: Record<string, number>;
-  loopIndices: Partial<{ [key in TIndexSymbol]: number }>;
+  loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
+
   store: TLeafStoreSubject;
   module: TModule;
   arrayPool: TArrayInfo[];
@@ -948,13 +975,14 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는
       // BIND_EVENT가 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
       const buildIteration = (
-        i: number,
+        indexKind: number,
+        indexRef: number,
         bodyStart: number,
         forEndPc: number,
         targetRegionIndex: number,
         targetBranchIndex: number,
       ) => {
-        loopIndexStack.push(i);
+        loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
         const f = interpret(
           code,
           argumentSourcePairs,
@@ -966,10 +994,11 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           targetRegionIndex,
           targetBranchIndex,
           pathPrefix,
-          loopIndexStack, // 회차 값을 물려준다(발화 시 $n)
+          loopIndexStack, // 회차 인덱스 소스를 물려준다(발화 시 $n으로 해소)
           loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
         );
-        loopIndexStack.pop();
+        loopIndexStack.pop(); // ref
+        loopIndexStack.pop(); // kind
         return f;
       };
 
@@ -979,7 +1008,12 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       // 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는 라이브라 순회 중 인덱스가 밀려 건너뛴다.
       const inlineFor = (count: number, bodyStart: number, forEndPc: number) => {
         for (let i = 0; i < count; i++) {
-          nodeTop().appendChild(buildIteration(i, bodyStart, forEndPc, startRegionIndex, startBranchIndex));
+          argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](리터럴은 반응성 없어 상수)
+          nodeTop().appendChild(buildIteration(RAW, i, bodyStart, forEndPc, startRegionIndex, startBranchIndex));
+          argumentSourcePairs.pop(); // index ref
+          argumentSourcePairs.pop(); // index kind
+          argumentSourcePairs.pop(); // item ref
+          argumentSourcePairs.pop(); // item kind
         }
       };
 
@@ -1001,12 +1035,14 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         // (array-for와 같은 push/pop 규칙). 슬롯 번호는 그 시점 pairs 길이/2 = props+바깥 회차변수 뒤.
         const addIterationBranch = (i: number) => {
           const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
-          argumentSourcePairs.push(RAW, i);
+          argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
           branchPool[newBranchIndex].nodes = Array.from(
-            buildIteration(i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
+            buildIteration(RAW, i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
           );
-          argumentSourcePairs.pop(); // 회차변수 ref
-          argumentSourcePairs.pop(); // 회차변수 kind
+          argumentSourcePairs.pop(); // index ref
+          argumentSourcePairs.pop(); // index kind
+          argumentSourcePairs.pop(); // item ref
+          argumentSourcePairs.pop(); // item kind
           return newBranchIndex;
         };
 
@@ -1043,6 +1079,13 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
           info.sizeLeafIndex = store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
         }
         const sizeLeafIndex = info.sizeLeafIndex;
+        // 인덱스 leaf도 @for에 처음 쓰일 때만 lazy 채운다(sizeLeafIndex와 같은 결). elemStartLeafIndices와
+        // 나란히 요소 수만큼 확보 - [i]=i번째 요소의 회차 번호. 이후 push/removeAt이 둘을 동기로 유지한다.
+        if (info.indexLeafIndices.length === 0) {
+          for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+            info.indexLeafIndices[i] = store.alloc([i]);
+          }
+        }
 
         const forRegionIndex = appendForRegion(regionPool, freeRegions, sizeLeafIndex);
         info.forRegionIndex = forRegionIndex; // removeAt이 이 region의 회차 DOM을 뗀다
@@ -1050,16 +1093,20 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
         branch.childRegionIndices.push(forRegionIndex);
         nodeTop().appendChild(region.anchor);
 
-        // 회차변수 슬롯을 그 요소 leaf에 [STORE, elemStartLeafIndices[i]]로 밀고 build 후 되돌린다
-        // (count-for의 [RAW, i]와 같은 push/pop 규칙). 슬롯 번호 = props + 바깥 회차변수 뒤.
+        // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를
+        // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 {i}가 읽는다. 인덱스 leaf는 발화 시
+        // $n으로도 해소되게 loopIndexStack에 (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
         const addIterationBranch = (i: number) => {
           const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
-          argumentSourcePairs.push(STORE, info.elemStartLeafIndices[i]);
+          const indexLeaf = info.indexLeafIndices[i];
+          argumentSourcePairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
           branchPool[newBranchIndex].nodes = Array.from(
-            buildIteration(i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
+            buildIteration(STORE, indexLeaf, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
           );
-          argumentSourcePairs.pop(); // 회차변수 ref
-          argumentSourcePairs.pop(); // 회차변수 kind
+          argumentSourcePairs.pop(); // 인덱스 ref
+          argumentSourcePairs.pop(); // 인덱스 kind
+          argumentSourcePairs.pop(); // 요소 ref
+          argumentSourcePairs.pop(); // 요소 kind
           return newBranchIndex;
         };
 
@@ -1206,11 +1253,13 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
               const created = createdContexts[i];
               contextLeaves[created.name] = created.fields;
             }
-            // @for 회차 인덱스를 바인딩 시점에 스냅샷($0=바깥, $1=안쪽...). 발화 때 핸들러
-            // 인자로 편다. fullname의 [$n] 정적 표기와 짝 - 이건 실제 회차값이다.
-            const loopIndices: Partial<{ [key in TIndexSymbol]: number }> = {};
-            for (let i = 0; i < loopIndexStack.length; i++) {
-              loopIndices[`$${i}` as TIndexSymbol] = loopIndexStack[i];
+            // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
+            // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가
+            // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
+            // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
+            const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
+            for (let i = 0; i * 2 < loopIndexStack.length; i++) {
+              loopIndices[`$${i}` as TIndexSymbol] = { kind: loopIndexStack[2 * i], ref: loopIndexStack[2 * i + 1] };
             }
             // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
             // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
@@ -1355,7 +1404,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
               // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
               childPrefix!,
               loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
-              loopIndexStack.length, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이
+              loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
             );
             // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
             // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는

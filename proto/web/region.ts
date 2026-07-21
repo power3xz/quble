@@ -48,6 +48,7 @@ export type TArrayInfo = {
   elemSize: number;
   elemTypeRef: number; // 요소 하나의 타입 - 요소 추가(push)가 값을 이 타입대로 store에 펴 심는다.
   elemStartLeafIndices: number[];
+  indexLeafIndices: number[]; // elemStartLeafIndices와 나란한 요소별 인덱스 leaf - [i]=i번째 요소의 회차 번호를 담은 store 칸. 몸체 {i}·$0가 이 leaf를 읽어, 중간 제거(removeAt) 시 뒤 칸을 set으로 당기면 자동 갱신된다(값 고정·위치 이동 설계의 인덱스 반응성). @for 순회될 때만 lazy로 채운다(sizeLeafIndex와 같은 결). count-for는 중간 제거가 없어(꼬리만) 이걸 안 쓴다.
   sizeLeafIndex: number | null; // 이 배열이 @for 순회 대상이 되면(그때만) 요소 수를 담는 store 칸을 lazy 확보 - 그 칸 구독이 grow/shrink 발화. @for에 안 쓰이면 null(길이 칸 낭비 없음).
   forRegionIndex: number | null; // 이 배열을 순회하는 @for region. 요소 중간 제거(removeAt)가 이 region의 i번째 회차 DOM을 뗀다. @for에 안 쓰이면 null(뗄 DOM 없음).
 };
@@ -66,6 +67,7 @@ export const appendArrayInfo = (
     elemSize,
     elemTypeRef,
     elemStartLeafIndices: [],
+    indexLeafIndices: [],
     sizeLeafIndex: null,
     forRegionIndex: null,
   });

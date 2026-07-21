@@ -114,12 +114,13 @@
   해법 방향: C의 `.o`/동적 링킹처럼 조각은 절대 인덱스 대신 심볼+재배치 표식을 남기고, 로드
   시점에 간접 테이블(import table)로 해소 - 인덱스별 문제를 한 메커니즘으로 통일.
 
-- **배열 요소 중간 제거 시 회차 인덱스 미갱신** - `removeAt(arr, i)`는 i번째 요소를 회수하고 그
-  회차 DOM만 뗀다(나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상 - 값 이동 없음). 그런데
-  회차 인덱스(`$0`, 몸체 `{i}` 등)는 build 시점에 스냅샷된 값이라, 중간 제거로 뒤 요소가 당겨져도
-  갱신되지 않는다. (재현: 요소 옆 삭제 버튼 `[$0].DEL`이 `removeAt(props.arr, ctx.$0)` - b(index 1)를
-  지운 뒤 c의 버튼을 누르면 여전히 $0=2로 잡혀 d를 지운다.) 근본 원인은 회차 인덱스가 반응형이
-  아니라는 것 - 반응형이 되려면 인덱스가 구독 가능한 store leaf여야 제거 시 뒤 인덱스를 set으로 당길
-  수 있다(값 이동 A는 요소 전체 재렌더라 과함). 그래서 removeAt은 인덱스에 의존하지 않는 경로
-  (@for 밖 버튼이 고정 index 제거)까지만 완결됐고, 인덱스 반응성(요소마다 인덱스 leaf, @for가 인덱스
-  쓸 때만 lazy)은 선행 별개 스텝. 그 위에 removeAt의 인덱스 당김을 얹으면 요소 옆 삭제가 완성된다.
+- **leaf free가 구독(subscribers)을 회수하지 않음** - leaf-store `free`는 `leaves` 값만 회수하고
+  `subscribers[leafIndex]` Set은 안 만진다. 꼬리 회수(`leaves.length = start`)든 중간 free든, 되감은
+  자리를 `alloc`이 재사용하면 옛 구독 Set이 남아 새 요소를 오염시킬 수 있다(살아있는 구독이 남아
+  있던 경우). 지금 removeAt 정상 경로는 removeBranchAt(detach→unsubscribe)이 free보다 먼저 불려
+  터지지 않지만, 이는 "free 호출 전 구독이 다 떼여있다"는 암묵 규약에 의존하는 취약한 계약이다
+  (freeElem이 free하는 안쪽 배열 sizeLeafIndex는 부모 @for가 구독 중이라 특히 위험). 근본 원인은 한
+  leaf의 값(leaf-store alloc/free)과 구독(region/branch detach/restoreBranchSubs)이 서로 다른 모듈·
+  타이밍에 회수돼 예측이 어렵다는 것. 방향 후보 - ① free가 subscribers 슬롯까지 비움(최소),
+  ② 구독 소유를 branch에서 leaf-store로 이전(중간), ③ 요소·회차·생애를 branch free 하나로 통합
+  (최대). ②/③ 필요 여부는 restoreBranchSubs 재구독 왕복 얽힘 확인 후 판단. 인덱스 반응성 작업 뒤 착수.

@@ -49,3 +49,20 @@ test("free list는 크기별로 분리 - 다른 크기는 재사용 안 하고 �
   const sz1 = store.alloc(["d"]); // size 1 - 재사용
   assert.equal(sz1, a, "같은 크기는 재사용");
 });
+
+test("같은 크기 두 자리를 반납하면 두 alloc이 각각 재사용해 새 칸을 안 늘린다", () => {
+  // 배열 요소 제거는 요소 leaf와 인덱스 leaf(둘 다 size 1)를 함께 반납하고, 뒤이은 push는 요소·인덱스를 함께
+  // alloc한다 - 같은 크기 두 자리가 반납됐다 두 번 alloc되는 패턴. free list가 둘을 다 재사용해 pool을 안 늘려야 한다.
+  const leaves: unknown[] = [];
+  const store = createLeafStoreSubject(leaves);
+  const a = store.alloc(["a"]); // 0
+  const b = store.alloc(["b"]); // 1
+  store.alloc(["keep"]); // 2 (a,b를 중간으로 - 끝 truncate 대신 free list로 가게)
+  const lenBefore = leaves.length; // 3
+  store.free(a, 1); // size 1 free list
+  store.free(b, 1); // size 1 free list (두 자리 반납)
+  const r1 = store.alloc(["x"]); // 반납분 재사용
+  const r2 = store.alloc(["y"]); // 나머지 반납분 재사용
+  assert.deepEqual([r1, r2].sort(), [a, b].sort(), "두 alloc이 반납된 두 자리를 각각 재사용");
+  assert.equal(leaves.length, lenBefore, "새 칸을 안 늘림(pool 그대로)");
+});
