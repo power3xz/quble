@@ -668,11 +668,12 @@ const dispatchBinding = (b: TBinding, domEventObject: Event) => {
       }
     };
     plantElem(elem, info);
-    // 인덱스 leaf도 동기로 하나 잇는다 - 단 @for로 순회돼 이미 채워진 경우만(비었으면 아직 순회 전이라
-    // reactiveArrayFor의 lazy 채움에 맡긴다). 새 요소는 꼬리라 인덱스 = 마지막 자리. 접근자 대입으로 그
-    // 자리에 놓는다(push 스프레드 없이). plantElem 밖 최상위 info에만 - 중첩 안쪽은 각자 @for 순회 시 lazy.
+    // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
+    // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
+    // 아니다 - 요소가 전부 제거돼 빈 배열(length 0)이어도 순회는 진행 중이라, length로 판단하면 이 채움을
+    // 건너뛰어 인덱스 없는 요소가 쌓이고 region과 어긋난다. 새 요소는 꼬리라 인덱스 = 마지막 자리.
     const tail = info.elemStartLeafIndices.length - 1;
-    if (info.indexLeafIndices.length !== 0) {
+    if (info.forRegionIndex !== null) {
       info.indexLeafIndices[tail] = store.alloc([tail]);
     }
     if (info.sizeLeafIndex !== null) {
@@ -719,10 +720,10 @@ const dispatchBinding = (b: TBinding, domEventObject: Event) => {
     }
     freeElem(info.elemStartLeafIndices[i], info.elemTypeRef);
     info.elemStartLeafIndices.splice(i, 1);
-    // 인덱스 leaf 처리(@for로 순회돼 채워졌을 때만) - i번째 인덱스 칸을 회수하고 목록에서 뺀 뒤, 뒤로 당겨진
-    // 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고 $n이 발화 시 읽으므로,
-    // 중간 제거로 뒤가 당겨져도 표시·이벤트 인덱스가 자동 정합한다(값 고정·위치 이동 설계의 인덱스 반응성).
-    if (info.indexLeafIndices.length !== 0) {
+    // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndex 기준) - i번째 인덱스 칸을 회수하고
+    // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고
+    // $n이 발화 시 읽으므로, 중간 제거로 뒤가 당겨져도 표시·이벤트 인덱스가 자동 정합한다(값 고정·위치 이동 설계).
+    if (info.forRegionIndex !== null) {
       store.free(info.indexLeafIndices[i], 1);
       info.indexLeafIndices.splice(i, 1);
       for (let k = i; k < info.indexLeafIndices.length; k++) {

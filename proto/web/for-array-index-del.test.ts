@@ -23,8 +23,13 @@ const rows = (host: ParentNode) =>
     (li) => `${li.querySelector(".idx")?.textContent}:${li.querySelector(".val")?.textContent}`,
   );
 
-const instantiate = (values: unknown) => {
+const instantiate = (values: unknown, addQueue: string[] = []) => {
   const handlers: THandlers = {
+    ADD: (_d, ctx) => {
+      const push = ctx.push as (a: number, e: unknown) => void;
+      const props = ctx.props as Record<string, number>;
+      push(props.tags, addQueue.shift() ?? "n");
+    },
     // @for 안 element라 fullname은 익명 [$0] 접미(for_event_element와 같은 규칙).
     "[$0].DEL": (_d, ctx) => {
       const removeAt = ctx.removeAt as (a: number, i: number) => void;
@@ -34,7 +39,7 @@ const instantiate = (values: unknown) => {
   };
   const inst = compile(qubb)(0)(values, handlers);
   const host = mount(inst);
-  return { host };
+  return { host, add: host.querySelector(".add") as HTMLButtonElement };
 };
 
 const delButton = (host: ParentNode, row: number) =>
@@ -64,4 +69,28 @@ test("맨 앞을 반복해 지우면 매번 앞이 당겨져 인덱스가 재정
   assert.deepEqual(rows(host), ["0:b", "1:c"], "b:0, c:1");
   delButton(host, 0).click(); // b 제거
   assert.deepEqual(rows(host), ["0:c"], "c:0");
+});
+
+// 전부 제거해 0개가 된 뒤 다시 추가·제거가 이어지는지 - "@for 순회 중"을 indexLeafIndices.length(빈 배열 0)로
+// 판단하면 여기서 인덱스 채움을 건너뛰어 인덱스 없는 요소가 쌓이고, 다음 제거가 region과 어긋나 크래시했다.
+// forRegionIndex 기준으로 고쳤다. 회귀 방지.
+test("전부 제거해 0개가 된 뒤 다시 추가하면 인덱스가 정상 부여된다", () => {
+  const { host, add } = instantiate({ tags: ["a"] });
+  delButton(host, 0).click(); // 0개로
+  assert.deepEqual(rows(host), [], "빈 목록");
+  add.click(); // 다시 추가 - 인덱스 0이 붙어야(옛 버그면 빈칸)
+  assert.deepEqual(rows(host), ["0:n"], "추가된 요소에 인덱스 0");
+  add.click();
+  assert.deepEqual(rows(host), ["0:n", "1:n"], "인덱스 이어짐");
+});
+
+test("0개 후 재추가한 요소도 삭제가 정상 동작한다(옛 버그: region 어긋나 크래시)", () => {
+  const { host, add } = instantiate({ tags: ["a"] });
+  delButton(host, 0).click(); // 0개
+  add.click();
+  add.click(); // [0:n, 1:n]
+  delButton(host, 0).click(); // 크래시 없이 앞을 제거, 뒤 당김
+  assert.deepEqual(rows(host), ["0:n"], "재추가분도 제거·당김 정상");
+  delButton(host, 0).click();
+  assert.deepEqual(rows(host), [], "다시 0개까지");
 });
