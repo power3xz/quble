@@ -1,0 +1,97 @@
+/* TodoList - 회차 인덱스 반응성 실사용 프리뷰. 번호(todo__num)는 몸체 {i}라 중간 삭제 시 자동 재정렬된다. */
+.todo {
+  max-width: 420px;
+  margin: 40px auto;
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #e3e8ef;
+  box-shadow: 0 2px 12px rgba(20, 30, 50, 0.06);
+  font: 14px/1.5 -apple-system, system-ui, sans-serif;
+  color: #2a3240;
+}
+
+.todo__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.todo__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.todo__add {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.todo__add:hover {
+  background: #2563eb;
+}
+
+.todo__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.todo__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f9fc;
+  border: 1px solid #eef2f7;
+}
+
+.todo__num {
+  flex: 0 0 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.todo__text {
+  flex: 1 1 auto;
+}
+
+.todo__done {
+  flex: 0 0 auto;
+  color: #94a3b8;
+}
+
+.todo__del {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #ef4444;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.todo__del:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
