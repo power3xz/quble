@@ -963,11 +963,11 @@ class Interpreter {
 
   componentEvents = (componentId: number): TEventEntry[] => {
     return this.module.defs[componentId].events;
-  }
+  };
 
   componentContexts = (componentId: number): TEventEntry[] => {
     return this.module.defs[componentId].contexts;
-  }
+  };
 
   // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
   //
@@ -1011,7 +1011,6 @@ class Interpreter {
       freeBranches,
       createdContexts,
     } = this;
-    const interpret = this.interpret.bind(this);
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
@@ -1045,7 +1044,7 @@ class Interpreter {
       targetBranchIndex: number,
     ) => {
       this.loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
-      const f = interpret(
+      const f = this.interpret(
         argumentSourcePairs,
         compId,
         activeContexts,
@@ -1318,7 +1317,10 @@ class Interpreter {
           // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
           const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
           for (let i = 0; i * 2 < this.loopIndexStack.length; i++) {
-            loopIndices[`$${i}` as TIndexSymbol] = { kind: this.loopIndexStack[2 * i], ref: this.loopIndexStack[2 * i + 1] };
+            loopIndices[`$${i}` as TIndexSymbol] = {
+              kind: this.loopIndexStack[2 * i],
+              ref: this.loopIndexStack[2 * i + 1],
+            };
           }
           // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
           // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
@@ -1445,7 +1447,7 @@ class Interpreter {
           // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
           // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
           const childDef = module.defs[childCompId];
-          const childFragment = interpret(
+          const childFragment = this.interpret(
             childArgumentSourcePairs,
             childCompId, // 자식 BIND_EVENT/ENTER_CONTEXT는 자식 def의 이벤트/컨텍스트 테이블을 본다
             activeContexts, // 부모 활성 컨텍스트를 공유로 물려준다 - 자식의 ENTER/EXIT_CONTEXT는
@@ -1489,7 +1491,7 @@ class Interpreter {
 
           // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
           const buildThen = () => {
-            const f = interpret(
+            const f = this.interpret(
               argumentSourcePairs,
               compId,
               activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
@@ -1506,17 +1508,17 @@ class Interpreter {
             const f =
               elseStart === -1
                 ? document.createDocumentFragment() // else 없는 if - 빈 가지
-                : interpret(
-                  argumentSourcePairs,
-                  compId,
-                  activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
-                  elseStart,
-                  ifEndPc,
-                  regionIndex,
-                  elseBranchIndex,
-                  pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-                  loopIndexBase,
-                );
+                : this.interpret(
+                    argumentSourcePairs,
+                    compId,
+                    activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
+                    elseStart,
+                    ifEndPc,
+                    regionIndex,
+                    elseBranchIndex,
+                    pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+                    loopIndexBase,
+                  );
             elseBranch.nodes = Array.from(f.childNodes);
           };
           thenBranch.lazyBuild = buildThen;
@@ -1593,7 +1595,7 @@ class Interpreter {
       }
     }
     return fragment;
-  }
+  };
 }
 
 const compileDef = (module: TModule, compId: number, resources: string[] = [], loadedHrefs = new Set()) => {
