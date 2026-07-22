@@ -1,0 +1,19 @@
+component IndexedTagList {
+  props { tags: string[] }
+  events {
+    ADD({ tags })
+    DEL({ tags })
+  }
+  template {
+    div(class="taglist") {
+      button(class="add" @click:ADD) { "+" }
+      @for (tag, i of tags) {
+        li(class="tag") {
+          span(class="idx") { {i} }
+          span(class="val") { {tag} }
+          button(class="del" @click:DEL) { "x" }
+        }
+      }
+    }
+  }
+}

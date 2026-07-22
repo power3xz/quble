@@ -5,6 +5,9 @@
 # 컴포넌트 소스(.qubc)는 레포 루트의 /components 아래에 있다 - proto/ 아래가 아니다.
 # 초기 data가 필요한 컴포넌트는 짝 파일 <name>.data.json을 같은 폴더에 두는 게 관례다
 # (예: components/forstress.qubc <-> components/forstress.data.json). --data로 그 짝을 넘긴다.
+# 이벤트 핸들러도 짝 파일 <name>.qubc.handlers.ts를 같은 폴더에 두면 build.mjs가 자동으로 찾아
+# esbuild로 번들·주입한다(예: components/forlist.qubc <-> components/forlist.qubc.handlers.ts).
+# 없으면 렌더만 되고 클릭은 이벤트 발화까지만 - set/removeAt 같은 상태 변경은 핸들러가 있어야 한다.
 # 서빙되는 건 proto/dist 하나뿐 - build.mjs가 여기에 <name>.qubb·data.json·index.html을 낸다.
 #
 # 사용: ./quble-preview.sh <component.qubc> [--data <data.json>]

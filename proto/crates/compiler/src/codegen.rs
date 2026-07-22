@@ -195,7 +195,7 @@ fn var_ref_to_slot<'a>(
 
     // root를 회차변수에서 먼저 찾는다. props와 이름이 겹칠 수 없어(@for 진입에서 충돌을 에러로
     // 건다) 조회 순서는 무관. for_var는 자기 슬롯 번호를 이미 갖고 있고, prop은 선언 순번이 슬롯.
-    let (scope_index, mut ty) = match for_vars.iter().find(|fv| fv.name == var.root) {
+    let (scope_index, mut ty) = match for_vars.iter().find(|fv| fv.name.as_deref() == Some(var.root.as_str())) {
         Some(fv) => (u8::try_from(fv.offset).map_err(|_| overflow())?, &fv.type_),
         None => {
             let mut ty = None;
@@ -389,11 +389,13 @@ impl ForScope<'_> {
     const ROOT: ForScope<'static> = ForScope { pending: &[], depth_base: 0, for_vars: &[] };
 }
 
-/// @for 회차변수 하나. name = 루프 변수명(`@for (tag of ..)`의 tag), offset = 이 변수가
-/// 앉는 scope 슬롯(props leaf 뒤에 회차 진입 순서로 이어짐), type_ = 요소 타입(배열 inner).
+/// @for 회차변수 하나. name = 루프 변수명(`@for (tag of ..)`의 tag). 인덱스변수는 이름이 없을 수
+/// 있어(`@for (row of rows)` - 인덱스 슬롯은 잡되 몸체 참조 불가) Option이다 - None이면 이름 조회에
+/// 안 걸린다(슬롯만 점유). offset = 이 변수가 앉는 scope 슬롯(props leaf 뒤에 회차 진입 순서로 이어짐),
+/// type_ = 요소 타입(배열 inner) 또는 Number(count 회차값·인덱스).
 #[derive(Clone)]
 struct ForVar {
-    name: String,
+    name: Option<String>,
     offset: u16,
     type_: Type,
 }
@@ -583,68 +585,61 @@ fn emit_node(
 
             code.push(Op::IfEnd as u8);
         }
-        Node::For { item, count, body } => {
-            // count 출처·타입으로 opcode를 가른다(컴파일타임 타입으로 구별 - 런타임이 값만 보고 안
-            // 헷갈리게). 리터럴 숫자=ForRaw, 숫자 slot=ForCountVar, 배열 slot=ForArrayVar.
-            // slot 참조는 (scope_index:u8, offset:u8) - count가 필드(a.count)면 offset이 산다.
-            let mut new_for_var = None;
-            match count {
+        Node::For { item, index, count, body } => {
+            // 이름 충돌 검사(섀도잉 금지 - 조회를 순서 무관하게 유지). item·index 둘 다 props/바깥 회차변수와
+            // 안 겹쳐야 한다. item==index도 금지(같은 이름 두 슬롯).
+            let mut names: Vec<&String> = vec![item];
+            if let Some(idx) = index {
+                names.push(idx);
+            }
+            for name in &names {
+                let dup = props.iter().any(|p| &&p.name == name)
+                    || for_scope.for_vars.iter().any(|fv| fv.name.as_ref() == Some(*name));
+                if dup || (index.as_ref() == Some(item) && names.len() == 2) {
+                    return Err(CodegenError::DuplicateBinding((*name).clone()));
+                }
+            }
+
+            // 모든 @for는 슬롯 2칸 - item(회차값/요소) + index(회차 번호). base는 props 뒤 바깥 회차변수까지
+            // 이어 붙인 자리(안 펼쳐 슬롯=개수), index는 그 다음 칸. 런타임도 같은 규칙(props 슬롯 수 +
+            // loopIndexStack 깊이)으로 계산하므로 operand엔 안 싣는다. item 타입은 count 출처로 가른다:
+            // 리터럴/숫자 count면 회차값(Number), 배열이면 요소 타입(inner). index는 항상 Number.
+            let base = (props.len() + for_scope.for_vars.len()) as u16;
+            let item_type = match count {
                 ForCount::Literal(n) => {
                     code.push(Op::ForRaw as u8);
                     code.extend_from_slice(&n.to_le_bytes());
+                    Type::Number
                 }
                 ForCount::Var(var) => {
-                    let (scope_index, offset, ty) =
-                        var_ref_to_slot(var, props, for_scope.for_vars)?;
+                    let (scope_index, offset, ty) = var_ref_to_slot(var, props, for_scope.for_vars)?;
                     match ty {
                         Type::Number => {
-                            // 이름 충돌은 에러(섀도잉 금지 - array 경로와 동일).
-                            if props.iter().any(|p| &p.name == item)
-                                || for_scope.for_vars.iter().any(|fv| &fv.name == item)
-                            {
-                                return Err(CodegenError::DuplicateBinding(item.clone()));
-                            }
-                            // 회차변수 = 회차 인덱스(숫자). 슬롯만 잡고(props 뒤 바깥 회차변수까지 이어),
-                            // 그 슬롯 kind=RAW·값=회차 인덱스는 런타임이 채운다(바이트코드엔 슬롯 번호만).
-                            new_for_var = Some(ForVar {
-                                name: item.clone(),
-                                offset: (props.len() + for_scope.for_vars.len()) as u16,
-                                type_: Type::Number,
-                            });
                             code.push(Op::ForCountVar as u8);
                             code.push(scope_index);
                             code.push(offset);
+                            Type::Number
                         }
                         Type::Array(inner) => {
-                            // 이름 충돌은 에러(섀도잉 금지 - 조회를 순서 무관하게 유지).
-                            if props.iter().any(|p| &p.name == item)
-                                || for_scope.for_vars.iter().any(|fv| &fv.name == item)
-                            {
-                                return Err(CodegenError::DuplicateBinding(item.clone()));
-                            }
-                            // 요소값이 앉을 슬롯 - props 뒤에 바깥 회차변수까지 이어 붙인 자리(안 펼쳐 슬롯=개수).
-                            // 런타임도 같은 규칙(props 슬롯 수 + loopIndexStack 깊이)으로 계산하므로 operand엔 안 싣는다.
-                            new_for_var = Some(ForVar {
-                                name: item.clone(),
-                                offset: (props.len() + for_scope.for_vars.len()) as u16,
-                                type_: (**inner).clone(),
-                            });
                             code.push(Op::ForArrayVar as u8);
                             code.push(scope_index);
                             code.push(offset);
+                            (**inner).clone()
                         }
                         _ => return Err(CodegenError::ForCountNotIterable(var_ref_display(var))),
                     }
                 }
-            }
+            };
 
             // @for 진입 - depth_base를 pending에 추가(다음 세그먼트/이벤트가 접미), 다음 @for는
             // depth_base+1. 컴포넌트-로컬 깊이라 자식 컴포넌트로 안 넘어간다(RENDER가 경계).
             let mut nested = for_scope.pending.to_vec();
             nested.push(for_scope.depth_base);
-            // 회차변수도 바깥 것에 이어 붙여 전파(pending과 동일 누적 - 안쪽일수록 쌓임).
+            // 회차변수도 바깥 것에 이어 붙여 전파(pending과 동일 누적 - 안쪽일수록 쌓임). item(base) + index(base+1)
+            // 2칸을 잇는다. index는 이름 없으면 None(슬롯만 점유, 몸체 참조 불가) - 그래도 슬롯은 항상 잡아 $n 정합.
             let mut nested_vars = for_scope.for_vars.to_vec();
-            nested_vars.extend(new_for_var);
+            nested_vars.push(ForVar { name: Some(item.clone()), offset: base, type_: item_type });
+            nested_vars.push(ForVar { name: index.clone(), offset: base + 1, type_: Type::Number });
             let body_scope = ForScope {
                 pending: &nested,
                 depth_base: for_scope.depth_base + 1,

@@ -523,12 +523,19 @@ impl<'a> Parser<'a> {
         Ok(Node::If { cond, then, else_ })
     }
 
-    // @for ( IDENT of ( NUM | VAR_REF ) ) { NODE* }
+    // @for ( IDENT [, IDENT] of ( NUM | VAR_REF ) ) { NODE* }
     // count는 정수 리터럴(of 3) 또는 숫자 prop 참조(of count). of는 문맥 키워드(Ident("of")).
+    // 선택적 둘째 변수(, i)는 회차 인덱스변수 - 몸체 {i}·이벤트 $n이 읽는다(item과 별개 슬롯).
     fn for_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::For))?;
         self.expect(&Token::LParen)?;
         let item = self.ident()?;
+        let index = if matches!(self.peek(), Some(Token::Comma)) {
+            self.next()?; // ,
+            Some(self.ident()?)
+        } else {
+            None
+        };
         match self.next()? {
             Token::Ident(s) if s == "of" => {}
             got => {
@@ -553,7 +560,7 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LBrace)?;
         let body = self.nodes()?;
         self.expect(&Token::RBrace)?;
-        Ok(Node::For { item, count, body })
+        Ok(Node::For { item, index, count, body })
     }
 
     // @with CONTEXT { NODE* }   - context는 이 컴포넌트 contexts에 선언된 이름.

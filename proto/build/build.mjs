@@ -71,6 +71,7 @@ if (existsSync(handlersTs)) {
   const handlerPath = `res/${stem}.${fnv1a(Buffer.from(js))}.handlers.js`;
   // 내용이 바뀌면 해시(파일명)가 바뀌어 새 파일이 생긴다 - 같은 stem의 구 핸들러를 먼저 지운다.
   const resDir = join(distDir, "res");
+  mkdirSync(resDir, { recursive: true }); // 첫 핸들러면 res/가 아직 없다 - 만들어 둔다(readdir·write 둘 다 필요).
   const oldRe = new RegExp(`^${stem}\\.[0-9a-f]{16}\\.handlers\\.js$`);
   for (const f of readdirSync(resDir)) {
     if (oldRe.test(f)) {

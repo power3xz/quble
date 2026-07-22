@@ -1,0 +1,27 @@
+use "./todo_list.css"
+
+component TodoList {
+  props { todos: { text: string, done: string }[] }
+  events {
+    ADD({ todos })
+    DEL({ todos })
+  }
+  template {
+    div(class="todo") {
+      div(class="todo__head") {
+        h2(class="todo__title") { "할 일" }
+        button(class="todo__add" @click:ADD) { "+ 추가" }
+      }
+      ul(class="todo__list") {
+        @for (todo, i of todos) {
+          li(class="todo__item") {
+            span(class="todo__num") { {i} }
+            span(class="todo__text") { {todo.text} }
+            span(class="todo__done") { {todo.done} }
+            button(class="todo__del" @click:DEL) { "삭제" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -103,10 +103,13 @@ pub enum Node {
         then: Vec<Node>,
         else_: Vec<Node>,
     },
-    /// `@for (item of count) { body }` - count 회 반복 렌더. count는 정수 리터럴 또는 숫자 prop
-    /// 참조(ForCount). item(반복 변수)은 파싱만, 몸체 참조는 다음 단계.
+    /// `@for (item[, index] of count) { body }` - count 회 반복 렌더. count는 정수 리터럴 또는 숫자
+    /// prop 참조(ForCount). item은 요소(배열) 또는 회차값(count). index는 선택적 회차 인덱스변수 이름
+    /// (`@for (row, i of rows)`의 i) - 몸체 `{i}`·이벤트 `$n`이 읽는다. 없으면 None(인덱스 슬롯은 잡되
+    /// 몸체에서 이름 참조 불가). item과 index는 별개 슬롯이라 count-for든 array-for든 둘 다 쓸 수 있다.
     For {
         item: String,
+        index: Option<String>,
         count: ForCount,
         body: Vec<Node>,
     },

@@ -601,6 +601,56 @@ mod tests {
         ));
     }
 
+    /// `@for (tag, i of tags)` 인덱스변수. item(tag) 슬롯 뒤에 index(i) 슬롯이 항상 이어진다(모든 @for
+    /// 2칸). props(tags:0) + item(tag:1) + index(i:2)라 {i}는 TextVar 2, {tag}는 TextVar 1.
+    #[test]
+    fn compiles_for_index_var() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag, i of tags) {
+                  p() { {i} {tag} }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
+
+        // {tag}=요소 슬롯 1(offset 0), {i}=인덱스 슬롯 2(요소 뒤, offset 0).
+        for (name, scope) in [("tag", 1u8), ("i", 2u8)] {
+            let text_var = vec![Op::TextVar as u8, scope, 0];
+            assert!(
+                code.windows(text_var.len()).any(|w| w == text_var.as_slice()),
+                "TextVar({name} scope={scope} offset=0)이 있어야:\n{code:?}",
+            );
+        }
+    }
+
+    /// 인덱스변수 이름이 회차변수(item)와 같으면 에러 - 같은 이름이 두 슬롯을 가질 수 없다(섀도잉 금지).
+    #[test]
+    fn for_index_var_same_as_item_is_error() {
+        let src = r#"
+            component C {
+              props { tags: string[] }
+              template {
+                @for (tag, tag of tags) {
+                  p() { {tag} }
+                }
+              }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(codegen::CodegenError::DuplicateBinding(_)))
+        ));
+    }
+
     /// 컴포넌트 상수풀에서 문자열의 인덱스를 찾는다(테스트용 - 세그먼트 operand 확인).
     fn str_index(module: &bytecode::Module, s: &str) -> u16 {
         (0..)
