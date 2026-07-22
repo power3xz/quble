@@ -1,0 +1,19 @@
+component ForIfPushOrder {
+  props { tags: string[], flag: bool }
+  events { ADD({ tags }) }
+  template {
+    div() {
+      button(class="add" @click:ADD) { "+" }
+      ul() {
+        @for (tag of tags) {
+          @if (flag) {
+            li() { {tag} }
+          }
+          @else {
+            span() { "off" }
+          }
+        }
+      }
+    }
+  }
+}
