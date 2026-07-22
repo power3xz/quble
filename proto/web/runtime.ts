@@ -995,22 +995,6 @@ class Interpreter {
     pathPrefix: string,
     loopIndexBase: number,
   ): DocumentFragment => {
-    // 인스턴스 불변 상태를 지역으로 끌어와 아래 본문이 그대로 참조하게 한다.
-    // 재귀 호출(자식 RENDER·가지 build)도 이 interpret으로 나간다.
-    const {
-      module,
-      handlers,
-      resources,
-      loadedHrefs,
-      store,
-      arrayPool,
-      freeArrays,
-      regionPool,
-      freeRegions,
-      branchPool,
-      freeBranches,
-      createdContexts,
-    } = this;
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
@@ -1020,7 +1004,7 @@ class Interpreter {
 
     // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
     // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
-    const branch = branchPool[startBranchIndex]; // startBranchIndex는 전역 branchIndex
+    const branch = this.branchPool[startBranchIndex]; // startBranchIndex는 전역 branchIndex
 
     const u16at = () => {
       const v = this.code[pc] | (this.code[pc + 1] << 8);
@@ -1081,8 +1065,8 @@ class Interpreter {
     // 루트부터 일괄 attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일).
     // count leaf 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
     const reactiveCountFor = (countLeafIndex: number, bodyStart: number, forEndPc: number) => {
-      const forRegionIndex = appendForRegion(regionPool, freeRegions, countLeafIndex);
-      const region = regionPool[forRegionIndex];
+      const forRegionIndex = appendForRegion(this.regionPool, this.freeRegions, countLeafIndex);
+      const region = this.regionPool[forRegionIndex];
       branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
       nodeTop().appendChild(region.anchor);
 
@@ -1092,9 +1076,14 @@ class Interpreter {
       // 몸체 `{i}`가 읽을 회차변수(인덱스) 슬롯을 [RAW, i]로 밀고 build 후 되돌린다
       // (array-for와 같은 push/pop 규칙). 슬롯 번호는 그 시점 pairs 길이/2 = props+바깥 회차변수 뒤.
       const addIterationBranch = (i: number) => {
-        const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
+        const newBranchIndex = appendBranchOfForRegion(
+          this.regionPool,
+          this.branchPool,
+          this.freeBranches,
+          forRegionIndex,
+        );
         argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
-        branchPool[newBranchIndex].nodes = Array.from(
+        this.branchPool[newBranchIndex].nodes = Array.from(
           buildIteration(RAW, i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
         );
         argumentSourcePairs.pop(); // index ref
@@ -1104,7 +1093,7 @@ class Interpreter {
         return newBranchIndex;
       };
 
-      const initial = Number(store.get(countLeafIndex)) || 0;
+      const initial = Number(this.store.get(countLeafIndex)) || 0;
       for (let i = 0; i < initial; i++) {
         addIterationBranch(i);
       }
@@ -1113,16 +1102,16 @@ class Interpreter {
         const next = Number(v) || 0;
         const cur = region.branchIndices.length;
         for (let i = cur; i < next; i++) {
-          attachForIteration(store, regionPool, branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+          attachForIteration(this.store, this.regionPool, this.branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
         }
         if (next < cur) {
-          truncateFor(store, regionPool, freeRegions, branchPool, freeBranches, region, next); // 줄어든 꼬리 제거
+          truncateFor(this.store, this.regionPool, this.freeRegions, this.branchPool, this.freeBranches, region, next); // 줄어든 꼬리 제거
         }
       };
       // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
       branch.leafIndices.push(countLeafIndex);
       branch.updateFns.push(onCount);
-      store.subscribe(countLeafIndex, onCount);
+      this.store.subscribe(countLeafIndex, onCount);
     };
 
     // 배열 반응 @for - reactiveCountFor와 같은 구조(전용 region + 회차 branch + 길이 구독으로 grow/shrink)로,
@@ -1132,22 +1121,22 @@ class Interpreter {
     // (이 배열이 @for에 쓰일 때만) 요소 수를 심고 구독한다. push가 요소를 elemStartLeafIndices에 넣고
     // 그 칸을 set하면 이 구독이 깨어 늘어난 꼬리만 build+attach한다.
     const reactiveArrayFor = (arrayLeafIndex: number, bodyStart: number, forEndPc: number) => {
-      const info = arrayPool[Number(store.get(arrayLeafIndex))];
+      const info = this.arrayPool[Number(this.store.get(arrayLeafIndex))];
       if (info.sizeLeafIndex === null) {
-        info.sizeLeafIndex = store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
+        info.sizeLeafIndex = this.store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
       }
       const sizeLeafIndex = info.sizeLeafIndex;
       // 인덱스 leaf도 @for에 처음 쓰일 때만 lazy 채운다(sizeLeafIndex와 같은 결). elemStartLeafIndices와
       // 나란히 요소 수만큼 확보 - [i]=i번째 요소의 회차 번호. 이후 push/removeAt이 둘을 동기로 유지한다.
       if (info.indexLeafIndices.length === 0) {
         for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
-          info.indexLeafIndices[i] = store.alloc([i]);
+          info.indexLeafIndices[i] = this.store.alloc([i]);
         }
       }
 
-      const forRegionIndex = appendForRegion(regionPool, freeRegions, sizeLeafIndex);
+      const forRegionIndex = appendForRegion(this.regionPool, this.freeRegions, sizeLeafIndex);
       info.forRegionIndex = forRegionIndex; // removeAt이 이 region의 회차 DOM을 뗀다
-      const region = regionPool[forRegionIndex];
+      const region = this.regionPool[forRegionIndex];
       branch.childRegionIndices.push(forRegionIndex);
       nodeTop().appendChild(region.anchor);
 
@@ -1155,10 +1144,15 @@ class Interpreter {
       // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 {i}가 읽는다. 인덱스 leaf는 발화 시
       // $n으로도 해소되게 loopIndexStack에 (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
       const addIterationBranch = (i: number) => {
-        const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
+        const newBranchIndex = appendBranchOfForRegion(
+          this.regionPool,
+          this.branchPool,
+          this.freeBranches,
+          forRegionIndex,
+        );
         const indexLeaf = info.indexLeafIndices[i];
         argumentSourcePairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
-        branchPool[newBranchIndex].nodes = Array.from(
+        this.branchPool[newBranchIndex].nodes = Array.from(
           buildIteration(STORE, indexLeaf, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
         );
         argumentSourcePairs.pop(); // 인덱스 ref
@@ -1176,15 +1170,15 @@ class Interpreter {
         const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
         const cur = region.branchIndices.length;
         for (let i = cur; i < next; i++) {
-          attachForIteration(store, regionPool, branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+          attachForIteration(this.store, this.regionPool, this.branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
         }
         if (next < cur) {
-          truncateFor(store, regionPool, freeRegions, branchPool, freeBranches, region, next); // 줄어든 꼬리 제거
+          truncateFor(this.store, this.regionPool, this.freeRegions, this.branchPool, this.freeBranches, region, next); // 줄어든 꼬리 제거
         }
       };
       branch.leafIndices.push(sizeLeafIndex);
       branch.updateFns.push(onSize);
-      store.subscribe(sizeLeafIndex, onSize);
+      this.store.subscribe(sizeLeafIndex, onSize);
     };
 
     // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
@@ -1201,7 +1195,7 @@ class Interpreter {
       const kind = slotKind(argumentSourcePairs, scopeIndex);
       if (kind === CONST) {
         // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
-        return module.constpool[ref] ?? "";
+        return this.module.constpool[ref] ?? "";
       }
       if (kind === RAW) {
         // 회차 상수(count @for 인덱스): 참조가 값 자체. store에 없어 구독도 없다.
@@ -1209,7 +1203,7 @@ class Interpreter {
       }
       // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
       const leafIndex = ref + offset;
-      const initial = store.get(leafIndex) ?? "";
+      const initial = this.store.get(leafIndex) ?? "";
       branch.leafIndices.push(leafIndex);
       branch.updateFns.push(update);
       return initial;
@@ -1227,9 +1221,9 @@ class Interpreter {
           // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
           // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
           // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
-          const url = resources[u16at()];
-          if (url && !loadedHrefs.has(url)) {
-            loadedHrefs.add(url);
+          const url = this.resources[u16at()];
+          if (url && !this.loadedHrefs.has(url)) {
+            this.loadedHrefs.add(url);
             const link = document.createElement("link");
             link.rel = "stylesheet";
             link.href = url;
@@ -1244,13 +1238,13 @@ class Interpreter {
         case OP.ATTR_G: {
           const name = ATTRS[u16at()];
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          pending!.setAttribute(name, module.constpool[u16at()] as string);
+          pending!.setAttribute(name, this.module.constpool[u16at()] as string);
           break;
         }
         case OP.ATTR_L: {
-          const name = module.constpool[u16at()] as string;
+          const name = this.module.constpool[u16at()] as string;
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          pending!.setAttribute(name, module.constpool[u16at()] as string);
+          pending!.setAttribute(name, this.module.constpool[u16at()] as string);
           break;
         }
         case OP.ATTR_G_VAR: {
@@ -1264,7 +1258,7 @@ class Interpreter {
           break;
         }
         case OP.ATTR_L_VAR: {
-          const name = module.constpool[u16at()] as string;
+          const name = this.module.constpool[u16at()] as string;
           const scopeIndex = u8at();
           const offset = u8at();
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
@@ -1277,7 +1271,7 @@ class Interpreter {
           // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
           const domEvent = DOM_EVENTS[u16at()];
           const event = this.componentEvents(compId)[u16at()];
-          const eventName = module.constpool[event.nameConstIndex] as string;
+          const eventName = this.module.constpool[event.nameConstIndex] as string;
           // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
           // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
           // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
@@ -1290,16 +1284,16 @@ class Interpreter {
           // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
           // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
           const payload: TAssembled[] = event.fields.map((field) => ({
-            name: module.constpool[field.nameConstIndex] as string,
+            name: this.module.constpool[field.nameConstIndex] as string,
             typeRef: field.typeRef,
-            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(module, field.typeRef), argumentSourcePairs),
+            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
           }));
           // props: 핸들러의 상태변경 대상(필드명 -> leafIndex). STORE 슬롯만 - 상수 슬롯은 불변이라 대상이
           // 못 된다. 스칼라는 그 leaf(set/get 대상), 배열은 배열 칸 leaf(push 대상 - 그 값이 arrayInfoIndex).
           // 객체의 set 의미는 미정(ISSUES). data(읽기)는 객체까지 조립된다.
           const props: Record<string, number> = {};
           for (const p of payload) {
-            const tag = module.types[p.typeRef].tag;
+            const tag = this.module.types[p.typeRef].tag;
             if ((tag === "scalar" || tag === "array") && p.fieldSourcePairs[0] === STORE) {
               props[p.name] = p.fieldSourcePairs[1];
             }
@@ -1308,7 +1302,7 @@ class Interpreter {
           // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
           const contextLeaves: Record<string, TAssembled[]> = {};
           for (const i of activeContexts) {
-            const created = createdContexts[i];
+            const created = this.createdContexts[i];
             contextLeaves[created.name] = created.fields;
           }
           // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
@@ -1332,20 +1326,20 @@ class Interpreter {
             eventBindings.set(el, bound);
           }
           bound[domEvent] = {
-            handlers,
+            handlers: this.handlers,
             fullName,
             payload,
             contextLeaves,
             props,
             loopIndices,
-            store,
-            module,
-            arrayPool,
-            freeArrays,
-            regionPool,
-            freeRegions,
-            branchPool,
-            freeBranches,
+            store: this.store,
+            module: this.module,
+            arrayPool: this.arrayPool,
+            freeArrays: this.freeArrays,
+            regionPool: this.regionPool,
+            freeRegions: this.freeRegions,
+            branchPool: this.branchPool,
+            freeBranches: this.freeBranches,
           };
           ensureDelegate(domEvent);
           break;
@@ -1359,7 +1353,7 @@ class Interpreter {
           break;
         }
         case OP.TEXT: {
-          nodeTop().appendChild(document.createTextNode(module.constpool[u16at()] as string));
+          nodeTop().appendChild(document.createTextNode(this.module.constpool[u16at()] as string));
           break;
         }
         case OP.TEXT_VAR: {
@@ -1398,7 +1392,7 @@ class Interpreter {
         case OP.PUSH_PATH_SEGMENT: {
           // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
           // 단일 변수로 적재 - args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
-          segment = module.constpool[u16at()] as string;
+          segment = this.module.constpool[u16at()] as string;
           break;
         }
         case OP.PUSH_PATH_INDEX_SEGMENT: {
@@ -1414,20 +1408,20 @@ class Interpreter {
           // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
           // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
           const contextDef = this.componentContexts(compId)[u16at()];
-          const name = module.constpool[contextDef.nameConstIndex as number] as string;
+          const name = this.module.constpool[contextDef.nameConstIndex as number] as string;
           // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
           const fields: TAssembled[] = contextDef.fields.map((field) => ({
-            name: module.constpool[field.nameConstIndex] as string,
+            name: this.module.constpool[field.nameConstIndex] as string,
             typeRef: field.typeRef,
-            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(module, field.typeRef), argumentSourcePairs),
+            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
           }));
           // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
           // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
-          if (activeContexts.some((i) => createdContexts[i].name === name)) {
+          if (activeContexts.some((i) => this.createdContexts[i].name === name)) {
             console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
           }
-          activeContexts.push(createdContexts.length);
-          createdContexts.push({ name, fields });
+          activeContexts.push(this.createdContexts.length);
+          this.createdContexts.push({ name, fields });
           break;
         }
         case OP.EXIT_CONTEXT: {
@@ -1446,7 +1440,7 @@ class Interpreter {
           // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) -> 자식 IF는 이 가지의
           // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
           // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
-          const childDef = module.defs[childCompId];
+          const childDef = this.module.defs[childCompId];
           const childFragment = this.interpret(
             childArgumentSourcePairs,
             childCompId, // 자식 BIND_EVENT/ENTER_CONTEXT는 자식 def의 이벤트/컨텍스트 테이블을 본다
@@ -1475,13 +1469,19 @@ class Interpreter {
           const condIsConst = slotKind(argumentSourcePairs, condScopeIndex) === CONST;
           const condRef = slotRef(argumentSourcePairs, condScopeIndex);
           const condLeafIndex = condIsConst ? -1 : condRef + condOffset;
-          const regionIndex = appendIfRegion(regionPool, freeRegions, branchPool, freeBranches, condLeafIndex);
-          const region = regionPool[regionIndex];
+          const regionIndex = appendIfRegion(
+            this.regionPool,
+            this.freeRegions,
+            this.branchPool,
+            this.freeBranches,
+            condLeafIndex,
+          );
+          const region = this.regionPool[regionIndex];
           branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
           const thenBranchIndex = region.branchIndices[THEN_INDEX];
           const elseBranchIndex = region.branchIndices[ELSE_INDEX];
-          const thenBranch = branchPool[thenBranchIndex];
-          const elseBranch = branchPool[elseBranchIndex];
+          const thenBranch = this.branchPool[thenBranchIndex];
+          const elseBranch = this.branchPool[elseBranchIndex];
           // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
           nodeTop().appendChild(region.anchor);
 
@@ -1528,20 +1528,26 @@ class Interpreter {
           // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
           if (!condIsConst) {
             const onCond = (condValue: unknown) => {
-              activateIf(store, regionPool, branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+              activateIf(
+                this.store,
+                this.regionPool,
+                this.branchPool,
+                regionIndex,
+                condValue ? THEN_INDEX : ELSE_INDEX,
+              );
             };
             // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
             branch.leafIndices.push(condLeafIndex);
             branch.updateFns.push(onCond);
-            store.subscribe(condLeafIndex, onCond);
+            this.store.subscribe(condLeafIndex, onCond);
           }
           // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
           // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
           // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
           // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-          const condInitial = condIsConst ? module.constpool[condRef] : store.get(condLeafIndex);
+          const condInitial = condIsConst ? this.module.constpool[condRef] : this.store.get(condLeafIndex);
           const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
-          const initialBranch = branchPool[region.branchIndices[initialShownIndex]];
+          const initialBranch = this.branchPool[region.branchIndices[initialShownIndex]];
           // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
           initialBranch.lazyBuild!();
           initialBranch.built = true;
@@ -1569,7 +1575,7 @@ class Interpreter {
           const bodyStart = pc;
           const forEndPc = forBodyEnd(this.code, bodyStart);
           if (slotKind(argumentSourcePairs, scopeIndex) === CONST) {
-            inlineFor(Number(module.constpool[ref]) || 0, bodyStart, forEndPc);
+            inlineFor(Number(this.module.constpool[ref]) || 0, bodyStart, forEndPc);
           } else {
             reactiveCountFor(ref + offset, bodyStart, forEndPc);
           }
