@@ -930,6 +930,7 @@ class Interpreter {
   freeBranches: number[];
   createdContexts: TCreatedContext[];
   loopIndexStack: number[];
+  activeContexts: number[]; // 지금 감싼 @with 컨텍스트 누적. ENTER/EXIT_CONTEXT가 push/pop으로 균형을 맞춰 재진입 시 원복된다(loopIndexStack과 동형).
 
   constructor(
     module: TModule,
@@ -959,6 +960,7 @@ class Interpreter {
     this.freeBranches = freeBranches;
     this.createdContexts = createdContexts;
     this.loopIndexStack = [];
+    this.activeContexts = [];
   }
 
   componentEvents = (componentId: number): TEventEntry[] => {
@@ -978,7 +980,6 @@ class Interpreter {
   //
   // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
   // @param compId           지금 해석 중인 def(자식 RENDER면 자식 def). events/contexts를 이 def에서 참조로 꺼낸다.
-  // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
   // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
   // @param startRegionIndex 구독을 쌓을 region
   // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
@@ -987,7 +988,6 @@ class Interpreter {
   interpret = (
     argumentSourcePairs: TScope,
     compId: number,
-    activeContexts: number[],
     startPc: number,
     endPc: number,
     startRegionIndex: number,
@@ -1031,7 +1031,6 @@ class Interpreter {
       const f = this.interpret(
         argumentSourcePairs,
         compId,
-        activeContexts,
         bodyStart,
         forEndPc,
         targetRegionIndex,
@@ -1301,7 +1300,7 @@ class Interpreter {
           // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
           // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
           const contextLeaves: Record<string, TAssembled[]> = {};
-          for (const i of activeContexts) {
+          for (const i of this.activeContexts) {
             const created = this.createdContexts[i];
             contextLeaves[created.name] = created.fields;
           }
@@ -1417,16 +1416,16 @@ class Interpreter {
           }));
           // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
           // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
-          if (activeContexts.some((i) => this.createdContexts[i].name === name)) {
+          if (this.activeContexts.some((i) => this.createdContexts[i].name === name)) {
             console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
           }
-          activeContexts.push(this.createdContexts.length);
+          this.activeContexts.push(this.createdContexts.length);
           this.createdContexts.push({ name, fields });
           break;
         }
         case OP.EXIT_CONTEXT: {
           // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
-          activeContexts.pop();
+          this.activeContexts.pop();
           break;
         }
         case OP.RENDER: {
@@ -1444,9 +1443,6 @@ class Interpreter {
           const childFragment = this.interpret(
             childArgumentSourcePairs,
             childCompId, // 자식 BIND_EVENT/ENTER_CONTEXT는 자식 def의 이벤트/컨텍스트 테이블을 본다
-            activeContexts, // 부모 활성 컨텍스트를 공유로 물려준다 - 자식의 ENTER/EXIT_CONTEXT는
-            // @with 경계마다 push/pop 짝이라 자식 반환 시 원상복구된다(RENDER는 반환 후
-            // activeContexts를 다시 읽지 않아 오염 여지도 없다). 매 RENDER의 [...] 복사 제거.
             childDef.codeOff,
             childDef.codeOff + childDef.codeLen,
             startRegionIndex,
@@ -1462,16 +1458,7 @@ class Interpreter {
           break;
         }
         case OP.IF: {
-          pc = this.runIf(
-            pc,
-            argumentSourcePairs,
-            compId,
-            activeContexts,
-            pathPrefix,
-            loopIndexBase,
-            branch,
-            nodeTop(),
-          );
+          pc = this.runIf(pc, argumentSourcePairs, compId, pathPrefix, loopIndexBase, branch, nodeTop());
           break;
         }
         case OP.FOR_RAW: {
@@ -1528,7 +1515,6 @@ class Interpreter {
     pc: number,
     argumentSourcePairs: TScope,
     compId: number,
-    activeContexts: number[],
     pathPrefix: string,
     loopIndexBase: number,
     branch: TBranch,
@@ -1566,7 +1552,6 @@ class Interpreter {
       const f = this.interpret(
         argumentSourcePairs,
         compId,
-        activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
         thenStart,
         thenEnd,
         regionIndex,
@@ -1583,7 +1568,6 @@ class Interpreter {
           : this.interpret(
               argumentSourcePairs,
               compId,
-              activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
               elseStart,
               ifEndPc,
               regionIndex,
@@ -1674,7 +1658,6 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     const fragment = interpreter.interpret(
       rootFlat,
       compId, // 루트 def
-      [], // 루트는 활성 컨텍스트 없음
       def.codeOff,
       def.codeOff + def.codeLen,
       0,
