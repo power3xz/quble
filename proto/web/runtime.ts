@@ -291,6 +291,12 @@ const STORE = 0;
 const CONST = 1;
 const RAW = 2;
 
+// 스코프 - (kind, ref) 쌍을 인터리브로 담은 평탄 배열. 슬롯 offset o는 [2o]=kind, [2o+1]=ref.
+type TScope = number[];
+
+const slotKind = (scope: TScope, o: number): number => scope[2 * o];
+const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
+
 // FieldValue ref 출처 태그(Rust serialize <REF>와 대칭). ref마다 태그 1바이트 + payload.
 // 슬롯 해석방법(STORE/CONST)과 다른 층이다 - Scope 슬롯의 실제 kind는 argumentSourcePairs가 정한다.
 const FV_SCOPE = 0;
@@ -374,7 +380,7 @@ const readFields = (reader: Reader): TFieldEntry[] => {
 // @param argumentSourcePairs flat 슬롯 배열
 // @returns          [kind, ref, …] 열
 type TRef = { kind: number; ref: number; offset: number };
-const refToSourcePairs = (ref: TRef, leafCount: number, argumentSourcePairs: (string | number)[]): number[] => {
+const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[] => {
   if (ref.kind === FV_CONST) {
     return [CONST, ref.ref];
   }
@@ -382,13 +388,13 @@ const refToSourcePairs = (ref: TRef, leafCount: number, argumentSourcePairs: (st
     throw new Error("FV_RAW는 아직 미구현(@for)");
   }
   // FV_SCOPE - 슬롯의 kind를 물려받는다. CONST 슬롯(부모가 리터럴로 준 prop)은 상수 하나.
-  const kind = argumentSourcePairs[2 * ref.ref] as number;
-  const slotRef = argumentSourcePairs[2 * ref.ref + 1] as number;
+  const kind = slotKind(scope, ref.ref);
+  const slotBase = slotRef(scope, ref.ref);
   if (kind === CONST) {
-    return [CONST, slotRef];
+    return [CONST, slotBase];
   }
   // STORE 슬롯 - base(slotRef+offset)부터 leaf 개수만큼 연속 칸을 STORE 쌍으로 펼친다.
-  const base = slotRef + ref.offset;
+  const base = slotBase + ref.offset;
   const pairs: number[] = [];
   for (let i = 0; i < leafCount; i++) {
     pairs.push(STORE, base + i);
@@ -967,7 +973,7 @@ class Interpreter {
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
   // @returns                직속 노드를 담은 DocumentFragment
   interpret(
-    argumentSourcePairs: (string | number)[],
+    argumentSourcePairs: TScope,
     compId: number,
     activeContexts: number[],
     startPc: number,
@@ -1184,18 +1190,18 @@ class Interpreter {
     // @param update     값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
     // @returns          현재 값(없으면 "")
     const bindVar = (scopeIndex: number, offset: number, update: (v: unknown) => void) => {
-      const ref = argumentSourcePairs[2 * scopeIndex + 1];
-      const kind = argumentSourcePairs[2 * scopeIndex];
+      const ref = slotRef(argumentSourcePairs, scopeIndex);
+      const kind = slotKind(argumentSourcePairs, scopeIndex);
       if (kind === CONST) {
         // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
-        return module.constpool[ref as number] ?? "";
+        return module.constpool[ref] ?? "";
       }
       if (kind === RAW) {
         // 회차 상수(count @for 인덱스): 참조가 값 자체. store에 없어 구독도 없다.
         return ref;
       }
       // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
-      const leafIndex = (ref as number) + offset;
+      const leafIndex = ref + offset;
       const initial = store.get(leafIndex) ?? "";
       branch.leafIndices.push(leafIndex);
       branch.updateFns.push(update);
@@ -1362,7 +1368,7 @@ class Interpreter {
           // 경로 없는 참조 - 부모 슬롯 (kind, ref)를 편집 없이 그대로 자식에 넘긴다. kind를
           // 보존해 부모가 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
           const scopeIndex = u8at();
-          args.push(argumentSourcePairs[2 * scopeIndex], argumentSourcePairs[2 * scopeIndex + 1]);
+          args.push(slotKind(argumentSourcePairs, scopeIndex), slotRef(argumentSourcePairs, scopeIndex));
           break;
         }
         case OP.PUSH_FIELD: {
@@ -1370,7 +1376,7 @@ class Interpreter {
           // 위치만 옮긴다. CONST 슬롯은 필드가 없어(리터럴은 객체 아님) FIELD로 오지 않는다.
           const scopeIndex = u8at();
           const offset = u8at();
-          args.push(argumentSourcePairs[2 * scopeIndex], (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset);
+          args.push(slotKind(argumentSourcePairs, scopeIndex), slotRef(argumentSourcePairs, scopeIndex) + offset);
           break;
         }
         case OP.PUSH_ARG_LIT: {
@@ -1457,9 +1463,9 @@ class Interpreter {
           const condOffset = u8at();
           // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
           // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
-          const condIsConst = argumentSourcePairs[2 * condScopeIndex] === CONST;
-          const condRef = argumentSourcePairs[2 * condScopeIndex + 1];
-          const condLeafIndex = condIsConst ? -1 : (condRef as number) + condOffset;
+          const condIsConst = slotKind(argumentSourcePairs, condScopeIndex) === CONST;
+          const condRef = slotRef(argumentSourcePairs, condScopeIndex);
+          const condLeafIndex = condIsConst ? -1 : condRef + condOffset;
           const regionIndex = appendIfRegion(regionPool, freeRegions, branchPool, freeBranches, condLeafIndex);
           const region = regionPool[regionIndex];
           branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
@@ -1526,7 +1532,7 @@ class Interpreter {
           // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
           // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
           // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-          const condInitial = condIsConst ? module.constpool[condRef as number] : store.get(condLeafIndex);
+          const condInitial = condIsConst ? module.constpool[condRef] : store.get(condLeafIndex);
           const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
           const initialBranch = branchPool[region.branchIndices[initialShownIndex]];
           // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
@@ -1552,13 +1558,13 @@ class Interpreter {
           // 필드(a.count)면 base+offset이 그 leaf.
           const scopeIndex = u8at();
           const offset = u8at();
-          const ref = argumentSourcePairs[2 * scopeIndex + 1];
+          const ref = slotRef(argumentSourcePairs, scopeIndex);
           const bodyStart = pc;
           const forEndPc = forBodyEnd(code, bodyStart);
-          if (argumentSourcePairs[2 * scopeIndex] === CONST) {
-            inlineFor(Number(module.constpool[ref as number]) || 0, bodyStart, forEndPc);
+          if (slotKind(argumentSourcePairs, scopeIndex) === CONST) {
+            inlineFor(Number(module.constpool[ref]) || 0, bodyStart, forEndPc);
           } else {
-            reactiveCountFor((ref as number) + offset, bodyStart, forEndPc);
+            reactiveCountFor(ref + offset, bodyStart, forEndPc);
           }
           pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
           break;
@@ -1569,7 +1575,7 @@ class Interpreter {
           // 규칙(props 슬롯 수 + 현재 @for 깊이)으로 계산한다. base+offset이 배열 칸의 leaf.
           const scopeIndex = u8at();
           const offset = u8at();
-          const arrayLeafIndex = (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset;
+          const arrayLeafIndex = slotRef(argumentSourcePairs, scopeIndex) + offset;
           const bodyStart = pc;
           const forEndPc = forBodyEnd(code, bodyStart);
           reactiveArrayFor(arrayLeafIndex, bodyStart, forEndPc);
