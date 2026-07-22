@@ -958,10 +958,8 @@ class Interpreter {
   // RENDER는 자식 def 구간을 자식 argumentSourcePairs로 이 함수에 재진입해 인라인 합성한다(별도 인스턴스/
   // 루트 region 없이 부모 가지 안에 합류).
   //
-  // @param code             해석할 바이트코드(자식은 자식 def 구간)
   // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
-  // @param events           현재 def의 이벤트 테이블(BIND_EVENT가 event_idx로 참조. 자식은 자식 def의 것)
-  // @param contexts         현재 def의 컨텍스트 테이블(ENTER_CONTEXT가 context_index로 참조. 자식은 자식 def의 것)
+  // @param compId           지금 해석 중인 def(자식 RENDER면 자식 def). events/contexts를 이 def에서 참조로 꺼낸다.
   // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
   // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
   // @param startRegionIndex 구독을 쌓을 region
@@ -970,8 +968,7 @@ class Interpreter {
   // @returns                직속 노드를 담은 DocumentFragment
   interpret(
     argumentSourcePairs: (string | number)[],
-    events: TEventEntry[],
-    contexts: TEventEntry[],
+    compId: number,
     activeContexts: number[],
     startPc: number,
     endPc: number,
@@ -999,6 +996,7 @@ class Interpreter {
     } = this;
     const interpret = this.interpret.bind(this);
     const code = module.code; // 항상 module 전체 코드 - def/자식 구간은 pc(startPc~endPc)로 가른다
+    const { events, contexts } = module.defs[compId]; // 현재 def의 이벤트/컨텍스트 테이블
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
@@ -1034,8 +1032,7 @@ class Interpreter {
       loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
       const f = interpret(
         argumentSourcePairs,
-        events,
-        contexts,
+        compId,
         activeContexts,
         bodyStart,
         forEndPc,
@@ -1436,8 +1433,7 @@ class Interpreter {
           const childDef = module.defs[childCompId];
           const childFragment = interpret(
             childArgumentSourcePairs,
-            childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
-            childDef.contexts, // 자식 ENTER_CONTEXT는 자식 def의 컨텍스트 테이블을 본다
+            childCompId, // 자식 BIND_EVENT/ENTER_CONTEXT는 자식 def의 이벤트/컨텍스트 테이블을 본다
             activeContexts, // 부모 활성 컨텍스트를 공유로 물려준다 - 자식의 ENTER/EXIT_CONTEXT는
             // @with 경계마다 push/pop 짝이라 자식 반환 시 원상복구된다(RENDER는 반환 후
             // activeContexts를 다시 읽지 않아 오염 여지도 없다). 매 RENDER의 [...] 복사 제거.
@@ -1482,8 +1478,7 @@ class Interpreter {
           const buildThen = () => {
             const f = interpret(
               argumentSourcePairs,
-              events,
-              contexts,
+              compId,
               activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
               thenStart,
               thenEnd,
@@ -1501,8 +1496,7 @@ class Interpreter {
                 ? document.createDocumentFragment() // else 없는 if - 빈 가지
                 : interpret(
                     argumentSourcePairs,
-                    events,
-                    contexts,
+                    compId,
                     activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
                     elseStart,
                     ifEndPc,
@@ -1641,8 +1635,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     );
     const fragment = interp.interpret(
       rootFlat,
-      def.events, // 루트 def의 이벤트 테이블
-      def.contexts, // 루트 def의 컨텍스트 테이블
+      compId, // 루트 def
       [], // 루트는 활성 컨텍스트 없음
       def.codeOff,
       def.codeOff + def.codeLen,
