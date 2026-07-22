@@ -1716,39 +1716,23 @@ class Interpreter {
     const thenStart = pc;
     const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(this.code, thenStart);
 
-    // 비활성 가지는 lazyBuild로 심어만 뒀다 나중(조건 swap)에 실행된다. 그 지연 시점의 ws는 이
-    // @if를 지나 이미 pop된 상태라, build 시점 스택을 딥카피해 캡처한다 - 카피 없이는 회차
-    // 인덱스($n)·컨텍스트를 잃는다. then/else 중 하나만 실행되니 스냅샷 하나를 공유 캡처한다.
+    // 비활성 가지는 lazyBuild로 심어만 뒀다 나중(조건 swap)에 실행된다. 그 지연 시점의 공유
+    // pairs/ws는 이 @if를 지나 이미 pop된 상태라, build 시점 상태를 딥카피해 캡처한다 - 카피
+    // 없이는 회차변수 슬롯·회차 인덱스($n)·컨텍스트를 잃는다. then/else 중 하나만 실행되니
+    // 스냅샷 하나를 공유 캡처한다(reactive @for grow의 addIterationBranch와 같은 관례).
+    const pairs = [...argumentSourcePairs];
     const stacks = snapshotStacks(ws);
 
     // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
     const buildThen = () => {
-      const f = this.interpret(
-        argumentSourcePairs,
-        compId,
-        thenStart,
-        thenEnd,
-        thenBranchIndex,
-        pathPrefix,
-        loopIndexBase,
-        stacks,
-      );
+      const f = this.interpret(pairs, compId, thenStart, thenEnd, thenBranchIndex, pathPrefix, loopIndexBase, stacks);
       thenBranch.nodes = Array.from(f.childNodes);
     };
     const buildElse = () => {
       const f =
         elseStart === -1
           ? document.createDocumentFragment() // else 없는 if - 빈 가지
-          : this.interpret(
-              argumentSourcePairs,
-              compId,
-              elseStart,
-              ifEndPc,
-              elseBranchIndex,
-              pathPrefix,
-              loopIndexBase,
-              stacks,
-            );
+          : this.interpret(pairs, compId, elseStart, ifEndPc, elseBranchIndex, pathPrefix, loopIndexBase, stacks);
       elseBranch.nodes = Array.from(f.childNodes);
     };
     thenBranch.lazyBuild = buildThen;
