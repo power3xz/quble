@@ -929,7 +929,6 @@ class Interpreter {
   branchPool: TBranch[];
   freeBranches: number[];
   createdContexts: TCreatedContext[];
-  loopIndexStack: number[];
 
   constructor(
     module: TModule,
@@ -958,7 +957,6 @@ class Interpreter {
     this.branchPool = branchPool;
     this.freeBranches = freeBranches;
     this.createdContexts = createdContexts;
-    this.loopIndexStack = [];
   }
 
   componentEvents = (componentId: number): TEventEntry[] => {
@@ -982,6 +980,7 @@ class Interpreter {
   // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
   // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
+  // @param loopIndexStack   @for 회차 인덱스 소스 누적(인터리브 kind,ref). buildIteration이 회차마다 push/pop해 물려준다.
   // @returns                직속 노드를 담은 DocumentFragment
   interpret = (
     argumentSourcePairs: TScope,
@@ -991,6 +990,7 @@ class Interpreter {
     endPc: number,
     startBranchIndex: number,
     pathPrefix: string,
+    loopIndexStack: number[],
     loopIndexBase: number,
   ): DocumentFragment => {
     const fragment = document.createDocumentFragment();
@@ -1024,7 +1024,7 @@ class Interpreter {
       forEndPc: number,
       targetBranchIndex: number,
     ) => {
-      this.loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
+      loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
       const f = this.interpret(
         argumentSourcePairs,
         compId,
@@ -1033,10 +1033,11 @@ class Interpreter {
         forEndPc,
         targetBranchIndex,
         pathPrefix,
+        loopIndexStack, // 회차 인덱스 소스를 물려준다(발화 시 $n으로 해소)
         loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
       );
-      this.loopIndexStack.pop(); // ref
-      this.loopIndexStack.pop(); // kind
+      loopIndexStack.pop(); // ref
+      loopIndexStack.pop(); // kind
       return f;
     };
 
@@ -1306,10 +1307,10 @@ class Interpreter {
           // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
           // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
           const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
-          for (let i = 0; i * 2 < this.loopIndexStack.length; i++) {
+          for (let i = 0; i * 2 < loopIndexStack.length; i++) {
             loopIndices[`$${i}` as TIndexSymbol] = {
-              kind: this.loopIndexStack[2 * i],
-              ref: this.loopIndexStack[2 * i + 1],
+              kind: loopIndexStack[2 * i],
+              ref: loopIndexStack[2 * i + 1],
             };
           }
           // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
@@ -1448,7 +1449,8 @@ class Interpreter {
             startBranchIndex,
             // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
             childPrefix!,
-            this.loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
+            loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
+            loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
           );
           // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
           // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
@@ -1463,6 +1465,7 @@ class Interpreter {
             compId,
             activeContexts,
             pathPrefix,
+            loopIndexStack,
             loopIndexBase,
             branch,
             nodeTop(),
@@ -1525,6 +1528,7 @@ class Interpreter {
     compId: number,
     activeContexts: number[],
     pathPrefix: string,
+    loopIndexStack: number[],
     loopIndexBase: number,
     branch: TBranch,
     parent: Node,
@@ -1566,6 +1570,7 @@ class Interpreter {
         thenEnd,
         thenBranchIndex,
         pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+        loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다(클로저 캡처라 lazyBuild 지연 실행에도 정합)
         loopIndexBase,
       );
       thenBranch.nodes = Array.from(f.childNodes);
@@ -1582,6 +1587,7 @@ class Interpreter {
               ifEndPc,
               elseBranchIndex,
               pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+              loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다(클로저 캡처라 lazyBuild 지연 실행에도 정합)
               loopIndexBase,
             );
       elseBranch.nodes = Array.from(f.childNodes);
@@ -1672,6 +1678,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       def.codeOff + def.codeLen,
       rootRegion.branchIndices[THEN_INDEX], // branch index
       "", // 루트 경로 prefix 비어 있음
+      [], // 루트는 @for 밖 - 회차 인덱스 없음
       0, // 세그먼트 인덱스 base 0
     );
     branchPool[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
