@@ -969,7 +969,6 @@ class Interpreter {
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
   // @returns                직속 노드를 담은 DocumentFragment
   interpret(
-    code: Uint8Array,
     argumentSourcePairs: (string | number)[],
     events: TEventEntry[],
     contexts: TEventEntry[],
@@ -999,6 +998,7 @@ class Interpreter {
       createdContexts,
     } = this;
     const interpret = this.interpret.bind(this);
+    const code = module.code; // 항상 module 전체 코드 - def/자식 구간은 pc(startPc~endPc)로 가른다
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
@@ -1033,7 +1033,6 @@ class Interpreter {
     ) => {
       loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
       const f = interpret(
-        code,
         argumentSourcePairs,
         events,
         contexts,
@@ -1436,7 +1435,6 @@ class Interpreter {
           // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
           const childDef = module.defs[childCompId];
           const childFragment = interpret(
-            module.code,
             childArgumentSourcePairs,
             childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
             childDef.contexts, // 자식 ENTER_CONTEXT는 자식 def의 컨텍스트 테이블을 본다
@@ -1483,7 +1481,6 @@ class Interpreter {
           // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
           const buildThen = () => {
             const f = interpret(
-              code,
               argumentSourcePairs,
               events,
               contexts,
@@ -1503,7 +1500,6 @@ class Interpreter {
               elseStart === -1
                 ? document.createDocumentFragment() // else 없는 if - 빈 가지
                 : interpret(
-                    code,
                     argumentSourcePairs,
                     events,
                     contexts,
@@ -1644,7 +1640,6 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       createdContexts,
     );
     const fragment = interp.interpret(
-      module.code,
       rootFlat,
       def.events, // 루트 def의 이벤트 테이블
       def.contexts, // 루트 def의 컨텍스트 테이블
