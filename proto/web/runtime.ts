@@ -959,6 +959,14 @@ class Interpreter {
     this.createdContexts = createdContexts;
   }
 
+  componentEvents = (componentId: number): TEventEntry[] => {
+    return this.module.defs[componentId].events;
+  }
+
+  componentContexts = (componentId: number): TEventEntry[] => {
+    return this.module.defs[componentId].contexts;
+  }
+
   // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
   //
   // 재진입 가능: 최초 인스턴스화는 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만
@@ -1003,7 +1011,6 @@ class Interpreter {
       createdContexts,
     } = this;
     const interpret = this.interpret.bind(this);
-    const { events, contexts } = module.defs[compId]; // 현재 def의 이벤트/컨텍스트 테이블
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
@@ -1270,7 +1277,7 @@ class Interpreter {
         case OP.BIND_EVENT: {
           // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
           const domEvent = DOM_EVENTS[u16at()];
-          const event = events[u16at()];
+          const event = this.componentEvents(compId)[u16at()];
           const eventName = module.constpool[event.nameConstIndex] as string;
           // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
           // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
@@ -1404,7 +1411,7 @@ class Interpreter {
         case OP.ENTER_CONTEXT: {
           // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
           // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
-          const contextDef = contexts[u16at()];
+          const contextDef = this.componentContexts(compId)[u16at()];
           const name = module.constpool[contextDef.nameConstIndex as number] as string;
           // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
           const fields: TAssembled[] = contextDef.fields.map((field) => ({
