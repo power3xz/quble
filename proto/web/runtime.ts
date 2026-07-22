@@ -981,7 +981,6 @@ class Interpreter {
   // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
   // @param compId           지금 해석 중인 def(자식 RENDER면 자식 def). events/contexts를 이 def에서 참조로 꺼낸다.
   // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
-  // @param startRegionIndex 구독을 쌓을 region
   // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
   // @returns                직속 노드를 담은 DocumentFragment
@@ -990,7 +989,6 @@ class Interpreter {
     compId: number,
     startPc: number,
     endPc: number,
-    startRegionIndex: number,
     startBranchIndex: number,
     pathPrefix: string,
     loopIndexBase: number,
@@ -1024,7 +1022,6 @@ class Interpreter {
       indexRef: number,
       bodyStart: number,
       forEndPc: number,
-      targetRegionIndex: number,
       targetBranchIndex: number,
     ) => {
       this.loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
@@ -1033,7 +1030,6 @@ class Interpreter {
         compId,
         bodyStart,
         forEndPc,
-        targetRegionIndex,
         targetBranchIndex,
         pathPrefix,
         loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
@@ -1050,7 +1046,7 @@ class Interpreter {
     const inlineFor = (count: number, bodyStart: number, forEndPc: number) => {
       for (let i = 0; i < count; i++) {
         argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](리터럴은 반응성 없어 상수)
-        nodeTop().appendChild(buildIteration(RAW, i, bodyStart, forEndPc, startRegionIndex, startBranchIndex));
+        nodeTop().appendChild(buildIteration(RAW, i, bodyStart, forEndPc, startBranchIndex));
         argumentSourcePairs.pop(); // index ref
         argumentSourcePairs.pop(); // index kind
         argumentSourcePairs.pop(); // item ref
@@ -1083,7 +1079,7 @@ class Interpreter {
         );
         argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
         this.branchPool[newBranchIndex].nodes = Array.from(
-          buildIteration(RAW, i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
+          buildIteration(RAW, i, bodyStart, forEndPc, newBranchIndex).childNodes,
         );
         argumentSourcePairs.pop(); // index ref
         argumentSourcePairs.pop(); // index kind
@@ -1152,7 +1148,7 @@ class Interpreter {
         const indexLeaf = info.indexLeafIndices[i];
         argumentSourcePairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
         this.branchPool[newBranchIndex].nodes = Array.from(
-          buildIteration(STORE, indexLeaf, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
+          buildIteration(STORE, indexLeaf, bodyStart, forEndPc, newBranchIndex).childNodes,
         );
         argumentSourcePairs.pop(); // 인덱스 ref
         argumentSourcePairs.pop(); // 인덱스 kind
@@ -1436,7 +1432,7 @@ class Interpreter {
           const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
           segment = null;
           // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 argumentSourcePairs로 같은 interpret에 돌린다.
-          // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) -> 자식 IF는 이 가지의
+          // 시작 가지 = 지금 이 가지(startBranchIndex) -> 자식 IF는 이 가지의
           // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
           // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
           const childDef = this.module.defs[childCompId];
@@ -1445,7 +1441,6 @@ class Interpreter {
             childCompId, // 자식 BIND_EVENT/ENTER_CONTEXT는 자식 def의 이벤트/컨텍스트 테이블을 본다
             childDef.codeOff,
             childDef.codeOff + childDef.codeLen,
-            startRegionIndex,
             startBranchIndex,
             // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
             childPrefix!,
@@ -1554,7 +1549,6 @@ class Interpreter {
         compId,
         thenStart,
         thenEnd,
-        regionIndex,
         thenBranchIndex,
         pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
         loopIndexBase,
@@ -1566,15 +1560,14 @@ class Interpreter {
         elseStart === -1
           ? document.createDocumentFragment() // else 없는 if - 빈 가지
           : this.interpret(
-            argumentSourcePairs,
-            compId,
-            elseStart,
-            ifEndPc,
-            regionIndex,
-            elseBranchIndex,
-            pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-            loopIndexBase,
-          );
+              argumentSourcePairs,
+              compId,
+              elseStart,
+              ifEndPc,
+              elseBranchIndex,
+              pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+              loopIndexBase,
+            );
       elseBranch.nodes = Array.from(f.childNodes);
     };
     thenBranch.lazyBuild = buildThen;
@@ -1660,7 +1653,6 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       compId, // 루트 def
       def.codeOff,
       def.codeOff + def.codeLen,
-      0, // region index
       rootRegion.branchIndices[THEN_INDEX], // branch index
       "", // 루트 경로 prefix 비어 있음
       0, // 세그먼트 인덱스 base 0
