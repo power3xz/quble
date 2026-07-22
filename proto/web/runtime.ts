@@ -1462,98 +1462,16 @@ class Interpreter {
           break;
         }
         case OP.IF: {
-          const condScopeIndex = u8at();
-          const condOffset = u8at();
-          // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
-          // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
-          const condIsConst = slotKind(argumentSourcePairs, condScopeIndex) === CONST;
-          const condRef = slotRef(argumentSourcePairs, condScopeIndex);
-          const condLeafIndex = condIsConst ? -1 : condRef + condOffset;
-          const regionIndex = appendIfRegion(
-            this.regionPool,
-            this.freeRegions,
-            this.branchPool,
-            this.freeBranches,
-            condLeafIndex,
+          pc = this.runIf(
+            pc,
+            argumentSourcePairs,
+            compId,
+            activeContexts,
+            pathPrefix,
+            loopIndexBase,
+            branch,
+            nodeTop(),
           );
-          const region = this.regionPool[regionIndex];
-          branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
-          const thenBranchIndex = region.branchIndices[THEN_INDEX];
-          const elseBranchIndex = region.branchIndices[ELSE_INDEX];
-          const thenBranch = this.branchPool[thenBranchIndex];
-          const elseBranch = this.branchPool[elseBranchIndex];
-          // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
-          nodeTop().appendChild(region.anchor);
-
-          // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
-          const thenStart = pc;
-          const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(this.code, thenStart);
-
-          // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
-          const buildThen = () => {
-            const f = this.interpret(
-              argumentSourcePairs,
-              compId,
-              activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
-              thenStart,
-              thenEnd,
-              regionIndex,
-              thenBranchIndex,
-              pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-              loopIndexBase,
-            );
-            thenBranch.nodes = Array.from(f.childNodes);
-          };
-          const buildElse = () => {
-            const f =
-              elseStart === -1
-                ? document.createDocumentFragment() // else 없는 if - 빈 가지
-                : this.interpret(
-                    argumentSourcePairs,
-                    compId,
-                    activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
-                    elseStart,
-                    ifEndPc,
-                    regionIndex,
-                    elseBranchIndex,
-                    pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-                    loopIndexBase,
-                  );
-            elseBranch.nodes = Array.from(f.childNodes);
-          };
-          thenBranch.lazyBuild = buildThen;
-          elseBranch.lazyBuild = buildElse;
-
-          // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
-          // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
-          if (!condIsConst) {
-            const onCond = (condValue: unknown) => {
-              activateIf(
-                this.store,
-                this.regionPool,
-                this.branchPool,
-                regionIndex,
-                condValue ? THEN_INDEX : ELSE_INDEX,
-              );
-            };
-            // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
-            branch.leafIndices.push(condLeafIndex);
-            branch.updateFns.push(onCond);
-            this.store.subscribe(condLeafIndex, onCond);
-          }
-          // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
-          // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
-          // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
-          // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-          const condInitial = condIsConst ? this.module.constpool[condRef] : this.store.get(condLeafIndex);
-          const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
-          const initialBranch = this.branchPool[region.branchIndices[initialShownIndex]];
-          // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
-          initialBranch.lazyBuild!();
-          initialBranch.built = true;
-          region.shownIndex = initialShownIndex;
-
-          pc = ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음으로.
           break;
         }
         case OP.FOR_RAW: {
@@ -1601,6 +1519,107 @@ class Interpreter {
       }
     }
     return fragment;
+  };
+
+  // @if opcode 처리 - then/else Region을 스폰해 anchor를 parent에 붙이고, 활성 가지만 build한다.
+  // 비활성 가지엔 lazyBuild만 심어 첫 활성화 때 만든다. cond가 STORE면 구독을 걸어 swap한다.
+  // pc는 IF operand 직후(cond 슬롯)를 가리켜 들어오고, IF_END 다음 pc를 돌려준다.
+  runIf = (
+    pc: number,
+    argumentSourcePairs: TScope,
+    compId: number,
+    activeContexts: number[],
+    pathPrefix: string,
+    loopIndexBase: number,
+    branch: TBranch,
+    parent: Node,
+  ): number => {
+    const condScopeIndex = this.code[pc++];
+    const condOffset = this.code[pc++];
+    // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
+    // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
+    const condIsConst = slotKind(argumentSourcePairs, condScopeIndex) === CONST;
+    const condRef = slotRef(argumentSourcePairs, condScopeIndex);
+    const condLeafIndex = condIsConst ? -1 : condRef + condOffset;
+    const regionIndex = appendIfRegion(
+      this.regionPool,
+      this.freeRegions,
+      this.branchPool,
+      this.freeBranches,
+      condLeafIndex,
+    );
+    const region = this.regionPool[regionIndex];
+    branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
+    const thenBranchIndex = region.branchIndices[THEN_INDEX];
+    const elseBranchIndex = region.branchIndices[ELSE_INDEX];
+    const thenBranch = this.branchPool[thenBranchIndex];
+    const elseBranch = this.branchPool[elseBranchIndex];
+    // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
+    parent.appendChild(region.anchor);
+
+    // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
+    const thenStart = pc;
+    const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(this.code, thenStart);
+
+    // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
+    const buildThen = () => {
+      const f = this.interpret(
+        argumentSourcePairs,
+        compId,
+        activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
+        thenStart,
+        thenEnd,
+        regionIndex,
+        thenBranchIndex,
+        pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+        loopIndexBase,
+      );
+      thenBranch.nodes = Array.from(f.childNodes);
+    };
+    const buildElse = () => {
+      const f =
+        elseStart === -1
+          ? document.createDocumentFragment() // else 없는 if - 빈 가지
+          : this.interpret(
+              argumentSourcePairs,
+              compId,
+              activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
+              elseStart,
+              ifEndPc,
+              regionIndex,
+              elseBranchIndex,
+              pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+              loopIndexBase,
+            );
+      elseBranch.nodes = Array.from(f.childNodes);
+    };
+    thenBranch.lazyBuild = buildThen;
+    elseBranch.lazyBuild = buildElse;
+
+    // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
+    // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
+    if (!condIsConst) {
+      const onCond = (condValue: unknown) => {
+        activateIf(this.store, this.regionPool, this.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+      };
+      // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
+      branch.leafIndices.push(condLeafIndex);
+      branch.updateFns.push(onCond);
+      this.store.subscribe(condLeafIndex, onCond);
+    }
+    // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
+    // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
+    // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
+    // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
+    const condInitial = condIsConst ? this.module.constpool[condRef] : this.store.get(condLeafIndex);
+    const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
+    const initialBranch = this.branchPool[region.branchIndices[initialShownIndex]];
+    // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
+    initialBranch.lazyBuild!();
+    initialBranch.built = true;
+    region.shownIndex = initialShownIndex;
+
+    return ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음 pc
   };
 }
 
