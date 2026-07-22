@@ -297,6 +297,25 @@ type TScope = number[];
 const slotKind = (scope: TScope, o: number): number => scope[2 * o];
 const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
 
+// 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
+// @for 회차·RENDER 재진입은 같은 ws를 이어 쓰고(push/pop 공유), @if 비활성 가지만 build 시점
+// 상태를 snapshotWalk로 딥카피해 lazyBuild 클로저가 캡처한다 - 지연 실행 시점엔 원본 스택이
+// 이미 pop돼 비어 있어, 카피 없이는 회차 인덱스($n)·컨텍스트를 잃는다.
+// (pathPrefix/loopIndexBase는 불변 값이라 여기 안 담고 파라미터로 흐른다 - 클로저가 값을 캡처.)
+//   loopIndexStack: @for 회차 인덱스 소스 누적(인터리브 kind,ref). buildIteration이 push/pop.
+//   activeContexts: @with 컨텍스트 누적(createdContexts 인덱스). ENTER/EXIT_CONTEXT가 push/pop.
+type TWalkStacks = {
+  loopIndexStack: number[];
+  activeContexts: number[];
+};
+
+// lazyBuild(@if 비활성 가지)에 넘길 스냅샷 - 가변 스택을 딥카피해 build 후 원본이 pop돼도
+// 지연 실행이 build 시점 상태를 본다.
+const snapshotStacks = (ws: TWalkStacks): TWalkStacks => ({
+  loopIndexStack: [...ws.loopIndexStack],
+  activeContexts: [...ws.activeContexts],
+});
+
 // FieldValue ref 출처 태그(Rust serialize <REF>와 대칭). ref마다 태그 1바이트 + payload.
 // 슬롯 해석방법(STORE/CONST)과 다른 층이다 - Scope 슬롯의 실제 kind는 argumentSourcePairs가 정한다.
 const FV_SCOPE = 0;
@@ -976,22 +995,21 @@ class Interpreter {
   //
   // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
   // @param compId           지금 해석 중인 def(자식 RENDER면 자식 def). events/contexts를 이 def에서 참조로 꺼낸다.
-  // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
   // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
   // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
-  // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
-  // @param loopIndexStack   @for 회차 인덱스 소스 누적(인터리브 kind,ref). buildIteration이 회차마다 push/pop해 물려준다.
+  // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다(불변 값).
+  // @param loopIndexBase    자식 @for 세그먼트 인덱스의 base(누적 @for 깊이). RENDER가 늘린다(불변 값).
+  // @param ws               가변 walk 스택(loopIndexStack/activeContexts). @for·RENDER는 이어 쓰고, @if 비활성 가지는 카피본을 쓴다.
   // @returns                직속 노드를 담은 DocumentFragment
   interpret = (
     argumentSourcePairs: TScope,
     compId: number,
-    activeContexts: number[],
     startPc: number,
     endPc: number,
     startBranchIndex: number,
     pathPrefix: string,
-    loopIndexStack: number[],
     loopIndexBase: number,
+    ws: TWalkStacks,
   ): DocumentFragment => {
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
@@ -1024,20 +1042,19 @@ class Interpreter {
       forEndPc: number,
       targetBranchIndex: number,
     ) => {
-      loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
+      ws.loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
       const f = this.interpret(
         argumentSourcePairs,
         compId,
-        activeContexts,
         bodyStart,
         forEndPc,
         targetBranchIndex,
         pathPrefix,
-        loopIndexStack, // 회차 인덱스 소스를 물려준다(발화 시 $n으로 해소)
-        loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
-      );
-      loopIndexStack.pop(); // ref
-      loopIndexStack.pop(); // kind
+        loopIndexBase,
+        ws,
+      ); // ws.loopIndexStack에 방금 push된 회차 인덱스를 물려준다
+      ws.loopIndexStack.pop(); // ref
+      ws.loopIndexStack.pop(); // kind
       return f;
     };
 
@@ -1298,7 +1315,7 @@ class Interpreter {
           // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
           // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
           const contextLeaves: Record<string, TAssembled[]> = {};
-          for (const i of activeContexts) {
+          for (const i of ws.activeContexts) {
             const created = this.createdContexts[i];
             contextLeaves[created.name] = created.fields;
           }
@@ -1307,10 +1324,10 @@ class Interpreter {
           // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
           // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
           const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
-          for (let i = 0; i * 2 < loopIndexStack.length; i++) {
+          for (let i = 0; i * 2 < ws.loopIndexStack.length; i++) {
             loopIndices[`$${i}` as TIndexSymbol] = {
-              kind: loopIndexStack[2 * i],
-              ref: loopIndexStack[2 * i + 1],
+              kind: ws.loopIndexStack[2 * i],
+              ref: ws.loopIndexStack[2 * i + 1],
             };
           }
           // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
@@ -1414,16 +1431,16 @@ class Interpreter {
           }));
           // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
           // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
-          if (activeContexts.some((i) => this.createdContexts[i].name === name)) {
+          if (ws.activeContexts.some((i) => this.createdContexts[i].name === name)) {
             console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
           }
-          activeContexts.push(this.createdContexts.length);
+          ws.activeContexts.push(this.createdContexts.length);
           this.createdContexts.push({ name, fields });
           break;
         }
         case OP.EXIT_CONTEXT: {
           // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
-          activeContexts.pop();
+          ws.activeContexts.pop();
           break;
         }
         case OP.RENDER: {
@@ -1441,16 +1458,13 @@ class Interpreter {
           const childFragment = this.interpret(
             childArgumentSourcePairs,
             childCompId, // 자식 BIND_EVENT/ENTER_CONTEXT는 자식 def의 이벤트/컨텍스트 테이블을 본다
-            activeContexts, // 부모 활성 컨텍스트를 공유로 물려준다 - 자식의 ENTER/EXIT_CONTEXT는
-            // @with 경계마다 push/pop 짝이라 자식 반환 시 원상복구된다(RENDER는 반환 후
-            // activeContexts를 다시 읽지 않아 오염 여지도 없다). 매 RENDER의 [...] 복사 제거.
             childDef.codeOff,
             childDef.codeOff + childDef.codeLen,
             startBranchIndex,
             // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
             childPrefix!,
-            loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
-            loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
+            ws.loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
+            ws, // 회차 인덱스·컨텍스트 스택을 공유로 물려준다 - @for·@with 경계가 push/pop으로 원복(복사 없음)
           );
           // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
           // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
@@ -1459,17 +1473,7 @@ class Interpreter {
           break;
         }
         case OP.IF: {
-          pc = this.runIf(
-            pc,
-            argumentSourcePairs,
-            compId,
-            activeContexts,
-            pathPrefix,
-            loopIndexStack,
-            loopIndexBase,
-            branch,
-            nodeTop(),
-          );
+          pc = this.runIf(pc, argumentSourcePairs, compId, pathPrefix, loopIndexBase, ws, branch, nodeTop());
           break;
         }
         case OP.FOR_RAW: {
@@ -1526,10 +1530,9 @@ class Interpreter {
     pc: number,
     argumentSourcePairs: TScope,
     compId: number,
-    activeContexts: number[],
     pathPrefix: string,
-    loopIndexStack: number[],
     loopIndexBase: number,
+    ws: TWalkStacks,
     branch: TBranch,
     parent: Node,
   ): number => {
@@ -1560,18 +1563,22 @@ class Interpreter {
     const thenStart = pc;
     const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(this.code, thenStart);
 
+    // 비활성 가지는 lazyBuild로 심어만 뒀다 나중(조건 swap)에 실행된다. 그 지연 시점의 ws는 이
+    // @if를 지나 이미 pop된 상태라, build 시점 스택을 딥카피해 캡처한다 - 카피 없이는 회차
+    // 인덱스($n)·컨텍스트를 잃는다. then/else 중 하나만 실행되니 스냅샷 하나를 공유 캡처한다.
+    const stacks = snapshotStacks(ws);
+
     // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
     const buildThen = () => {
       const f = this.interpret(
         argumentSourcePairs,
         compId,
-        activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
         thenStart,
         thenEnd,
         thenBranchIndex,
-        pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-        loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다(클로저 캡처라 lazyBuild 지연 실행에도 정합)
+        pathPrefix,
         loopIndexBase,
+        stacks,
       );
       thenBranch.nodes = Array.from(f.childNodes);
     };
@@ -1582,13 +1589,12 @@ class Interpreter {
           : this.interpret(
               argumentSourcePairs,
               compId,
-              activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
               elseStart,
               ifEndPc,
               elseBranchIndex,
-              pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-              loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다(클로저 캡처라 lazyBuild 지연 실행에도 정합)
+              pathPrefix,
               loopIndexBase,
+              stacks,
             );
       elseBranch.nodes = Array.from(f.childNodes);
     };
@@ -1673,13 +1679,12 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     const fragment = interpreter.interpret(
       rootFlat,
       compId, // 루트 def
-      [], // 루트는 활성 컨텍스트 없음
       def.codeOff,
       def.codeOff + def.codeLen,
       rootRegion.branchIndices[THEN_INDEX], // branch index
       "", // 루트 경로 prefix 비어 있음
-      [], // 루트는 @for 밖 - 회차 인덱스 없음
       0, // 세그먼트 인덱스 base 0
+      { loopIndexStack: [], activeContexts: [] }, // 루트는 @for·@with 밖 - 빈 스택
     );
     branchPool[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
