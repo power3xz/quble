@@ -917,6 +917,7 @@ type TBinding = {
 // 가지 등)은 파라미터로 남기고, 인스턴스 내내 같은 값만 필드로 올린다.
 class Interpreter {
   module: TModule;
+  code: Uint8Array;
   handlers: THandlers;
   resources: string[];
   loadedHrefs: Set<unknown>;
@@ -944,6 +945,7 @@ class Interpreter {
     createdContexts: TCreatedContext[],
   ) {
     this.module = module;
+    this.code = module.code;
     this.handlers = handlers;
     this.resources = resources;
     this.loadedHrefs = loadedHrefs;
@@ -972,7 +974,7 @@ class Interpreter {
   // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
   // @returns                직속 노드를 담은 DocumentFragment
-  interpret(
+  interpret = (
     argumentSourcePairs: TScope,
     compId: number,
     activeContexts: number[],
@@ -983,7 +985,7 @@ class Interpreter {
     pathPrefix: string,
     loopIndexStack: number[],
     loopIndexBase: number,
-  ): DocumentFragment {
+  ): DocumentFragment => {
     // 인스턴스 불변 상태를 지역으로 끌어와 아래 본문이 그대로 참조하게 한다.
     // 재귀 호출(자식 RENDER·가지 build)도 이 interpret으로 나간다.
     const {
@@ -1001,7 +1003,6 @@ class Interpreter {
       createdContexts,
     } = this;
     const interpret = this.interpret.bind(this);
-    const code = module.code; // 항상 module 전체 코드 - def/자식 구간은 pc(startPc~endPc)로 가른다
     const { events, contexts } = module.defs[compId]; // 현재 def의 이벤트/컨텍스트 테이블
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
@@ -1015,11 +1016,11 @@ class Interpreter {
     const branch = branchPool[startBranchIndex]; // startBranchIndex는 전역 branchIndex
 
     const u16at = () => {
-      const v = code[pc] | (code[pc + 1] << 8);
+      const v = this.code[pc] | (this.code[pc + 1] << 8);
       pc += 2;
       return v;
     };
-    const u8at = () => code[pc++];
+    const u8at = () => this.code[pc++];
     const nodeTop = () => nodeStack[nodeStack.length - 1];
 
     // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드·구독·자식region은
@@ -1209,7 +1210,7 @@ class Interpreter {
     };
 
     while (pc < endPc) {
-      const op = code[pc++];
+      const op = this.code[pc++];
       switch (op) {
         case OP.HALT: {
           pc = endPc;
@@ -1478,7 +1479,7 @@ class Interpreter {
 
           // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
           const thenStart = pc;
-          const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(code, thenStart);
+          const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(this.code, thenStart);
 
           // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
           const buildThen = () => {
@@ -1501,17 +1502,17 @@ class Interpreter {
               elseStart === -1
                 ? document.createDocumentFragment() // else 없는 if - 빈 가지
                 : interpret(
-                    argumentSourcePairs,
-                    compId,
-                    activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
-                    elseStart,
-                    ifEndPc,
-                    regionIndex,
-                    elseBranchIndex,
-                    pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-                    loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
-                    loopIndexBase,
-                  );
+                  argumentSourcePairs,
+                  compId,
+                  activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
+                  elseStart,
+                  ifEndPc,
+                  regionIndex,
+                  elseBranchIndex,
+                  pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+                  loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
+                  loopIndexBase,
+                );
             elseBranch.nodes = Array.from(f.childNodes);
           };
           thenBranch.lazyBuild = buildThen;
@@ -1547,7 +1548,7 @@ class Interpreter {
           // 소스에 박힌 리터럴 횟수 - 안 변하니 지금 가지(startRegion/Branch)에 count회 인라인.
           const count = Number(u16at()) || 0;
           const bodyStart = pc;
-          const forEndPc = forBodyEnd(code, bodyStart);
+          const forEndPc = forBodyEnd(this.code, bodyStart);
           inlineFor(count, bodyStart, forEndPc);
           pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
           break;
@@ -1560,7 +1561,7 @@ class Interpreter {
           const offset = u8at();
           const ref = slotRef(argumentSourcePairs, scopeIndex);
           const bodyStart = pc;
-          const forEndPc = forBodyEnd(code, bodyStart);
+          const forEndPc = forBodyEnd(this.code, bodyStart);
           if (slotKind(argumentSourcePairs, scopeIndex) === CONST) {
             inlineFor(Number(module.constpool[ref]) || 0, bodyStart, forEndPc);
           } else {
@@ -1577,7 +1578,7 @@ class Interpreter {
           const offset = u8at();
           const arrayLeafIndex = slotRef(argumentSourcePairs, scopeIndex) + offset;
           const bodyStart = pc;
-          const forEndPc = forBodyEnd(code, bodyStart);
+          const forEndPc = forBodyEnd(this.code, bodyStart);
           reactiveArrayFor(arrayLeafIndex, bodyStart, forEndPc);
           pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
           break;
@@ -1625,7 +1626,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
     // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
     // rootFlat은 plantRoot가 준 [STORE, base, …] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
-    const interp = new Interpreter(
+    const interpreter = new Interpreter(
       module,
       handlers,
       resources,
@@ -1639,7 +1640,7 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       freeBranches,
       createdContexts,
     );
-    const fragment = interp.interpret(
+    const fragment = interpreter.interpret(
       rootFlat,
       compId, // 루트 def
       [], // 루트는 활성 컨텍스트 없음
