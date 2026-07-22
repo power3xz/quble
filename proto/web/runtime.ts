@@ -1566,15 +1566,15 @@ class Interpreter {
         elseStart === -1
           ? document.createDocumentFragment() // else 없는 if - 빈 가지
           : this.interpret(
-              argumentSourcePairs,
-              compId,
-              elseStart,
-              ifEndPc,
-              regionIndex,
-              elseBranchIndex,
-              pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-              loopIndexBase,
-            );
+            argumentSourcePairs,
+            compId,
+            elseStart,
+            ifEndPc,
+            regionIndex,
+            elseBranchIndex,
+            pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
+            loopIndexBase,
+          );
       elseBranch.nodes = Array.from(f.childNodes);
     };
     thenBranch.lazyBuild = buildThen;
@@ -1660,8 +1660,8 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
       compId, // 루트 def
       def.codeOff,
       def.codeOff + def.codeLen,
-      0,
-      rootRegion.branchIndices[THEN_INDEX],
+      0, // region index
+      rootRegion.branchIndices[THEN_INDEX], // branch index
       "", // 루트 경로 prefix 비어 있음
       0, // 세그먼트 인덱스 base 0
     );

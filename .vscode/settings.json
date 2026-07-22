@@ -1,3 +1,4 @@
 {
-  "cSpell.words": ["codegen", "constpool", "qubb", "qubc", "Quble"]
+  "cSpell.words": ["codegen", "constpool", "qubb", "qubc", "Quble"],
+  "cSpell.diagnosticLevel": "Hint"
 }
