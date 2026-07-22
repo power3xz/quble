@@ -1080,6 +1080,12 @@ class Interpreter {
     branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
     parent.appendChild(region.anchor);
 
+    // grow(onCount 발화)는 지연 실행이라 그 시점 공유 pairs/ws는 이 @for 지점을 지나 이미 pop돼
+    // 있다(@if lazyBuild와 동형). build 시점 상태를 딥카피해 addIterationBranch가 캡처한다 - 초기
+    // 회차도 같은 스냅샷을 쓴다(build 시점이라 값 동일, push/pop도 스냅샷에만 가 원본 무오염).
+    const pairs = [...argumentSourcePairs];
+    const stacks = snapshotStacks(ws);
+
     // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
     // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
     // 새 회차의 전역 branchIndex를 돌려준다.
@@ -1092,7 +1098,7 @@ class Interpreter {
         this.freeBranches,
         forRegionIndex,
       );
-      argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
+      pairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
       this.branchPool[newBranchIndex].nodes = Array.from(
         this.buildIteration(
           RAW,
@@ -1100,17 +1106,17 @@ class Interpreter {
           bodyStart,
           forEndPc,
           newBranchIndex,
-          argumentSourcePairs,
+          pairs,
           compId,
           pathPrefix,
           loopIndexBase,
-          ws,
+          stacks,
         ).childNodes,
       );
-      argumentSourcePairs.pop(); // index ref
-      argumentSourcePairs.pop(); // index kind
-      argumentSourcePairs.pop(); // item ref
-      argumentSourcePairs.pop(); // item kind
+      pairs.pop(); // index ref
+      pairs.pop(); // index kind
+      pairs.pop(); // item ref
+      pairs.pop(); // item kind
       return newBranchIndex;
     };
 
@@ -1172,6 +1178,12 @@ class Interpreter {
     branch.childRegionIndices.push(forRegionIndex);
     parent.appendChild(region.anchor);
 
+    // grow(onSize 발화)는 지연 실행이라 그 시점 공유 pairs/ws는 이 @for 지점을 지나 이미 pop돼
+    // 있다(@if lazyBuild와 동형). build 시점 상태를 딥카피해 addIterationBranch가 캡처한다 - 초기
+    // 회차도 같은 스냅샷을 쓴다(build 시점이라 값 동일, push/pop도 스냅샷에만 가 원본 무오염).
+    const pairs = [...argumentSourcePairs];
+    const stacks = snapshotStacks(ws);
+
     // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를
     // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 {i}가 읽는다. 인덱스 leaf는 발화 시
     // $n으로도 해소되게 loopIndexStack에 (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
@@ -1183,7 +1195,7 @@ class Interpreter {
         forRegionIndex,
       );
       const indexLeaf = info.indexLeafIndices[i];
-      argumentSourcePairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
+      pairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
       this.branchPool[newBranchIndex].nodes = Array.from(
         this.buildIteration(
           STORE,
@@ -1191,17 +1203,17 @@ class Interpreter {
           bodyStart,
           forEndPc,
           newBranchIndex,
-          argumentSourcePairs,
+          pairs,
           compId,
           pathPrefix,
           loopIndexBase,
-          ws,
+          stacks,
         ).childNodes,
       );
-      argumentSourcePairs.pop(); // 인덱스 ref
-      argumentSourcePairs.pop(); // 인덱스 kind
-      argumentSourcePairs.pop(); // 요소 ref
-      argumentSourcePairs.pop(); // 요소 kind
+      pairs.pop(); // 인덱스 ref
+      pairs.pop(); // 인덱스 kind
+      pairs.pop(); // 요소 ref
+      pairs.pop(); // 요소 kind
       return newBranchIndex;
     };
 
