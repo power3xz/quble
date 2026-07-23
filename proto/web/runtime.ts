@@ -1145,10 +1145,10 @@ class Interpreter {
       const next = Number(v) || 0;
       const cur = region.branchIndices.length;
       for (let i = cur; i < next; i++) {
-        attachForIteration(this.store, this.regionPool, this.branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+        attachForIteration(this.store, this.regionPool, this.branchPool, forRegionIndex, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
       }
       if (next < cur) {
-        truncateFor(this.store, this.regionPool, this.branchPool, region, next); // 줄어든 꼬리 제거
+        truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
       }
     };
     // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
@@ -1236,10 +1236,10 @@ class Interpreter {
       const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
       const cur = region.branchIndices.length;
       for (let i = cur; i < next; i++) {
-        attachForIteration(this.store, this.regionPool, this.branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+        attachForIteration(this.store, this.regionPool, this.branchPool, forRegionIndex, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
       }
       if (next < cur) {
-        truncateFor(this.store, this.regionPool, this.branchPool, region, next); // 줄어든 꼬리 제거
+        truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
       }
     };
     branch.leafIndices.push(sizeLeafIndex);

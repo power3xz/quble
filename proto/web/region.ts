@@ -1,4 +1,4 @@
-import { Pool } from "./pool-allocator.ts";
+import type { Pool } from "./pool-allocator.ts";
 
 // Region - 노드가 붙었다/떼였다 하는 경계. @if(then/else 중 하나만 보임)와 @for(회차 전부 보임)
 // 두 종류. 모든 관계는 인덱스 기반 - 객체는 regionPool/branchPool 두 배열에만 살고 나머지는 숫자로
@@ -286,9 +286,10 @@ export const attachForIteration = (
   store: Store,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
-  region: TRegion,
+  regionIndex: number,
   branchIndex: number,
 ): void => {
+  const region = regionPool.entries[regionIndex];
   const slot = region.branchIndices.indexOf(branchIndex);
   const prev = slot > 0 ? branchPool.entries[region.branchIndices[slot - 1]] : null;
   const after = prev ? branchTailNode(regionPool, branchPool, prev, region.anchor) : region.anchor;
@@ -319,10 +320,10 @@ export const truncateFor = (
   store: Store,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
-  region: TRegion,
+  regionIndex: number,
   count: number,
 ): void => {
-  const branchIndices = region.branchIndices;
+  const branchIndices = regionPool.entries[regionIndex].branchIndices;
   for (let i = branchIndices.length - 1; i >= count; i--) {
     detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
     freeBranchTree(branchPool, regionPool, branchIndices[i]);
