@@ -781,7 +781,9 @@ class Interpreter {
   // 남의 element는 그냥 통과한다(그 인터프리터의 리스너가 잡는다). 리스너 수 = 인터프리터 수 x
   // 사용 타입 수 - element 수에 비례하지 않아 위임의 목적은 유지된다.
   eventBindings = new WeakMap<Element, Record<string, TBinding>>();
-  installedDelegates = new Set<string>(); // 내가 document에 단 DOM 이벤트 타입(중복 설치 방지)
+  // 내가 document에 단 위임 리스너(DOM 이벤트 타입 -> 리스너). 중복 설치 방지 겸, destroy가
+  // removeEventListener로 뗄 때 같은 함수 참조가 필요해 리스너 자체를 보관한다.
+  installedDelegates = new Map<string, EventListener>();
 
   constructor(
     module: TModule,
@@ -970,8 +972,7 @@ class Interpreter {
     if (this.installedDelegates.has(domEventName)) {
       return;
     }
-    this.installedDelegates.add(domEventName);
-    document.addEventListener(domEventName, (domEventObject) => {
+    const listener = (domEventObject: Event) => {
       let node = domEventObject.target;
       while (node && node !== document) {
         const bound = this.eventBindings.get(node as Element);
@@ -982,7 +983,19 @@ class Interpreter {
         }
         node = (node as Node).parentNode;
       }
-    });
+    };
+    this.installedDelegates.set(domEventName, listener);
+    document.addEventListener(domEventName, listener);
+  };
+
+  // 내가 document에 단 위임 리스너를 전부 뗀다. 리스너 클로저가 this를 잡아 인터프리터
+  // (store/pool 전체)를 살려두므로, 떼지 않으면 인스턴스가 GC되지 않는다. 인스턴스 해체(destroy)의
+  // 리스너 축 - DOM·구독 축은 rootRegion.detach가 맡는다(compileDef의 destroy가 둘을 묶는다).
+  removeDelegates = () => {
+    for (const [domEventName, listener] of this.installedDelegates) {
+      document.removeEventListener(domEventName, listener);
+    }
+    this.installedDelegates.clear();
   };
 
   // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드·구독·자식region은
@@ -1813,7 +1826,15 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     // store를 인스턴스에 실어 반환 - 호출측이 set(leafIndex, v)로 반응성을 건다(옛 setPath 대체).
-    return { nodes, regionPool, freeRegions, branchPool, freeBranches, arrayPool, store };
+    // destroy = 인스턴스 해체: 붙은 DOM·구독을 region 트리 재귀로 떼고(detach - 반응 갱신으로
+    // 나중에 붙은 노드까지 region이 안다), 루트 anchor와 document 위임 리스너를 제거해 인스턴스가
+    // GC되게 한다.
+    const destroy = () => {
+      rootRegion.detach(store, regionPool, branchPool, rootRegion);
+      rootRegion.anchor.remove();
+      interpreter.removeDelegates();
+    };
+    return { nodes, regionPool, freeRegions, branchPool, freeBranches, arrayPool, store, destroy };
   };
 };
 
