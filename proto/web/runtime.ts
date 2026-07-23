@@ -1016,7 +1016,7 @@ class Interpreter {
 
   // 내가 document에 단 위임 리스너를 전부 뗀다. 리스너 클로저가 this를 잡아 인터프리터
   // (store/pool 전체)를 살려두므로, 떼지 않으면 인스턴스가 GC되지 않는다. 인스턴스 해체(destroy)의
-  // 리스너 축 - DOM·구독 축은 rootRegion.detach가 맡는다(compileDef의 destroy가 둘을 묶는다).
+  // 리스너 축 - DOM·구독 축은 rootRegion.detach가 맡는다(Blueprint의 destroy가 둘을 묶는다).
   removeDelegates = () => {
     for (const [domEventName, listener] of this.installedDelegates) {
       document.removeEventListener(domEventName, listener);
@@ -1788,15 +1788,25 @@ class Interpreter {
   };
 }
 
-const compileDef = (module: TModule, compId: number, resources: string[] = [], loadedHrefs = new Set()) => {
-  const def = module.defs[compId];
-  if (!def) {
-    throw new Error(`bad component ${compId}`);
-  }
+// ── 공개 API ─────────────────────────────────────────────────────────
+// qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
+//
+// 사용: const blueprintOf = compile(bytes);
+//       const inst = blueprintOf(0)(rootValue, handlers);
+//       root.append(...inst.nodes);
+//
+// @param bytes  qubb 바이트
+// @param resources resId -> URL 매핑(LOAD_RES가 <link>로 삽입). manifest.resources. 없으면 로드 생략.
+// @returns      blueprintOf: (compId) => Blueprint
+export const compile = (bytes: Uint8Array, resources: string[] = []) => {
+  const module = decode(bytes);
+  // LOAD_RES dedup 집합은 compile 단위 - 이 compile에서 나온 모든 blueprint/인스턴스가 공유하되,
+  // 다른 compile(다른 렌더 세션)은 깨끗한 Set으로 시작한다.
+  const loadedHrefs = new Set();
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def/자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
-
-  return (rootValue: unknown, handlers: THandlers = {}) => {
+  return (compId: number) => (rootValue: unknown, handlers: THandlers = {}) => {
+    const def = module.defs[compId];
     // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
     const arrayPool: TArrayInfo[] = []; // @for가 순회하는 배열마다 요소 leaf 위치. 요소 추가/제거 시 참조.
     const freeArrays: number[] = []; // arrayPool의 빈 칸 인덱스(freelist).
@@ -1862,24 +1872,6 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     };
     return { nodes, regionPool, freeRegions, branchPool, freeBranches, arrayPool, store, destroy };
   };
-};
-
-// ── 공개 API ─────────────────────────────────────────────────────────
-// qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
-//
-// 사용: const blueprintOf = compile(bytes);
-//       const inst = blueprintOf(0)(rootValue, handlers);
-//       root.append(...inst.nodes);
-//
-// @param bytes  qubb 바이트
-// @param resources resId -> URL 매핑(LOAD_RES가 <link>로 삽입). manifest.resources. 없으면 로드 생략.
-// @returns      blueprintOf: (compId) => Blueprint
-export const compile = (bytes: Uint8Array, resources: string[] = []) => {
-  const module = decode(bytes);
-  // LOAD_RES dedup 집합은 compile 단위 - 이 compile에서 나온 모든 blueprint/인스턴스가 공유하되,
-  // 다른 compile(다른 렌더 세션)은 깨끗한 Set으로 시작한다.
-  const loadedHrefs = new Set();
-  return (compId: number) => compileDef(module, compId, resources, loadedHrefs);
 };
 
 // 상태 저장소(store)는 leaf-store.js가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.
