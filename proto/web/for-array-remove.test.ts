@@ -77,7 +77,7 @@ test("연속 제거로 빈 배열까지", () => {
 
 test("중간 제거 후 push는 free된 leaf 자리를 재사용한다(pool 안 커짐)", () => {
   const { host, del, add, arrayPool } = instantiate({ tags: ["a", "b", "c"] }, ["d"], [1]);
-  const info = arrayPool[0];
+  const info = arrayPool.entries[0];
   // 요소 leaf와 인덱스 leaf는 크기가 같아(둘 다 1) 같은 free 버킷을 공유한다 - b 제거로 두 자리가 반납되고
   // d push의 두 alloc(요소·인덱스)이 그 자리를 재사용한다. 어느 자리가 어느 용도로 가는지는 free list LIFO라
   // 특정하지 않는다(자리 번호가 아니라 "새 칸을 안 늘렸는지"가 재사용의 참 조건). 최대 leaf가 제거 전을 안 넘으면
@@ -93,7 +93,7 @@ test("중간 제거 후 push는 free된 leaf 자리를 재사용한다(pool 안 
 
 test("끝 제거는 pool을 되감아 다음 push가 그 자리를 다시 쓴다", () => {
   const { del, add, arrayPool } = instantiate({ tags: ["a", "b", "c"] }, ["d"], [2]);
-  const info = arrayPool[0];
+  const info = arrayPool.entries[0];
   const tailLeaf = info.elemStartLeafIndices[2]; // c의 leaf(끝)
   del.click(); // c 제거 -> leaves.length 되감김
   add.click(); // d push -> 되감긴 끝 = 같은 자리

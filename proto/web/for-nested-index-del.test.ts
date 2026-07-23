@@ -41,7 +41,7 @@ const instantiate = (values: unknown) => {
     // 요소 레이아웃은 label(스칼라 1칸) + cells(배열 칸 1)라 cells 배열 칸 = 요소 시작 + 1.
     "[$0][$1].DEL_CELL": (_d, c) => {
       const ctx = c as unknown as Ctx;
-      const rowsInfo = inst.arrayPool[Number(ctx.get(ctx.props.rows))];
+      const rowsInfo = inst.arrayPool.entries[Number(ctx.get(ctx.props.rows))];
       const cellsArrayLeaf = rowsInfo.elemStartLeafIndices[ctx.$0] + 1;
       ctx.removeAt(cellsArrayLeaf, ctx.$1);
     },
@@ -51,10 +51,17 @@ const instantiate = (values: unknown) => {
   return { host, inst };
 };
 
-const initial = { rows: [{ label: "R0", cells: ["a", "b", "c"] }, { label: "R1", cells: ["d", "e"] }] };
+const initial = {
+  rows: [
+    { label: "R0", cells: ["a", "b", "c"] },
+    { label: "R1", cells: ["d", "e"] },
+  ],
+};
 
 const delCell = (host: ParentNode, row: number, cell: number) =>
-  ([...host.querySelectorAll(".row")][row].querySelectorAll(".cell")[cell].querySelector(".delcell") as HTMLButtonElement);
+  [...host.querySelectorAll(".row")][row]
+    .querySelectorAll(".cell")
+    [cell].querySelector(".delcell") as HTMLButtonElement;
 
 test("중첩 배열의 안쪽 {j}가 회차 번호를 표시한다", () => {
   const { host } = instantiate(initial);

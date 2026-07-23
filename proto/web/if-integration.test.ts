@@ -42,9 +42,9 @@ const instantiate = (name: string, leafNames: string[], values: unknown) => {
 // region 트리 탐색. branchOf: region의 슬롯(THEN/ELSE)을 전역 branchPool에서 Branch 객체로 푼다.
 const THEN = 0;
 const ELSE = 1;
-const branchOf = (inst: any, region: any, slot: number) => inst.branchPool[region.branchIndices[slot]];
+const branchOf = (inst: any, region: any, slot: number) => inst.branchPool.entries[region.branchIndices[slot]];
 const childRegion = (inst: any, regionIndex: number, slot: number, nth = 0) =>
-  inst.regionPool[branchOf(inst, inst.regionPool[regionIndex], slot).childRegionIndices[nth]];
+  inst.regionPool.entries[branchOf(inst, inst.regionPool.entries[regionIndex], slot).childRegionIndices[nth]];
 
 // 텍스트만 추출(주석 anchor·태그 제외) - swap 가시화 확인용.
 const texts = (host: ParentNode) => [...host.querySelectorAll("p")].map((p) => p.textContent);
@@ -93,7 +93,7 @@ test("중첩 if: 바깥 then 활성 시 안쪽 if도 build·자식 등록", () =
   assert.deepEqual(texts(host), ["A", "B"], "바깥 then의 a + 안쪽 then의 b");
   const outer = childRegion(inst, 0, THEN);
   assert.equal(branchOf(inst, outer, THEN).childRegionIndices.length, 1, "안쪽 if 1개 등록");
-  const inner = childRegion(inst, inst.regionPool.indexOf(outer), THEN);
+  const inner = childRegion(inst, inst.regionPool.entries.indexOf(outer), THEN);
   assert.equal(inner.shownIndex, THEN);
 });
 
@@ -150,7 +150,7 @@ test("형제 if: 같은 가지의 if 둘이 독립 swap", () => {
     d: "D",
   });
   assert.deepEqual(texts(host), ["A", "D"], "첫 if then(A) + 둘째 if else(D)");
-  assert.equal(branchOf(inst, inst.regionPool[0], THEN).childRegionIndices.length, 2, "루트 가지에 if 2개");
+  assert.equal(branchOf(inst, inst.regionPool.entries[0], THEN).childRegionIndices.length, 2, "루트 가지에 if 2개");
 
   set("c1", false); // 첫 if만 swap
   assert.deepEqual(texts(host), ["B", "D"], "첫 if만 B로, 둘째 D 유지");

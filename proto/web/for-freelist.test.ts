@@ -25,36 +25,36 @@ const instantiate = (name: string, values: Record<string, unknown>) => {
 
 const paragraphTexts = (host: HTMLElement) => [...host.querySelectorAll("p")].map((p) => p.textContent);
 
-test("count 줄이면 떼어낸 회차의 branch 칸이 freeBranches에 반납된다", () => {
+test("count 줄이면 떼어낸 회차의 branch 칸이 branchPool.free에 반납된다", () => {
   const { store, inst } = instantiate("for_count", { n: 5 });
-  assert.equal(inst.freeBranches.length, 0, "초기엔 빈 칸 없음");
+  assert.equal(inst.branchPool.free.length, 0, "초기엔 빈 칸 없음");
   store.set(0, 2); // n
-  assert.equal(inst.freeBranches.length, 3, "회차 3개 제거 -> branch 칸 3개 반납");
+  assert.equal(inst.branchPool.free.length, 3, "회차 3개 제거 -> branch 칸 3개 반납");
 });
 
 test("count 재증가 시 반납된 칸을 재사용해 branchPool이 안 커진다", () => {
   const { store, inst } = instantiate("for_count", { n: 5 });
-  const lenAt5 = inst.branchPool.length;
+  const lenAt5 = inst.branchPool.entries.length;
   store.set(0, 2); // n: 3칸 반납
   store.set(0, 5); // n: 3칸 재사용해야 함
-  assert.equal(inst.freeBranches.length, 0, "반납된 칸을 전부 재사용 -> freelist 비움");
-  assert.equal(inst.branchPool.length, lenAt5, "재사용했으니 pool 길이 그대로(append 아님)");
+  assert.equal(inst.branchPool.free.length, 0, "반납된 칸을 전부 재사용 -> freelist 비움");
+  assert.equal(inst.branchPool.entries.length, lenAt5, "재사용했으니 pool 길이 그대로(append 아님)");
 });
 
-test("@if 품은 회차를 줄이면 자식 region 칸도 freeRegions에 반납된다", () => {
+test("@if 품은 회차를 줄이면 자식 region 칸도 regionPool.free에 반납된다", () => {
   const { store, inst } = instantiate("for_if_count", { n: 3, flag: true });
-  assert.equal(inst.freeRegions.length, 0, "초기엔 빈 칸 없음");
+  assert.equal(inst.regionPool.free.length, 0, "초기엔 빈 칸 없음");
   store.set(0, 1); // n: 회차 2개 제거 -> 각 회차의 자식 @if region도 반납되어야
-  assert.equal(inst.freeRegions.length, 2, "회차 2개의 자식 region 2개 반납");
+  assert.equal(inst.regionPool.free.length, 2, "회차 2개의 자식 region 2개 반납");
 });
 
 test("@if 품은 회차 재증가 시 region 칸도 재사용돼 regionPool이 안 커진다", () => {
   const { store, inst } = instantiate("for_if_count", { n: 3, flag: true });
-  const lenAt3 = inst.regionPool.length;
+  const lenAt3 = inst.regionPool.entries.length;
   store.set(0, 1); // n
   store.set(0, 3); // n
-  assert.equal(inst.freeRegions.length, 0, "반납된 region 칸 전부 재사용");
-  assert.equal(inst.regionPool.length, lenAt3, "재사용했으니 regionPool 길이 그대로");
+  assert.equal(inst.regionPool.free.length, 0, "반납된 region 칸 전부 재사용");
+  assert.equal(inst.regionPool.entries.length, lenAt3, "재사용했으니 regionPool 길이 그대로");
 });
 
 // 제거된 회차의 @if 조건 구독이 store에 잔류하면, 이후 flag 토글이 free된(또는 재사용된) region을

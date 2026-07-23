@@ -51,7 +51,7 @@ test("고정부는 연속, 배열 요소는 레벨별로 store 끝에 BFS로 심
 test("arrayPool이 요소 시작 leafIndex와 elemSize를 등록한다", () => {
   const inst = compile(qubb)(0)(rootValue);
   mount(inst);
-  const pool = inst.arrayPool;
+  const pool = inst.arrayPool.entries;
 
   const sizeAndStarts = (info: (typeof pool)[number]) => ({
     elemSize: info.elemSize,

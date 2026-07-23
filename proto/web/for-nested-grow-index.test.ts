@@ -45,7 +45,7 @@ const instantiate = (values: unknown, pushOnFirst: boolean) => {
       fired.push([ctx.$0, ctx.$1]);
       if (pushOnFirst && !pushed) {
         pushed = true;
-        const rowsInfo = inst.arrayPool[Number(ctx.get(ctx.props.rows))];
+        const rowsInfo = inst.arrayPool.entries[Number(ctx.get(ctx.props.rows))];
         const cellsArrayLeaf = rowsInfo.elemStartLeafIndices[ctx.$0] + 1;
         ctx.push(cellsArrayLeaf, "x");
       }
@@ -56,20 +56,29 @@ const instantiate = (values: unknown, pushOnFirst: boolean) => {
   return { host, fired };
 };
 
-const initial = { rows: [{ label: "R0", cells: ["a"] }, { label: "R1", cells: ["d", "e"] }] };
+const initial = {
+  rows: [
+    { label: "R0", cells: ["a"] },
+    { label: "R1", cells: ["d", "e"] },
+  ],
+};
 
 const cellButton = (host: ParentNode, row: number, cell: number) =>
-  [...host.querySelectorAll(".row")][row].querySelectorAll(".cell")[cell].querySelector(
-    ".delcell",
-  ) as HTMLButtonElement;
+  [...host.querySelectorAll(".row")][row]
+    .querySelectorAll(".cell")
+    [cell].querySelector(".delcell") as HTMLButtonElement;
 
 test("안쪽 배열 grow로 생긴 셀의 이벤트도 바깥 인덱스 $0가 정합한다", () => {
   const { host, fired } = instantiate(initial, true);
   cellButton(host, 1, 0).click(); // R1의 d 클릭 -> ($0=1,$1=0) 기록 + R1.cells에 "x" push(grow)
   assert.deepEqual(cellsOf(host), ["[0:a]", "[0:d,1:e,2:x]"], "x가 R1 꼬리에 j=2로");
   cellButton(host, 1, 2).click(); // grow된 x의 버튼 - 발화 시점 ws가 아니라 자기 행 인덱스를 봐야
-  assert.deepEqual(fired, [
-    [1, 0],
-    [1, 2],
-  ], "grow된 셀의 발화 인덱스 ($0=1, $1=2)");
+  assert.deepEqual(
+    fired,
+    [
+      [1, 0],
+      [1, 2],
+    ],
+    "grow된 셀의 발화 인덱스 ($0=1, $1=2)",
+  );
 });

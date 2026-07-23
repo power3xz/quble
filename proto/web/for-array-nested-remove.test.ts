@@ -47,7 +47,12 @@ const instantiate = (values: unknown, addQueue: Row[] = [], delQueue: number[] =
   };
 };
 
-const initial = { rows: [{ label: "R1", cells: ["a", "b"] }, { label: "R2", cells: ["c"] }] };
+const initial = {
+  rows: [
+    { label: "R1", cells: ["a", "b"] },
+    { label: "R2", cells: ["c"] },
+  ],
+};
 
 test("중첩 배열 요소를 제거하면 안쪽 셀까지 그 행이 통째로 사라진다", () => {
   const { host, del } = instantiate(initial, [], [0]);
@@ -58,10 +63,10 @@ test("중첩 배열 요소를 제거하면 안쪽 셀까지 그 행이 통째로
 
 test("제거 후 push는 arrayPool을 안 늘린다(내부 배열 arrayInfo까지 재귀 회수·재사용)", () => {
   const { del, add, inst } = instantiate(initial, [{ label: "R3", cells: ["z"] }], [0]);
-  const poolBefore = inst.arrayPool.length;
+  const poolBefore = inst.arrayPool.entries.length;
   del.click(); // R1 제거 -> 내부 cells arrayInfo 재귀 반납
   add.click(); // R3 push -> 반납분 재사용
-  assert.equal(inst.arrayPool.length, poolBefore, "arrayPool 안 늘어남(내부 arrayInfo 재사용)");
+  assert.equal(inst.arrayPool.entries.length, poolBefore, "arrayPool 안 늘어남(내부 arrayInfo 재사용)");
 });
 
 test("제거 후 push한 행이 안쪽 셀까지 렌더된다", () => {
