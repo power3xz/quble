@@ -8,7 +8,7 @@
 //
 // Instance = { nodes, regionPool }. nodes는 루트 노드들(부착/추적용), regionPool는 이 인스턴스의 모든
 // Region(@if swap / @for 회차 경계). 구독은 가지(Branch)에 모이고 attach가 켤 때 건다 - 안 보이는
-// 가지는 구독 0이다(region 구조/동작은 region.js). RENDER는 자식 def를 같은 interpret으로 인라인
+// 가지는 구독 0이다(region 구조/동작은 region.ts). RENDER는 자식 def를 같은 interpret으로 인라인
 // 재진입해, 자식 if가 부모와 같은 regionPool/가지에 합류한다(별도 인스턴스 없음).
 //
 // 값 소비 경로 (REACTIVITY.md §1~§3):
@@ -187,13 +187,13 @@ const skipBranch = (code: Uint8Array, startPc: number) => {
   throw new Error("unbalanced branch - no matching ELSE/IF_END");
 };
 
-// @for 몸체 끝(FOR_END)의 pc를 찾는다. bodyStart부터 op 경계를 전진하며 중첩 @for 깊이를
-// 센다(같은 깊이 0의 FOR_END가 이 몸체 끝). IF는 몸체 안에 섞여도 여기선 무시 - @for 여는
-// opcode(FOR_RAW/FOR_COUNT_VAR/FOR_ARRAY_VAR)와 FOR_END만 깊이에 관여한다.
+// @for 몸체 끝(FOR_END)의 pc를 찾는다.
 //
-// @param code      def 바이트코드
-// @param bodyStart 몸체 첫 op 위치(FOR operand 직후)
-// @returns         FOR_END의 pc - 호출자가 그 마커를 소비
+//   FOR op | operand | 몸체 ......... | FOR_END
+//                    ^bodyStart      ^반환 pc(호출자가 마커 소비)
+//
+// bodyStart부터 op 경계를 전진하며 중첩 @for 깊이를 센다(같은 깊이 0의 FOR_END가 이 몸체 끝).
+// IF는 몸체 안에 섞여도 무시 - @for 여는 opcode와 FOR_END만 깊이에 관여한다.
 const forBodyEnd = (code: Uint8Array, bodyStart: number) => {
   let pc = bodyStart;
   let depth = 0;
@@ -217,12 +217,12 @@ const forBodyEnd = (code: Uint8Array, bodyStart: number) => {
 
 // IF 블록의 if/else 몸체 코드 경계를 구한다(순수 - code와 if 몸체 시작 pc만 본다).
 //
-// if 몸체 = ifBodyStart~ifBodyEnd, else 몸체 = elseBodyStart~ifEndPc. else 없으면 elseBodyStart = -1이고
-// ifBodyEnd === ifEndPc === IF_END 위치. 마커는 skipBranch로 찾고 호출자가 소비한다.
+//   IF operand | if 몸체 ... | ELSE | else 몸체 ... | IF_END
+//              ^ifBodyStart  ^ifBodyEnd             ^ifEndPc
+//                                   ^elseBodyStart
 //
-// @param code      def 바이트코드
-// @param ifBodyStart if 몸체 시작 pc(IF operand 직후)
-// @returns           { ifBodyEnd, elseBodyStart, ifEndPc }
+// else 없으면 elseBodyStart = -1이고 ifBodyEnd === ifEndPc === IF_END 위치.
+// 마커는 skipBranch로 찾고 호출자가 소비한다.
 const ifBranchRanges = (code: Uint8Array, ifBodyStart: number) => {
   const ifBodyEnd = skipBranch(code, ifBodyStart); // ELSE 또는 IF_END
   if (code[ifBodyEnd] === OP.ELSE) {
@@ -292,17 +292,22 @@ const STORE = 0;
 const CONST = 1;
 const RAW = 2;
 
-// 스코프 - (kind, ref) 쌍을 인터리브로 담은 평탄 배열. 슬롯 offset o는 [2o]=kind, [2o+1]=ref.
+// 스코프 - (kind, ref) 쌍을 인터리브로 담은 평탄 배열.
+//
+//   [ kind0, ref0 | kind1, ref1 | ... ]      슬롯 o -> [2o]=kind, [2o+1]=ref
+//     +-- 슬롯 0 --+  +-- 슬롯 1 --+
 type TScope = number[];
 
 const slotKind = (scope: TScope, o: number): number => scope[2 * o];
 const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
 
 // 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
-// @for 회차·RENDER 재진입은 같은 ws를 이어 쓰고(push/pop 공유), @if 비활성 가지만 build 시점
-// 상태를 snapshotWalk로 딥카피해 lazyBuild 클로저가 캡처한다 - 지연 실행 시점엔 원본 스택이
-// 이미 pop돼 비어 있어, 카피 없이는 회차 인덱스($n)·컨텍스트를 잃는다.
-// (pathPrefix/loopIndexBase는 불변 값이라 여기 안 담고 파라미터로 흐른다 - 클로저가 값을 캡처.)
+// @for 회차·RENDER 재진입은 같은 ws를 이어 쓰고(push/pop 공유), 지연 실행(@if lazyBuild·@for grow)만
+// build 시점 상태를 snapshotStacks로 딥카피해 캡처한다 - 지연 시점엔 원본 스택이 이미 pop돼 있어,
+// 카피 없이는 회차 인덱스($n)·컨텍스트를 잃는다.
+// (pathPrefix/loopIndexBase는 불변 값이라 여기 안 담고 파라미터로 흐른다 - 클로저가 값을 캡처.
+//  argumentSourcePairs도 가변(같은 push/pop 성질)이라 지연 실행은 pairs까지 딥카피한다 - 단
+//  RENDER마다 새 배열로 교체되는 다른 생애라 여기 안 묶고 나란히 흐른다.)
 //   loopIndexStack: @for 회차 인덱스 소스 누적(인터리브 kind,ref). buildIteration이 push/pop.
 //   activeContexts: @with 컨텍스트 누적(createdContexts 인덱스). ENTER/EXIT_CONTEXT가 push/pop.
 type TWalkStacks = {
@@ -390,7 +395,7 @@ const readFields = (reader: Reader): TFieldEntry[] => {
   return fields;
 };
 
-// field ref 하나를 assemble이 커서로 소비할 [kind, ref, …] 열로 푼다(바인딩 때 1회). 한 field는
+// field ref 하나를 assemble이 커서로 소비할 [kind, ref, ...] 열로 푼다(바인딩 때 1회). 한 field는
 // 단일 출처다 - 리터럴이면 CONST 쌍 하나, 변수면 그 슬롯의 kind. 객체 변수는 store에 연속으로
 // 깔려(base부터 재귀적으로 이어짐) base+offset부터 leaf 개수만큼 STORE 쌍으로 펼친다. leaf
 // 개수 = steps의 STEP_LEAF 수. assemble이 이 열을 steps 따라 소비해 (중첩) 객체를 조립한다.
@@ -398,7 +403,7 @@ const readFields = (reader: Reader): TFieldEntry[] => {
 // @param ref       field.ref
 // @param leafCount  field.typeRef의 leaf 칸 수(객체를 몇 칸 펼칠지)
 // @param argumentSourcePairs flat 슬롯 배열
-// @returns          [kind, ref, …] 열
+// @returns          [kind, ref, ...] 열
 type TRef = { kind: number; ref: number; offset: number };
 const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[] => {
   if (ref.kind === FV_CONST) {
@@ -495,7 +500,7 @@ const compileType = (types: TType[], typeRef: number, constpool: (string | numbe
 // 객체로 감싸지 않고 값을 그대로 반환한다.
 //
 // @param steps   compileType 결과
-// @param fieldSourcePairs 이 field의 flat 값-소스 [kind, ref, …](깊이우선, step의 LEAF 순서와 일치)
+// @param fieldSourcePairs 이 field의 flat 값-소스 [kind, ref, ...](깊이우선, step의 LEAF 순서와 일치)
 
 const assemble = (
   steps: TStep[],
@@ -577,8 +582,7 @@ const leafCountOf = (module: TModule, typeRef: number): number => {
   return count;
 };
 
-// 지연 심기 항목 - 배열 하나. 요소 leaf가 객체 고정 칸 사이에 끼면 뒤 필드 offset이 밀리므로,
-// 고정부를 다 심은 뒤 요소를 store 끝에 몰아 심는다(중간 삽입 금지). value는 원본 배열.
+// 지연 심기 항목 - 만난 배열 하나(요소 심기는 고정부 뒤로 미룸 - plantRoot 레이아웃 참고). value는 원본 배열.
 type TDeferredArray = { arrayInfoIndex: number; value: unknown; elemTypeRef: number };
 
 // value를 typeRef의 "고정 칸"만 leaves에 연속 push하고, 만난 배열들을 반환한다 - 스칼라=값 한 칸,
@@ -615,9 +619,16 @@ const plantFixed = (
 
 // 루트 props 타입(반드시 object)의 각 1뎁스 prop을 슬롯 하나로 보고, rootValue를 leaves에 펴며
 // 각 prop의 base leafIndex를 모은다. 반환 leaves/arrayPool로 store·인스턴스를 채우고,
-// rootFlat([STORE, base, …])을 진입점 argumentSourcePairs로 쓴다. 루트 슬롯은 정의상 전부
-// 외부 데이터 바인딩이라 kind가 늘 STORE. 루트 고정부를 다 심은 뒤(base가 고정 칸을 가리켜야
-// 한다) 배열 요소를 store 끝에 몰아 심는다(drainArrays).
+// rootFlat([STORE, base, ...])을 진입점 argumentSourcePairs로 쓴다. 루트 슬롯은 정의상 전부
+// 외부 데이터 바인딩이라 kind가 늘 STORE.
+//
+// store 레이아웃 - 고정부 연속, 배열 요소는 뒤로(레벨 순):
+//
+//   [ 루트 고정부(prop들, 배열 칸=arrayInfoIndex) | 레벨0 배열들 요소 | 레벨1 ... ]
+//     ^rootFlat의 base들이 여기를 가리킨다          ^elemStartLeafIndices가 가리킨다
+//
+// 요소 leaf가 고정 칸 사이에 끼면 뒤 필드 offset이 밀리므로, 고정부를 다 심은 뒤 요소를 끝에
+// 레벨별로 몰아 심는다(중간 삽입 금지).
 const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayInfo>) => {
   const rootType = module.types[module.rootPropsTypeRef];
   const leaves: unknown[] = [];
@@ -649,10 +660,7 @@ const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayIn
   return { leaves, rootFlat };
 };
 
-// qubb 바이트를 모듈로 디코드한다(상수풀/def 테이블/코드).
-//
-// @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
-// @returns     { constpool, defs, code }
+// qubb 바이트를 TModule로 디코드한다(proto/BYTECODE.md 포맷).
 const decode = (bytes: Uint8Array) => {
   const r = new Reader(bytes);
   const magic = r.take(4);
@@ -746,15 +754,6 @@ type TBinding = {
   loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
 };
 
-// ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
-// 한 컴포넌트 def를 Blueprint(인스턴스화 함수)로 만든다.
-//
-// Blueprint는 호출 시 def 코드를 훑어 DOM/구독을 만든다. 자식 RENDER는 interpret을 자식 def
-// 구간으로 재진입해 인라인 합성한다(별도 청사진 호출 없음).
-//
-// @param module 디코드된 모듈
-// @param compId 컴포넌트 def 인덱스
-// @returns      Blueprint: (rootValue, handlers) => Instance { nodes, regionPool, store }
 // ── 한 인스턴스의 인터프리터 ─────────────────────────────────────────
 // 한 Blueprint 호출(인스턴스화)마다 하나. 인스턴스 불변 상태(store/각종 pool/module 등)를
 // 필드로 들고, interpret으로 바이트코드를 훑어 DOM/구독을 짓는다. 호출마다 다른 값(code/pc/
@@ -1788,7 +1787,7 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
       // @for가 순회하는 배열마다 요소 leaf 위치(entries). 요소 추가/제거 시 참조. free는 빈 칸 인덱스(freelist).
       const arrayPool: Pool<TArrayInfo> = new Pool();
       // rootValue를 루트 props 타입대로 store에 펴 심고(고정부 연속 + 배열 요소는 뒤로), 각 루트
-      // 슬롯의 base leafIndex를 rootFlat([STORE, base, …])으로 얻는다. 배열 요소는 arrayPool에 등록된다.
+      // 슬롯의 base leafIndex를 rootFlat([STORE, base, ...])으로 얻는다. 배열 요소는 arrayPool에 등록된다.
       const { leaves, rootFlat } = plantRoot(module, rootValue, arrayPool);
       const store = createLeafStoreSubject(leaves);
       // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
@@ -1806,7 +1805,7 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
       // build: 트리(regionPool/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
       // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
       // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-      // rootFlat은 plantRoot가 준 [STORE, base, …] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
+      // rootFlat은 plantRoot가 준 [STORE, base, ...] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
       const interpreter = new Interpreter(
         module,
         handlers,
@@ -1846,5 +1845,5 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
     };
 };
 
-// 상태 저장소(store)는 leaf-store.js가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.
+// 상태 저장소(store)는 leaf-store.ts가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.
 export { createLeafStoreSubject };

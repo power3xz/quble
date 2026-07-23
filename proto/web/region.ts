@@ -2,7 +2,11 @@ import type { Pool } from "./pool-allocator.ts";
 
 // Region - 노드가 붙었다/떼였다 하는 경계. @if(then/else 중 하나만 보임)와 @for(회차 전부 보임)
 // 두 종류. 모든 관계는 인덱스 기반 - 객체는 regionPool/branchPool 두 배열에만 살고 나머지는 숫자로
-// 든다(숫자를 끝까지 들고, 객체는 최말단에서만 pool[i]로 푼다).
+// 든다(숫자를 끝까지 들고, 객체는 최말단에서만 pool.entries[i]로 푼다).
+//
+//   Region --branchIndices[]--> Branch --childRegionIndices[]--> Region --> ... (인덱스로 교차 재귀)
+//   @if Region:  branchIndices = [then, else]  (shownIndex 하나만 attach)
+//   @for Region: branchIndices = [회차0, 회차1, ...]  (전부 attach, 꼬리 grow/truncate)
 //
 // 왜 lazy build: @if 비활성 가지는 안 보이니 구독 0이어야 한다(안 보이는 노드는 set에 반응 안 함).
 // 그래서 비활성 가지는 최초 인스턴스화 때 build하지 않고, 처음 활성화될 때 1회 build한다(built).
@@ -80,7 +84,7 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     updateFns: [],
     childRegionIndices: [],
     built: false,
-    lazyBuild: null, // runtime.js가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
+    lazyBuild: null, // runtime.ts가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
   });
 
 // 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detach 함수가 전담.
@@ -154,7 +158,7 @@ const detachIf = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBra
 };
 
 // region을 받아 그 활성(shownIndex) 가지를 켠다. 최초 인스턴스화의 부착도 이 함수로 한다
-// (runtime.js가 build로 트리만 만든 뒤 루트 Region부터 호출). 루트도 anchor를 가져 자식과
+// (runtime.ts가 build로 트리만 만든 뒤 루트 Region부터 호출). 루트도 anchor를 가져 자식과
 // 균일 처리된다(분기 없음).
 const attachIf = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion): ChildNode => {
   return attachOneBranch(store, regionPool, branchPool, region.anchor, region.branchIndices[region.shownIndex]);
@@ -243,7 +247,7 @@ export const appendForRegion = (regionPool: Pool<TRegion>, countLeafIndex: numbe
   return regionIndex;
 };
 
-// @for region에 회차 Branch 하나를 더하고 그 branchIndex(전역)를 돌려준다. runtime.js가 그 인덱스를
+// @for region에 회차 Branch 하나를 더하고 그 branchIndex(전역)를 돌려준다. runtime.ts가 그 인덱스를
 // startBranchIndex로 interpret해 노드·구독·자식region을 이 회차에 격리한다.
 export const appendBranchOfForRegion = (
   regionPool: Pool<TRegion>,

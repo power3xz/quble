@@ -2,8 +2,8 @@
 // 그 위에 반응성을 얹는다. 값은 진입점(plantRoot)이 루트 props 타입 구조대로 미리 펴서 넣는다
 // - store는 타입을 모르는 순수 저장소다(leafIndex가 유일한 접근 축).
 //
-//   createLeafStore(leaves)        → { get, set }                              (데이터만)
-//   createLeafStoreSubject(leaves) → 위 + { subscribe, unsubscribe }, set이 통지  (반응성)
+//   createLeafStore(leaves)        -> { get, set }                                 (데이터만)
+//   createLeafStoreSubject(leaves) -> 위 + { subscribe, unsubscribe, alloc, free }  (반응성 + 동적 칸)
 //
 // runtime.ts의 blueprint가 만들어 인스턴스에 싣는 store가 곧 createLeafStoreSubject의 반환물이다.
 
@@ -27,12 +27,9 @@ const createLeafStore = (leaves: unknown[]) => {
   return { get, set };
 };
 
-// ── leafStoreSubject (leafStore + 반응성) ────────────────────────────
-// leafStore를 감싸 구독·통지를 얹는다(Subject - 값을 들고 변경을 구독자에게 통지하는 주체).
-// get은 leafStore에 위임하고, set은 통지하는 버전으로 덮어쓴다.
-//
-// @param leaves    leafStore에 넘길 초기값 배열
-// @returns         { get, set, subscribe, unsubscribe }
+// ── leafStoreSubject (leafStore + 반응성 + 동적 칸) ──────────────────
+// leafStore를 감싸 구독·통지(subscribe/set 통지)와 동적 칸(alloc/free - 배열 요소 추가/제거)을
+// 얹는다(Subject - 값을 들고 변경을 구독자에게 통지하는 주체).
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
@@ -43,7 +40,7 @@ export type LeafStoreSubject = {
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
-  const subscribers: Array<Set<(v: unknown) => void> | undefined> = []; // leafIndex → Set<(v)=>void>. Set이라 unsubscribe가 O(1).
+  const subscribers: Array<Set<(v: unknown) => void> | undefined> = []; // leafIndex -> Set<(v)=>void>. Set이라 unsubscribe가 O(1).
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
   // 정적·유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합·split·정렬 없이 O(1) 재사용/반납.
   const freeBySize = new Map<number, LeafIndex[]>();
@@ -55,7 +52,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     leafStore.set(leafIndex, value);
     const subs = subscribers[leafIndex];
     if (subs) {
-      // 스냅샷 순회 - 콜백(cond)이 activateBranch로 구독을 해제할 수 있어 원본 순회는 깨진다.
+      // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
       for (const fn of [...subs]) {
         fn(value);
       }
