@@ -207,6 +207,17 @@ op마다 "태그 여는 중인데 속성 아니면 먼저 `>` 닫기"를 검사�
 (작은 구간·흔한 조각은 손해). gzip이 반복을 잡아 압축 후 손해는 작을 수 있음 - 실측 대상.
 부분 갱신엔 못 씀(재파싱). 인코딩 재설계·`@for` 확정 후 검토.
 
+### region/branch를 Control/Subs로 재편 (역할 축 분리)
+
+region(제어)/branch(구독+노드+자식제어 혼재)를 역할 축으로 다시 자른다:
+Control(kind·cond/size·anchor·가지들[{subsIndex, childControlIndices[]}]) +
+Subs(구독·노드만 - 잎, 트리 아님). 순회가 Control 단일 축 재귀가 되어 현행
+region<->branch 교차 상호 재귀·자기 전달(`child.detach(..., child)`)이 사라진다.
+pool+인덱스는 유지(객체 참조 잔류가 GC를 막는 위험 회피). build 중 subs 전환은
+control 경계에서만 - RENDER는 같은 subs를 이어 쓴다(현행과 동일). 구조 위상은
+현행과 동형이라 rename+재배치 성격 - attach 끝 노드 추적 등 로직은 이식 대상.
+보류된 rename 건(branch/region 이름)의 답이기도 하다.
+
 ### `@for` 리스트 - 노드 재사용 풀 (성능 필요 시)
 
 `@for`가 요소를 제거/추가할 때 지금은 노드를 새로 생성/파괴한다. 성능이 필요해지면
