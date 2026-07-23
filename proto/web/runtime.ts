@@ -214,21 +214,21 @@ const forBodyEnd = (code: Uint8Array, bodyStart: number) => {
   throw new Error("unbalanced @for - no matching FOR_END");
 };
 
-// IF 블록의 then/else 코드 경계를 구한다(순수 - code와 then 시작 pc만 본다).
+// IF 블록의 if/else 몸체 코드 경계를 구한다(순수 - code와 if 몸체 시작 pc만 본다).
 //
-// then = thenStart~thenEnd, else = elseStart~ifEndPc. else 없으면 elseStart = -1이고
-// thenEnd === ifEndPc === IF_END 위치. 마커는 skipBranch로 찾고 호출자가 소비한다.
+// if 몸체 = ifBodyStart~ifBodyEnd, else 몸체 = elseBodyStart~ifEndPc. else 없으면 elseBodyStart = -1이고
+// ifBodyEnd === ifEndPc === IF_END 위치. 마커는 skipBranch로 찾고 호출자가 소비한다.
 //
 // @param code      def 바이트코드
-// @param thenStart then 가지 시작 pc(IF operand 직후)
-// @returns         { thenEnd, elseStart, ifEndPc }
-const ifBranchRanges = (code: Uint8Array, thenStart: number) => {
-  const thenEnd = skipBranch(code, thenStart); // ELSE 또는 IF_END
-  if (code[thenEnd] === OP.ELSE) {
-    const elseStart = thenEnd + 1;
-    return { thenEnd, elseStart, ifEndPc: skipBranch(code, elseStart) };
+// @param ifBodyStart if 몸체 시작 pc(IF operand 직후)
+// @returns           { ifBodyEnd, elseBodyStart, ifEndPc }
+const ifBranchRanges = (code: Uint8Array, ifBodyStart: number) => {
+  const ifBodyEnd = skipBranch(code, ifBodyStart); // ELSE 또는 IF_END
+  if (code[ifBodyEnd] === OP.ELSE) {
+    const elseBodyStart = ifBodyEnd + 1;
+    return { ifBodyEnd, elseBodyStart, ifEndPc: skipBranch(code, elseBodyStart) };
   }
-  return { thenEnd, elseStart: -1, ifEndPc: thenEnd }; // else 없는 if
+  return { ifBodyEnd, elseBodyStart: -1, ifEndPc: ifBodyEnd }; // else 없는 if
 };
 
 // ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
@@ -785,6 +785,12 @@ class Interpreter {
   // removeEventListener로 뗄 때 같은 함수 참조가 필요해 리스너 자체를 보관한다.
   installedDelegates = new Map<string, EventListener>();
 
+  // ── 끝 마커 스캔 캐시 ────────────────────────────────────────────
+  // code는 인스턴스 내내 불변이라 스캔 결과가 pc마다 고정. @for 회차·@if lazyBuild가 같은
+  // IF/FOR 지점을 회차 수만큼 재해석하며 매번 몸체를 재스캔하는 낭비를 없앤다. 키는 시작 pc.
+  forEndCache = new Map<number, number>();
+  ifRangesCache = new Map<number, { ifBodyEnd: number; elseBodyStart: number; ifEndPc: number }>();
+
   constructor(
     module: TModule,
     handlers: THandlers,
@@ -813,6 +819,26 @@ class Interpreter {
     this.freeBranches = freeBranches;
     this.createdContexts = createdContexts;
   }
+
+  // forBodyEnd의 캐시 통과 조회.
+  cachedForEnd = (bodyStart: number): number => {
+    let end = this.forEndCache.get(bodyStart);
+    if (end === undefined) {
+      end = forBodyEnd(this.code, bodyStart);
+      this.forEndCache.set(bodyStart, end);
+    }
+    return end;
+  };
+
+  // ifBranchRanges의 캐시 통과 조회.
+  cachedIfRanges = (ifBodyStart: number): { ifBodyEnd: number; elseBodyStart: number; ifEndPc: number } => {
+    let ranges = this.ifRangesCache.get(ifBodyStart);
+    if (ranges === undefined) {
+      ranges = ifBranchRanges(this.code, ifBodyStart);
+      this.ifRangesCache.set(ifBodyStart, ranges);
+    }
+    return ranges;
+  };
 
   componentEvents = (componentId: number): TEventEntry[] => {
     return this.module.defs[componentId].events;
@@ -1586,7 +1612,7 @@ class Interpreter {
           // 소스에 박힌 리터럴 횟수 - 안 변하니 지금 가지(startRegion/Branch)에 count회 인라인.
           const count = Number(u16at()) || 0;
           const bodyStart = pc;
-          const forEndPc = forBodyEnd(this.code, bodyStart);
+          const forEndPc = this.cachedForEnd(bodyStart);
           this.inlineFor(
             count,
             bodyStart,
@@ -1610,7 +1636,7 @@ class Interpreter {
           const offset = u8at();
           const ref = slotRef(argumentSourcePairs, scopeIndex);
           const bodyStart = pc;
-          const forEndPc = forBodyEnd(this.code, bodyStart);
+          const forEndPc = this.cachedForEnd(bodyStart);
           if (slotKind(argumentSourcePairs, scopeIndex) === CONST) {
             this.inlineFor(
               Number(this.module.constpool[ref]) || 0,
@@ -1649,7 +1675,7 @@ class Interpreter {
           const offset = u8at();
           const arrayLeafIndex = slotRef(argumentSourcePairs, scopeIndex) + offset;
           const bodyStart = pc;
-          const forEndPc = forBodyEnd(this.code, bodyStart);
+          const forEndPc = this.cachedForEnd(bodyStart);
           this.reactiveArrayFor(
             arrayLeafIndex,
             bodyStart,
@@ -1709,9 +1735,9 @@ class Interpreter {
     // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
     parent.appendChild(region.anchor);
 
-    // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
-    const thenStart = pc;
-    const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(this.code, thenStart);
+    // if/else 몸체 코드 경계. ifBodyStart = IF operand 직후(현재 pc).
+    const ifBodyStart = pc;
+    const { ifBodyEnd, elseBodyStart, ifEndPc } = this.cachedIfRanges(ifBodyStart);
 
     // 비활성 가지는 lazyBuild로 심어만 뒀다 나중(조건 swap)에 실행된다. 그 지연 시점의 공유
     // pairs/ws는 이 @if를 지나 이미 pop된 상태라, build 시점 상태를 딥카피해 캡처한다 - 카피
@@ -1722,14 +1748,14 @@ class Interpreter {
 
     // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
     const buildThen = () => {
-      const f = this.interpret(pairs, compId, thenStart, thenEnd, thenBranchIndex, pathPrefix, loopIndexBase, stacks);
+      const f = this.interpret(pairs, compId, ifBodyStart, ifBodyEnd, thenBranchIndex, pathPrefix, loopIndexBase, stacks);
       thenBranch.nodes = Array.from(f.childNodes);
     };
     const buildElse = () => {
       const f =
-        elseStart === -1
+        elseBodyStart === -1
           ? document.createDocumentFragment() // else 없는 if - 빈 가지
-          : this.interpret(pairs, compId, elseStart, ifEndPc, elseBranchIndex, pathPrefix, loopIndexBase, stacks);
+          : this.interpret(pairs, compId, elseBodyStart, ifEndPc, elseBranchIndex, pathPrefix, loopIndexBase, stacks);
       elseBranch.nodes = Array.from(f.childNodes);
     };
     thenBranch.lazyBuild = buildThen;
