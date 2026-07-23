@@ -649,173 +649,6 @@ const plantRoot = (module: TModule, rootValue: unknown, arrayPool: TArrayInfo[],
   return { leaves, rootFlat };
 };
 
-// ── 이벤트 위임 ──────────────────────────────────────────────────────
-// element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
-// element -> 발화 바인딩을 WeakMap에 심고 document에 DOM 이벤트 타입별 위임 리스너 하나만 단다.
-// 발화 시 target에서 위로 올라가며 첫 바인딩을 찾아 디스패치하고 멈춘다(자기 선에서 버블 끊기와
-// 동등 - 조상의 같은 타입 위임으로 새지 않는다). 바인딩은 인스턴스 스코프 값(handlers/store/module)을
-// 함께 담아 위임 리스너에서 복원한다.
-const eventBindings = new WeakMap<Element, Record<string, TBinding>>();
-const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 타입(중복 설치 방지)
-
-// 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
-const dispatchBinding = (b: TBinding, domEventObject: Event) => {
-  const {
-    handlers,
-    fullName,
-    payload,
-    contextLeaves,
-    props,
-    loopIndices,
-    store,
-    module,
-    arrayPool,
-    freeArrays,
-    regionPool,
-    freeRegions,
-    branchPool,
-    freeBranches,
-  } = b;
-  const data: Record<string, unknown> = {};
-  for (const p of payload) {
-    data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
-  }
-  const context: Record<string, Record<string, unknown>> = {};
-  for (const ctxName in contextLeaves) {
-    const values: Record<string, unknown> = {};
-    for (const p of contextLeaves[ctxName]) {
-      values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
-    }
-    context[ctxName] = values;
-  }
-  // 배열 요소 추가 - props의 배열 필드(arrayLeafIndex) 칸 값이 arrayInfoIndex다. 요소를 타입대로 store에 심고
-  // (plantFixed로 로컬에 펴 store.alloc으로 삽입, 요소 안 중첩 배열은 plantRoot처럼 레벨별로 마저 심음),
-  // 그 시작 leaf를 elemStartLeafIndices에 잇고 길이 칸(sizeLeafIndex)을 set해 @for grow를 깨운다. sizeLeafIndex가
-  // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
-  const push = (arrayLeafIndex: number, elem: unknown): void => {
-    const info = arrayPool[Number(store.get(arrayLeafIndex))];
-    // 한 요소를 이 arrayInfo에 심는다: 고정부를 local에 펴(plantFixed) store.alloc으로 삽입하고 그 base를
-    // elemStartLeafIndices에 잇는다. 요소 안 중첩 배열은 plantFixed가 deferred로 돌려주니, 그 배열들의 요소도
-    // 같은 방식으로 재귀해 마저 심는다(plantRoot의 레벨 심기와 같되 store.alloc 삽입).
-    const plantElem = (value: unknown, target: TArrayInfo): void => {
-      const local: unknown[] = [];
-      const deferred = plantFixed(value, target.elemTypeRef, module, local, arrayPool, freeArrays);
-      target.elemStartLeafIndices.push(store.alloc(local));
-      for (const d of deferred) {
-        for (const child of d.value as unknown[]) {
-          plantElem(child, arrayPool[d.arrayInfoIndex]);
-        }
-      }
-    };
-    plantElem(elem, info);
-    // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
-    // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
-    // 아니다 - 요소가 전부 제거돼 빈 배열(length 0)이어도 순회는 진행 중이라, length로 판단하면 이 채움을
-    // 건너뛰어 인덱스 없는 요소가 쌓이고 region과 어긋난다. 새 요소는 꼬리라 인덱스 = 마지막 자리.
-    const tail = info.elemStartLeafIndices.length - 1;
-    if (info.forRegionIndex !== null) {
-      info.indexLeafIndices[tail] = store.alloc([tail]);
-    }
-    if (info.sizeLeafIndex !== null) {
-      store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
-    }
-  };
-  // 요소 하나(start, typeRef)를 회수한다 - 고정부를 타입대로 걸어 배열 칸(offset)을 만나면 그 자식 배열의 요소를
-  // 재귀 회수하고 arrayInfo·길이 칸을 반납한다. 걷기가 끝나면 이 요소 고정 블록을 store.free. 제거된 요소의
-  // 서브트리는 어디서도 참조되지 않으므로 안쪽까지 전부 반납해야 한다(누수 방지). 배열 칸 값이 arrayInfoIndex.
-  const freeElem = (start: number, typeRef: number): void => {
-    let cursor = start;
-    const walk = (ref: number): void => {
-      const t = module.types[ref];
-      if (t.tag === "object") {
-        for (const [, childTypeRef] of t.fields) {
-          walk(childTypeRef);
-        }
-        return;
-      }
-      if (t.tag === "array") {
-        const child = arrayPool[Number(store.get(cursor))];
-        for (const elemStart of child.elemStartLeafIndices) {
-          freeElem(elemStart, child.elemTypeRef);
-        }
-        if (child.sizeLeafIndex !== null) {
-          store.free(child.sizeLeafIndex, 1); // @for에 쓰였으면 길이 칸도 회수(region은 removeBranchAt 재귀가 뗌)
-        }
-        freeArrayInfo(arrayPool, freeArrays, Number(store.get(cursor)));
-      }
-      cursor += 1; // 스칼라·배열 칸 하나 소비
-    };
-    walk(typeRef);
-    store.free(start, leafCountOf(module, typeRef));
-  };
-  // 배열 요소 제거 - i번째 요소를 재귀 회수(freeElem)하고 목록(elemStartLeafIndices)에서 뺀다. @for에 쓰였으면
-  // (forRegionIndex) 그 region의 i번째 회차 DOM만 뗀다 - 나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상
-  // (재빌드·재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
-  // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
-  // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
-  const removeAt = (arrayLeafIndex: number, i: number): void => {
-    const info = arrayPool[Number(store.get(arrayLeafIndex))];
-    if (info.forRegionIndex !== null) {
-      removeBranchAt(store, regionPool, freeRegions, branchPool, freeBranches, info.forRegionIndex, i);
-    }
-    freeElem(info.elemStartLeafIndices[i], info.elemTypeRef);
-    info.elemStartLeafIndices.splice(i, 1);
-    // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndex 기준) - i번째 인덱스 칸을 회수하고
-    // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고
-    // $n이 발화 시 읽으므로, 중간 제거로 뒤가 당겨져도 표시·이벤트 인덱스가 자동 정합한다(값 고정·위치 이동 설계).
-    if (info.forRegionIndex !== null) {
-      store.free(info.indexLeafIndices[i], 1);
-      info.indexLeafIndices.splice(i, 1);
-      for (let k = i; k < info.indexLeafIndices.length; k++) {
-        store.set(info.indexLeafIndices[k], k); // 뒤 인덱스 당김 발화
-      }
-    }
-    if (info.sizeLeafIndex !== null) {
-      store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
-    }
-  };
-  // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
-  // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
-  const currentIndices: Record<string, number> = {};
-  for (const key in loopIndices) {
-    const src = loopIndices[key as TIndexSymbol];
-    if (src) {
-      currentIndices[key] = src.kind === STORE ? (store.get(src.ref) as number) : src.ref;
-    }
-  }
-  handlers[fullName]?.(data, {
-    event: domEventObject,
-    set: store.set,
-    get: store.get,
-    push,
-    removeAt,
-    props,
-    context,
-    ...currentIndices,
-  });
-};
-
-// domEvent 타입의 위임 리스너를 document에 (한 번만) 단다. target -> 조상 순회로 첫 바인딩을
-// 찾아 발화하고 멈춘다. 같은 타입 바인딩이 있는 element만 매칭한다.
-const ensureDelegate = (domEventName: (typeof DOM_EVENTS)[number]) => {
-  if (installedDelegates.has(domEventName)) {
-    return;
-  }
-  installedDelegates.add(domEventName);
-  document.addEventListener(domEventName, (domEventObject) => {
-    let node = domEventObject.target;
-    while (node && node !== document) {
-      const bound = eventBindings.get(node as Element);
-      const b = bound?.[domEventName];
-      if (b) {
-        dispatchBinding(b, domEventObject);
-        return; // 첫 매칭에서 멈춤 - 자기 선에서 버블 끊기와 동등
-      }
-      node = (node as Node).parentNode;
-    }
-  });
-};
-
 // qubb 바이트를 모듈로 디코드한다(상수풀/def 테이블/코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
@@ -902,23 +735,15 @@ export type THandlers = Record<
   string,
   ((data: Record<string, unknown>, ctx: Record<string, unknown>) => void) | undefined
 >;
-// 한 element·DOM이벤트 타입의 발화 바인딩. eventBindings WeakMap에 심고 위임 리스너가 복원한다.
+// 한 element·DOM이벤트 타입의 발화 맥락. 인터프리터의 eventBindings에 심고, 그 인터프리터의
+// 위임 리스너가 dispatch로 발화한다 - 인스턴스 상태(store/pool/handlers)는 소유자(인터프리터)의
+// 것이라 여기 안 싣는다.
 type TBinding = {
-  handlers: THandlers;
   fullName: string;
   payload: TAssembled[];
   contextLeaves: Record<string, TAssembled[]>;
   props: Record<string, number>;
   loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
-
-  store: TLeafStoreSubject;
-  module: TModule;
-  arrayPool: TArrayInfo[];
-  freeArrays: number[];
-  regionPool: TRegion[]; // removeAt이 요소 회차 DOM(region)을 뗄 때 필요
-  freeRegions: number[];
-  branchPool: TBranch[];
-  freeBranches: number[];
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -948,6 +773,15 @@ class Interpreter {
   branchPool: TBranch[];
   freeBranches: number[];
   createdContexts: TCreatedContext[];
+
+  // ── 이벤트 위임(인터프리터 격리) ──────────────────────────────────
+  // element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
+  // element -> 발화 맥락을 eventBindings에 심고 document에 DOM 이벤트 타입별 위임 리스너를 단다.
+  // 인터프리터는 서로 격리라 바인딩·리스너 모두 자기 것 - 리스너는 자기 eventBindings만 매칭하고,
+  // 남의 element는 그냥 통과한다(그 인터프리터의 리스너가 잡는다). 리스너 수 = 인터프리터 수 x
+  // 사용 타입 수 - element 수에 비례하지 않아 위임의 목적은 유지된다.
+  eventBindings = new WeakMap<Element, Record<string, TBinding>>();
+  installedDelegates = new Set<string>(); // 내가 document에 단 DOM 이벤트 타입(중복 설치 방지)
 
   constructor(
     module: TModule,
@@ -984,6 +818,171 @@ class Interpreter {
 
   componentContexts = (componentId: number): TEventEntry[] => {
     return this.module.defs[componentId].contexts;
+  };
+
+  // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
+  dispatch = (binding: TBinding, domEventObject: Event) => {
+    const data: Record<string, unknown> = {};
+    for (const p of binding.payload) {
+      data[p.name] = assemble(
+        compiledStepsOf(this.module, p.typeRef),
+        p.fieldSourcePairs,
+        this.store,
+        this.module,
+        this.arrayPool,
+      );
+    }
+    const context: Record<string, Record<string, unknown>> = {};
+    for (const ctxName in binding.contextLeaves) {
+      const values: Record<string, unknown> = {};
+      for (const p of binding.contextLeaves[ctxName]) {
+        values[p.name] = assemble(
+          compiledStepsOf(this.module, p.typeRef),
+          p.fieldSourcePairs,
+          this.store,
+          this.module,
+          this.arrayPool,
+        );
+      }
+      context[ctxName] = values;
+    }
+    // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
+    // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
+    const currentIndices: Record<string, number> = {};
+    for (const key in binding.loopIndices) {
+      const src = binding.loopIndices[key as TIndexSymbol];
+      if (src) {
+        currentIndices[key] = src.kind === STORE ? (this.store.get(src.ref) as number) : src.ref;
+      }
+    }
+    this.handlers[binding.fullName]?.(data, {
+      event: domEventObject,
+      set: this.store.set,
+      get: this.store.get,
+      push: this.pushArrayElement,
+      removeAt: this.removeArrayElementAt,
+      props: binding.props,
+      context,
+      ...currentIndices,
+    });
+  };
+
+  // 배열 요소 추가 - props의 배열 필드(arrayLeafIndex) 칸 값이 arrayInfoIndex다. 요소를 타입대로 store에 심고
+  // (plantFixed로 로컬에 펴 store.alloc으로 삽입, 요소 안 중첩 배열은 plantRoot처럼 레벨별로 마저 심음),
+  // 그 시작 leaf를 elemStartLeafIndices에 잇고 길이 칸(sizeLeafIndex)을 set해 @for grow를 깨운다. sizeLeafIndex가
+  // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
+  pushArrayElement = (arrayLeafIndex: number, elem: unknown): void => {
+    const info = this.arrayPool[Number(this.store.get(arrayLeafIndex))];
+    // 한 요소를 이 arrayInfo에 심는다: 고정부를 local에 펴(plantFixed) store.alloc으로 삽입하고 그 base를
+    // elemStartLeafIndices에 잇는다. 요소 안 중첩 배열은 plantFixed가 deferred로 돌려주니, 그 배열들의 요소도
+    // 같은 방식으로 재귀해 마저 심는다(plantRoot의 레벨 심기와 같되 store.alloc 삽입).
+    const plantElem = (value: unknown, target: TArrayInfo): void => {
+      const local: unknown[] = [];
+      const deferred = plantFixed(value, target.elemTypeRef, this.module, local, this.arrayPool, this.freeArrays);
+      target.elemStartLeafIndices.push(this.store.alloc(local));
+      for (const d of deferred) {
+        for (const child of d.value as unknown[]) {
+          plantElem(child, this.arrayPool[d.arrayInfoIndex]);
+        }
+      }
+    };
+    plantElem(elem, info);
+    // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
+    // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
+    // 아니다 - 요소가 전부 제거돼 빈 배열(length 0)이어도 순회는 진행 중이라, length로 판단하면 이 채움을
+    // 건너뛰어 인덱스 없는 요소가 쌓이고 region과 어긋난다. 새 요소는 꼬리라 인덱스 = 마지막 자리.
+    const tail = info.elemStartLeafIndices.length - 1;
+    if (info.forRegionIndex !== null) {
+      info.indexLeafIndices[tail] = this.store.alloc([tail]);
+    }
+    if (info.sizeLeafIndex !== null) {
+      this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
+    }
+  };
+
+  // 요소 하나(start, typeRef)를 회수한다 - 고정부를 타입대로 걸어 배열 칸(offset)을 만나면 그 자식 배열의 요소를
+  // 재귀 회수하고 arrayInfo·길이 칸을 반납한다. 걷기가 끝나면 이 요소 고정 블록을 store.free. 제거된 요소의
+  // 서브트리는 어디서도 참조되지 않으므로 안쪽까지 전부 반납해야 한다(누수 방지). 배열 칸 값이 arrayInfoIndex.
+  freeArrayElement = (start: number, typeRef: number): void => {
+    let cursor = start;
+    const walk = (ref: number): void => {
+      const t = this.module.types[ref];
+      if (t.tag === "object") {
+        for (const [, childTypeRef] of t.fields) {
+          walk(childTypeRef);
+        }
+        return;
+      }
+      if (t.tag === "array") {
+        const child = this.arrayPool[Number(this.store.get(cursor))];
+        for (const elemStart of child.elemStartLeafIndices) {
+          this.freeArrayElement(elemStart, child.elemTypeRef);
+        }
+        if (child.sizeLeafIndex !== null) {
+          this.store.free(child.sizeLeafIndex, 1); // @for에 쓰였으면 길이 칸도 회수(region은 removeBranchAt 재귀가 뗌)
+        }
+        freeArrayInfo(this.arrayPool, this.freeArrays, Number(this.store.get(cursor)));
+      }
+      cursor += 1; // 스칼라·배열 칸 하나 소비
+    };
+    walk(typeRef);
+    this.store.free(start, leafCountOf(this.module, typeRef));
+  };
+
+  // 배열 요소 제거 - i번째 요소를 재귀 회수(freeElem)하고 목록(elemStartLeafIndices)에서 뺀다. @for에 쓰였으면
+  // (forRegionIndex) 그 region의 i번째 회차 DOM만 뗀다 - 나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상
+  // (재빌드·재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
+  // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
+  // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
+  removeArrayElementAt = (arrayLeafIndex: number, i: number): void => {
+    const info = this.arrayPool[Number(this.store.get(arrayLeafIndex))];
+    if (info.forRegionIndex !== null) {
+      removeBranchAt(
+        this.store,
+        this.regionPool,
+        this.freeRegions,
+        this.branchPool,
+        this.freeBranches,
+        info.forRegionIndex,
+        i,
+      );
+    }
+    this.freeArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef);
+    info.elemStartLeafIndices.splice(i, 1);
+    // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndex 기준) - i번째 인덱스 칸을 회수하고
+    // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고
+    // $n이 발화 시 읽으므로, 중간 제거로 뒤가 당겨져도 표시·이벤트 인덱스가 자동 정합한다(값 고정·위치 이동 설계).
+    if (info.forRegionIndex !== null) {
+      this.store.free(info.indexLeafIndices[i], 1);
+      info.indexLeafIndices.splice(i, 1);
+      for (let k = i; k < info.indexLeafIndices.length; k++) {
+        this.store.set(info.indexLeafIndices[k], k); // 뒤 인덱스 당김 발화
+      }
+    }
+    if (info.sizeLeafIndex !== null) {
+      this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
+    }
+  };
+
+  // domEvent 타입의 위임 리스너를 document에 (인터프리터당 한 번만) 단다. target -> 조상 순회로
+  // 자기 eventBindings의 첫 바인딩을 찾아 발화하고 멈춘다 - 남의 element는 통과한다(격리).
+  ensureDelegate = (domEventName: (typeof DOM_EVENTS)[number]) => {
+    if (this.installedDelegates.has(domEventName)) {
+      return;
+    }
+    this.installedDelegates.add(domEventName);
+    document.addEventListener(domEventName, (domEventObject) => {
+      let node = domEventObject.target;
+      while (node && node !== document) {
+        const bound = this.eventBindings.get(node as Element);
+        const binding = bound?.[domEventName];
+        if (binding) {
+          this.dispatch(binding, domEventObject);
+          return; // 첫 매칭에서 멈춤 - 자기 선에서 버블 끊기와 동등
+        }
+        node = (node as Node).parentNode;
+      }
+    });
   };
 
   // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드·구독·자식region은
@@ -1437,28 +1436,13 @@ class Interpreter {
           // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
           // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           const el = pending!;
-          let bound = eventBindings.get(el);
+          let bound = this.eventBindings.get(el);
           if (!bound) {
             bound = {};
-            eventBindings.set(el, bound);
+            this.eventBindings.set(el, bound);
           }
-          bound[domEvent] = {
-            handlers: this.handlers,
-            fullName,
-            payload,
-            contextLeaves,
-            props,
-            loopIndices,
-            store: this.store,
-            module: this.module,
-            arrayPool: this.arrayPool,
-            freeArrays: this.freeArrays,
-            regionPool: this.regionPool,
-            freeRegions: this.freeRegions,
-            branchPool: this.branchPool,
-            freeBranches: this.freeBranches,
-          };
-          ensureDelegate(domEvent);
+          bound[domEvent] = { fullName, payload, contextLeaves, props, loopIndices };
+          this.ensureDelegate(domEvent);
           break;
         }
         case OP.ELEM_CLOSE_OPEN: {
