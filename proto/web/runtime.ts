@@ -23,6 +23,7 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 type TIndexSymbol = `$${TDigitString}`;
 
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
+import type { TPool } from "./pool-allocator.ts";
 import {
   activateIf,
   appendArrayInfo,
@@ -39,7 +40,6 @@ import {
   type TRegion,
   truncateFor,
 } from "./region.ts";
-import type { TPool } from "./pool-allocator.ts";
 
 const TAGS = [
   "div",
