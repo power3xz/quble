@@ -23,7 +23,7 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 type TIndexSymbol = `$${TDigitString}`;
 
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
-import type { TPool } from "./pool-allocator.ts";
+import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
   appendArrayInfo,
@@ -502,7 +502,7 @@ const assemble = (
   fieldSourcePairs: number[],
   store: TLeafStoreSubject,
   module: TModule,
-  arrayPool: TPool<TArrayInfo>,
+  arrayPool: Pool<TArrayInfo>,
 ): unknown => {
   let cursor = 0;
   const root: Record<string, unknown> = {};
@@ -590,7 +590,7 @@ const plantFixed = (
   typeRef: number,
   module: TModule,
   leaves: unknown[],
-  arrayPool: TPool<TArrayInfo>,
+  arrayPool: Pool<TArrayInfo>,
 ): TDeferredArray[] => {
   const t = module.types[typeRef];
   if (t.tag === "scalar") {
@@ -618,7 +618,7 @@ const plantFixed = (
 // rootFlat([STORE, base, …])을 진입점 argumentSourcePairs로 쓴다. 루트 슬롯은 정의상 전부
 // 외부 데이터 바인딩이라 kind가 늘 STORE. 루트 고정부를 다 심은 뒤(base가 고정 칸을 가리켜야
 // 한다) 배열 요소를 store 끝에 몰아 심는다(drainArrays).
-const plantRoot = (module: TModule, rootValue: unknown, arrayPool: TPool<TArrayInfo>) => {
+const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayInfo>) => {
   const rootType = module.types[module.rootPropsTypeRef];
   const leaves: unknown[] = [];
   const rootFlat: number[] = [];
@@ -766,9 +766,9 @@ class Interpreter {
   resources: string[];
   loadedHrefs: Set<unknown>;
   store: TLeafStoreSubject;
-  arrayPool: TPool<TArrayInfo>;
-  regionPool: TPool<TRegion>;
-  branchPool: TPool<TBranch>;
+  arrayPool: Pool<TArrayInfo>;
+  regionPool: Pool<TRegion>;
+  branchPool: Pool<TBranch>;
   createdContexts: TCreatedContext[];
 
   // ── 이벤트 위임(인터프리터 격리) ──────────────────────────────────
@@ -794,9 +794,9 @@ class Interpreter {
     resources: string[],
     loadedHrefs: Set<unknown>,
     store: TLeafStoreSubject,
-    arrayPool: TPool<TArrayInfo>,
-    regionPool: TPool<TRegion>,
-    branchPool: TPool<TBranch>,
+    arrayPool: Pool<TArrayInfo>,
+    regionPool: Pool<TRegion>,
+    branchPool: Pool<TBranch>,
     createdContexts: TCreatedContext[],
   ) {
     this.module = module;
@@ -1786,15 +1786,15 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
       const def = module.defs[compId];
       // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
       // @for가 순회하는 배열마다 요소 leaf 위치(entries). 요소 추가/제거 시 참조. free는 빈 칸 인덱스(freelist).
-      const arrayPool: TPool<TArrayInfo> = { entries: [], free: [] };
+      const arrayPool: Pool<TArrayInfo> = new Pool();
       // rootValue를 루트 props 타입대로 store에 펴 심고(고정부 연속 + 배열 요소는 뒤로), 각 루트
       // 슬롯의 base leafIndex를 rootFlat([STORE, base, …])으로 얻는다. 배열 요소는 arrayPool에 등록된다.
       const { leaves, rootFlat } = plantRoot(module, rootValue, arrayPool);
       const store = createLeafStoreSubject(leaves);
       // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
       // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
-      const regionPool: TPool<TRegion> = { entries: [], free: [] }; // 한 인스턴스의 모든 Region. alloc/free(@for 회차 제거 시 자식 region 반납).
-      const branchPool: TPool<TBranch> = { entries: [], free: [] }; // 한 인스턴스의 모든 Branch. alloc/free(@for 회차 제거 시 반납).
+      const regionPool: Pool<TRegion> = new Pool(); // 한 인스턴스의 모든 Region. alloc/free(@for 회차 제거 시 자식 region 반납).
+      const branchPool: Pool<TBranch> = new Pool(); // 한 인스턴스의 모든 Branch. alloc/free(@for 회차 제거 시 반납).
       // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
       // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
       // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
