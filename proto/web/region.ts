@@ -37,7 +37,8 @@ export type TRegion = {
   anchor: Comment;
   shownIndex: number;
   detach: (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion) => void;
-  attach: (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion) => void;
+  // 실제로 삽입한 마지막 DOM 노드를 돌려준다 - @for가 다음 회차를 이 노드 뒤에 이어 붙일 때 쓴다.
+  attach: (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion) => ChildNode;
 };
 
 // @for가 순회하는 배열 하나의 요소 위치. elemSize = 요소 하나가 차지하는 leaf 수(스칼라 1, 객체는
@@ -117,22 +118,32 @@ const detachOneBranch = (store: Store, regionPool: TRegion[], branchPool: TBranc
   }
 };
 
-// 한 가지를 붙인다. 부모 노드를 먼저 anchor 뒤에 붙여야(자식 anchor가 그 안에 들어가) 자식 노드가
-// 위치를 가지므로, 부모 부착 후 자식 Region까지 재귀로 붙인다.
+// 한 가지를 붙이고 실제로 삽입한 마지막 DOM 노드를 돌려준다. 부모 노드를 먼저 anchor 뒤에 붙여야
+// (자식 anchor가 그 안에 들어가) 자식 노드가 위치를 가지므로, 부모 부착 후 자식 Region까지 재귀로
+// 붙인다. 끝 노드가 필요한 이유: branch.nodes가 자식 region anchor로 끝나면 실제 끝은 그 anchor가
+// 아니라 자식이 anchor 뒤에 붙인 노드다 - 이걸 모르고 @for 다음 회차를 anchor 뒤에 넣으면 자식
+// 컨텐츠 앞에 끼어들어 역순이 된다(회차 안 @if 버그).
 const attachOneBranch = (
   store: Store,
   regionPool: TRegion[],
   branchPool: TBranch[],
   anchor: ChildNode,
   branchIndex: number,
-): void => {
+): ChildNode => {
   const branch = branchPool[branchIndex];
   anchor.after(...branch.nodes);
   restoreBranchSubs(store, branch);
+  // branch.nodes 마지막 노드(없으면 anchor 자신)가 이 가지의 끝 - 단 그게 자식 region anchor면
+  // 그 자식이 붙인 노드가 진짜 끝이다.
+  let last: ChildNode = branch.nodes.length ? (branch.nodes[branch.nodes.length - 1] as ChildNode) : anchor;
   for (const childRegionIndex of branch.childRegionIndices) {
     const child = regionPool[childRegionIndex];
-    child.attach(store, regionPool, branchPool, child);
+    const childLast = child.attach(store, regionPool, branchPool, child);
+    if (child.anchor === last) {
+      last = childLast; // 마지막 노드가 이 자식 anchor였으면 자식 끝으로 확장
+    }
   }
+  return last;
 };
 
 // ── @if: then/else 둘 중 shownIndex 하나만 보인다 ──────────────────────────────
@@ -145,8 +156,8 @@ const detachIf = (store: Store, regionPool: TRegion[], branchPool: TBranch[], re
 // region을 받아 그 활성(shownIndex) 가지를 켠다. 최초 인스턴스화의 부착도 이 함수로 한다
 // (runtime.js가 build로 트리만 만든 뒤 루트 Region부터 호출). 루트도 anchor를 가져 자식과
 // 균일 처리된다(분기 없음).
-const attachIf = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
-  attachOneBranch(store, regionPool, branchPool, region.anchor, region.branchIndices[region.shownIndex]);
+const attachIf = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): ChildNode => {
+  return attachOneBranch(store, regionPool, branchPool, region.anchor, region.branchIndices[region.shownIndex]);
 };
 
 // regionPool에 @if Region을 스폰한다 - anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 alloc하고
@@ -210,17 +221,16 @@ const detachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], r
   }
 };
 
-// region을 받아 회차 전부를 붙인다. 각 회차는 직전 회차의 마지막 노드 뒤에 이어 붙인다
-// (전부 anchor 바로 뒤에 넣으면 나중 회차가 앞서 들어가 역순이 된다). 첫 회차는 anchor 뒤.
-const attachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): void => {
+// region을 받아 회차 전부를 붙인다. 각 회차는 직전 회차가 실제로 삽입한 마지막 노드 뒤에 이어 붙인다
+// (전부 anchor 바로 뒤에 넣으면 나중 회차가 앞서 들어가 역순이 된다). 첫 회차는 anchor 뒤. 회차 안
+// @if가 있으면 그 실제 끝(자식 컨텐츠)이 attachOneBranch 반환값이라, branch.nodes만 보던 옛 방식의
+// 역순 버그가 없다.
+const attachFor = (store: Store, regionPool: TRegion[], branchPool: TBranch[], region: TRegion): ChildNode => {
   let after: ChildNode = region.anchor;
   for (const branchIndex of region.branchIndices) {
-    attachOneBranch(store, regionPool, branchPool, after, branchIndex);
-    const nodes = branchPool[branchIndex].nodes;
-    if (nodes.length) {
-      after = nodes[nodes.length - 1] as ChildNode;
-    }
+    after = attachOneBranch(store, regionPool, branchPool, after, branchIndex);
   }
+  return after;
 };
 
 // regionPool에 @for Region을 스폰한다 - anchor만 만들고 회차는 0개(회차는 appendBranchOfForRegion이
@@ -253,8 +263,32 @@ export const appendBranchOfForRegion = (
 };
 
 // @for region에 회차 하나(branchIndex)를 붙인다(count 늘 때 새 회차만). anchor 뒤에 노드가 붙는데,
+// 한 가지가 DOM에 남긴 실제 마지막 노드를 구한다(자식 region 끝까지). attachOneBranch가 붙이는
+// 것과 대칭 - branch.nodes 마지막이 자식 region anchor면 그 자식 컨텐츠가 진짜 끝이다. 이미 붙어
+// 있는 직전 회차의 끝을 @for grow가 기준점으로 삼을 때 쓴다(반환값을 저장 안 해둔 회차라 재계산).
+const branchTailNode = (
+  regionPool: TRegion[],
+  branchPool: TBranch[],
+  branch: TBranch,
+  fallback: ChildNode,
+): ChildNode => {
+  if (!branch.nodes.length) {
+    return fallback;
+  }
+  let last = branch.nodes[branch.nodes.length - 1] as ChildNode;
+  for (const childRegionIndex of branch.childRegionIndices) {
+    const child = regionPool[childRegionIndex];
+    if (child.anchor === last) {
+      const childBranch = branchPool[child.branchIndices[child.shownIndex]];
+      last = branchTailNode(regionPool, branchPool, childBranch, child.anchor);
+    }
+  }
+  return last;
+};
+
 // anchor.after는 늘 anchor 바로 뒤에 끼워 순서가 뒤집힌다 - 마지막 회차의 끝 노드 뒤에 붙여야
-// 회차 순서가 유지된다. 회차가 없으면 anchor 뒤, 있으면 직전 회차 끝 노드 뒤가 기준점이다.
+// 회차 순서가 유지된다. 회차가 없으면 anchor 뒤, 있으면 직전 회차의 실제 끝 노드 뒤가 기준점이다
+// (branch.nodes만 보면 회차 안 @if 컨텐츠를 건너뛰어 역순이 된다).
 export const attachForIteration = (
   store: Store,
   regionPool: TRegion[],
@@ -262,16 +296,10 @@ export const attachForIteration = (
   region: TRegion,
   branchIndex: number,
 ): void => {
-  const branch = branchPool[branchIndex];
   const slot = region.branchIndices.indexOf(branchIndex);
   const prev = slot > 0 ? branchPool[region.branchIndices[slot - 1]] : null;
-  const after = prev?.nodes.length ? prev.nodes[prev.nodes.length - 1] : region.anchor;
-  after.after(...branch.nodes);
-  restoreBranchSubs(store, branch);
-  for (const childRegionIndex of branch.childRegionIndices) {
-    const child = regionPool[childRegionIndex];
-    child.attach(store, regionPool, branchPool, child);
-  }
+  const after = prev ? branchTailNode(regionPool, branchPool, prev, region.anchor) : region.anchor;
+  attachOneBranch(store, regionPool, branchPool, after, branchIndex);
 };
 
 // branch(branchIndex)와 그 자식 region들을 리프까지 재귀로 free해 칸을 반납한다. detach(DOM/구독

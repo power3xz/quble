@@ -1,0 +1,16 @@
+component ForIfLazySlot {
+  props { tags: string[], flag: bool }
+  events { PICK({ }) }
+  template {
+    div() {
+      @for (tag of tags) {
+        @if (flag) {
+          span(class="on") { {tag} }
+        }
+        @else {
+          span(class="off") { "off" }
+        }
+      }
+    }
+  }
+}

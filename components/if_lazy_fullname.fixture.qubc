@@ -1,0 +1,23 @@
+component Parent {
+  props { cond: bool }
+  template {
+    div() {
+      Child(cond={cond} /)
+    }
+  }
+}
+
+component Child {
+  props { cond: bool }
+  events { PICK({ }) }
+  template {
+    div() {
+      @if (cond) {
+        button(@click:PICK) { "yes" }
+      }
+      @else {
+        span() { "no" }
+      }
+    }
+  }
+}

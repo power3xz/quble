@@ -1,0 +1,16 @@
+component ForIfLazyIndex {
+  props { n: number, flag: bool }
+  events { PICK({ }) }
+  template {
+    div() {
+      @for (i of n) {
+        @if (flag) {
+          button(@click:PICK) { "on" {i} }
+        }
+        @else {
+          span() { "off" }
+        }
+      }
+    }
+  }
+}

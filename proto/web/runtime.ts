@@ -291,6 +291,31 @@ const STORE = 0;
 const CONST = 1;
 const RAW = 2;
 
+// 스코프 - (kind, ref) 쌍을 인터리브로 담은 평탄 배열. 슬롯 offset o는 [2o]=kind, [2o+1]=ref.
+type TScope = number[];
+
+const slotKind = (scope: TScope, o: number): number => scope[2 * o];
+const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
+
+// 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
+// @for 회차·RENDER 재진입은 같은 ws를 이어 쓰고(push/pop 공유), @if 비활성 가지만 build 시점
+// 상태를 snapshotWalk로 딥카피해 lazyBuild 클로저가 캡처한다 - 지연 실행 시점엔 원본 스택이
+// 이미 pop돼 비어 있어, 카피 없이는 회차 인덱스($n)·컨텍스트를 잃는다.
+// (pathPrefix/loopIndexBase는 불변 값이라 여기 안 담고 파라미터로 흐른다 - 클로저가 값을 캡처.)
+//   loopIndexStack: @for 회차 인덱스 소스 누적(인터리브 kind,ref). buildIteration이 push/pop.
+//   activeContexts: @with 컨텍스트 누적(createdContexts 인덱스). ENTER/EXIT_CONTEXT가 push/pop.
+type TWalkStacks = {
+  loopIndexStack: number[];
+  activeContexts: number[];
+};
+
+// lazyBuild(@if 비활성 가지)에 넘길 스냅샷 - 가변 스택을 딥카피해 build 후 원본이 pop돼도
+// 지연 실행이 build 시점 상태를 본다.
+const snapshotStacks = (ws: TWalkStacks): TWalkStacks => ({
+  loopIndexStack: [...ws.loopIndexStack],
+  activeContexts: [...ws.activeContexts],
+});
+
 // FieldValue ref 출처 태그(Rust serialize <REF>와 대칭). ref마다 태그 1바이트 + payload.
 // 슬롯 해석방법(STORE/CONST)과 다른 층이다 - Scope 슬롯의 실제 kind는 argumentSourcePairs가 정한다.
 const FV_SCOPE = 0;
@@ -374,7 +399,7 @@ const readFields = (reader: Reader): TFieldEntry[] => {
 // @param argumentSourcePairs flat 슬롯 배열
 // @returns          [kind, ref, …] 열
 type TRef = { kind: number; ref: number; offset: number };
-const refToSourcePairs = (ref: TRef, leafCount: number, argumentSourcePairs: (string | number)[]): number[] => {
+const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[] => {
   if (ref.kind === FV_CONST) {
     return [CONST, ref.ref];
   }
@@ -382,13 +407,13 @@ const refToSourcePairs = (ref: TRef, leafCount: number, argumentSourcePairs: (st
     throw new Error("FV_RAW는 아직 미구현(@for)");
   }
   // FV_SCOPE - 슬롯의 kind를 물려받는다. CONST 슬롯(부모가 리터럴로 준 prop)은 상수 하나.
-  const kind = argumentSourcePairs[2 * ref.ref] as number;
-  const slotRef = argumentSourcePairs[2 * ref.ref + 1] as number;
+  const kind = slotKind(scope, ref.ref);
+  const slotBase = slotRef(scope, ref.ref);
   if (kind === CONST) {
-    return [CONST, slotRef];
+    return [CONST, slotBase];
   }
   // STORE 슬롯 - base(slotRef+offset)부터 leaf 개수만큼 연속 칸을 STORE 쌍으로 펼친다.
-  const base = slotRef + ref.offset;
+  const base = slotBase + ref.offset;
   const pairs: number[] = [];
   for (let i = 0; i < leafCount; i++) {
     pairs.push(STORE, base + i);
@@ -624,158 +649,6 @@ const plantRoot = (module: TModule, rootValue: unknown, arrayPool: TArrayInfo[],
   return { leaves, rootFlat };
 };
 
-// ── 이벤트 위임 ──────────────────────────────────────────────────────
-// element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
-// element -> 발화 바인딩을 WeakMap에 심고 document에 DOM 이벤트 타입별 위임 리스너 하나만 단다.
-// 발화 시 target에서 위로 올라가며 첫 바인딩을 찾아 디스패치하고 멈춘다(자기 선에서 버블 끊기와
-// 동등 - 조상의 같은 타입 위임으로 새지 않는다). 바인딩은 인스턴스 스코프 값(handlers/store/module)을
-// 함께 담아 위임 리스너에서 복원한다.
-const eventBindings = new WeakMap<Element, Record<string, TBinding>>();
-const installedDelegates = new Set(); // 이미 document에 단 DOM 이벤트 타입(중복 설치 방지)
-
-// 한 바인딩을 발화한다 - 기존 element별 리스너가 하던 data/context 조립 + 핸들러 호출.
-const dispatchBinding = (b: TBinding, domEventObject: Event) => {
-  const { handlers, fullName, payload, contextLeaves, props, loopIndices, store, module, arrayPool, freeArrays, regionPool, freeRegions, branchPool, freeBranches } = b;
-  const data: Record<string, unknown> = {};
-  for (const p of payload) {
-    data[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
-  }
-  const context: Record<string, Record<string, unknown>> = {};
-  for (const ctxName in contextLeaves) {
-    const values: Record<string, unknown> = {};
-    for (const p of contextLeaves[ctxName]) {
-      values[p.name] = assemble(compiledStepsOf(module, p.typeRef), p.fieldSourcePairs, store, module, arrayPool);
-    }
-    context[ctxName] = values;
-  }
-  // 배열 요소 추가 - props의 배열 필드(arrayLeafIndex) 칸 값이 arrayInfoIndex다. 요소를 타입대로 store에 심고
-  // (plantFixed로 로컬에 펴 store.alloc으로 삽입, 요소 안 중첩 배열은 plantRoot처럼 레벨별로 마저 심음),
-  // 그 시작 leaf를 elemStartLeafIndices에 잇고 길이 칸(sizeLeafIndex)을 set해 @for grow를 깨운다. sizeLeafIndex가
-  // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
-  const push = (arrayLeafIndex: number, elem: unknown): void => {
-    const info = arrayPool[Number(store.get(arrayLeafIndex))];
-    // 한 요소를 이 arrayInfo에 심는다: 고정부를 local에 펴(plantFixed) store.alloc으로 삽입하고 그 base를
-    // elemStartLeafIndices에 잇는다. 요소 안 중첩 배열은 plantFixed가 deferred로 돌려주니, 그 배열들의 요소도
-    // 같은 방식으로 재귀해 마저 심는다(plantRoot의 레벨 심기와 같되 store.alloc 삽입).
-    const plantElem = (value: unknown, target: TArrayInfo): void => {
-      const local: unknown[] = [];
-      const deferred = plantFixed(value, target.elemTypeRef, module, local, arrayPool, freeArrays);
-      target.elemStartLeafIndices.push(store.alloc(local));
-      for (const d of deferred) {
-        for (const child of d.value as unknown[]) {
-          plantElem(child, arrayPool[d.arrayInfoIndex]);
-        }
-      }
-    };
-    plantElem(elem, info);
-    // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
-    // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
-    // 아니다 - 요소가 전부 제거돼 빈 배열(length 0)이어도 순회는 진행 중이라, length로 판단하면 이 채움을
-    // 건너뛰어 인덱스 없는 요소가 쌓이고 region과 어긋난다. 새 요소는 꼬리라 인덱스 = 마지막 자리.
-    const tail = info.elemStartLeafIndices.length - 1;
-    if (info.forRegionIndex !== null) {
-      info.indexLeafIndices[tail] = store.alloc([tail]);
-    }
-    if (info.sizeLeafIndex !== null) {
-      store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
-    }
-  };
-  // 요소 하나(start, typeRef)를 회수한다 - 고정부를 타입대로 걸어 배열 칸(offset)을 만나면 그 자식 배열의 요소를
-  // 재귀 회수하고 arrayInfo·길이 칸을 반납한다. 걷기가 끝나면 이 요소 고정 블록을 store.free. 제거된 요소의
-  // 서브트리는 어디서도 참조되지 않으므로 안쪽까지 전부 반납해야 한다(누수 방지). 배열 칸 값이 arrayInfoIndex.
-  const freeElem = (start: number, typeRef: number): void => {
-    let cursor = start;
-    const walk = (ref: number): void => {
-      const t = module.types[ref];
-      if (t.tag === "object") {
-        for (const [, childTypeRef] of t.fields) {
-          walk(childTypeRef);
-        }
-        return;
-      }
-      if (t.tag === "array") {
-        const child = arrayPool[Number(store.get(cursor))];
-        for (const elemStart of child.elemStartLeafIndices) {
-          freeElem(elemStart, child.elemTypeRef);
-        }
-        if (child.sizeLeafIndex !== null) {
-          store.free(child.sizeLeafIndex, 1); // @for에 쓰였으면 길이 칸도 회수(region은 removeBranchAt 재귀가 뗌)
-        }
-        freeArrayInfo(arrayPool, freeArrays, Number(store.get(cursor)));
-      }
-      cursor += 1; // 스칼라·배열 칸 하나 소비
-    };
-    walk(typeRef);
-    store.free(start, leafCountOf(module, typeRef));
-  };
-  // 배열 요소 제거 - i번째 요소를 재귀 회수(freeElem)하고 목록(elemStartLeafIndices)에서 뺀다. @for에 쓰였으면
-  // (forRegionIndex) 그 region의 i번째 회차 DOM만 뗀다 - 나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상
-  // (재빌드·재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
-  // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
-  // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
-  const removeAt = (arrayLeafIndex: number, i: number): void => {
-    const info = arrayPool[Number(store.get(arrayLeafIndex))];
-    if (info.forRegionIndex !== null) {
-      removeBranchAt(store, regionPool, freeRegions, branchPool, freeBranches, info.forRegionIndex, i);
-    }
-    freeElem(info.elemStartLeafIndices[i], info.elemTypeRef);
-    info.elemStartLeafIndices.splice(i, 1);
-    // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndex 기준) - i번째 인덱스 칸을 회수하고
-    // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고
-    // $n이 발화 시 읽으므로, 중간 제거로 뒤가 당겨져도 표시·이벤트 인덱스가 자동 정합한다(값 고정·위치 이동 설계).
-    if (info.forRegionIndex !== null) {
-      store.free(info.indexLeafIndices[i], 1);
-      info.indexLeafIndices.splice(i, 1);
-      for (let k = i; k < info.indexLeafIndices.length; k++) {
-        store.set(info.indexLeafIndices[k], k); // 뒤 인덱스 당김 발화
-      }
-    }
-    if (info.sizeLeafIndex !== null) {
-      store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
-    }
-  };
-  // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
-  // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
-  const currentIndices: Record<string, number> = {};
-  for (const key in loopIndices) {
-    const src = loopIndices[key as TIndexSymbol];
-    if (src) {
-      currentIndices[key] = src.kind === STORE ? (store.get(src.ref) as number) : src.ref;
-    }
-  }
-  handlers[fullName]?.(data, {
-    event: domEventObject,
-    set: store.set,
-    get: store.get,
-    push,
-    removeAt,
-    props,
-    context,
-    ...currentIndices,
-  });
-};
-
-// domEvent 타입의 위임 리스너를 document에 (한 번만) 단다. target -> 조상 순회로 첫 바인딩을
-// 찾아 발화하고 멈춘다. 같은 타입 바인딩이 있는 element만 매칭한다.
-const ensureDelegate = (domEventName: (typeof DOM_EVENTS)[number]) => {
-  if (installedDelegates.has(domEventName)) {
-    return;
-  }
-  installedDelegates.add(domEventName);
-  document.addEventListener(domEventName, (domEventObject) => {
-    let node = domEventObject.target;
-    while (node && node !== document) {
-      const bound = eventBindings.get(node as Element);
-      const b = bound?.[domEventName];
-      if (b) {
-        dispatchBinding(b, domEventObject);
-        return; // 첫 매칭에서 멈춤 - 자기 선에서 버블 끊기와 동등
-      }
-      node = (node as Node).parentNode;
-    }
-  });
-};
-
 // qubb 바이트를 모듈로 디코드한다(상수풀/def 테이블/코드).
 //
 // @param bytes qubb 바이트 (proto/BYTECODE.md 포맷)
@@ -862,23 +735,15 @@ export type THandlers = Record<
   string,
   ((data: Record<string, unknown>, ctx: Record<string, unknown>) => void) | undefined
 >;
-// 한 element·DOM이벤트 타입의 발화 바인딩. eventBindings WeakMap에 심고 위임 리스너가 복원한다.
+// 한 element·DOM이벤트 타입의 발화 맥락. 인터프리터의 eventBindings에 심고, 그 인터프리터의
+// 위임 리스너가 dispatch로 발화한다 - 인스턴스 상태(store/pool/handlers)는 소유자(인터프리터)의
+// 것이라 여기 안 싣는다.
 type TBinding = {
-  handlers: THandlers;
   fullName: string;
   payload: TAssembled[];
   contextLeaves: Record<string, TAssembled[]>;
   props: Record<string, number>;
   loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
-
-  store: TLeafStoreSubject;
-  module: TModule;
-  arrayPool: TArrayInfo[];
-  freeArrays: number[];
-  regionPool: TRegion[]; // removeAt이 요소 회차 DOM(region)을 뗄 때 필요
-  freeRegions: number[];
-  branchPool: TBranch[];
-  freeBranches: number[];
 };
 
 // ── 한 def를 Blueprint로 컴파일 ──────────────────────────────────────
@@ -890,6 +755,1013 @@ type TBinding = {
 // @param module 디코드된 모듈
 // @param compId 컴포넌트 def 인덱스
 // @returns      Blueprint: (rootValue, handlers) => Instance { nodes, regionPool, store }
+// ── 한 인스턴스의 인터프리터 ─────────────────────────────────────────
+// 한 Blueprint 호출(인스턴스화)마다 하나. 인스턴스 불변 상태(store/각종 pool/module 등)를
+// 필드로 들고, interpret으로 바이트코드를 훑어 DOM/구독을 짓는다. 호출마다 다른 값(code/pc/
+// 가지 등)은 파라미터로 남기고, 인스턴스 내내 같은 값만 필드로 올린다.
+class Interpreter {
+  module: TModule;
+  code: Uint8Array;
+  handlers: THandlers;
+  resources: string[];
+  loadedHrefs: Set<unknown>;
+  store: TLeafStoreSubject;
+  arrayPool: TArrayInfo[];
+  freeArrays: number[];
+  regionPool: TRegion[];
+  freeRegions: number[];
+  branchPool: TBranch[];
+  freeBranches: number[];
+  createdContexts: TCreatedContext[];
+
+  // ── 이벤트 위임(인터프리터 격리) ──────────────────────────────────
+  // element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
+  // element -> 발화 맥락을 eventBindings에 심고 document에 DOM 이벤트 타입별 위임 리스너를 단다.
+  // 인터프리터는 서로 격리라 바인딩·리스너 모두 자기 것 - 리스너는 자기 eventBindings만 매칭하고,
+  // 남의 element는 그냥 통과한다(그 인터프리터의 리스너가 잡는다). 리스너 수 = 인터프리터 수 x
+  // 사용 타입 수 - element 수에 비례하지 않아 위임의 목적은 유지된다.
+  eventBindings = new WeakMap<Element, Record<string, TBinding>>();
+  // 내가 document에 단 위임 리스너(DOM 이벤트 타입 -> 리스너). 중복 설치 방지 겸, destroy가
+  // removeEventListener로 뗄 때 같은 함수 참조가 필요해 리스너 자체를 보관한다.
+  installedDelegates = new Map<string, EventListener>();
+
+  constructor(
+    module: TModule,
+    handlers: THandlers,
+    resources: string[],
+    loadedHrefs: Set<unknown>,
+    store: TLeafStoreSubject,
+    arrayPool: TArrayInfo[],
+    freeArrays: number[],
+    regionPool: TRegion[],
+    freeRegions: number[],
+    branchPool: TBranch[],
+    freeBranches: number[],
+    createdContexts: TCreatedContext[],
+  ) {
+    this.module = module;
+    this.code = module.code;
+    this.handlers = handlers;
+    this.resources = resources;
+    this.loadedHrefs = loadedHrefs;
+    this.store = store;
+    this.arrayPool = arrayPool;
+    this.freeArrays = freeArrays;
+    this.regionPool = regionPool;
+    this.freeRegions = freeRegions;
+    this.branchPool = branchPool;
+    this.freeBranches = freeBranches;
+    this.createdContexts = createdContexts;
+  }
+
+  componentEvents = (componentId: number): TEventEntry[] => {
+    return this.module.defs[componentId].events;
+  };
+
+  componentContexts = (componentId: number): TEventEntry[] => {
+    return this.module.defs[componentId].contexts;
+  };
+
+  // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
+  dispatch = (binding: TBinding, domEventObject: Event) => {
+    const data: Record<string, unknown> = {};
+    for (const p of binding.payload) {
+      data[p.name] = assemble(
+        compiledStepsOf(this.module, p.typeRef),
+        p.fieldSourcePairs,
+        this.store,
+        this.module,
+        this.arrayPool,
+      );
+    }
+    const context: Record<string, Record<string, unknown>> = {};
+    for (const ctxName in binding.contextLeaves) {
+      const values: Record<string, unknown> = {};
+      for (const p of binding.contextLeaves[ctxName]) {
+        values[p.name] = assemble(
+          compiledStepsOf(this.module, p.typeRef),
+          p.fieldSourcePairs,
+          this.store,
+          this.module,
+          this.arrayPool,
+        );
+      }
+      context[ctxName] = values;
+    }
+    // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
+    // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
+    const currentIndices: Record<string, number> = {};
+    for (const key in binding.loopIndices) {
+      const src = binding.loopIndices[key as TIndexSymbol];
+      if (src) {
+        currentIndices[key] = src.kind === STORE ? (this.store.get(src.ref) as number) : src.ref;
+      }
+    }
+    this.handlers[binding.fullName]?.(data, {
+      event: domEventObject,
+      set: this.store.set,
+      get: this.store.get,
+      push: this.pushArrayElement,
+      removeAt: this.removeArrayElementAt,
+      props: binding.props,
+      context,
+      ...currentIndices,
+    });
+  };
+
+  // 배열 요소 추가 - props의 배열 필드(arrayLeafIndex) 칸 값이 arrayInfoIndex다. 요소를 타입대로 store에 심고
+  // (plantFixed로 로컬에 펴 store.alloc으로 삽입, 요소 안 중첩 배열은 plantRoot처럼 레벨별로 마저 심음),
+  // 그 시작 leaf를 elemStartLeafIndices에 잇고 길이 칸(sizeLeafIndex)을 set해 @for grow를 깨운다. sizeLeafIndex가
+  // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
+  pushArrayElement = (arrayLeafIndex: number, elem: unknown): void => {
+    const info = this.arrayPool[Number(this.store.get(arrayLeafIndex))];
+    // 한 요소를 이 arrayInfo에 심는다: 고정부를 local에 펴(plantFixed) store.alloc으로 삽입하고 그 base를
+    // elemStartLeafIndices에 잇는다. 요소 안 중첩 배열은 plantFixed가 deferred로 돌려주니, 그 배열들의 요소도
+    // 같은 방식으로 재귀해 마저 심는다(plantRoot의 레벨 심기와 같되 store.alloc 삽입).
+    const plantElem = (value: unknown, target: TArrayInfo): void => {
+      const local: unknown[] = [];
+      const deferred = plantFixed(value, target.elemTypeRef, this.module, local, this.arrayPool, this.freeArrays);
+      target.elemStartLeafIndices.push(this.store.alloc(local));
+      for (const d of deferred) {
+        for (const child of d.value as unknown[]) {
+          plantElem(child, this.arrayPool[d.arrayInfoIndex]);
+        }
+      }
+    };
+    plantElem(elem, info);
+    // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
+    // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
+    // 아니다 - 요소가 전부 제거돼 빈 배열(length 0)이어도 순회는 진행 중이라, length로 판단하면 이 채움을
+    // 건너뛰어 인덱스 없는 요소가 쌓이고 region과 어긋난다. 새 요소는 꼬리라 인덱스 = 마지막 자리.
+    const tail = info.elemStartLeafIndices.length - 1;
+    if (info.forRegionIndex !== null) {
+      info.indexLeafIndices[tail] = this.store.alloc([tail]);
+    }
+    if (info.sizeLeafIndex !== null) {
+      this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
+    }
+  };
+
+  // 요소 하나(start, typeRef)를 회수한다 - 고정부를 타입대로 걸어 배열 칸(offset)을 만나면 그 자식 배열의 요소를
+  // 재귀 회수하고 arrayInfo·길이 칸을 반납한다. 걷기가 끝나면 이 요소 고정 블록을 store.free. 제거된 요소의
+  // 서브트리는 어디서도 참조되지 않으므로 안쪽까지 전부 반납해야 한다(누수 방지). 배열 칸 값이 arrayInfoIndex.
+  freeArrayElement = (start: number, typeRef: number): void => {
+    let cursor = start;
+    const walk = (ref: number): void => {
+      const t = this.module.types[ref];
+      if (t.tag === "object") {
+        for (const [, childTypeRef] of t.fields) {
+          walk(childTypeRef);
+        }
+        return;
+      }
+      if (t.tag === "array") {
+        const child = this.arrayPool[Number(this.store.get(cursor))];
+        for (const elemStart of child.elemStartLeafIndices) {
+          this.freeArrayElement(elemStart, child.elemTypeRef);
+        }
+        if (child.sizeLeafIndex !== null) {
+          this.store.free(child.sizeLeafIndex, 1); // @for에 쓰였으면 길이 칸도 회수(region은 removeBranchAt 재귀가 뗌)
+        }
+        freeArrayInfo(this.arrayPool, this.freeArrays, Number(this.store.get(cursor)));
+      }
+      cursor += 1; // 스칼라·배열 칸 하나 소비
+    };
+    walk(typeRef);
+    this.store.free(start, leafCountOf(this.module, typeRef));
+  };
+
+  // 배열 요소 제거 - i번째 요소를 재귀 회수(freeElem)하고 목록(elemStartLeafIndices)에서 뺀다. @for에 쓰였으면
+  // (forRegionIndex) 그 region의 i번째 회차 DOM만 뗀다 - 나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상
+  // (재빌드·재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
+  // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
+  // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
+  removeArrayElementAt = (arrayLeafIndex: number, i: number): void => {
+    const info = this.arrayPool[Number(this.store.get(arrayLeafIndex))];
+    if (info.forRegionIndex !== null) {
+      removeBranchAt(
+        this.store,
+        this.regionPool,
+        this.freeRegions,
+        this.branchPool,
+        this.freeBranches,
+        info.forRegionIndex,
+        i,
+      );
+    }
+    this.freeArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef);
+    info.elemStartLeafIndices.splice(i, 1);
+    // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndex 기준) - i번째 인덱스 칸을 회수하고
+    // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고
+    // $n이 발화 시 읽으므로, 중간 제거로 뒤가 당겨져도 표시·이벤트 인덱스가 자동 정합한다(값 고정·위치 이동 설계).
+    if (info.forRegionIndex !== null) {
+      this.store.free(info.indexLeafIndices[i], 1);
+      info.indexLeafIndices.splice(i, 1);
+      for (let k = i; k < info.indexLeafIndices.length; k++) {
+        this.store.set(info.indexLeafIndices[k], k); // 뒤 인덱스 당김 발화
+      }
+    }
+    if (info.sizeLeafIndex !== null) {
+      this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
+    }
+  };
+
+  // domEvent 타입의 위임 리스너를 document에 (인터프리터당 한 번만) 단다. target -> 조상 순회로
+  // 자기 eventBindings의 첫 바인딩을 찾아 발화하고 멈춘다 - 남의 element는 통과한다(격리).
+  ensureDelegate = (domEventName: (typeof DOM_EVENTS)[number]) => {
+    if (this.installedDelegates.has(domEventName)) {
+      return;
+    }
+    const listener = (domEventObject: Event) => {
+      let node = domEventObject.target;
+      while (node && node !== document) {
+        const bound = this.eventBindings.get(node as Element);
+        const binding = bound?.[domEventName];
+        if (binding) {
+          this.dispatch(binding, domEventObject);
+          return; // 첫 매칭에서 멈춤 - 자기 선에서 버블 끊기와 동등
+        }
+        node = (node as Node).parentNode;
+      }
+    };
+    this.installedDelegates.set(domEventName, listener);
+    document.addEventListener(domEventName, listener);
+  };
+
+  // 내가 document에 단 위임 리스너를 전부 뗀다. 리스너 클로저가 this를 잡아 인터프리터
+  // (store/pool 전체)를 살려두므로, 떼지 않으면 인스턴스가 GC되지 않는다. 인스턴스 해체(destroy)의
+  // 리스너 축 - DOM·구독 축은 rootRegion.detach가 맡는다(compileDef의 destroy가 둘을 묶는다).
+  removeDelegates = () => {
+    for (const [domEventName, listener] of this.installedDelegates) {
+      document.removeEventListener(domEventName, listener);
+    }
+    this.installedDelegates.clear();
+  };
+
+  // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드·구독·자식region은
+  // target 가지에 쌓인다(인라인이면 지금 가지, 반응이면 회차 branch). 회차 인덱스를 공유
+  // 스택에 push -> 재귀 -> pop한다 - 매 회차 [...stack, i] 복사 대신 배열 하나를 재사용한다
+  // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는
+  // BIND_EVENT가 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
+  buildIteration = (
+    indexKind: number,
+    indexRef: number,
+    bodyStart: number,
+    forEndPc: number,
+    targetBranchIndex: number,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    ws: TWalkStacks,
+  ) => {
+    ws.loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
+    const f = this.interpret(
+      argumentSourcePairs,
+      compId,
+      bodyStart,
+      forEndPc,
+      targetBranchIndex,
+      pathPrefix,
+      loopIndexBase,
+      ws,
+    ); // ws.loopIndexStack에 방금 push된 회차 인덱스를 물려준다
+    ws.loopIndexStack.pop(); // ref
+    ws.loopIndexStack.pop(); // kind
+    return f;
+  };
+
+  // 안 변하는 @for(FOR_RAW·CONST) - 각 회차를 지금 가지(startRegion/Branch)에 fragment로
+  // 인라인한다. @for는 컴포넌트 경계가 아니라 같은 가지의 제어 흐름이라 부모 노드에 통째로
+  // 붙인다. appendChild(fragment)는 내용 전체를 한 번에 옮기고 fragment를 비운다(노드별 재입양
+  // 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는 라이브라 순회 중 인덱스가 밀려 건너뛴다.
+  inlineFor = (
+    count: number,
+    bodyStart: number,
+    forEndPc: number,
+    parent: Node,
+    startBranchIndex: number,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    ws: TWalkStacks,
+  ) => {
+    for (let i = 0; i < count; i++) {
+      argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](리터럴은 반응성 없어 상수)
+      parent.appendChild(
+        this.buildIteration(
+          RAW,
+          i,
+          bodyStart,
+          forEndPc,
+          startBranchIndex,
+          argumentSourcePairs,
+          compId,
+          pathPrefix,
+          loopIndexBase,
+          ws,
+        ),
+      );
+      argumentSourcePairs.pop(); // index ref
+      argumentSourcePairs.pop(); // index kind
+      argumentSourcePairs.pop(); // item ref
+      argumentSourcePairs.pop(); // item kind
+    }
+  };
+
+  // 숫자 count 반응 @for(FOR_SCOPE_INDEX+STORE, 값이 숫자) - 전용 region을 만들어 회차마다 branch
+  // 하나에 노드·구독·자식region을 격리한다(count 줄 때 그 회차만 통째로 떼기 위함). anchor를 지금
+  // 가지에 남기고 회차 노드는 anchor 뒤에 붙는다. 초기엔 branch.nodes만 채운다(부모 attachIf가
+  // 루트부터 일괄 attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일).
+  // count leaf 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
+  reactiveCountFor = (
+    countLeafIndex: number,
+    bodyStart: number,
+    forEndPc: number,
+    parent: Node,
+    branch: TBranch,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    ws: TWalkStacks,
+  ) => {
+    const forRegionIndex = appendForRegion(this.regionPool, this.freeRegions, countLeafIndex);
+    const region = this.regionPool[forRegionIndex];
+    branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
+    parent.appendChild(region.anchor);
+
+    // grow(onCount 발화)는 지연 실행이라 그 시점 공유 pairs/ws는 이 @for 지점을 지나 이미 pop돼
+    // 있다(@if lazyBuild와 동형). build 시점 상태를 딥카피해 addIterationBranch가 캡처한다 - 초기
+    // 회차도 같은 스냅샷을 쓴다(build 시점이라 값 동일, push/pop도 스냅샷에만 가 원본 무오염).
+    const pairs = [...argumentSourcePairs];
+    const stacks = snapshotStacks(ws);
+
+    // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
+    // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
+    // 새 회차의 전역 branchIndex를 돌려준다.
+    // 몸체 `{i}`가 읽을 회차변수(인덱스) 슬롯을 [RAW, i]로 밀고 build 후 되돌린다
+    // (array-for와 같은 push/pop 규칙). 슬롯 번호는 그 시점 pairs 길이/2 = props+바깥 회차변수 뒤.
+    const addIterationBranch = (i: number) => {
+      const newBranchIndex = appendBranchOfForRegion(
+        this.regionPool,
+        this.branchPool,
+        this.freeBranches,
+        forRegionIndex,
+      );
+      pairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
+      this.branchPool[newBranchIndex].nodes = Array.from(
+        this.buildIteration(
+          RAW,
+          i,
+          bodyStart,
+          forEndPc,
+          newBranchIndex,
+          pairs,
+          compId,
+          pathPrefix,
+          loopIndexBase,
+          stacks,
+        ).childNodes,
+      );
+      pairs.pop(); // index ref
+      pairs.pop(); // index kind
+      pairs.pop(); // item ref
+      pairs.pop(); // item kind
+      return newBranchIndex;
+    };
+
+    const initial = Number(this.store.get(countLeafIndex)) || 0;
+    for (let i = 0; i < initial; i++) {
+      addIterationBranch(i);
+    }
+
+    const onCount = (v: unknown) => {
+      const next = Number(v) || 0;
+      const cur = region.branchIndices.length;
+      for (let i = cur; i < next; i++) {
+        attachForIteration(this.store, this.regionPool, this.branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+      }
+      if (next < cur) {
+        truncateFor(this.store, this.regionPool, this.freeRegions, this.branchPool, this.freeBranches, region, next); // 줄어든 꼬리 제거
+      }
+    };
+    // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
+    branch.leafIndices.push(countLeafIndex);
+    branch.updateFns.push(onCount);
+    this.store.subscribe(countLeafIndex, onCount);
+  };
+
+  // 배열 반응 @for - reactiveCountFor와 같은 구조(전용 region + 회차 branch + 길이 구독으로 grow/shrink)로,
+  // 다른 점은 회차변수 slot이 count처럼 [RAW, i]가 아니라 그 요소 leaf에 [STORE, elemStartLeafIndices[i]]로
+  // 붙는다는 것뿐이다(몸체가 요소 필드를 store에서 읽는다). 배열 요소 수는 store 값이 아니라
+  // info.elemStartLeafIndices.length가 진실이라, 발화용 길이 칸(sizeLeafIndex)을 여기서 lazy 확보해
+  // (이 배열이 @for에 쓰일 때만) 요소 수를 심고 구독한다. push가 요소를 elemStartLeafIndices에 넣고
+  // 그 칸을 set하면 이 구독이 깨어 늘어난 꼬리만 build+attach한다.
+  reactiveArrayFor = (
+    arrayLeafIndex: number,
+    bodyStart: number,
+    forEndPc: number,
+    parent: Node,
+    branch: TBranch,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    ws: TWalkStacks,
+  ) => {
+    const info = this.arrayPool[Number(this.store.get(arrayLeafIndex))];
+    if (info.sizeLeafIndex === null) {
+      info.sizeLeafIndex = this.store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
+    }
+    const sizeLeafIndex = info.sizeLeafIndex;
+    // 인덱스 leaf도 @for에 처음 쓰일 때만 lazy 채운다(sizeLeafIndex와 같은 결). elemStartLeafIndices와
+    // 나란히 요소 수만큼 확보 - [i]=i번째 요소의 회차 번호. 이후 push/removeAt이 둘을 동기로 유지한다.
+    if (info.indexLeafIndices.length === 0) {
+      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+        info.indexLeafIndices[i] = this.store.alloc([i]);
+      }
+    }
+
+    const forRegionIndex = appendForRegion(this.regionPool, this.freeRegions, sizeLeafIndex);
+    info.forRegionIndex = forRegionIndex; // removeAt이 이 region의 회차 DOM을 뗀다
+    const region = this.regionPool[forRegionIndex];
+    branch.childRegionIndices.push(forRegionIndex);
+    parent.appendChild(region.anchor);
+
+    // grow(onSize 발화)는 지연 실행이라 그 시점 공유 pairs/ws는 이 @for 지점을 지나 이미 pop돼
+    // 있다(@if lazyBuild와 동형). build 시점 상태를 딥카피해 addIterationBranch가 캡처한다 - 초기
+    // 회차도 같은 스냅샷을 쓴다(build 시점이라 값 동일, push/pop도 스냅샷에만 가 원본 무오염).
+    const pairs = [...argumentSourcePairs];
+    const stacks = snapshotStacks(ws);
+
+    // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를
+    // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 {i}가 읽는다. 인덱스 leaf는 발화 시
+    // $n으로도 해소되게 loopIndexStack에 (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
+    const addIterationBranch = (i: number) => {
+      const newBranchIndex = appendBranchOfForRegion(
+        this.regionPool,
+        this.branchPool,
+        this.freeBranches,
+        forRegionIndex,
+      );
+      const indexLeaf = info.indexLeafIndices[i];
+      pairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
+      this.branchPool[newBranchIndex].nodes = Array.from(
+        this.buildIteration(
+          STORE,
+          indexLeaf,
+          bodyStart,
+          forEndPc,
+          newBranchIndex,
+          pairs,
+          compId,
+          pathPrefix,
+          loopIndexBase,
+          stacks,
+        ).childNodes,
+      );
+      pairs.pop(); // 인덱스 ref
+      pairs.pop(); // 인덱스 kind
+      pairs.pop(); // 요소 ref
+      pairs.pop(); // 요소 kind
+      return newBranchIndex;
+    };
+
+    for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+      addIterationBranch(i);
+    }
+
+    const onSize = () => {
+      const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
+      const cur = region.branchIndices.length;
+      for (let i = cur; i < next; i++) {
+        attachForIteration(this.store, this.regionPool, this.branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+      }
+      if (next < cur) {
+        truncateFor(this.store, this.regionPool, this.freeRegions, this.branchPool, this.freeBranches, region, next); // 줄어든 꼬리 제거
+      }
+    };
+    branch.leafIndices.push(sizeLeafIndex);
+    branch.updateFns.push(onSize);
+    this.store.subscribe(sizeLeafIndex, onSize);
+  };
+
+  // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
+  //
+  // 구독은 즉시 걸지 않고 현재 가지에 모은다 - attach가 그 가지를 켤 때 건다
+  // (안 보이는 가지는 구독 0).
+  //
+  // @param scopeIndex 슬롯 번호(argumentSourcePairs[2*scopeIndex]=kind, [2*scopeIndex+1]=ref)
+  // @param offset     슬롯이 객체 base일 때 필드까지의 store 칸 거리(leaf/const면 0)
+  // @param update     값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
+  // @returns          현재 값(없으면 "")
+  bindVar = (
+    scopeIndex: number,
+    offset: number,
+    update: (v: unknown) => void,
+    argumentSourcePairs: TScope,
+    branch: TBranch,
+  ) => {
+    const ref = slotRef(argumentSourcePairs, scopeIndex);
+    const kind = slotKind(argumentSourcePairs, scopeIndex);
+    if (kind === CONST) {
+      // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
+      return this.module.constpool[ref] ?? "";
+    }
+    if (kind === RAW) {
+      // 회차 상수(count @for 인덱스): 참조가 값 자체. store에 없어 구독도 없다.
+      return ref;
+    }
+    // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
+    const leafIndex = ref + offset;
+    const initial = this.store.get(leafIndex) ?? "";
+    branch.leafIndices.push(leafIndex);
+    branch.updateFns.push(update);
+    return initial;
+  };
+
+  // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
+  //
+  // 재진입 가능: 최초 인스턴스화는 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만
+  // 해석한다. 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
+  // RENDER는 자식 def 구간을 자식 argumentSourcePairs로 이 함수에 재진입해 인라인 합성한다(별도 인스턴스/
+  // 루트 region 없이 부모 가지 안에 합류).
+  //
+  // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
+  // @param compId           지금 해석 중인 def(자식 RENDER면 자식 def). events/contexts를 이 def에서 참조로 꺼낸다.
+  // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
+  // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
+  // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다(불변 값).
+  // @param loopIndexBase    자식 @for 세그먼트 인덱스의 base(누적 @for 깊이). RENDER가 늘린다(불변 값).
+  // @param ws               가변 walk 스택(loopIndexStack/activeContexts). @for·RENDER는 이어 쓰고, @if 비활성 가지는 카피본을 쓴다.
+  // @returns                직속 노드를 담은 DocumentFragment
+  interpret = (
+    argumentSourcePairs: TScope,
+    compId: number,
+    startPc: number,
+    endPc: number,
+    startBranchIndex: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    ws: TWalkStacks,
+  ): DocumentFragment => {
+    const fragment = document.createDocumentFragment();
+    const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
+    let pending: HTMLElement | null = null;
+    let args = [];
+    let segment: string | null = null; // 다음 RENDER/BIND_EVENT가 소비할 경로 세그먼트(PUSH_PATH_SEGMENT/INDEX가 적재)
+    let pc = startPc;
+
+    // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
+    // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
+    const branch = this.branchPool[startBranchIndex]; // startBranchIndex는 전역 branchIndex
+
+    const u16at = () => {
+      const v = this.code[pc] | (this.code[pc + 1] << 8);
+      pc += 2;
+      return v;
+    };
+    const u8at = () => this.code[pc++];
+    const nodeTop = () => nodeStack[nodeStack.length - 1];
+
+    while (pc < endPc) {
+      const op = this.code[pc++];
+      switch (op) {
+        case OP.HALT: {
+          pc = endPc;
+          break;
+        }
+        case OP.LOAD_RES: {
+          // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
+          // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
+          // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
+          // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
+          const url = this.resources[u16at()];
+          if (url && !this.loadedHrefs.has(url)) {
+            this.loadedHrefs.add(url);
+            const link = document.createElement("link");
+            link.rel = "stylesheet";
+            link.href = url;
+            document.head.appendChild(link);
+          }
+          break;
+        }
+        case OP.ELEM_OPEN: {
+          pending = document.createElement(TAGS[u16at()]);
+          break;
+        }
+        case OP.ATTR_G: {
+          const name = ATTRS[u16at()];
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          pending!.setAttribute(name, this.module.constpool[u16at()] as string);
+          break;
+        }
+        case OP.ATTR_L: {
+          const name = this.module.constpool[u16at()] as string;
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          pending!.setAttribute(name, this.module.constpool[u16at()] as string);
+          break;
+        }
+        case OP.ATTR_G_VAR: {
+          const name = ATTRS[u16at()];
+          const scopeIndex = u8at();
+          const offset = u8at();
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          const el = pending!;
+          const v = this.bindVar(
+            scopeIndex,
+            offset,
+            (v) => el.setAttribute(name, v as string),
+            argumentSourcePairs,
+            branch,
+          );
+          el.setAttribute(name, v as string);
+          break;
+        }
+        case OP.ATTR_L_VAR: {
+          const name = this.module.constpool[u16at()] as string;
+          const scopeIndex = u8at();
+          const offset = u8at();
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          const el = pending!;
+          const v = this.bindVar(
+            scopeIndex,
+            offset,
+            (v) => el.setAttribute(name, v as string),
+            argumentSourcePairs,
+            branch,
+          );
+          el.setAttribute(name, v as string);
+          break;
+        }
+        case OP.BIND_EVENT: {
+          // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
+          const domEvent = DOM_EVENTS[u16at()];
+          const event = this.componentEvents(compId)[u16at()];
+          const eventName = this.module.constpool[event.nameConstIndex] as string;
+          // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
+          // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
+          // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
+          let eventPrefix = pathPrefix;
+          if (segment !== null) {
+            eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
+            segment = null;
+          }
+          const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
+          // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
+          // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
+          const payload: TAssembled[] = event.fields.map((field) => ({
+            name: this.module.constpool[field.nameConstIndex] as string,
+            typeRef: field.typeRef,
+            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
+          }));
+          // props: 핸들러의 상태변경 대상(필드명 -> leafIndex). STORE 슬롯만 - 상수 슬롯은 불변이라 대상이
+          // 못 된다. 스칼라는 그 leaf(set/get 대상), 배열은 배열 칸 leaf(push 대상 - 그 값이 arrayInfoIndex).
+          // 객체의 set 의미는 미정(ISSUES). data(읽기)는 객체까지 조립된다.
+          const props: Record<string, number> = {};
+          for (const p of payload) {
+            const tag = this.module.types[p.typeRef].tag;
+            if ((tag === "scalar" || tag === "array") && p.fieldSourcePairs[0] === STORE) {
+              props[p.name] = p.fieldSourcePairs[1];
+            }
+          }
+          // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
+          // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
+          const contextLeaves: Record<string, TAssembled[]> = {};
+          for (const i of ws.activeContexts) {
+            const created = this.createdContexts[i];
+            contextLeaves[created.name] = created.fields;
+          }
+          // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
+          // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가
+          // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
+          // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
+          const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
+          for (let i = 0; i * 2 < ws.loopIndexStack.length; i++) {
+            loopIndices[`$${i}` as TIndexSymbol] = {
+              kind: ws.loopIndexStack[2 * i],
+              ref: ws.loopIndexStack[2 * i + 1],
+            };
+          }
+          // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
+          // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
+          // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          const el = pending!;
+          let bound = this.eventBindings.get(el);
+          if (!bound) {
+            bound = {};
+            this.eventBindings.set(el, bound);
+          }
+          bound[domEvent] = { fullName, payload, contextLeaves, props, loopIndices };
+          this.ensureDelegate(domEvent);
+          break;
+        }
+        case OP.ELEM_CLOSE_OPEN: {
+          // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          nodeTop().appendChild(pending!);
+          // biome-ignore lint/style/noNonNullAssertion: 바로 위와 같은 pending
+          nodeStack.push(pending!);
+          pending = null;
+          break;
+        }
+        case OP.TEXT: {
+          nodeTop().appendChild(document.createTextNode(this.module.constpool[u16at()] as string));
+          break;
+        }
+        case OP.TEXT_VAR: {
+          const node = document.createTextNode("");
+          const scopeIndex = u8at();
+          const offset = u8at();
+          node.textContent = this.bindVar(
+            scopeIndex,
+            offset,
+            (v) => (node.textContent = v as string),
+            argumentSourcePairs,
+            branch,
+          ) as string;
+          nodeTop().appendChild(node);
+          break;
+        }
+        case OP.ELEM_END: {
+          nodeStack.pop();
+          break;
+        }
+        case OP.PUSH_THROUGH: {
+          // 경로 없는 참조 - 부모 슬롯 (kind, ref)를 편집 없이 그대로 자식에 넘긴다. kind를
+          // 보존해 부모가 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
+          const scopeIndex = u8at();
+          args.push(slotKind(argumentSourcePairs, scopeIndex), slotRef(argumentSourcePairs, scopeIndex));
+          break;
+        }
+        case OP.PUSH_FIELD: {
+          // 필드 참조 - 부모 슬롯 base에 offset을 더해 자식에 넘긴다. kind는 그대로 전파,
+          // 위치만 옮긴다. CONST 슬롯은 필드가 없어(리터럴은 객체 아님) FIELD로 오지 않는다.
+          const scopeIndex = u8at();
+          const offset = u8at();
+          args.push(slotKind(argumentSourcePairs, scopeIndex), slotRef(argumentSourcePairs, scopeIndex) + offset);
+          break;
+        }
+        case OP.PUSH_ARG_LIT: {
+          // 리터럴 인자(불변): 상수풀 인덱스를 CONST 슬롯으로 자식에 넘긴다. store에 심지
+          // 않는다 - 소비 지점(bindVar)이 CONST를 보고 pool을 직접 읽고 구독을 스킵한다.
+          args.push(CONST, u16at());
+          break;
+        }
+        case OP.PUSH_PATH_SEGMENT: {
+          // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
+          // 단일 변수로 적재 - args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
+          segment = this.module.constpool[u16at()] as string;
+          break;
+        }
+        case OP.PUSH_PATH_INDEX_SEGMENT: {
+          // @for 인덱스 세그먼트를 정적 fullname에 접미한다. 직전 이름 세그먼트가 있으면
+          // Row[$0], 없으면(element 직속) 익명 [$0]. operand는 컴포넌트-로컬 깊이라 use-site에서
+          // 물려받은 깊이(loopIndexStack.length)를 base로 더해 누적 표기($1...)로 만든다 - 자식
+          // 컴포넌트 코드는 자기 @for를 0부터 세지만 fullname은 바깥까지 누적돼야 한다.
+          const token = `[$${loopIndexBase + u16at()}]`;
+          segment = (segment ?? "") + token;
+          break;
+        }
+        case OP.ENTER_CONTEXT: {
+          // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
+          // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
+          const contextDef = this.componentContexts(compId)[u16at()];
+          const name = this.module.constpool[contextDef.nameConstIndex as number] as string;
+          // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
+          const fields: TAssembled[] = contextDef.fields.map((field) => ({
+            name: this.module.constpool[field.nameConstIndex] as string,
+            typeRef: field.typeRef,
+            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
+          }));
+          // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
+          // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
+          if (ws.activeContexts.some((i) => this.createdContexts[i].name === name)) {
+            console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
+          }
+          ws.activeContexts.push(this.createdContexts.length);
+          this.createdContexts.push({ name, fields });
+          break;
+        }
+        case OP.EXIT_CONTEXT: {
+          // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
+          ws.activeContexts.pop();
+          break;
+        }
+        case OP.RENDER: {
+          const childCompId = u16at();
+          const childArgumentSourcePairs = args;
+          args = [];
+          // 자식 경로 prefix = 부모 prefix + 세그먼트. 이벤트 fullname의 path 축을 누적한다.
+          const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
+          segment = null;
+          // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 argumentSourcePairs로 같은 interpret에 돌린다.
+          // 시작 가지 = 지금 이 가지(startBranchIndex) -> 자식 IF는 이 가지의
+          // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
+          // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
+          const childDef = this.module.defs[childCompId];
+          const childFragment = this.interpret(
+            childArgumentSourcePairs,
+            childCompId, // 자식 BIND_EVENT/ENTER_CONTEXT는 자식 def의 이벤트/컨텍스트 테이블을 본다
+            childDef.codeOff,
+            childDef.codeOff + childDef.codeLen,
+            startBranchIndex,
+            // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
+            childPrefix!,
+            ws.loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
+            ws, // 회차 인덱스·컨텍스트 스택을 공유로 물려준다 - @for·@with 경계가 push/pop으로 원복(복사 없음)
+          );
+          // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
+          // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
+          // 라이브라 순회 중 인덱스가 밀려 건너뛴다.
+          nodeTop().appendChild(childFragment);
+          break;
+        }
+        case OP.IF: {
+          pc = this.runIf(pc, argumentSourcePairs, compId, pathPrefix, loopIndexBase, ws, branch, nodeTop());
+          break;
+        }
+        case OP.FOR_RAW: {
+          // 소스에 박힌 리터럴 횟수 - 안 변하니 지금 가지(startRegion/Branch)에 count회 인라인.
+          const count = Number(u16at()) || 0;
+          const bodyStart = pc;
+          const forEndPc = forBodyEnd(this.code, bodyStart);
+          this.inlineFor(
+            count,
+            bodyStart,
+            forEndPc,
+            nodeTop(),
+            startBranchIndex,
+            argumentSourcePairs,
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            ws,
+          );
+          pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
+          break;
+        }
+        case OP.FOR_COUNT_VAR: {
+          // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
+          // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다. count가
+          // 필드(a.count)면 base+offset이 그 leaf.
+          const scopeIndex = u8at();
+          const offset = u8at();
+          const ref = slotRef(argumentSourcePairs, scopeIndex);
+          const bodyStart = pc;
+          const forEndPc = forBodyEnd(this.code, bodyStart);
+          if (slotKind(argumentSourcePairs, scopeIndex) === CONST) {
+            this.inlineFor(
+              Number(this.module.constpool[ref]) || 0,
+              bodyStart,
+              forEndPc,
+              nodeTop(),
+              startBranchIndex,
+              argumentSourcePairs,
+              compId,
+              pathPrefix,
+              loopIndexBase,
+              ws,
+            );
+          } else {
+            this.reactiveCountFor(
+              ref + offset,
+              bodyStart,
+              forEndPc,
+              nodeTop(),
+              branch,
+              argumentSourcePairs,
+              compId,
+              pathPrefix,
+              loopIndexBase,
+              ws,
+            );
+          }
+          pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
+          break;
+        }
+        case OP.FOR_ARRAY_VAR: {
+          // 배열 count slot. 배열 칸에 든 arrayInfoIndex로 요소 수·요소 위치를 얻어, 회차마다
+          // 회차변수(item) slot을 그 요소 leaf로 바인딩하며 반복한다. item slot은 codegen과 같은
+          // 규칙(props 슬롯 수 + 현재 @for 깊이)으로 계산한다. base+offset이 배열 칸의 leaf.
+          const scopeIndex = u8at();
+          const offset = u8at();
+          const arrayLeafIndex = slotRef(argumentSourcePairs, scopeIndex) + offset;
+          const bodyStart = pc;
+          const forEndPc = forBodyEnd(this.code, bodyStart);
+          this.reactiveArrayFor(
+            arrayLeafIndex,
+            bodyStart,
+            forEndPc,
+            nodeTop(),
+            branch,
+            argumentSourcePairs,
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            ws,
+          );
+          pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
+          break;
+        }
+        default: {
+          throw new Error(`bad opcode 0x${op.toString(16)}`);
+        }
+      }
+    }
+    return fragment;
+  };
+
+  // @if opcode 처리 - then/else Region을 스폰해 anchor를 parent에 붙이고, 활성 가지만 build한다.
+  // 비활성 가지엔 lazyBuild만 심어 첫 활성화 때 만든다. cond가 STORE면 구독을 걸어 swap한다.
+  // pc는 IF operand 직후(cond 슬롯)를 가리켜 들어오고, IF_END 다음 pc를 돌려준다.
+  runIf = (
+    pc: number,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    ws: TWalkStacks,
+    branch: TBranch,
+    parent: Node,
+  ): number => {
+    const condScopeIndex = this.code[pc++];
+    const condOffset = this.code[pc++];
+    // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
+    // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
+    const condIsConst = slotKind(argumentSourcePairs, condScopeIndex) === CONST;
+    const condRef = slotRef(argumentSourcePairs, condScopeIndex);
+    const condLeafIndex = condIsConst ? -1 : condRef + condOffset;
+    const regionIndex = appendIfRegion(
+      this.regionPool,
+      this.freeRegions,
+      this.branchPool,
+      this.freeBranches,
+      condLeafIndex,
+    );
+    const region = this.regionPool[regionIndex];
+    branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
+    const thenBranchIndex = region.branchIndices[THEN_INDEX];
+    const elseBranchIndex = region.branchIndices[ELSE_INDEX];
+    const thenBranch = this.branchPool[thenBranchIndex];
+    const elseBranch = this.branchPool[elseBranchIndex];
+    // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
+    parent.appendChild(region.anchor);
+
+    // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
+    const thenStart = pc;
+    const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(this.code, thenStart);
+
+    // 비활성 가지는 lazyBuild로 심어만 뒀다 나중(조건 swap)에 실행된다. 그 지연 시점의 공유
+    // pairs/ws는 이 @if를 지나 이미 pop된 상태라, build 시점 상태를 딥카피해 캡처한다 - 카피
+    // 없이는 회차변수 슬롯·회차 인덱스($n)·컨텍스트를 잃는다. then/else 중 하나만 실행되니
+    // 스냅샷 하나를 공유 캡처한다(reactive @for grow의 addIterationBranch와 같은 관례).
+    const pairs = [...argumentSourcePairs];
+    const stacks = snapshotStacks(ws);
+
+    // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
+    const buildThen = () => {
+      const f = this.interpret(pairs, compId, thenStart, thenEnd, thenBranchIndex, pathPrefix, loopIndexBase, stacks);
+      thenBranch.nodes = Array.from(f.childNodes);
+    };
+    const buildElse = () => {
+      const f =
+        elseStart === -1
+          ? document.createDocumentFragment() // else 없는 if - 빈 가지
+          : this.interpret(pairs, compId, elseStart, ifEndPc, elseBranchIndex, pathPrefix, loopIndexBase, stacks);
+      elseBranch.nodes = Array.from(f.childNodes);
+    };
+    thenBranch.lazyBuild = buildThen;
+    elseBranch.lazyBuild = buildElse;
+
+    // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
+    // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
+    if (!condIsConst) {
+      const onCond = (condValue: unknown) => {
+        activateIf(this.store, this.regionPool, this.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+      };
+      // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
+      branch.leafIndices.push(condLeafIndex);
+      branch.updateFns.push(onCond);
+      this.store.subscribe(condLeafIndex, onCond);
+    }
+    // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
+    // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
+    // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
+    // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
+    const condInitial = condIsConst ? this.module.constpool[condRef] : this.store.get(condLeafIndex);
+    const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
+    const initialBranch = this.branchPool[region.branchIndices[initialShownIndex]];
+    // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
+    initialBranch.lazyBuild!();
+    initialBranch.built = true;
+    region.shownIndex = initialShownIndex;
+
+    return ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음 pc
+  };
+}
+
 const compileDef = (module: TModule, compId: number, resources: string[] = [], loadedHrefs = new Set()) => {
   const def = module.defs[compId];
   if (!def) {
@@ -920,652 +1792,33 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     branchPool[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
     rootRegion.shownIndex = THEN_INDEX;
 
-    // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
-    //
-    // 재진입 가능: 최초 인스턴스화는 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만
-    // 해석한다. 자식 IF는 활성 가지를 재귀로 즉시 build하고 비활성 가지엔 lazyBuild만 심는다.
-    // RENDER는 자식 def 구간을 자식 argumentSourcePairs로 이 함수에 재진입해 인라인 합성한다(별도 인스턴스/
-    // 루트 region 없이 부모 가지 안에 합류).
-    //
-    // @param code             해석할 바이트코드(자식은 자식 def 구간)
-    // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
-    // @param events           현재 def의 이벤트 테이블(BIND_EVENT가 event_idx로 참조. 자식은 자식 def의 것)
-    // @param contexts         현재 def의 컨텍스트 테이블(ENTER_CONTEXT가 context_index로 참조. 자식은 자식 def의 것)
-    // @param activeContexts   지금 감싼 @with 컨텍스트 누적([{ name, fields }]). RENDER가 자식에 물려준다.
-    // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
-    // @param startRegionIndex 구독을 쌓을 region
-    // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool[startBranchIndex])
-    // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다.
-    // @returns                직속 노드를 담은 DocumentFragment
-    const interpret = (
-      code: Uint8Array,
-      argumentSourcePairs: (string | number)[],
-      events: TEventEntry[],
-      contexts: TEventEntry[],
-      activeContexts: number[],
-      startPc: number,
-      endPc: number,
-      startRegionIndex: number,
-      startBranchIndex: number,
-      pathPrefix: string,
-      loopIndexStack: number[],
-      loopIndexBase: number,
-    ) => {
-      const fragment = document.createDocumentFragment();
-      const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
-      let pending: HTMLElement | null = null;
-      let args = [];
-      let segment: string | null = null; // 다음 RENDER/BIND_EVENT가 소비할 경로 세그먼트(PUSH_PATH_SEGMENT/INDEX가 적재)
-      let pc = startPc;
-
-      // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
-      // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
-      const branch = branchPool[startBranchIndex]; // startBranchIndex는 전역 branchIndex
-
-      const u16at = () => {
-        const v = code[pc] | (code[pc + 1] << 8);
-        pc += 2;
-        return v;
-      };
-      const u8at = () => code[pc++];
-      const nodeTop = () => nodeStack[nodeStack.length - 1];
-
-      // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드·구독·자식region은
-      // target 가지에 쌓인다(인라인이면 지금 가지, 반응이면 회차 branch). 회차 인덱스를 공유
-      // 스택에 push -> 재귀 -> pop한다 - 매 회차 [...stack, i] 복사 대신 배열 하나를 재사용한다
-      // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는
-      // BIND_EVENT가 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
-      const buildIteration = (
-        indexKind: number,
-        indexRef: number,
-        bodyStart: number,
-        forEndPc: number,
-        targetRegionIndex: number,
-        targetBranchIndex: number,
-      ) => {
-        loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
-        const f = interpret(
-          code,
-          argumentSourcePairs,
-          events,
-          contexts,
-          activeContexts,
-          bodyStart,
-          forEndPc,
-          targetRegionIndex,
-          targetBranchIndex,
-          pathPrefix,
-          loopIndexStack, // 회차 인덱스 소스를 물려준다(발화 시 $n으로 해소)
-          loopIndexBase, // base는 그대로 - 이 @for는 몸체의 operand로 표현된다
-        );
-        loopIndexStack.pop(); // ref
-        loopIndexStack.pop(); // kind
-        return f;
-      };
-
-      // 안 변하는 @for(FOR_RAW·CONST) - 각 회차를 지금 가지(startRegion/Branch)에 fragment로
-      // 인라인한다. @for는 컴포넌트 경계가 아니라 같은 가지의 제어 흐름이라 부모 노드에 통째로
-      // 붙인다. appendChild(fragment)는 내용 전체를 한 번에 옮기고 fragment를 비운다(노드별 재입양
-      // 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는 라이브라 순회 중 인덱스가 밀려 건너뛴다.
-      const inlineFor = (count: number, bodyStart: number, forEndPc: number) => {
-        for (let i = 0; i < count; i++) {
-          argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](리터럴은 반응성 없어 상수)
-          nodeTop().appendChild(buildIteration(RAW, i, bodyStart, forEndPc, startRegionIndex, startBranchIndex));
-          argumentSourcePairs.pop(); // index ref
-          argumentSourcePairs.pop(); // index kind
-          argumentSourcePairs.pop(); // item ref
-          argumentSourcePairs.pop(); // item kind
-        }
-      };
-
-      // 숫자 count 반응 @for(FOR_SCOPE_INDEX+STORE, 값이 숫자) - 전용 region을 만들어 회차마다 branch
-      // 하나에 노드·구독·자식region을 격리한다(count 줄 때 그 회차만 통째로 떼기 위함). anchor를 지금
-      // 가지에 남기고 회차 노드는 anchor 뒤에 붙는다. 초기엔 branch.nodes만 채운다(부모 attachIf가
-      // 루트부터 일괄 attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일).
-      // count leaf 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
-      const reactiveCountFor = (countLeafIndex: number, bodyStart: number, forEndPc: number) => {
-        const forRegionIndex = appendForRegion(regionPool, freeRegions, countLeafIndex);
-        const region = regionPool[forRegionIndex];
-        branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
-        nodeTop().appendChild(region.anchor);
-
-        // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
-        // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
-        // 새 회차의 전역 branchIndex를 돌려준다.
-        // 몸체 `{i}`가 읽을 회차변수(인덱스) 슬롯을 [RAW, i]로 밀고 build 후 되돌린다
-        // (array-for와 같은 push/pop 규칙). 슬롯 번호는 그 시점 pairs 길이/2 = props+바깥 회차변수 뒤.
-        const addIterationBranch = (i: number) => {
-          const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
-          argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)·index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
-          branchPool[newBranchIndex].nodes = Array.from(
-            buildIteration(RAW, i, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
-          );
-          argumentSourcePairs.pop(); // index ref
-          argumentSourcePairs.pop(); // index kind
-          argumentSourcePairs.pop(); // item ref
-          argumentSourcePairs.pop(); // item kind
-          return newBranchIndex;
-        };
-
-        const initial = Number(store.get(countLeafIndex)) || 0;
-        for (let i = 0; i < initial; i++) {
-          addIterationBranch(i);
-        }
-
-        const onCount = (v: unknown) => {
-          const next = Number(v) || 0;
-          const cur = region.branchIndices.length;
-          for (let i = cur; i < next; i++) {
-            attachForIteration(store, regionPool, branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
-          }
-          if (next < cur) {
-            truncateFor(store, regionPool, freeRegions, branchPool, freeBranches, region, next); // 줄어든 꼬리 제거
-          }
-        };
-        // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
-        branch.leafIndices.push(countLeafIndex);
-        branch.updateFns.push(onCount);
-        store.subscribe(countLeafIndex, onCount);
-      };
-
-      // 배열 반응 @for - reactiveCountFor와 같은 구조(전용 region + 회차 branch + 길이 구독으로 grow/shrink)로,
-      // 다른 점은 회차변수 slot이 count처럼 [RAW, i]가 아니라 그 요소 leaf에 [STORE, elemStartLeafIndices[i]]로
-      // 붙는다는 것뿐이다(몸체가 요소 필드를 store에서 읽는다). 배열 요소 수는 store 값이 아니라
-      // info.elemStartLeafIndices.length가 진실이라, 발화용 길이 칸(sizeLeafIndex)을 여기서 lazy 확보해
-      // (이 배열이 @for에 쓰일 때만) 요소 수를 심고 구독한다. push가 요소를 elemStartLeafIndices에 넣고
-      // 그 칸을 set하면 이 구독이 깨어 늘어난 꼬리만 build+attach한다.
-      const reactiveArrayFor = (arrayLeafIndex: number, bodyStart: number, forEndPc: number) => {
-        const info = arrayPool[Number(store.get(arrayLeafIndex))];
-        if (info.sizeLeafIndex === null) {
-          info.sizeLeafIndex = store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
-        }
-        const sizeLeafIndex = info.sizeLeafIndex;
-        // 인덱스 leaf도 @for에 처음 쓰일 때만 lazy 채운다(sizeLeafIndex와 같은 결). elemStartLeafIndices와
-        // 나란히 요소 수만큼 확보 - [i]=i번째 요소의 회차 번호. 이후 push/removeAt이 둘을 동기로 유지한다.
-        if (info.indexLeafIndices.length === 0) {
-          for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
-            info.indexLeafIndices[i] = store.alloc([i]);
-          }
-        }
-
-        const forRegionIndex = appendForRegion(regionPool, freeRegions, sizeLeafIndex);
-        info.forRegionIndex = forRegionIndex; // removeAt이 이 region의 회차 DOM을 뗀다
-        const region = regionPool[forRegionIndex];
-        branch.childRegionIndices.push(forRegionIndex);
-        nodeTop().appendChild(region.anchor);
-
-        // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를
-        // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 {i}가 읽는다. 인덱스 leaf는 발화 시
-        // $n으로도 해소되게 loopIndexStack에 (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
-        const addIterationBranch = (i: number) => {
-          const newBranchIndex = appendBranchOfForRegion(regionPool, branchPool, freeBranches, forRegionIndex);
-          const indexLeaf = info.indexLeafIndices[i];
-          argumentSourcePairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
-          branchPool[newBranchIndex].nodes = Array.from(
-            buildIteration(STORE, indexLeaf, bodyStart, forEndPc, forRegionIndex, newBranchIndex).childNodes,
-          );
-          argumentSourcePairs.pop(); // 인덱스 ref
-          argumentSourcePairs.pop(); // 인덱스 kind
-          argumentSourcePairs.pop(); // 요소 ref
-          argumentSourcePairs.pop(); // 요소 kind
-          return newBranchIndex;
-        };
-
-        for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
-          addIterationBranch(i);
-        }
-
-        const onSize = () => {
-          const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
-          const cur = region.branchIndices.length;
-          for (let i = cur; i < next; i++) {
-            attachForIteration(store, regionPool, branchPool, region, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
-          }
-          if (next < cur) {
-            truncateFor(store, regionPool, freeRegions, branchPool, freeBranches, region, next); // 줄어든 꼬리 제거
-          }
-        };
-        branch.leafIndices.push(sizeLeafIndex);
-        branch.updateFns.push(onSize);
-        store.subscribe(sizeLeafIndex, onSize);
-      };
-
-      // offset을 leafIndex로 해석(지연)하고 초기값을 돌려준다.
-      //
-      // 구독은 즉시 걸지 않고 현재 가지에 모은다 - attach가 그 가지를 켤 때 건다
-      // (안 보이는 가지는 구독 0).
-      //
-      // @param scopeIndex 슬롯 번호(argumentSourcePairs[2*scopeIndex]=kind, [2*scopeIndex+1]=ref)
-      // @param offset     슬롯이 객체 base일 때 필드까지의 store 칸 거리(leaf/const면 0)
-      // @param update     값 변경 시 호출될 콜백(가지 활성화 후 구독으로 연결)
-      // @returns          현재 값(없으면 "")
-      const bindVar = (scopeIndex: number, offset: number, update: (v: unknown) => void) => {
-        const ref = argumentSourcePairs[2 * scopeIndex + 1];
-        const kind = argumentSourcePairs[2 * scopeIndex];
-        if (kind === CONST) {
-          // 상수: 상수풀 직접 참조. 안 변하니 구독은 죽은 구독 - 스킵한다.
-          return module.constpool[ref as number] ?? "";
-        }
-        if (kind === RAW) {
-          // 회차 상수(count @for 인덱스): 참조가 값 자체. store에 없어 구독도 없다.
-          return ref;
-        }
-        // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
-        const leafIndex = (ref as number) + offset;
-        const initial = store.get(leafIndex) ?? "";
-        branch.leafIndices.push(leafIndex);
-        branch.updateFns.push(update);
-        return initial;
-      };
-
-      while (pc < endPc) {
-        const op = code[pc++];
-        switch (op) {
-          case OP.HALT: {
-            pc = endPc;
-            break;
-          }
-          case OP.LOAD_RES: {
-            // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
-            // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
-            // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
-            // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
-            const url = resources[u16at()];
-            if (url && !loadedHrefs.has(url)) {
-              loadedHrefs.add(url);
-              const link = document.createElement("link");
-              link.rel = "stylesheet";
-              link.href = url;
-              document.head.appendChild(link);
-            }
-            break;
-          }
-          case OP.ELEM_OPEN: {
-            pending = document.createElement(TAGS[u16at()]);
-            break;
-          }
-          case OP.ATTR_G: {
-            const name = ATTRS[u16at()];
-            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-            pending!.setAttribute(name, module.constpool[u16at()] as string);
-            break;
-          }
-          case OP.ATTR_L: {
-            const name = module.constpool[u16at()] as string;
-            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-            pending!.setAttribute(name, module.constpool[u16at()] as string);
-            break;
-          }
-          case OP.ATTR_G_VAR: {
-            const name = ATTRS[u16at()];
-            const scopeIndex = u8at();
-            const offset = u8at();
-            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-            const el = pending!;
-            const v = bindVar(scopeIndex, offset, (v) => el.setAttribute(name, v as string));
-            el.setAttribute(name, v as string);
-            break;
-          }
-          case OP.ATTR_L_VAR: {
-            const name = module.constpool[u16at()] as string;
-            const scopeIndex = u8at();
-            const offset = u8at();
-            // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-            const el = pending!;
-            const v = bindVar(scopeIndex, offset, (v) => el.setAttribute(name, v as string));
-            el.setAttribute(name, v as string);
-            break;
-          }
-          case OP.BIND_EVENT: {
-            // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
-            const domEvent = DOM_EVENTS[u16at()];
-            const event = events[u16at()];
-            const eventName = module.constpool[event.nameConstIndex] as string;
-            // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
-            // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
-            // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
-            let eventPrefix = pathPrefix;
-            if (segment !== null) {
-              eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
-              segment = null;
-            }
-            const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
-            // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
-            // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
-            const payload: TAssembled[] = event.fields.map((field) => ({
-              name: module.constpool[field.nameConstIndex] as string,
-              typeRef: field.typeRef,
-              fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(module, field.typeRef), argumentSourcePairs),
-            }));
-            // props: 핸들러의 상태변경 대상(필드명 -> leafIndex). STORE 슬롯만 - 상수 슬롯은 불변이라 대상이
-            // 못 된다. 스칼라는 그 leaf(set/get 대상), 배열은 배열 칸 leaf(push 대상 - 그 값이 arrayInfoIndex).
-            // 객체의 set 의미는 미정(ISSUES). data(읽기)는 객체까지 조립된다.
-            const props: Record<string, number> = {};
-            for (const p of payload) {
-              const tag = module.types[p.typeRef].tag;
-              if ((tag === "scalar" || tag === "array") && p.fieldSourcePairs[0] === STORE) {
-                props[p.name] = p.fieldSourcePairs[1];
-              }
-            }
-            // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
-            // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
-            const contextLeaves: Record<string, TAssembled[]> = {};
-            for (const i of activeContexts) {
-              const created = createdContexts[i];
-              contextLeaves[created.name] = created.fields;
-            }
-            // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
-            // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가
-            // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
-            // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
-            const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
-            for (let i = 0; i * 2 < loopIndexStack.length; i++) {
-              loopIndices[`$${i}` as TIndexSymbol] = { kind: loopIndexStack[2 * i], ref: loopIndexStack[2 * i + 1] };
-            }
-            // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
-            // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
-            // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-            const el = pending!;
-            let bound = eventBindings.get(el);
-            if (!bound) {
-              bound = {};
-              eventBindings.set(el, bound);
-            }
-            bound[domEvent] = {
-              handlers,
-              fullName,
-              payload,
-              contextLeaves,
-              props,
-              loopIndices,
-              store,
-              module,
-              arrayPool,
-              freeArrays,
-              regionPool,
-              freeRegions,
-              branchPool,
-              freeBranches,
-            };
-            ensureDelegate(domEvent);
-            break;
-          }
-          case OP.ELEM_CLOSE_OPEN: {
-            // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-            nodeTop().appendChild(pending!);
-            // biome-ignore lint/style/noNonNullAssertion: 바로 위와 같은 pending
-            nodeStack.push(pending!);
-            pending = null;
-            break;
-          }
-          case OP.TEXT: {
-            nodeTop().appendChild(document.createTextNode(module.constpool[u16at()] as string));
-            break;
-          }
-          case OP.TEXT_VAR: {
-            const node = document.createTextNode("");
-            const scopeIndex = u8at();
-            const offset = u8at();
-            node.textContent = bindVar(scopeIndex, offset, (v) => (node.textContent = v as string)) as string;
-            nodeTop().appendChild(node);
-            break;
-          }
-          case OP.ELEM_END: {
-            nodeStack.pop();
-            break;
-          }
-          case OP.PUSH_THROUGH: {
-            // 경로 없는 참조 - 부모 슬롯 (kind, ref)를 편집 없이 그대로 자식에 넘긴다. kind를
-            // 보존해 부모가 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
-            const scopeIndex = u8at();
-            args.push(argumentSourcePairs[2 * scopeIndex], argumentSourcePairs[2 * scopeIndex + 1]);
-            break;
-          }
-          case OP.PUSH_FIELD: {
-            // 필드 참조 - 부모 슬롯 base에 offset을 더해 자식에 넘긴다. kind는 그대로 전파,
-            // 위치만 옮긴다. CONST 슬롯은 필드가 없어(리터럴은 객체 아님) FIELD로 오지 않는다.
-            const scopeIndex = u8at();
-            const offset = u8at();
-            args.push(
-              argumentSourcePairs[2 * scopeIndex],
-              (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset,
-            );
-            break;
-          }
-          case OP.PUSH_ARG_LIT: {
-            // 리터럴 인자(불변): 상수풀 인덱스를 CONST 슬롯으로 자식에 넘긴다. store에 심지
-            // 않는다 - 소비 지점(bindVar)이 CONST를 보고 pool을 직접 읽고 구독을 스킵한다.
-            args.push(CONST, u16at());
-            break;
-          }
-          case OP.PUSH_PATH_SEGMENT: {
-            // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
-            // 단일 변수로 적재 - args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
-            segment = module.constpool[u16at()] as string;
-            break;
-          }
-          case OP.PUSH_PATH_INDEX_SEGMENT: {
-            // @for 인덱스 세그먼트를 정적 fullname에 접미한다. 직전 이름 세그먼트가 있으면
-            // Row[$0], 없으면(element 직속) 익명 [$0]. operand는 컴포넌트-로컬 깊이라 use-site에서
-            // 물려받은 깊이(loopIndexStack.length)를 base로 더해 누적 표기($1...)로 만든다 - 자식
-            // 컴포넌트 코드는 자기 @for를 0부터 세지만 fullname은 바깥까지 누적돼야 한다.
-            const token = `[$${loopIndexBase + u16at()}]`;
-            segment = (segment ?? "") + token;
-            break;
-          }
-          case OP.ENTER_CONTEXT: {
-            // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
-            // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
-            const contextDef = contexts[u16at()];
-            const name = module.constpool[contextDef.nameConstIndex as number] as string;
-            // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
-            const fields: TAssembled[] = contextDef.fields.map((field) => ({
-              name: module.constpool[field.nameConstIndex] as string,
-              typeRef: field.typeRef,
-              fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(module, field.typeRef), argumentSourcePairs),
-            }));
-            // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
-            // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
-            if (activeContexts.some((i) => createdContexts[i].name === name)) {
-              console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
-            }
-            activeContexts.push(createdContexts.length);
-            createdContexts.push({ name, fields });
-            break;
-          }
-          case OP.EXIT_CONTEXT: {
-            // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
-            activeContexts.pop();
-            break;
-          }
-          case OP.RENDER: {
-            const childCompId = u16at();
-            const childArgumentSourcePairs = args;
-            args = [];
-            // 자식 경로 prefix = 부모 prefix + 세그먼트. 이벤트 fullname의 path 축을 누적한다.
-            const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
-            segment = null;
-            // 합성 = 인라인 재진입. 자식 def의 code 구간을 자식 argumentSourcePairs로 같은 interpret에 돌린다.
-            // 시작 가지 = 지금 이 가지(startRegionIndex/startBranchIndex) -> 자식 IF는 이 가지의
-            // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
-            // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
-            const childDef = module.defs[childCompId];
-            const childFragment = interpret(
-              module.code,
-              childArgumentSourcePairs,
-              childDef.events, // 자식 BIND_EVENT는 자식 def의 이벤트 테이블을 본다
-              childDef.contexts, // 자식 ENTER_CONTEXT는 자식 def의 컨텍스트 테이블을 본다
-              activeContexts, // 부모 활성 컨텍스트를 공유로 물려준다 - 자식의 ENTER/EXIT_CONTEXT는
-              // @with 경계마다 push/pop 짝이라 자식 반환 시 원상복구된다(RENDER는 반환 후
-              // activeContexts를 다시 읽지 않아 오염 여지도 없다). 매 RENDER의 [...] 복사 제거.
-              childDef.codeOff,
-              childDef.codeOff + childDef.codeLen,
-              startRegionIndex,
-              startBranchIndex,
-              // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
-              childPrefix!,
-              loopIndexStack, // 자식은 회차 값을 물려받는다(발화 시 $n)
-              loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
-            );
-            // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
-            // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
-            // 라이브라 순회 중 인덱스가 밀려 건너뛴다.
-            nodeTop().appendChild(childFragment);
-            break;
-          }
-          case OP.IF: {
-            const condScopeIndex = u8at();
-            const condOffset = u8at();
-            // 조건 슬롯도 STORE/CONST 위임 처리. CONST(부모가 리터럴로 준 prop)는 값이 안
-            // 변하니 leafIndex도 구독도 없다 - condLeafIndex=-1(region이 이 값을 읽지 않는다).
-            const condIsConst = argumentSourcePairs[2 * condScopeIndex] === CONST;
-            const condRef = argumentSourcePairs[2 * condScopeIndex + 1];
-            const condLeafIndex = condIsConst ? -1 : (condRef as number) + condOffset;
-            const regionIndex = appendIfRegion(regionPool, freeRegions, branchPool, freeBranches, condLeafIndex);
-            const region = regionPool[regionIndex];
-            branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
-            const thenBranchIndex = region.branchIndices[THEN_INDEX];
-            const elseBranchIndex = region.branchIndices[ELSE_INDEX];
-            const thenBranch = branchPool[thenBranchIndex];
-            const elseBranch = branchPool[elseBranchIndex];
-            // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
-            nodeTop().appendChild(region.anchor);
-
-            // then/else 코드 경계. thenStart = IF operand 직후(현재 pc).
-            const thenStart = pc;
-            const { thenEnd, elseStart, ifEndPc } = ifBranchRanges(code, thenStart);
-
-            // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
-            const buildThen = () => {
-              const f = interpret(
-                code,
-                argumentSourcePairs,
-                events,
-                contexts,
-                activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
-                thenStart,
-                thenEnd,
-                regionIndex,
-                thenBranchIndex,
-                pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-                loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
-                loopIndexBase,
-              );
-              thenBranch.nodes = Array.from(f.childNodes);
-            };
-            const buildElse = () => {
-              const f =
-                elseStart === -1
-                  ? document.createDocumentFragment() // else 없는 if - 빈 가지
-                  : interpret(
-                      code,
-                      argumentSourcePairs,
-                      events,
-                      contexts,
-                      activeContexts, // 가지는 같은 컨텍스트 범위 - 그대로 물려받는다
-                      elseStart,
-                      ifEndPc,
-                      regionIndex,
-                      elseBranchIndex,
-                      pathPrefix, // 가지 안의 합성도 부모 경로를 물려받는다
-                      loopIndexStack, // @if는 @for 깊이를 안 늘린다 - 그대로 물려받는다
-                      loopIndexBase,
-                    );
-              elseBranch.nodes = Array.from(f.childNodes);
-            };
-            thenBranch.lazyBuild = buildThen;
-            elseBranch.lazyBuild = buildElse;
-
-            // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
-            // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
-            if (!condIsConst) {
-              const onCond = (condValue: unknown) => {
-                activateIf(store, regionPool, branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
-              };
-              // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
-              branch.leafIndices.push(condLeafIndex);
-              branch.updateFns.push(onCond);
-              store.subscribe(condLeafIndex, onCond);
-            }
-            // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
-            // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
-            // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
-            // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-            const condInitial = condIsConst ? module.constpool[condRef as number] : store.get(condLeafIndex);
-            const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
-            const initialBranch = branchPool[region.branchIndices[initialShownIndex]];
-            // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
-            initialBranch.lazyBuild!();
-            initialBranch.built = true;
-            region.shownIndex = initialShownIndex;
-
-            pc = ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음으로.
-            break;
-          }
-          case OP.FOR_RAW: {
-            // 소스에 박힌 리터럴 횟수 - 안 변하니 지금 가지(startRegion/Branch)에 count회 인라인.
-            const count = Number(u16at()) || 0;
-            const bodyStart = pc;
-            const forEndPc = forBodyEnd(code, bodyStart);
-            inlineFor(count, bodyStart, forEndPc);
-            pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
-            break;
-          }
-          case OP.FOR_COUNT_VAR: {
-            // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
-            // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다. count가
-            // 필드(a.count)면 base+offset이 그 leaf.
-            const scopeIndex = u8at();
-            const offset = u8at();
-            const ref = argumentSourcePairs[2 * scopeIndex + 1];
-            const bodyStart = pc;
-            const forEndPc = forBodyEnd(code, bodyStart);
-            if (argumentSourcePairs[2 * scopeIndex] === CONST) {
-              inlineFor(Number(module.constpool[ref as number]) || 0, bodyStart, forEndPc);
-            } else {
-              reactiveCountFor((ref as number) + offset, bodyStart, forEndPc);
-            }
-            pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
-            break;
-          }
-          case OP.FOR_ARRAY_VAR: {
-            // 배열 count slot. 배열 칸에 든 arrayInfoIndex로 요소 수·요소 위치를 얻어, 회차마다
-            // 회차변수(item) slot을 그 요소 leaf로 바인딩하며 반복한다. item slot은 codegen과 같은
-            // 규칙(props 슬롯 수 + 현재 @for 깊이)으로 계산한다. base+offset이 배열 칸의 leaf.
-            const scopeIndex = u8at();
-            const offset = u8at();
-            const arrayLeafIndex = (argumentSourcePairs[2 * scopeIndex + 1] as number) + offset;
-            const bodyStart = pc;
-            const forEndPc = forBodyEnd(code, bodyStart);
-            reactiveArrayFor(arrayLeafIndex, bodyStart, forEndPc);
-            pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
-            break;
-          }
-          default: {
-            throw new Error(`bad opcode 0x${op.toString(16)}`);
-          }
-        }
-      }
-      return fragment;
-    };
-
     // build: 트리(regionPool/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
     // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
     // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
     // rootFlat은 plantRoot가 준 [STORE, base, …] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
-    const fragment = interpret(
-      module.code,
+    const interpreter = new Interpreter(
+      module,
+      handlers,
+      resources,
+      loadedHrefs,
+      store,
+      arrayPool,
+      freeArrays,
+      regionPool,
+      freeRegions,
+      branchPool,
+      freeBranches,
+      createdContexts,
+    );
+    const fragment = interpreter.interpret(
       rootFlat,
-      def.events, // 루트 def의 이벤트 테이블
-      def.contexts, // 루트 def의 컨텍스트 테이블
-      [], // 루트는 활성 컨텍스트 없음
+      compId, // 루트 def
       def.codeOff,
       def.codeOff + def.codeLen,
-      0,
-      rootRegion.branchIndices[THEN_INDEX],
+      rootRegion.branchIndices[THEN_INDEX], // branch index
       "", // 루트 경로 prefix 비어 있음
-      [], // 루트는 @for 밖 - 회차 인덱스 없음
       0, // 세그먼트 인덱스 base 0
+      { loopIndexStack: [], activeContexts: [] }, // 루트는 @for·@with 밖 - 빈 스택
     );
     branchPool[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
     fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
@@ -1573,7 +1826,15 @@ const compileDef = (module: TModule, compId: number, resources: string[] = [], l
     // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
     const nodes = Array.from(fragment.childNodes);
     // store를 인스턴스에 실어 반환 - 호출측이 set(leafIndex, v)로 반응성을 건다(옛 setPath 대체).
-    return { nodes, regionPool, freeRegions, branchPool, freeBranches, arrayPool, store };
+    // destroy = 인스턴스 해체: 붙은 DOM·구독을 region 트리 재귀로 떼고(detach - 반응 갱신으로
+    // 나중에 붙은 노드까지 region이 안다), 루트 anchor와 document 위임 리스너를 제거해 인스턴스가
+    // GC되게 한다.
+    const destroy = () => {
+      rootRegion.detach(store, regionPool, branchPool, rootRegion);
+      rootRegion.anchor.remove();
+      interpreter.removeDelegates();
+    };
+    return { nodes, regionPool, freeRegions, branchPool, freeBranches, arrayPool, store, destroy };
   };
 };
 
