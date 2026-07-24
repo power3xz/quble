@@ -68,6 +68,10 @@ pub struct CompDef {
     pub code_off: u32,
     /// 코드 길이.
     pub code_len: u32,
+    /// 이 컴포넌트 props를 하나의 Object로 묶은 타입(types 인덱스). 필드 순서 = scope 슬롯 순서.
+    /// defs[0].props_type_ref가 진입점의 rootValue 풀필 구조. 핸들러 props 접근이 이 타입 워크 +
+    /// argumentSourcePairs(런타임 슬롯 출처)로 해소된다.
+    pub props_type_ref: u16,
     /// 이 컴포넌트가 선언한 이벤트들. 선언 순서 = event_index.
     pub events: Vec<EventDef>,
     /// 이 컴포넌트가 선언한 컨텍스트들. 선언 순서 = context_index.
@@ -80,9 +84,6 @@ pub struct Module {
     pub pool: ConstPool,
     /// 모듈 전역 타입 테이블(dedup). field.type_ref가 이걸 인덱싱한다.
     pub types: Vec<TypeEntry>,
-    /// 루트 컴포넌트(#0) props의 객체 타입 인덱스(types 테이블). 진입점이 rootValue를
-    /// 이 구조로 store에 풀필한다. 비루트 props 타입은 쓰이지 않아 인코딩하지 않는다.
-    pub root_props_type_ref: u16,
     pub(crate) defs: Vec<CompDef>,
     pub code: Vec<u8>,
 }
@@ -91,11 +92,10 @@ impl Module {
     pub fn new(
         pool: ConstPool,
         types: Vec<TypeEntry>,
-        root_props_type_ref: u16,
         defs: Vec<CompDef>,
         code: Vec<u8>,
     ) -> Self {
-        Self { pool, types, root_props_type_ref, defs, code }
+        Self { pool, types, defs, code }
     }
 
     /// 컴포넌트 ID로 정의를 직접 인덱싱.

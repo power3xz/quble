@@ -630,7 +630,7 @@ const plantFixed = (
 // 요소 leaf가 고정 칸 사이에 끼면 뒤 필드 offset이 밀리므로, 고정부를 다 심은 뒤 요소를 끝에
 // 레벨별로 몰아 심는다(중간 삽입 금지).
 const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayInfo>) => {
-  const rootType = module.types[module.rootPropsTypeRef];
+  const rootType = module.types[module.defs[0].propsTypeRef];
   const leaves: unknown[] = [];
   const rootFlat: number[] = [];
   const obj = rootValue as Record<string, unknown> | undefined;
@@ -685,13 +685,12 @@ const decode = (bytes: Uint8Array) => {
     types.push(readType(r));
   }
 
-  // 루트 props 객체 타입 인덱스 - 진입점이 rootValue를 이 구조로 store에 풀필한다.
-  const rootPropsTypeRef = r.u16();
-
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
     const nameConstIndex = r.u16();
+    // 이 comp props를 묶은 Object 타입(types 인덱스). defs[0]이 진입점 풀필 구조.
+    const propsTypeRef = r.u16();
     const codeOff = r.u32();
     const codeLen = r.u32();
     // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameConstIndex, fields)]
@@ -706,7 +705,7 @@ const decode = (bytes: Uint8Array) => {
     for (let c = 0; c < contextCount; c++) {
       contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
-    defs.push({ nameConstIndex, codeOff, codeLen, events, contexts });
+    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts });
   }
 
   const codeLen = r.u32();
@@ -714,12 +713,13 @@ const decode = (bytes: Uint8Array) => {
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
   // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
-  return { constpool, types, rootPropsTypeRef, defs, code, compiledSteps: [], leafCounts: [] };
+  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [] };
 };
 type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
 type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
 type TDef = {
   nameConstIndex: number;
+  propsTypeRef: number;
   codeOff: number;
   codeLen: number;
   events: TEventEntry[];
@@ -729,7 +729,6 @@ type TModule = {
   code: Uint8Array;
   constpool: (string | number | boolean)[];
   types: TType[];
-  rootPropsTypeRef: number;
   compiledSteps: TStep[][];
   leafCounts: number[];
   defs: TDef[];

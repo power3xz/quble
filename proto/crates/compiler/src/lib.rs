@@ -211,11 +211,11 @@ mod tests {
 
         let expected = Module::new(
             pool,
-            // props 없는 컴포넌트라도 루트 props를 빈 객체 타입으로 intern한다(엔트리 #0).
+            // props 없는 컴포넌트라도 props를 빈 객체 타입으로 intern한다(엔트리 #0).
             vec![bytecode::TypeEntry::Object(vec![])],
-            0,
             vec![CompDef {
                 name_const_index: hello,
+                props_type_ref: 0,
                 code_off: 0,
                 code_len: code.len() as u32,
                 events: vec![],

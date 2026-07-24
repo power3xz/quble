@@ -77,6 +77,10 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     for fc in comps {
         let comp = &fc.comp;
         let name_const_index = pool.intern_str(&comp.name);
+        // props를 하나의 Object로 intern - 필드 순서 = scope 슬롯 순서. defs[0]이 진입점 풀필 구조,
+        // 나머지는 핸들러 props 접근용(타입 워크 재료). props 없으면 빈 Object.
+        let props_ty = Type::Object(comp.props.iter().map(|p| (p.name.clone(), p.type_.clone())).collect());
+        let props_type_ref = types.intern(&props_ty, &mut pool);
         let code_off = code.len() as u32;
         // 리소스 로드를 정의 앞머리에 깐다. lazy build에서 이 컴포넌트가 실제로 그려질 때만
         // 실행돼 리소스가 로드된다(같은 파일 컴포넌트가 같은 LOAD_RES를 내도 런타임이 URL dedup).
@@ -137,6 +141,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
             .collect::<Result<Vec<_>, CodegenError>>()?;
         defs.push(CompDef {
             name_const_index,
+            props_type_ref,
             code_off,
             code_len: code.len() as u32 - code_off,
             events,
@@ -144,15 +149,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
         });
     }
 
-    // 루트 컴포넌트(#0) props를 하나의 객체 타입으로 intern - 진입점이 rootValue를 이 구조로 풀필.
-    // props 없는(빈) 파일은 없다는 전제(FlatComp가 최소 하나) - comps[0]을 루트로 본다.
-    let root_props = &comps[0].comp.props;
-    let root_props_ty = Type::Object(
-        root_props.iter().map(|p| (p.name.clone(), p.type_.clone())).collect(),
-    );
-    let root_props_type_ref = types.intern(&root_props_ty, &mut pool);
-
-    let module = Module::new(pool, types.into_entries(), root_props_type_ref, defs, code);
+    let module = Module::new(pool, types.into_entries(), defs, code);
     Ok((encode(&module).into_boxed_slice(), res_ids))
 }
 
