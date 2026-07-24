@@ -76,3 +76,36 @@ test("리터럴 바인딩 prop 접근은 throw, STORE prop은 leafIndex", () => 
   assert.equal(typeof flowRef, "number", "STORE flow는 leafIndex");
   assert.match((litError as Error)?.message ?? "", /lit/, "리터럴 lit 접근은 throw");
 });
+
+// 비루트(Child)에서 발화해도 store는 루트부터의 절대 경로 - 루트 prop(flowed)을 store로 읽는다.
+// props(발화 comp 상대)로는 flow지만, store로는 루트 이름 flowed로 접근한다.
+test("비루트 발화에서 store로 루트 상태를 읽는다", () => {
+  const qubb2 = buildFixture("props_const_slot");
+  let readViaStore: unknown = null;
+  const inst = compile(qubb2)(0)({ flowed: "흐른값" }, {
+    "Child.TAP": (_data: unknown, { get, store }: { get: (k: unknown) => unknown; store: Record<string, unknown> }) => {
+      readViaStore = get(store.flowed); // 루트 절대 경로
+    },
+  } as unknown as THandlers);
+  mount(inst);
+  document.querySelector("button")!.click();
+  assert.equal(readViaStore, "흐른값", "store.flowed가 루트 현재값");
+});
+
+// store로 set하면 루트 상태가 바뀐다(통지 포함) - Child 발화가 루트 prop을 store로 갱신.
+test("비루트 발화에서 store로 루트 상태를 set한다", () => {
+  const qubb2 = buildFixture("props_const_slot");
+  const inst = compile(qubb2)(0)({ flowed: "before" }, {
+    "Child.TAP": (
+      _data: unknown,
+      { set, store }: { set: (k: unknown, v: unknown) => void; store: Record<string, unknown> },
+    ) => {
+      set(store.flowed, "after");
+    },
+  } as unknown as THandlers);
+  mount(inst);
+  document.querySelector("button")!.click();
+  // flowed는 루트 leafIndex 0. Child에 flow={flowed}로 흘러 button 텍스트로 나온다.
+  assert.equal(inst.store.get(0), "after", "store.flowed set이 루트 상태 갱신");
+  assert.equal(document.querySelector("button")!.textContent, "after", "통지로 DOM 갱신");
+});

@@ -782,6 +782,9 @@ class Interpreter {
   regionPool: Pool<TRegion>;
   branchPool: Pool<TBranch>;
   createdContexts: TCreatedContext[];
+  // 진입점 argumentSourcePairs(plantRoot의 rootFlat). store(루트부터의 절대 경로) 접근에 쓴다 -
+  // 어느 핸들러든 같은 루트라 인스턴스 전역. props(발화 comp 상대)와 달리 store는 defs[0] 기준.
+  rootScope: TScope;
 
   // ── 이벤트 위임(인터프리터 격리) ──────────────────────────────────
   // element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
@@ -810,6 +813,7 @@ class Interpreter {
     regionPool: Pool<TRegion>,
     branchPool: Pool<TBranch>,
     createdContexts: TCreatedContext[],
+    rootScope: TScope,
   ) {
     this.module = module;
     this.code = module.code;
@@ -821,6 +825,7 @@ class Interpreter {
     this.regionPool = regionPool;
     this.branchPool = branchPool;
     this.createdContexts = createdContexts;
+    this.rootScope = rootScope;
   }
 
   // forBodyEnd의 캐시 통과 조회.
@@ -931,9 +936,18 @@ class Interpreter {
       push: this.pushArrayElement,
       removeAt: this.removeArrayElementAt,
       props: binding.props,
+      store: this.rootStore(),
       context,
       ...currentIndices,
     });
+  };
+
+  // store = 루트부터의 절대 경로(props와 같은 leafIndex 중첩 객체, 단 발화 comp가 아닌 defs[0] 기준).
+  // 인스턴스 불변이라 1회 만들어 캐시한다. 어느 핸들러든 같은 루트 상태 트리를 본다.
+  storeTree: Record<string, unknown> | null = null;
+  rootStore = (): Record<string, unknown> => {
+    this.storeTree ??= this.buildProps(this.module.defs[0].propsTypeRef, this.rootScope);
+    return this.storeTree;
   };
 
   // 배열 요소 추가 - props의 배열 필드(arrayLeafIndex) 칸 값이 arrayInfoIndex다. 요소를 타입대로 store에 심고
@@ -1860,6 +1874,7 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
         regionPool,
         branchPool,
         createdContexts,
+        rootFlat,
       );
       const fragment = interpreter.interpret(
         rootFlat,
