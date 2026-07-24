@@ -5,18 +5,18 @@
 mod ast;
 mod codegen;
 mod dts;
+mod flatten;
 mod lexer;
 mod parse;
-mod resolve;
 
 pub use dts::handlers_dts_file;
-pub use resolve::{ResolveError, Resolver};
+pub use flatten::{ResolveError, Resolver};
 
 use std::path::Path;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
-    Resolve(resolve::ResolveError),
+    Resolve(flatten::ResolveError),
     Codegen(codegen::CodegenError),
 }
 
@@ -36,9 +36,12 @@ pub fn compile_src(
     src: &str,
     resolver: &impl Resolver,
 ) -> Result<CompileOutput, CompileError> {
-    let comps = resolve::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
+    let comps = flatten::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
     let (bytecode, resources) = codegen::generate(&comps).map_err(CompileError::Codegen)?;
-    Ok(CompileOutput { bytecode, resources })
+    Ok(CompileOutput {
+        bytecode,
+        resources,
+    })
 }
 
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
@@ -287,7 +290,10 @@ mod tests {
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
         // CLOSE_OPEN 바로 뒤가 END여야 한다(그 사이에 자식 opcode가 없음 = 자식 없는 요소).
-        let close = code.iter().position(|&b| b == Op::ElemCloseOpen as u8).unwrap();
+        let close = code
+            .iter()
+            .position(|&b| b == Op::ElemCloseOpen as u8)
+            .unwrap();
         assert_eq!(
             code[close + 1],
             Op::ElemEnd as u8,
@@ -411,7 +417,10 @@ mod tests {
         assert_eq!(str_at(&module, area.name_const_index), Some("Area"));
         assert_eq!(area.fields.len(), 2);
         // section: "actions" -> 스칼라 field, ref가 Const(상수풀이 "actions"를 가리킴).
-        assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("section"));
+        assert_eq!(
+            str_at(&module, area.fields[0].name_const_index),
+            Some("section")
+        );
         match area.fields[0].value {
             FieldValue::Const(actions_index) => {
                 assert_eq!(str_at(&module, actions_index), Some("actions"));
@@ -419,7 +428,10 @@ mod tests {
             other => panic!("section은 리터럴 스칼라라 Const ref여야: {other:?}"),
         }
         // userId: assignee -> 스칼라 field, ref가 Scope(assignee 슬롯 0, offset 0).
-        assert_eq!(str_at(&module, area.fields[1].name_const_index), Some("userId"));
+        assert_eq!(
+            str_at(&module, area.fields[1].name_const_index),
+            Some("userId")
+        );
         assert_eq!(area.fields[1].value, FieldValue::Scope(0, 0));
 
         // 코드: EnterContext context_index=0 ... ExitContext.
@@ -524,7 +536,8 @@ mod tests {
         // {tag} 회차변수는 props 슬롯(1개) 뒤 scope_index 1, 요소가 스칼라라 offset 0.
         let text_var = vec![Op::TextVar as u8, 1, 0];
         assert!(
-            code.windows(text_var.len()).any(|w| w == text_var.as_slice()),
+            code.windows(text_var.len())
+                .any(|w| w == text_var.as_slice()),
             "TextVar(회차변수 tag scope=1 offset=0)가 있어야:\n{code:?}",
         );
     }
@@ -556,7 +569,8 @@ mod tests {
         // 회차변수 자리라 순번 1. THROUGH operand는 scope_index u8 하나.
         let push_arg = vec![Op::PushThrough as u8, 1u8];
         assert!(
-            code.windows(push_arg.len()).any(|w| w == push_arg.as_slice()),
+            code.windows(push_arg.len())
+                .any(|w| w == push_arg.as_slice()),
             "PushThrough(회차변수 tag=1)가 있어야:\n{code:?}",
         );
     }
@@ -578,7 +592,9 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::UnknownArg { .. }))
+            Err(CompileError::Codegen(
+                codegen::CodegenError::UnknownArg { .. }
+            ))
         ));
     }
 
@@ -597,7 +613,9 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::DuplicateBinding(_)))
+            Err(CompileError::Codegen(
+                codegen::CodegenError::DuplicateBinding(_)
+            ))
         ));
     }
 
@@ -626,7 +644,8 @@ mod tests {
         for (name, scope) in [("tag", 1u8), ("i", 2u8)] {
             let text_var = vec![Op::TextVar as u8, scope, 0];
             assert!(
-                code.windows(text_var.len()).any(|w| w == text_var.as_slice()),
+                code.windows(text_var.len())
+                    .any(|w| w == text_var.as_slice()),
                 "TextVar({name} scope={scope} offset=0)이 있어야:\n{code:?}",
             );
         }
@@ -647,7 +666,9 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::DuplicateBinding(_)))
+            Err(CompileError::Codegen(
+                codegen::CodegenError::DuplicateBinding(_)
+            ))
         ));
     }
 
@@ -814,7 +835,10 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let area = &module.def(0).unwrap().contexts[0];
         // 단축형 tier -> 필드명 "tier", 값은 tier prop(scope 0, offset 0). 스칼라.
-        assert_eq!(str_at(&module, area.fields[0].name_const_index), Some("tier"));
+        assert_eq!(
+            str_at(&module, area.fields[0].name_const_index),
+            Some("tier")
+        );
         assert_eq!(area.fields[0].value, FieldValue::Scope(0, 0));
     }
 
@@ -834,9 +858,15 @@ mod tests {
         let module = decode(&bytes).unwrap();
         let event = &module.def(0).unwrap().events[0];
         // count: 단축형 -> Scope(0, 0). label: "clicks" -> Const. 둘 다 스칼라.
-        assert_eq!(str_at(&module, event.fields[0].name_const_index), Some("count"));
+        assert_eq!(
+            str_at(&module, event.fields[0].name_const_index),
+            Some("count")
+        );
         assert_eq!(event.fields[0].value, FieldValue::Scope(0, 0));
-        assert_eq!(str_at(&module, event.fields[1].name_const_index), Some("label"));
+        assert_eq!(
+            str_at(&module, event.fields[1].name_const_index),
+            Some("label")
+        );
         match event.fields[1].value {
             FieldValue::Const(clicks_index) => {
                 assert_eq!(str_at(&module, clicks_index), Some("clicks"));
@@ -898,8 +928,14 @@ mod tests {
                 assert_eq!(fields.len(), 2);
                 assert_eq!(str_at(&module, fields[0].0), Some("name"));
                 assert_eq!(str_at(&module, fields[1].0), Some("age"));
-                assert!(matches!(module.types[fields[0].1 as usize], TypeEntry::Scalar));
-                assert!(matches!(module.types[fields[1].1 as usize], TypeEntry::Scalar));
+                assert!(matches!(
+                    module.types[fields[0].1 as usize],
+                    TypeEntry::Scalar
+                ));
+                assert!(matches!(
+                    module.types[fields[1].1 as usize],
+                    TypeEntry::Scalar
+                ));
             }
             other => panic!("user는 객체라 Object여야: {other:?}"),
         }
@@ -942,7 +978,10 @@ mod tests {
         let fields = &module.def(0).unwrap().events[0].fields;
         // 두 스칼라 field가 같은 Scalar 엔트리를 가리킨다.
         assert_eq!(fields[0].type_ref, fields[1].type_ref);
-        assert!(matches!(module.types[fields[0].type_ref as usize], TypeEntry::Scalar));
+        assert!(matches!(
+            module.types[fields[0].type_ref as usize],
+            TypeEntry::Scalar
+        ));
         // 테이블엔 Scalar 하나 + 루트 props 객체({a,b}) 하나뿐 - 두 스칼라 field는 Scalar를 공유.
         assert_eq!(module.types.len(), 2);
     }
@@ -1003,10 +1042,12 @@ mod tests {
     /// 타입(Ref/Omit/Pick) 해소·선언 순서·객체 재귀 순서를 검증한다. 펼침은 이 검증만의 관찰
     /// 창이라 테스트 지역에 둔다(런타임은 타입 테이블로 심어 이 leaf 경로를 안 쓴다).
     fn compile_props(src: &str) -> Vec<String> {
-        let comps = resolve::flatten("entry", src, &(|_: &str, _: &str| None)).unwrap();
+        let comps = flatten::flatten("entry", src, &(|_: &str, _: &str| None)).unwrap();
         fn push_leaf_paths(prefix: &str, ty: &ast::Type, out: &mut Vec<String>) {
             match ty {
-                ast::Type::Bool | ast::Type::Number | ast::Type::String => out.push(prefix.to_string()),
+                ast::Type::Bool | ast::Type::Number | ast::Type::String => {
+                    out.push(prefix.to_string())
+                }
                 ast::Type::Array(inner) => push_leaf_paths(prefix, inner, out),
                 ast::Type::Object(fields) => {
                     for (name, field_ty) in fields {
@@ -1014,7 +1055,9 @@ mod tests {
                     }
                 }
                 ast::Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
-                ast::Type::Omit(..) | ast::Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
+                ast::Type::Omit(..) | ast::Type::Pick(..) => {
+                    unreachable!("resolve가 유틸 타입을 안 풀었다")
+                }
             }
         }
         let mut paths = Vec::new();
@@ -1028,7 +1071,8 @@ mod tests {
     /// 펼쳐진다 - 인라인 객체로 쓴 것과 같은 leaf 경로가 나온다.
     #[test]
     fn prop_type_ref_expands_like_inline() {
-        let ref_props = compile_props(r#"
+        let ref_props = compile_props(
+            r#"
             component C {
               props { heading: string, sec: Section }
               template { div() { {heading} } }
@@ -1037,13 +1081,16 @@ mod tests {
               props { title: string, on: bool }
               template { div( /) }
             }
-        "#);
-        let inline_props = compile_props(r#"
+        "#,
+        );
+        let inline_props = compile_props(
+            r#"
             component C {
               props { heading: string, sec: { title: string, on: bool } }
               template { div() { {heading} } }
             }
-        "#);
+        "#,
+        );
         assert_eq!(ref_props, inline_props);
         assert_eq!(ref_props, vec!["heading", "sec.title", "sec.on"]);
     }
@@ -1051,7 +1098,8 @@ mod tests {
     /// `Omit<Section, 'title'>` - Section props에서 title을 뺀 leaf만 남는다.
     #[test]
     fn prop_type_omit() {
-        let props = compile_props(r#"
+        let props = compile_props(
+            r#"
             component C {
               props { sec: Omit<Section, 'title'> }
               template { div( /) }
@@ -1060,14 +1108,16 @@ mod tests {
               props { title: string, desc: string, on: bool }
               template { div( /) }
             }
-        "#);
+        "#,
+        );
         assert_eq!(props, vec!["sec.desc", "sec.on"]);
     }
 
     /// `Pick<Section, 'title' | 'on'>` - 나열한 키만 남는다(유니온 키).
     #[test]
     fn prop_type_pick_union() {
-        let props = compile_props(r#"
+        let props = compile_props(
+            r#"
             component C {
               props { sec: Pick<Section, 'title' | 'on'> }
               template { div( /) }
@@ -1076,7 +1126,8 @@ mod tests {
               props { title: string, desc: string, on: bool }
               template { div( /) }
             }
-        "#);
+        "#,
+        );
         assert_eq!(props, vec!["sec.title", "sec.on"]);
     }
 
@@ -1145,8 +1196,11 @@ mod tests {
         assert_eq!(
             compile_props(src),
             vec![
-                "heading", "dirty",
-                "general.open", "general.a.title", "general.a.on",
+                "heading",
+                "dirty",
+                "general.open",
+                "general.a.title",
+                "general.a.on",
             ],
         );
     }
@@ -1171,7 +1225,11 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
         let pos = code.iter().position(|&b| b == Op::TextVar as u8).unwrap();
-        assert_eq!((code[pos + 1], code[pos + 2]), (2, 2), "TEXT_VAR = (general 슬롯 2, a.on offset 2)");
+        assert_eq!(
+            (code[pos + 1], code[pos + 2]),
+            (2, 2),
+            "TEXT_VAR = (general 슬롯 2, a.on offset 2)"
+        );
     }
 
     /// 객체 통째 전달(`row={a}`) - 부모 객체 prop을 자식 객체 prop에 통째로 넘긴다. 안 펼치므로
@@ -1417,7 +1475,12 @@ mod tests {
         // 컴포넌트 ID로 이름을 확인해 매핑이 어긋나도 잡히게 한다.
         let id_of = |name: &str| {
             (0..)
-                .find(|&i| module.def(i).map(|d| str_at(&module, d.name_const_index).unwrap()) == Some(name))
+                .find(|&i| {
+                    module
+                        .def(i)
+                        .map(|d| str_at(&module, d.name_const_index).unwrap())
+                        == Some(name)
+                })
                 .unwrap()
         };
         // 한 컴포넌트의 코드 앞머리 LOAD_RES들을 순서대로 모은다(연속한 LOAD_RES만).
@@ -1436,7 +1499,11 @@ mod tests {
         assert_eq!(load_res_ids(id_of("A")), vec![1], "A는 a.css=1");
         assert_eq!(load_res_ids(id_of("B")), vec![2], "B는 b.css=2");
         // C는 app(0)·b(2) 재사용 + c(3) 신규 - use 순서대로 셋.
-        assert_eq!(load_res_ids(id_of("C")), vec![0, 2, 3], "C는 app=0·b=2 재사용 + c=3");
+        assert_eq!(
+            load_res_ids(id_of("C")),
+            vec![0, 2, 3],
+            "C는 app=0·b=2 재사용 + c=3"
+        );
     }
 
     /// resolver가 경로를 못 찾으면 NotFound.
@@ -1566,7 +1633,10 @@ mod tests {
         let names = component_names(&bytes);
         assert!(names.contains(&"X".to_string()), "Left가 use한 X");
         assert!(names.contains(&"Y".to_string()), "Right가 use한 Y");
-        assert!(!names.contains(&"Z".to_string()), "아무도 use 안 한 Z는 제외");
+        assert!(
+            !names.contains(&"Z".to_string()),
+            "아무도 use 안 한 Z는 제외"
+        );
     }
 
     /// 합성은 RENDER 직전에 PUSH_PATH_SEGMENT를 낸다 - operand는 자식 type-name 상수풀 인덱스.
@@ -1621,7 +1691,10 @@ mod tests {
             .collect();
 
         assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 → 세그먼트 둘");
-        assert_eq!(seg_indices[0], seg_indices[1], "같은 type-name은 같은 상수풀 인덱스");
+        assert_eq!(
+            seg_indices[0], seg_indices[1],
+            "같은 type-name은 같은 상수풀 인덱스"
+        );
         assert_eq!(str_at(&module, seg_indices[0]).unwrap(), "Inner");
     }
 
@@ -1713,7 +1786,8 @@ mod tests {
         let trailing = r#"component B { props { a: string, b: number, } template { div( /) } }"#;
         assert!(compile(trailing).is_ok());
         // 중첩 object에서도 동일.
-        let nested = r#"component C { props { o: { a: string, b: number, } } template { div( /) } }"#;
+        let nested =
+            r#"component C { props { o: { a: string, b: number, } } template { div( /) } }"#;
         assert!(compile(nested).is_ok());
     }
 
@@ -1784,7 +1858,9 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::UnknownField { .. }))
+            Err(CompileError::Codegen(
+                codegen::CodegenError::UnknownField { .. }
+            ))
         ));
     }
 
@@ -1799,7 +1875,9 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::UnknownField { .. }))
+            Err(CompileError::Codegen(
+                codegen::CodegenError::UnknownField { .. }
+            ))
         ));
     }
 }

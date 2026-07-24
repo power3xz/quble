@@ -1,7 +1,7 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{ArgValue, AttrValue, Context, Event, ForCount, LitValue, Node, Prop, Type, VarRef};
-use crate::resolve::FlatComp;
+use crate::flatten::FlatComp;
 use bytecode::{
     encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
     TypeEntry,

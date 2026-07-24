@@ -7,7 +7,7 @@
 //! 뺀다. props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 
 use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
-use crate::resolve::{flatten, FlatComp, Resolver};
+use crate::flatten::{flatten, FlatComp, Resolver};
 use crate::CompileError;
 
 /// 엔트리 소스에서 핸들러 d.ts 텍스트를 낸다(compile_src와 대칭). use 그래프를 평탄화해
