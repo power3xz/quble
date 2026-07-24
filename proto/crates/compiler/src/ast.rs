@@ -36,7 +36,7 @@ pub struct Prop {
 /// prop 타입. quble이 온전히 소유하는 재귀 구조 - 원시 3종을 잎으로 배열·객체를 조합한다.
 /// d.ts가 TS 타입으로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 ///
-/// Ref/Omit/Pick은 "다른 곳의 타입을 참조/가공"하는 표기라, resolve 단계가 이를 그
+/// Ref/Omit/Pick은 "다른 곳의 타입을 참조/가공"하는 표기라, expand 단계가 이를 그
 /// 실제 필드 목록(Object)으로 바꿔치기한다. 예: `Section`의 props가 `{ title, on }`이면
 /// `Omit<Section, 'title'>` → `Object([("on", ...)])`. 그래서 codegen에는 Object만 오고
 /// Ref/Omit/Pick은 남지 않는다.
@@ -47,11 +47,11 @@ pub enum Type {
     String,
     Array(Box<Type>),
     Object(Vec<(String, Type)>), // 필드 선언 순서 보존(d.ts 방출 안정성)
-    /// `general: Section` - 다른 컴포넌트(대문자명)의 props를 타입으로 참조. resolve가
+    /// `general: Section` - 다른 컴포넌트(대문자명)의 props를 타입으로 참조. expand가
     /// 평탄화 후 그 컴포넌트 props를 Object로 환원해 치환한다(codegen엔 Ref가 안 남는다).
     Ref(String),
     /// `Omit<Section, 'title'>` - 안쪽 타입(Object로 환원됨)의 필드에서 나열한 키를 뺀다.
-    /// resolve가 안쪽을 먼저 풀고 필터해 Object로 치환한다. 유틸 타입은 Ref처럼 codegen 전에 사라진다.
+    /// expand가 안쪽을 먼저 풀고 필터해 Object로 치환한다. 유틸 타입은 Ref처럼 codegen 전에 사라진다.
     Omit(Box<Type>, Vec<String>),
     /// `Pick<Section, 'title'>` - 안쪽 타입 필드에서 나열한 키만 고른다(Omit의 반대).
     Pick(Box<Type>, Vec<String>),

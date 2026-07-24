@@ -173,8 +173,8 @@ fn store_size(ty: &Type) -> u16 {
         Type::Bool | Type::Number | Type::String => 1,
         Type::Array(_) => 1,
         Type::Object(fields) => fields.iter().map(|(_, t)| store_size(t)).sum(),
-        Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
-        Type::Omit(..) | Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
+        Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+        Type::Omit(..) | Type::Pick(..) => unreachable!("expand가 유틸 타입을 안 풀었다"),
     }
 }
 
@@ -258,7 +258,7 @@ fn var_ref_to_leaf_slot(
 
 /// 두 타입이 구조적으로 동일한가 - 필드 이름·순서·타입이 재귀로 일치. 객체 통째 전달에서
 /// 넘긴 경로의 도달 타입과 자식 prop 타입이 같은 leaf 배치인지 검사(순서만으로 leaf를 짝지으므로
-/// 이름·순서가 어긋나면 엉뚱하게 이어진다). (Ref/Omit/Pick은 resolve가 이미 Object로 풀었다.)
+/// 이름·순서가 어긋나면 엉뚱하게 이어진다). (Ref/Omit/Pick은 expand가 이미 Object로 풀었다.)
 fn types_match(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Bool, Type::Bool) | (Type::Number, Type::Number) | (Type::String, Type::String) => {
@@ -299,7 +299,7 @@ impl TypeTable {
     }
 
     /// Type의 구조를 테이블에 intern하고 type_ref 반환. object는 필드 자식부터 재귀 intern.
-    /// 필드명은 상수풀 인덱스로. (Ref/Omit/Pick은 resolve가 이미 풀었다 - split과 같은 전제.)
+    /// 필드명은 상수풀 인덱스로. (Ref/Omit/Pick은 expand가 이미 풀었다 - split과 같은 전제.)
     fn intern(&mut self, ty: &Type, pool: &mut ConstPool) -> u16 {
         let entry = match ty {
             Type::Bool | Type::Number | Type::String => TypeEntry::Scalar,
@@ -311,8 +311,8 @@ impl TypeTable {
                     .collect();
                 TypeEntry::Object(fields)
             }
-            Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
-            Type::Omit(..) | Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
+            Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+            Type::Omit(..) | Type::Pick(..) => unreachable!("expand가 유틸 타입을 안 풀었다"),
         };
         if let Some(&idx) = self.cache.get(&entry) {
             return idx;

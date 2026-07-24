@@ -7,7 +7,7 @@
 //! 뺀다. props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 
 use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
-use crate::flatten::{flatten, FlatComp, Resolver};
+use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::CompileError;
 
 /// 엔트리 소스에서 핸들러 d.ts 텍스트를 낸다(compile_src와 대칭). use 그래프를 평탄화해
@@ -15,23 +15,23 @@ use crate::CompileError;
 pub fn handlers_dts_src(
     entry_path: &str,
     src: &str,
-    resolver: &impl Resolver,
+    loader: &impl SourceLoader,
 ) -> Result<String, CompileError> {
-    let comps = flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
+    let comps = flatten(entry_path, src, loader).map_err(CompileError::Flatten)?;
     Ok(render(&comps))
 }
 
-/// 파일 경로로 d.ts를 낸다(compile_file과 대칭). 엔트리를 읽고 fs resolver로 use를 해소한다.
+/// 파일 경로로 d.ts를 낸다(compile_file과 대칭). 엔트리를 읽고 fs loader로 use를 해소한다.
 pub fn handlers_dts_file(path: &str) -> Result<String, CompileError> {
     let not_found = || {
-        CompileError::Resolve(crate::ResolveError::NotFound {
+        CompileError::Flatten(crate::FlattenError::NotFound {
             base: String::new(),
             target: path.to_string(),
         })
     };
     let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
     let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
-    handlers_dts_src(&entry.to_string_lossy(), &src, &crate::fs_resolver)
+    handlers_dts_src(&entry.to_string_lossy(), &src, &crate::fs_loader)
 }
 
 /// 한 fullname에 대응하는 핸들러 시그니처.
@@ -91,9 +91,10 @@ fn signature(h: &Handler) -> String {
     let ctx = if h.contexts.is_empty() {
         "{}".to_string()
     } else {
-        let fields = join(h.contexts.iter().map(|(name, fields)| {
-            format!("{name}: {{ {} }}", fields_type(fields, value_type))
-        }));
+        let fields =
+            join(h.contexts.iter().map(|(name, fields)| {
+                format!("{name}: {{ {} }}", fields_type(fields, value_type))
+            }));
         format!("{{ {fields} }}")
     };
     // Loop: 회차 인덱스 $0..$(loop_depth-1). 전부 number(회차 번호). @for 밖이면 {}.
@@ -116,11 +117,15 @@ fn type_to_ts(ty: &Type) -> String {
         Type::String => "string".to_string(),
         Type::Array(inner) => format!("{}[]", type_to_ts(inner)),
         Type::Object(fields) => {
-            let body = join(fields.iter().map(|(k, t)| format!("{k}: {}", type_to_ts(t))));
+            let body = join(
+                fields
+                    .iter()
+                    .map(|(k, t)| format!("{k}: {}", type_to_ts(t))),
+            );
             format!("{{ {body} }}")
         }
-        Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
-        Type::Omit(..) | Type::Pick(..) => unreachable!("resolve가 유틸 타입을 안 풀었다"),
+        Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+        Type::Omit(..) | Type::Pick(..) => unreachable!("expand가 유틸 타입을 안 풀었다"),
     }
 }
 
@@ -169,7 +174,17 @@ fn walk(
     seen: &mut Vec<String>,
 ) {
     let comp = &comps[comp_id].comp;
-    walk_nodes(comps, comp, &comp.template, path_prefix, context_stack, pending, depth_base, handlers, seen);
+    walk_nodes(
+        comps,
+        comp,
+        &comp.template,
+        path_prefix,
+        context_stack,
+        pending,
+        depth_base,
+        handlers,
+        seen,
+    );
 }
 
 /// depth_base: 다음 @for가 쓸 인덱스 번호(use-site부터 누적). pending을 컴포넌트가 소비해도
@@ -204,9 +219,27 @@ fn walk_nodes(
                     format!("{path_prefix}.{suffix}")
                 };
                 for (_dom, event_name) in event_bindings {
-                    emit(comp, event_name, &event_prefix, context_stack, depth_base, handlers, seen);
+                    emit(
+                        comp,
+                        event_name,
+                        &event_prefix,
+                        context_stack,
+                        depth_base,
+                        handlers,
+                        seen,
+                    );
                 }
-                walk_nodes(comps, comp, children, path_prefix, context_stack, pending, depth_base, handlers, seen);
+                walk_nodes(
+                    comps,
+                    comp,
+                    children,
+                    path_prefix,
+                    context_stack,
+                    pending,
+                    depth_base,
+                    handlers,
+                    seen,
+                );
             }
             Node::Component { alias, name, .. } => {
                 // 컴포넌트 세그먼트가 pending 인덱스를 전부 접미(Mid[$0]). 자식으로 내려가면 pending은
@@ -219,7 +252,16 @@ fn walk_nodes(
                     format!("{path_prefix}.{segment}")
                 };
                 if let Some(child_id) = comps.iter().position(|c| &c.comp.name == name) {
-                    walk(comps, child_id, &child_prefix, context_stack, &[], depth_base, handlers, seen);
+                    walk(
+                        comps,
+                        child_id,
+                        &child_prefix,
+                        context_stack,
+                        &[],
+                        depth_base,
+                        handlers,
+                        seen,
+                    );
                 }
             }
             Node::With { context, children } => {
@@ -227,18 +269,58 @@ fn walk_nodes(
                 if let Some(def) = comp.contexts.iter().find(|c| &c.name == context) {
                     stack.push((def.name.clone(), def.fields.clone()));
                 }
-                walk_nodes(comps, comp, children, path_prefix, &stack, pending, depth_base, handlers, seen);
+                walk_nodes(
+                    comps,
+                    comp,
+                    children,
+                    path_prefix,
+                    &stack,
+                    pending,
+                    depth_base,
+                    handlers,
+                    seen,
+                );
             }
             Node::If { then, else_, .. } => {
-                walk_nodes(comps, comp, then, path_prefix, context_stack, pending, depth_base, handlers, seen);
-                walk_nodes(comps, comp, else_, path_prefix, context_stack, pending, depth_base, handlers, seen);
+                walk_nodes(
+                    comps,
+                    comp,
+                    then,
+                    path_prefix,
+                    context_stack,
+                    pending,
+                    depth_base,
+                    handlers,
+                    seen,
+                );
+                walk_nodes(
+                    comps,
+                    comp,
+                    else_,
+                    path_prefix,
+                    context_stack,
+                    pending,
+                    depth_base,
+                    handlers,
+                    seen,
+                );
             }
             Node::For { body, .. } => {
                 // @for 진입 - depth_base를 pending에 추가(다음 세그먼트/이벤트가 접미), 다음 @for는
                 // depth_base+1. 자식 컴포넌트 경계를 넘어도 depth_base로 이어진다(use-site 누적).
                 let mut nested = pending.to_vec();
                 nested.push(depth_base);
-                walk_nodes(comps, comp, body, path_prefix, context_stack, &nested, depth_base + 1, handlers, seen);
+                walk_nodes(
+                    comps,
+                    comp,
+                    body,
+                    path_prefix,
+                    context_stack,
+                    &nested,
+                    depth_base + 1,
+                    handlers,
+                    seen,
+                );
             }
             Node::Text(_) | Node::Var(_) => {}
         }
@@ -293,7 +375,7 @@ fn emit(
 mod tests {
     use super::*;
 
-    /// use 없는 단일 소스로 d.ts를 낸다(resolver 미호출).
+    /// use 없는 단일 소스로 d.ts를 낸다(loader 미호출).
     fn dts(src: &str) -> String {
         handlers_dts_src("entry", src, &(|_: &str, _: &str| None)).unwrap()
     }
@@ -337,9 +419,12 @@ mod tests {
               template { button(@click:GO /) }
             }
         "#);
-        assert!(out.contains(
-            "{ tags: LeafIndex<string[]>; owner: LeafIndex<{ name: string; id: number }> }"
-        ), "실제 출력:\n{out}");
+        assert!(
+            out.contains(
+                "{ tags: LeafIndex<string[]>; owner: LeafIndex<{ name: string; id: number }> }"
+            ),
+            "실제 출력:\n{out}"
+        );
     }
 
     /// alias가 fullname path 세그먼트가 된다.
@@ -365,7 +450,11 @@ mod tests {
               template { button(@click:TOGGLE /) }
             }
         "#);
-        assert_eq!(out.matches("'Inner.TOGGLE':").count(), 1, "실제 출력:\n{out}");
+        assert_eq!(
+            out.matches("'Inner.TOGGLE':").count(),
+            1,
+            "실제 출력:\n{out}"
+        );
     }
 
     /// @with 활성 컨텍스트가 Ctx에 필드째 들어간다. 리터럴은 값으로 좁힌다.
@@ -383,7 +472,10 @@ mod tests {
               }
             }
         "#);
-        assert!(out.contains(r#", { Area: { section: "actions"; user: string } }, {}>"#), "실제 출력:\n{out}");
+        assert!(
+            out.contains(r#", { Area: { section: "actions"; user: string } }, {}>"#),
+            "실제 출력:\n{out}"
+        );
     }
 
     /// 리터럴 payload 필드는 그 값으로 좁혀지고, 변수 필드는 string.
@@ -396,7 +488,10 @@ mod tests {
               template { button(@click:BUMP /) }
             }
         "#);
-        assert!(out.contains(r#"Handler<{ count: string; label: "clicks" }"#), "실제 출력:\n{out}");
+        assert!(
+            out.contains(r#"Handler<{ count: string; label: "clicks" }"#),
+            "실제 출력:\n{out}"
+        );
     }
 
     /// payload 리터럴은 타입대로 좁혀진다 - 숫자는 그 값, 불리언은 true/false, 문자열은 "..".
@@ -408,7 +503,10 @@ mod tests {
               template { button(@click:E /) }
             }
         "#);
-        assert!(out.contains(r#"Handler<{ n: 42; b: true; s: "hi" }"#), "실제 출력:\n{out}");
+        assert!(
+            out.contains(r#"Handler<{ n: 42; b: true; s: "hi" }"#),
+            "실제 출력:\n{out}"
+        );
     }
 
     /// @if 양가지를 다 순회한다 - then·else 안의 이벤트가 둘 다 나온다.
@@ -506,7 +604,10 @@ mod tests {
               template { button(@click:PICK /) }
             }
         "#);
-        assert!(out.contains("'Row[$0].Cell[$1].PICK':"), "실제 출력:\n{out}");
+        assert!(
+            out.contains("'Row[$0].Cell[$1].PICK':"),
+            "실제 출력:\n{out}"
+        );
     }
 
     /// @for 안 @if는 깊이를 안 늘린다 - 가지 안 세그먼트도 같은 @for 인덱스.
@@ -544,8 +645,14 @@ mod tests {
             }
         "#);
         // @for 안 Mid: b가 [$1] (a 안). @for 밖 Mid: b가 [$0].
-        assert!(out.contains("'Mid[$0].Inner[$1].PICK':"), "@for 안 use-site\n{out}");
-        assert!(out.contains("'Mid.Inner[$0].PICK':"), "@for 밖 use-site\n{out}");
+        assert!(
+            out.contains("'Mid[$0].Inner[$1].PICK':"),
+            "@for 안 use-site\n{out}"
+        );
+        assert!(
+            out.contains("'Mid.Inner[$0].PICK':"),
+            "@for 밖 use-site\n{out}"
+        );
     }
 
     /// @for 밖 컴포넌트/이벤트는 [$n] 없음(회귀 - 반복 아니면 구분자 불필요).

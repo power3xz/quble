@@ -10,13 +10,13 @@ mod lexer;
 mod parse;
 
 pub use dts::handlers_dts_file;
-pub use flatten::{ResolveError, Resolver};
+pub use flatten::{FlattenError, SourceLoader};
 
 use std::path::Path;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
-    Resolve(flatten::ResolveError),
+    Flatten(flatten::FlattenError),
     Codegen(codegen::CodegenError),
 }
 
@@ -28,15 +28,15 @@ pub struct CompileOutput {
     pub resources: Vec<String>,
 }
 
-/// 엔트리 소스를 직렬화된 바이트코드로 컴파일. use 그래프를 resolver로 따라가
+/// 엔트리 소스를 직렬화된 바이트코드로 컴파일. use 그래프를 loader로 따라가
 /// 모든 컴포넌트를 한 모듈로 평탄화한다. entry_path는 엔트리 소스 자신의 정규화 경로로,
 /// 첫 use의 base가 된다(엔트리 컴포넌트가 ID 0).
 pub fn compile_src(
     entry_path: &str,
     src: &str,
-    resolver: &impl Resolver,
+    loader: &impl SourceLoader,
 ) -> Result<CompileOutput, CompileError> {
-    let comps = flatten::flatten(entry_path, src, resolver).map_err(CompileError::Resolve)?;
+    let comps = flatten::flatten(entry_path, src, loader).map_err(CompileError::Flatten)?;
     let (bytecode, resources) = codegen::generate(&comps).map_err(CompileError::Codegen)?;
     Ok(CompileOutput {
         bytecode,
@@ -45,21 +45,21 @@ pub fn compile_src(
 }
 
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
-/// 정규화한 절대경로로 해소한다(파일시스템 resolver).
+/// 정규화한 절대경로로 해소한다(파일시스템 loader).
 pub fn compile_file(path: &str) -> Result<CompileOutput, CompileError> {
     let not_found = || {
-        CompileError::Resolve(ResolveError::NotFound {
+        CompileError::Flatten(FlattenError::NotFound {
             base: String::new(),
             target: path.to_string(),
         })
     };
     let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
     let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
-    compile_src(&entry.to_string_lossy(), &src, &fs_resolver)
+    compile_src(&entry.to_string_lossy(), &src, &fs_loader)
 }
 
-/// 파일시스템 resolver: base 파일의 디렉터리 기준으로 target을 풀어 정규화한 절대경로와 소스를 반환.
-fn fs_resolver(base_canonical_path: &str, target_path: &str) -> Option<(String, String)> {
+/// 파일시스템 loader: base 파일의 디렉터리 기준으로 target을 풀어 정규화한 절대경로와 소스를 반환.
+fn fs_loader(base_canonical_path: &str, target_path: &str) -> Option<(String, String)> {
     let dir = Path::new(base_canonical_path).parent()?;
     let abs = std::fs::canonicalize(dir.join(target_path)).ok()?;
     let src = std::fs::read_to_string(&abs).ok()?;
@@ -81,7 +81,7 @@ mod tests {
         }
     }
 
-    /// use 없는 단일 소스를 컴파일(테스트용). resolver는 호출되지 않으므로 항상 None.
+    /// use 없는 단일 소스를 컴파일(테스트용). loader는 호출되지 않으므로 항상 None.
     fn compile(src: &str) -> Result<Box<[u8]>, CompileError> {
         compile_src("entry", src, &(|_: &str, _: &str| None)).map(|o| o.bytecode)
     }
@@ -92,13 +92,13 @@ mod tests {
             .iter()
             .map(|(p, s)| (p.to_string(), s.to_string()))
             .collect();
-        let resolver = |_base: &str, target: &str| {
+        let loader = |_base: &str, target: &str| {
             files
                 .iter()
                 .find(|(p, _)| p == target)
                 .map(|(p, s)| (p.clone(), s.clone()))
         };
-        compile_src("entry", entry_src, &resolver).map(|o| o.bytecode)
+        compile_src("entry", entry_src, &loader).map(|o| o.bytecode)
     }
 
     const HELLO: &str = r#"
@@ -307,7 +307,7 @@ mod tests {
         let src = r#"component C { template { img(src="a.png") {} } }"#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
@@ -317,7 +317,7 @@ mod tests {
         let src = r#"component C { template { img(src="a.png"/) } }"#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
@@ -334,7 +334,7 @@ mod tests {
         let src = r#"component C { template { div() {} } }"#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
@@ -347,7 +347,7 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
@@ -801,7 +801,7 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
@@ -815,7 +815,7 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
@@ -1025,7 +1025,7 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Lex(_)))
+            Err(CompileError::Flatten(FlattenError::Lex(_)))
         ));
     }
 
@@ -1034,11 +1034,11 @@ mod tests {
         let src = r#"component C { template { div() { } "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
-    /// resolve가 푼 루트 props를 leaf 경로로 펼쳐(객체는 필드까지, 배열은 요소 타입) 유틸
+    /// expand가 푼 루트 props를 leaf 경로로 펼쳐(객체는 필드까지, 배열은 요소 타입) 유틸
     /// 타입(Ref/Omit/Pick) 해소·선언 순서·객체 재귀 순서를 검증한다. 펼침은 이 검증만의 관찰
     /// 창이라 테스트 지역에 둔다(런타임은 타입 테이블로 심어 이 leaf 경로를 안 쓴다).
     fn compile_props(src: &str) -> Vec<String> {
@@ -1054,9 +1054,9 @@ mod tests {
                         push_leaf_paths(&format!("{prefix}.{name}"), field_ty, out);
                     }
                 }
-                ast::Type::Ref(n) => unreachable!("resolve가 Type::Ref({n})를 안 풀었다"),
+                ast::Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
                 ast::Type::Omit(..) | ast::Type::Pick(..) => {
-                    unreachable!("resolve가 유틸 타입을 안 풀었다")
+                    unreachable!("expand가 유틸 타입을 안 풀었다")
                 }
             }
         }
@@ -1144,7 +1144,7 @@ mod tests {
         );
         assert!(matches!(
             err,
-            Err(CompileError::Resolve(ResolveError::UnknownKey(k))) if k == "nope"
+            Err(CompileError::Flatten(FlattenError::UnknownKey(k))) if k == "nope"
         ));
     }
 
@@ -1158,7 +1158,7 @@ mod tests {
         );
         assert!(matches!(
             err,
-            Err(CompileError::Resolve(ResolveError::UnknownType(n))) if n == "Nope"
+            Err(CompileError::Flatten(FlattenError::UnknownType(n))) if n == "Nope"
         ));
     }
 
@@ -1175,7 +1175,7 @@ mod tests {
         );
         assert!(matches!(
             err,
-            Err(CompileError::Resolve(ResolveError::TypeCycle(_)))
+            Err(CompileError::Flatten(FlattenError::TypeCycle(_)))
         ));
     }
 
@@ -1361,7 +1361,7 @@ mod tests {
     }
 
     /// `use "./x.css"` - 리소스를 use한 컴포넌트는 정의 코드 앞머리에 LOAD_RES 0을 낸다.
-    /// 사이드맵 resources[0]은 정규화 경로(dedup 키). resolver가 정규화 경로를 돌려준다(소스는 버려짐).
+    /// 사이드맵 resources[0]은 정규화 경로(dedup 키). loader가 정규화 경로를 돌려준다(소스는 버려짐).
     #[test]
     fn compiles_load_res_for_used_css() {
         use bytecode::{decode, Op};
@@ -1371,11 +1371,11 @@ mod tests {
             component Card { template { div( /) } }
         "#;
         // 정규화 경로를 직접 매핑("./card.css" -> "/abs/card.css"). 소스는 빈 문자열(컴파일러가 안 씀).
-        let resolver = |_base: &str, target: &str| match target {
+        let loader = |_base: &str, target: &str| match target {
             "./card.css" => Some(("/abs/card.css".to_string(), String::new())),
             _ => None,
         };
-        let output = compile_src("entry", entry, &resolver).unwrap();
+        let output = compile_src("entry", entry, &loader).unwrap();
 
         // 사이드맵: resId 0 -> 정규화 경로.
         assert_eq!(output.resources, vec!["/abs/card.css".to_string()]);
@@ -1398,11 +1398,11 @@ mod tests {
             component A { template { div( /) } }
             component B { template { span( /) } }
         "#;
-        let resolver = |_base: &str, target: &str| match target {
+        let loader = |_base: &str, target: &str| match target {
             "./shared.css" => Some(("/abs/shared.css".to_string(), String::new())),
             _ => None,
         };
-        let output = compile_src("entry", entry, &resolver).unwrap();
+        let output = compile_src("entry", entry, &loader).unwrap();
 
         // 리소스는 하나만(dedup).
         assert_eq!(output.resources, vec!["/abs/shared.css".to_string()]);
@@ -1447,7 +1447,7 @@ mod tests {
             component C { template { a( /) } }
         "#;
         // .qubc는 소스를, .css는 정규화 경로 + 빈 소스를 돌려준다.
-        let resolver = |_base: &str, target: &str| match target {
+        let loader = |_base: &str, target: &str| match target {
             "./a.qubc" => Some(("./a.qubc".to_string(), a.to_string())),
             "./b.qubc" => Some(("./b.qubc".to_string(), b.to_string())),
             "./c.qubc" => Some(("./c.qubc".to_string(), c.to_string())),
@@ -1457,7 +1457,7 @@ mod tests {
             "./c.css" => Some(("/abs/c.css".to_string(), String::new())),
             _ => None,
         };
-        let output = compile_src("entry", entry, &resolver).unwrap();
+        let output = compile_src("entry", entry, &loader).unwrap();
 
         // 사이드맵: 등장 순서대로 전역 0,1,2,3. entry(app), a, b, 그다음 C의 신규 c.
         // C의 app·b는 재사용이라 사이드맵에 새로 추가되지 않는다.
@@ -1506,7 +1506,7 @@ mod tests {
         );
     }
 
-    /// resolver가 경로를 못 찾으면 NotFound.
+    /// loader가 경로를 못 찾으면 NotFound.
     #[test]
     fn use_unresolved_path_errors() {
         let entry = r#"
@@ -1515,7 +1515,7 @@ mod tests {
         "#;
         assert!(matches!(
             compile_map(entry, &[]),
-            Err(CompileError::Resolve(ResolveError::NotFound { .. }))
+            Err(CompileError::Flatten(FlattenError::NotFound { .. }))
         ));
     }
 
@@ -1529,7 +1529,7 @@ mod tests {
         let parts = r#"component Label { template { span( /) } }"#;
         assert!(matches!(
             compile_map(entry, &[("./parts.qubc", parts)]),
-            Err(CompileError::Resolve(ResolveError::MissingExport { .. }))
+            Err(CompileError::Flatten(FlattenError::MissingExport { .. }))
         ));
     }
 
@@ -1543,7 +1543,7 @@ mod tests {
         let other = r#"component Card { template { span( /) } }"#;
         assert!(matches!(
             compile_map(entry, &[("./other.qubc", other)]),
-            Err(CompileError::Resolve(ResolveError::DuplicateComponent(_)))
+            Err(CompileError::Flatten(FlattenError::DuplicateComponent(_)))
         ));
     }
 
@@ -1554,19 +1554,19 @@ mod tests {
             use A from "./a.qubc"
             component Entry { template { A( /) } }
         "#;
-        // a가 다시 entry를 use. resolver는 "entry"(엔트리 path)도 매핑한다.
+        // a가 다시 entry를 use. loader는 "entry"(엔트리 path)도 매핑한다.
         let a = r#"
             use Entry from "./entry.qubc"
             component A { template { Entry( /) } }
         "#;
-        let resolver = move |_base: &str, target: &str| match target {
+        let loader = move |_base: &str, target: &str| match target {
             "./a.qubc" => Some(("./a.qubc".to_string(), a.to_string())),
             "./entry.qubc" => Some(("entry".to_string(), String::new())),
             _ => None,
         };
         assert!(matches!(
-            compile_src("entry", entry, &resolver),
-            Err(CompileError::Resolve(ResolveError::Cycle(_)))
+            compile_src("entry", entry, &loader),
+            Err(CompileError::Flatten(FlattenError::Cycle(_)))
         ));
     }
 
@@ -1755,7 +1755,7 @@ mod tests {
         let src = r#"component A { template { div(class="x", id="y" /) } }"#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
@@ -1766,13 +1766,13 @@ mod tests {
         let src = r#"component A { props { a: string b: number } template { div( /) } }"#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
         // 중첩 object 타입에서 콤마 누락.
         let nested = r#"component B { props { o: { a: string b: number } } template { div( /) } }"#;
         assert!(matches!(
             compile(nested),
-            Err(CompileError::Resolve(ResolveError::Parse(_)))
+            Err(CompileError::Flatten(FlattenError::Parse(_)))
         ));
     }
 
