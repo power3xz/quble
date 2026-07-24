@@ -1,0 +1,16 @@
+component Parent {
+  props { flowed: string }
+  template {
+    div() {
+      Child(lit="고정" flow={flowed} /)
+    }
+  }
+}
+
+component Child {
+  props { lit: string, flow: string }
+  events { TAP({ flow }) }
+  template {
+    button(@click:TAP) { {flow} }
+  }
+}

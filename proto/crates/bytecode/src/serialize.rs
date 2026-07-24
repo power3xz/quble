@@ -51,13 +51,11 @@ pub fn encode(m: &Module) -> Vec<u8> {
         put_type(&mut out, t);
     }
 
-    // 루트 props 객체 타입 인덱스 - 진입점이 rootValue를 이 구조로 풀필한다.
-    put_u16(&mut out, m.root_props_type_ref);
-
     // 컴포넌트 테이블
     put_u16(&mut out, m.defs.len() as u16);
     for d in &m.defs {
         put_u16(&mut out, d.name_const_index);
+        put_u16(&mut out, d.props_type_ref);
         put_u32(&mut out, d.code_off);
         put_u32(&mut out, d.code_len);
         // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(name_const_index, fields)]
@@ -192,13 +190,12 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
         types.push(read_type(&mut r)?);
     }
 
-    let root_props_type_ref = r.u16()?;
-
     // 컴포넌트 테이블
     let def_count = r.u16()?;
     let mut defs = Vec::with_capacity(def_count as usize);
     for _ in 0..def_count {
         let name_const_index = r.u16()?;
+        let props_type_ref = r.u16()?;
         let code_off = r.u32()?;
         let code_len = r.u32()?;
         let event_count = r.u16()?;
@@ -213,14 +210,14 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
             let name_const_index = r.u16()?;
             contexts.push(ContextDef { name_const_index, fields: read_fields(&mut r)? });
         }
-        defs.push(CompDef { name_const_index, code_off, code_len, events, contexts });
+        defs.push(CompDef { name_const_index, props_type_ref, code_off, code_len, events, contexts });
     }
 
     // 코드
     let code_len = r.u32()? as usize;
     let code = r.take(code_len)?.to_vec();
 
-    Ok(Module::new(pool, types, root_props_type_ref, defs, code))
+    Ok(Module::new(pool, types, defs, code))
 }
 
 /// 타입 테이블 엔트리를 읽는다 - 태그 1바이트 + payload(put_type 대응). 알 수 없는 태그는 거부.

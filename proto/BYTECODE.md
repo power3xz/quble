@@ -126,13 +126,15 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
                                   // type_ref로 자식 타입을 가리켜 중첩·공유를 표현
                  tag 2 (Array)  : elem_type_ref:u16   // 원소 타입. 배열의 배열은 elem이 다시 Array
                                   //   (string[][] = #0 Array(1) -> #1 Array(2) -> #2 Scalar)
-[ 루트 props 타입 ]
-  root_props_type_ref : u16   // 루트 컴포넌트(#0) props의 객체 타입 인덱스. 진입점이 rootValue를
-                              //   이 구조로 store에 풀필. 비루트 props 타입은 안 쓰여 인코딩 안 함
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
   count      : u16
   defs       : count x (
                  name_const_index : u16  // 상수풀의 컴포넌트명
+                 props_type_ref   : u16  // 이 컴포넌트 props를 하나의 Object로 묶은 타입(타입 테이블
+                                         //   인덱스). 필드 순서 = scope 슬롯 순서. props 없으면 빈
+                                         //   Object. 진입점은 defs[0].props_type_ref로 rootValue를
+                                         //   store에 풀필하고, 핸들러 props 접근은 발화 comp의 이걸
+                                         //   argumentSourcePairs(런타임 슬롯 출처)와 결합해 해소한다
                  code_off   : u32        // 코드 영역 내 구획
                  code_len   : u32
                  event_count: u16        // 이 컴포넌트가 선언한 이벤트 수
@@ -168,8 +170,9 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 - 내장 태그 테이블/전역 상수풀은 파일에 없다 - 헤더의 version이 이 테이블들의 버전을 함께
   결정한다고 본다.
-- **타입 테이블은 모듈 전역·dedup.** payload/context가 실제로 담는 객체 타입만 등록한다(props
-  전체가 아니라). Object 필드가 자식을 `type_ref`로 가리켜 중첩·공유를 표현한다. field는
+- **타입 테이블은 모듈 전역·dedup.** payload/context가 담는 타입 + **모든 comp의 props 타입**을
+  등록한다(props는 핸들러가 접근하려면 선언 전체가 필요). Object 필드가 자식을 `type_ref`로 가리켜
+  중첩·공유를 표현한다. field는
   `type_ref`로 이 테이블을 참조하고 값 출처(`ref`)만 따로 싣는다 - 구조는 전역에, 인스턴스는
   컴포넌트 field에. 슬롯을 펼치지 않으므로 객체 field도 ref 하나로 그 슬롯을 가리킨다(런타임이
   type_ref 구조로 store에서 조립). 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).

@@ -582,6 +582,20 @@ const leafCountOf = (module: TModule, typeRef: number): number => {
   return count;
 };
 
+// props 중첩 객체를 감싼다 - 없는 prop명을 문자열로 접근하면 즉시 throw. 핸들러는 우리 통제 밖의
+// 자유 코드라(d.ts는 힌트일 뿐 강제 못 함), 오타·리터럴 바인딩(STORE 아님) prop을 만지면 조용히
+// undefined로 새지 않고 여기서 잡는다. 심볼 키(Symbol.toPrimitive 등 JS 내부)와 존재 키는 통과.
+// leafTree가 중첩 객체마다 감싸므로 props.item.typo도 안쪽 객체가 잡는다.
+const propsGuard = (obj: Record<string, unknown>): Record<string, unknown> =>
+  new Proxy(obj, {
+    get(target, key) {
+      if (typeof key === "symbol" || key in target) {
+        return target[key as string];
+      }
+      throw new Error(`prop '${key}' 없음 - 오타이거나 리터럴 바인딩 prop(STORE만 접근 가능)`);
+    },
+  });
+
 // 지연 심기 항목 - 만난 배열 하나(요소 심기는 고정부 뒤로 미룸 - plantRoot 레이아웃 참고). value는 원본 배열.
 type TDeferredArray = { arrayInfoIndex: number; value: unknown; elemTypeRef: number };
 
@@ -630,7 +644,7 @@ const plantFixed = (
 // 요소 leaf가 고정 칸 사이에 끼면 뒤 필드 offset이 밀리므로, 고정부를 다 심은 뒤 요소를 끝에
 // 레벨별로 몰아 심는다(중간 삽입 금지).
 const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayInfo>) => {
-  const rootType = module.types[module.rootPropsTypeRef];
+  const rootType = module.types[module.defs[0].propsTypeRef];
   const leaves: unknown[] = [];
   const rootFlat: number[] = [];
   const obj = rootValue as Record<string, unknown> | undefined;
@@ -685,13 +699,12 @@ const decode = (bytes: Uint8Array) => {
     types.push(readType(r));
   }
 
-  // 루트 props 객체 타입 인덱스 - 진입점이 rootValue를 이 구조로 store에 풀필한다.
-  const rootPropsTypeRef = r.u16();
-
   const defCount = r.u16();
   const defs = [];
   for (let i = 0; i < defCount; i++) {
     const nameConstIndex = r.u16();
+    // 이 comp props를 묶은 Object 타입(types 인덱스). defs[0]이 진입점 풀필 구조.
+    const propsTypeRef = r.u16();
     const codeOff = r.u32();
     const codeLen = r.u32();
     // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameConstIndex, fields)]
@@ -706,7 +719,7 @@ const decode = (bytes: Uint8Array) => {
     for (let c = 0; c < contextCount; c++) {
       contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
-    defs.push({ nameConstIndex, codeOff, codeLen, events, contexts });
+    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts });
   }
 
   const codeLen = r.u32();
@@ -714,12 +727,13 @@ const decode = (bytes: Uint8Array) => {
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
   // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
-  return { constpool, types, rootPropsTypeRef, defs, code, compiledSteps: [], leafCounts: [] };
+  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [] };
 };
 type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
 type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
 type TDef = {
   nameConstIndex: number;
+  propsTypeRef: number;
   codeOff: number;
   codeLen: number;
   events: TEventEntry[];
@@ -729,7 +743,6 @@ type TModule = {
   code: Uint8Array;
   constpool: (string | number | boolean)[];
   types: TType[];
-  rootPropsTypeRef: number;
   compiledSteps: TStep[][];
   leafCounts: number[];
   defs: TDef[];
@@ -750,7 +763,7 @@ type TBinding = {
   fullName: string;
   payload: TAssembled[];
   contextLeaves: Record<string, TAssembled[]>;
-  props: Record<string, number>;
+  props: Record<string, unknown>;
   loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
 };
 
@@ -769,6 +782,9 @@ class Interpreter {
   regionPool: Pool<TRegion>;
   branchPool: Pool<TBranch>;
   createdContexts: TCreatedContext[];
+  // 진입점 argumentSourcePairs(plantRoot의 rootFlat). store(루트부터의 절대 경로) 접근에 쓴다 -
+  // 어느 핸들러든 같은 루트라 인스턴스 전역. props(발화 comp 상대)와 달리 store는 defs[0] 기준.
+  rootScope: TScope;
 
   // ── 이벤트 위임(인터프리터 격리) ──────────────────────────────────
   // element마다 addEventListener를 다는 대신(부하 시 리스너 클로저가 노드 수만큼 쌓인다),
@@ -797,6 +813,7 @@ class Interpreter {
     regionPool: Pool<TRegion>,
     branchPool: Pool<TBranch>,
     createdContexts: TCreatedContext[],
+    rootScope: TScope,
   ) {
     this.module = module;
     this.code = module.code;
@@ -808,6 +825,7 @@ class Interpreter {
     this.regionPool = regionPool;
     this.branchPool = branchPool;
     this.createdContexts = createdContexts;
+    this.rootScope = rootScope;
   }
 
   // forBodyEnd의 캐시 통과 조회.
@@ -836,6 +854,44 @@ class Interpreter {
 
   componentContexts = (componentId: number): TEventEntry[] => {
     return this.module.defs[componentId].contexts;
+  };
+
+  // 발화 comp의 props를 이름->leafIndex 중첩 객체로 편다(BIND_EVENT에서 1회). props는 이 comp가
+  // 받은 값의 주소라, scope 슬롯 i(=prop 선언 순서)의 (kind, base)를 argumentSourcePairs에서 읽는다.
+  // STORE 슬롯만 담는다 - CONST(리터럴 바인딩)는 주소가 없어(get/set 대상 아님) 제외. 스칼라는
+  // base 하나, 객체는 base부터 필드 offset 누적해 하위까지 편다(잎=leafIndex). 배열은 칸 leafIndex
+  // 하나(push 대상 - 요소 경로 접근은 언어 전체가 아직 미지원).
+  buildProps = (propsTypeRef: number, scope: TScope): Record<string, unknown> => {
+    const propsType = this.module.types[propsTypeRef];
+    if (propsType.tag !== "object") {
+      return propsGuard({});
+    }
+    const props: Record<string, unknown> = {};
+    for (let i = 0; i < propsType.fields.length; i++) {
+      const [nameConst, fieldTypeRef] = propsType.fields[i];
+      if (slotKind(scope, i) !== STORE) {
+        continue; // CONST 슬롯 - 상수라 주소 없음
+      }
+      const name = this.module.constpool[nameConst] as string;
+      props[name] = this.leafTree(fieldTypeRef, slotRef(scope, i));
+    }
+    return propsGuard(props);
+  };
+
+  // base부터 typeRef 구조 따라 잎=leafIndex 중첩값을 만든다. 스칼라·배열은 base 하나, 객체는
+  // 필드마다 앞 형제 leaf 수만큼 offset을 밀어 재귀한다(store 레이아웃 = 깊이우선 연속).
+  leafTree = (typeRef: number, base: number): unknown => {
+    const t = this.module.types[typeRef];
+    if (t.tag !== "object") {
+      return base; // 스칼라(leafIndex) / 배열(칸 leafIndex)
+    }
+    const obj: Record<string, unknown> = {};
+    let offset = 0;
+    for (const [nameConst, fieldTypeRef] of t.fields) {
+      obj[this.module.constpool[nameConst] as string] = this.leafTree(fieldTypeRef, base + offset);
+      offset += leafCountOf(this.module, fieldTypeRef);
+    }
+    return propsGuard(obj);
   };
 
   // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
@@ -880,9 +936,18 @@ class Interpreter {
       push: this.pushArrayElement,
       removeAt: this.removeArrayElementAt,
       props: binding.props,
+      store: this.rootStore(),
       context,
       ...currentIndices,
     });
+  };
+
+  // store = 루트부터의 절대 경로(props와 같은 leafIndex 중첩 객체, 단 발화 comp가 아닌 defs[0] 기준).
+  // 인스턴스 불변이라 1회 만들어 캐시한다. 어느 핸들러든 같은 루트 상태 트리를 본다.
+  storeTree: Record<string, unknown> | null = null;
+  rootStore = (): Record<string, unknown> => {
+    this.storeTree ??= this.buildProps(this.module.defs[0].propsTypeRef, this.rootScope);
+    return this.storeTree;
   };
 
   // 배열 요소 추가 - props의 배열 필드(arrayLeafIndex) 칸 값이 arrayInfoIndex다. 요소를 타입대로 store에 심고
@@ -1415,16 +1480,9 @@ class Interpreter {
             typeRef: field.typeRef,
             fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
           }));
-          // props: 핸들러의 상태변경 대상(필드명 -> leafIndex). STORE 슬롯만 - 상수 슬롯은 불변이라 대상이
-          // 못 된다. 스칼라는 그 leaf(set/get 대상), 배열은 배열 칸 leaf(push 대상 - 그 값이 arrayInfoIndex).
-          // 객체의 set 의미는 미정(ISSUES). data(읽기)는 객체까지 조립된다.
-          const props: Record<string, number> = {};
-          for (const p of payload) {
-            const tag = this.module.types[p.typeRef].tag;
-            if ((tag === "scalar" || tag === "array") && p.fieldSourcePairs[0] === STORE) {
-              props[p.name] = p.fieldSourcePairs[1];
-            }
-          }
+          // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
+          // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 현재 scope로 편다.
+          const props = this.buildProps(this.module.defs[compId].propsTypeRef, argumentSourcePairs);
           // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
           // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
           const contextLeaves: Record<string, TAssembled[]> = {};
@@ -1816,6 +1874,7 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
         regionPool,
         branchPool,
         createdContexts,
+        rootFlat,
       );
       const fragment = interpreter.interpret(
         rootFlat,
