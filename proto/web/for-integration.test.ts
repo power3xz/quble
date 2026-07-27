@@ -200,7 +200,7 @@ test("@for (of c.count): 객체 필드를 count로, 몸체에서 값 참조", ()
   assert.deepEqual(paras(host), ["3", "3", "3"], "count=3 -> p 3개, 각 회차가 c.count 값 표시");
 });
 
-test("객체 필드 count 반응: setPath로 회차가 증감한다", () => {
+test("객체 필드 count 반응: set으로 회차가 증감한다", () => {
   const { host, store } = instantiate("for_obj_field", { c: { count: 2 } });
   assert.deepEqual(paras(host), ["2", "2"], "초기 count=2");
   store.set(0, 4); // c.count

@@ -12,8 +12,8 @@
 // 재진입해, 자식 if가 부모와 같은 regionPool/가지에 합류한다(별도 인스턴스 없음).
 //
 // 값 소비 경로 (REACTIVITY.md §1~§3):
-//   offset(컴포넌트 로컬) -> argumentSourcePairs 슬롯 [kind, ref] -> kind가 STORE면 store.leafOf로
-//   leafIndex(lazy 발급) + store.get, CONST면 module.constpool[ref] 직접.
+//   offset(컴포넌트 로컬) -> argumentSourcePairs 슬롯 [kind, ref] -> kind가 STORE면 ref가 leafIndex라
+//   store.get, CONST면 module.constpool[ref] 직접.
 
 type TDigit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
 
@@ -286,7 +286,7 @@ class Reader {
 
 // 슬롯 해석방법. argumentSourcePairs는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
 // argumentSourcePairs[2*offset](해석방법) / argumentSourcePairs[2*offset+1](참조)로 읽는다. STORE는 참조가 store
-// 경로(반응값, 구독), CONST는 참조가 상수풀 인덱스(불변, 구독 스킵), RAW는 참조가 값 자체
+// leafIndex(반응값, 구독), CONST는 참조가 상수풀 인덱스(불변, 구독 스킵), RAW는 참조가 값 자체
 // (count @for의 회차 인덱스 - store에 안 앉는 회차 상수, 구독 스킵).
 const STORE = 0;
 const CONST = 1;
