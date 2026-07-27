@@ -34,8 +34,6 @@ component Greeting {
 scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
 `{expr}` 전체 표현식은 아직 아니다.)
 
-이 Hello 예시에 안 쓰인 것(뒤에서 다룬다): 슬롯, `@for`, 배열 타입. 아직 미구현: 전체 `{expr}`.
-
 ---
 
 ## 2. 상수풀 3단 구조 - 분리
@@ -211,8 +209,13 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `PUSH_ARG_LIT`    | 0x11 | const_index: u16      | 컴포넌트 상수풀           | 리터럴 값을 자식 인자 버퍼에 push. 부모 슬롯과 분리된 독립 leaf(use-site `Comp(prop="lit")`). |
 | `PUSH_PATH_SEGMENT` | 0x12 | seg_index: u16      | 컴포넌트 상수풀           | 합성 경로(fullname)에 세그먼트 하나를 민다(자식 type-name/alias). 뒤따르는 `RENDER`가 소비. |
 | `ENTER_CONTEXT`   | 0x13 | context_index: u16    | 컴포넌트 컨텍스트 테이블   | `@with` 진입. `ContextDef.fields`를 읽어 활성 컨텍스트 스택에 push. 이후 코드가 그 범위. |
-| `PUSH_FIELD`      | 0x19 | scope_index:u8, offset:u8 | scope                 | 부모 `scope[scope_index]`에서 필드로 내려가 `(kind, base+offset)`을 자식에 push(경로 참조 `{user.name}`). kind(출처)는 부모 슬롯 그대로 전파, 위치만 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다(leaf면 `store.get`, object면 base+offset, array면 `arrayPool[store.get()]`). |
 | `EXIT_CONTEXT`    | 0x14 | -                     | -                         | `@with` 블록 끝(IF_END 동형 마커). 활성 컨텍스트 스택 pop.                 |
+| `FOR_RAW`         | 0x15 | count: u16            | -                         | 리터럴 횟수 반복(`@for (x of 3)`). 슬롯 안 거치고 직접 인라인. `FOR_END`까지가 몸체. |
+| `FOR_COUNT_VAR`   | 0x16 | scope_index:u8, offset:u8 | scope                 | count가 숫자 슬롯인 반복(`@for (x of n)`). `scope[scope_index]`의 `base+offset` 값을 횟수로. |
+| `FOR_END`         | 0x17 | -                     | -                         | `@for` 몸체 끝(IF_END 동형 마커). 중첩은 깊이로 짝짓기.                    |
+| `PUSH_PATH_INDEX_SEGMENT` | 0x18 | depth: u16    | -                         | 합성 경로에 `@for` 회차 인덱스 세그먼트를 민다. `depth`는 loopIndexStack에서 읽을 위치. 직전 이름 세그먼트에 접미(`VideoItem[3]`)하거나, 직전 이름이 없으면 익명 세그먼트(`[3]`). |
+| `PUSH_FIELD`      | 0x19 | scope_index:u8, offset:u8 | scope                 | 부모 `scope[scope_index]`에서 필드로 내려가 `(kind, base+offset)`을 자식에 push(경로 참조 `{user.name}`). kind(출처)는 부모 슬롯 그대로 전파, 위치만 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다(leaf면 `store.get`, object면 base+offset, array면 `arrayPool[store.get()]`). |
+| `FOR_ARRAY_VAR`   | 0x1a | scope_index:u8, offset:u8 | scope                 | count가 배열 슬롯인 반복(`@for (item of arr)`). 그 칸의 `arrayInfoIndex`로 요소 수·위치를 얻어 요소 수만큼 반복하며, 회차마다 회차변수 슬롯을 그 요소 leaf에 바인딩. |
 
 설계 메모:
 
@@ -391,10 +394,11 @@ HALT
 proto/
   Cargo.toml            # workspace
   crates/
-    bytecode/   # opcode, 내장 태그 테이블, 전역 상수풀(속성명), 컴포넌트 상수풀, 직렬화/역직렬화 (컴파일러/렌더러 공용)
+    bytecode/   # opcode, 내장 태그 테이블, 전역 상수풀(속성명), 컴포넌트 상수풀, 직렬화/역직렬화
     compiler/   # .qubc 소스 -> bytecode. 프론트엔드(lexer/parse->ast) + 백엔드(codegen)
-    renderer/   # bytecode -> HTML 문자열 (SSR, render_to_string)
-  src/main.rs           # .qubc -> 컴파일 -> 실행 -> stdout
+    renderer/   # bytecode -> HTML 문자열 (SSR)
+  src/bin/      # 실행 바이너리 - 컴파일, dev 서버
+  web/          # JS 런타임 - qubb를 읽어 DOM 렌더
 ```
 
 `bytecode` 크레이트가 포맷의 단일 정의처(내장 태그 테이블 포함). 컴파일러/렌더러가 공유해 계약

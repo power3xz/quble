@@ -48,8 +48,9 @@ pub enum Op {
     ExitContext = 0x14,
     /// `@for (x of N)` 반복. operand: 반복 횟수 u16(슬롯 안 거치고 직접 인라인). FOR_END까지가 몸체.
     ForRaw = 0x15,
-    /// `@for (x of n)` 반복 - count가 숫자 slot. operand: count의 scope index u16. 런타임이 그
-    /// 슬롯 값을 횟수로. count가 배열이면 ForArrayVar로 갈린다(컴파일타임 타입으로 구별).
+    /// `@for (x of n)` 반복 - count가 숫자 slot. operand: scope index u8, offset u8 (count가
+    /// 필드면 base로부터의 거리). 런타임이 그 슬롯 값을 횟수로. count가 배열이면 ForArrayVar로
+    /// 갈린다(컴파일타임 타입으로 구별).
     ForCountVar = 0x16,
     /// `@for` 몸체 끝 마커(operand 없음, IfEnd 동형).
     ForEnd = 0x17,
