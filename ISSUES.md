@@ -22,6 +22,21 @@
   `ELEM_OPEN..ELEM_CLOSE_OPEN..ELEM_END`로 그대로 나가 새 opcode 없이 `<input>`(내용 없음)으로
   렌더된다.
 
+- **핸들러가 set/get할 수 있는 prop이 이벤트 payload에 선언한 것뿐** - 핸들러의 `props`를 런타임이
+  이벤트 payload 필드로만 채워, payload에 없는 prop은 핸들러에서 못 바꿨다(d.ts는 전체 prop을
+  타이핑해 TS는 통과하고 런타임에서만 조용히 깨졌다). 엮인 결정은 prop 이름을 런타임에 어떻게
+  공급하느냐였다. **해결:** 이름을 런타임으로 넘기지 않는 쪽으로 갔다 - 모든 comp props 타입을
+  Object로 intern해(`def.props_type_ref`) 발화 comp의 전체 props를 leafIndex 중첩 객체로 주고,
+  루트 절대 경로는 `store`로 함께 노출한다(같은 메커니즘). 이름은 컴파일타임에 소진되고 런타임은
+  leafIndex만 본다. 리터럴(CONST) 접근은 set 대상이 없어 Proxy가 throw.
+
+- **pathCache 문자열 키 메모리** - leaf-store가 경로 문자열을 키로 leafIndex를 lazy 발급해
+  (`Map<path-string, leafIndex>`), 배열 요소마다 경로 문자열이 영구 누적됐다. 실측으로 캐시 자체는
+  작았고(경로당 ~47B, 같은 규모의 DOM이 ~100배) 진짜 걸림돌은 **회수 없음**이었다 - 발급이 증가만
+  해서 지나간 경로가 안 지워졌다. **해결:** 경로 기반 해소가 사라져 캐시가 없어졌고(leafIndex는
+  컴파일타임 슬롯과 `alloc`으로 직접 받는다), 누적도 배열 항목 제거 시 크기별 free list로 회수하게
+  됐다.
+
 ## 미해결
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
@@ -29,19 +44,6 @@
   POC였고 그 역할은 끝났다 - 언어가 어느 정도 완성된 뒤 다시 본다. 당분간 처리하지 않는다.
   워크스페이스 members에서 빼고 exclude로 뒀다(크레이트 파일은 복구용으로 남김). quble 크레이트의
   render_source/render_with와 tests/end_to_end.rs(SSR 통합 테스트)도 제거했다.
-
-- **핸들러가 set/get할 수 있는 prop이 이벤트 payload에 선언한 것뿐** - 핸들러의 `set`/`get`은
-  `props.<이름>`으로 prop을 가리키는데, 런타임(runtime.ts BIND_EVENT)이 그 `props` 맵을 이벤트
-  payload 필드로만 채운다. 그래서 payload에 없는 prop은 핸들러에서 못 바꾼다. (재현:
-  `TOGGLE_SECTION({ title, open })`처럼 payload에 `dirty`가 없으면, 컴포넌트가 `dirty`를 prop으로
-  받아도 `set(props.dirty, ...)`가 undefined를 건드려 아무 일도 안 일어난다.) d.ts는 이와 어긋나게
-  컴포넌트 **전체 prop**을 `props`로 타이핑해, TS는 통과하고 런타임에서만 조용히 깨진다.
-  - **엮인 결정**: "무엇을 담느냐"(payload만 vs 전체 prop)와 "어떻게 담느냐"(지금은 이름->leafIndex
-    맵을 미리 짓는데, 자식 컴포넌트는 prop 이름이 바이트코드에 없어 이름 맵을 못 짓는다)가
-    prop 이름을 런타임에 어떻게 공급하느냐(지금은 바이트코드에 이름이 없어 scope index만)에 달려
-    있다 - 이건 바이트코드/manifest 포맷 결정이라 신중히 정한다. (검토된 갈래: `data`에 값 대신
-    leafIndex를 담아 `set(data.x, v)`로 통합, prop 이름을 manifest 사이드카/바이트코드에 두기,
-    scope index+paths 폐기하고 이름 기반으로 복귀.)
 
 - **안 쓰는 `use`가 트리셰이킹 안 됨** - `use`로 import했지만 template에서 합성(RENDER)하지
   않는 컴포넌트가 qubb에 def로 포함된다. (재현: `components/profilecard.qubc`의 `Tag`는
@@ -52,23 +54,11 @@
   끊는다(runtime.ts). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
   필요가 구체화되면 그 모양에 맞춰 설계한다.
 
-- **pathCache 문자열 키 메모리 (실제 문제 아닐 수 있음)** - `leaf-store.ts`의 pathCache는
-  `Map<path-string, leafIndex>`라, 배열 요소마다 `organizations.0...members.M.profileDetails.name`
-  같은 경로 문자열을 키로 영구 보관한다. 요소가 많고 중첩이 깊으면 문자열 키가 쌓인다. **실측**
-  (node --expose-gc): 5만 경로 1.75MB, 12만 3.5MB, 120만 56MB (경로당 ~47B - 정수 leafIndex만이면
-  사실상 0). 문자열 길이보다 **경로 개수**가 지배 요인. **다만 우선순위 낮음:** 그 leaf가 실제로
-  화면에 살아있으려면 DOM이 훨씬 크다 - 실측(headless Chrome renderer RSS) 노드당 ~2.5KB로,
-  12만 요소면 DOM +347MB vs pathCache 3.5MB(DOM이 ~100배). 즉 이만한 규모는 가상 스크롤이 강제되고
-  살아있는 leaf는 화면분뿐이라 pathCache도 작다. 진짜 걸림돌은 캐시 키 표현(문자열 vs 정수)이
-  아니라 **회수 없음**(leafOf가 `leaves.length`로 증가만, 스크롤로 지나간 경로가 안 지워지고 누적) -
-  leafIndex 회수(REACTIVITY.md §3, 아래 createdContexts 항목과 같은 free-list 메커니즘)로 풀 문제.
-
-- **createdContexts 회수 미구현 (@for 들어올 때)** - 런타임은 EnterContext마다 컨텍스트를
-  createdContexts에 append하고 contextIndex로 참조한다. 컨텍스트 fields는 그 시점
-  paths로 푼 leafIndex라 인스턴스마다 달라 공유·캐시가 안 되고, 매번 새로 만든다. 지금은 정적
-  구조라 회수가 불필요해 append만 한다. `@for`가 들어와 항목이 동적으로 생기고 사라지면 그 안의
-  컨텍스트도 회수돼야 한다 - leafIndex 회수(REACTIVITY.md §3)와 같은 메커니즘으로 풀 문제라
-  그때 함께 정한다.
+- **createdContexts 회수 - 지금 구현 불가** - 런타임은 EnterContext마다 컨텍스트를
+  createdContexts에 append하고 contextIndex로 참조한다. ExitContext는 활성 스택에서만 빼서,
+  `@for` 회차가 사라져도 그 안에서 만든 컨텍스트는 남는다(회차를 넣고 빼면 누적).
+  **막힌 이유:** 이벤트 핸들러가 그 컨텍스트를 언제 참조할지 런타임이 알 수 없어 회수 시점을
+  정할 수 없다. 핸들러가 컴파일 대상에 들어오면(참조 시점을 컴파일러가 봄) 풀 수 있다.
 
 - **같은 컨텍스트명 중첩** - 방향성: 맥락(컨텍스트)이라는 정보는 그 성격상 같은 이름이 중복으로
   쌓이지 않는 게 맞다. `@with Area`가 합성 경계를 넘어 중첩되면(`Outer`의 `@with Area` 안에 합성된

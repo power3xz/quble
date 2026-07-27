@@ -9,7 +9,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 ## 바이트코드 / 실행
 
 - [x] 바이트코드 + VM 파이프라인 (compile -> qubb -> render)
-- [x] SSR 렌더러 / 클라이언트 런타임 (같은 qubb 계약을 Rust·JS가 각각 해석)
+- [x] 클라이언트 런타임 - qubb 계약을 JS가 해석해 DOM을 만든다.
+- [ ] SSR 렌더러 - 같은 qubb 계약을 Rust가 해석. 보류(ISSUES.md).
 - [ ] 실행 재개 (resume, ≈hydration) - 클라가 SSR이 만든 HTML을 새로 만들지 않고, 기존
   노드에 구독·핸들러만 붙여 SSR이 멈춘 실행을 이어받는다. region anchor 주석(`<!--qb:region#N-->`)이
   결합 지점 단서일 수 있다(방법 미정).
@@ -25,7 +26,7 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 
 ## 템플릿 / 렌더링
 
-- [ ] `@for` - 반복. 지금 컴포넌트가 펼쳐지는 근본 원인 제거.
+- [x] `@for` - 반복. 횟수·스칼라 배열·객체 배열, 중첩, 회차변수·회차 인덱스, 항목 추가·제거.
 - [x] `@if` / `@else` - 조건 분기. 클라 region/branch swap + 비활성 가지 lazy build(REACTIVITY.md §8).
   중첩·형제·else 없는 if, 합성 경계를 넘는 if(RENDER 인라인 재진입으로 자식 if가 부모 region 트리에 합류)까지. (SSR은 분기 평가 후 활성 가지만 렌더.)
 - [ ] `{expr}` - 표현식 (JS 위임 여부 포함). 지금은 단순 변수 참조만.
@@ -45,8 +46,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
     타입 표기가 필요하다. `{expr}`(필드 접근·경로)과 `props 객체`의 공통 전제 - 값의 형태를
     알아야 접근할 수 있다. 최종적으로는 보간·합성에서의 타입 검사까지. 전제 미결: props에
     타입 단서가 없고(IDEAS.md), qubb 포맷에 타입을 싣는지. 방법 미정.
-  - [ ] props 객체 (여러 필드 - store 객체를 path로 lazy resolve, 부분 적용)
-  - [ ] leafIndex 할당기 / free list (지금은 증가만 - `@for`에서 회수 필요)
+  - [x] props 객체 (여러 필드 - 각 속성값이 leafIndex를 가리키는 중첩 구조)
+  - [x] leafIndex 할당기 / free list - 배열 항목 제거 시 회수하고 다음 할당이 재사용.
 
 ## 합성 / 이벤트
 
