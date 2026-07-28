@@ -132,7 +132,8 @@ component TodoItem {
 | `@if (cond) { ... } @else { ... }` | 조건부 렌더링.                                   |
 | `@for (item in list) { ... }`      | 반복 렌더링.                                     |
 | `@click:EVENT`                     | DOM 이벤트를 컴포넌트 이벤트로 위임한다.         |
-| `>>`                               | 슬롯. 자식 콘텐츠가 들어갈 자리.                 |
+| `@slot [name]`                     | 슬롯 정의. 자식 콘텐츠가 들어갈 자리. 한 컴포넌트는 무기명 하나 **또는** 기명 여럿 - 섞을 수 없다. |
+| `Name << 노드`                     | 기명 슬롯에 콘텐츠 주입. 무기명은 합성 블록(`Comp(…) { … }`)이 그대로 들어간다. |
 | `{expr}`                           | 표현식 보간.                                     |
 
 ### 2.4 이벤트 위임 흐름
@@ -409,7 +410,7 @@ component Card {
     div(class=["card", styles.variant, styles.priority]) {
       h2(class=["title"]) { {title} }
       div(class=["card-body"]) {
-        >>   // 슬롯 - children이 들어온다
+        @slot   // 무기명 슬롯 - children이 들어온다
       }
     }
   }

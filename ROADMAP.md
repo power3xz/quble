@@ -54,7 +54,7 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] 합성 - 컴포넌트 호출(`Comp(p={var})`), 다중 정의, use-site 바인딩(`PUSH_ARG`+`RENDER`로 부모->자식 path 전달). 공유 검증.
 - [x] fullname - 합성 경로를 누적한 이벤트 식별자(`Toggle.TOGGLE`). 별칭 없으면 타입명이 마디.
 - [x] 별칭 - `Alias: Comp(...)`로 경로 마디를 별칭으로(분리), 생략 시 타입명 공유.
-- [ ] 슬롯 - `{}` 자식 콘텐츠 주입.
+- [ ] 슬롯 - 자식 콘텐츠 주입(무기명/기명). 문법은 SYNTAX §3.3.
 - [x] contexts / events - 핸들러(fullname에 묶임), 이벤트 위임 (`@click:EVENT`), `@with` 컨텍스트 주입(`provided`/`context`). 모델: [REACTIVITY.md](REACTIVITY.md) §6·§7.
 
 ## 전송 / 보안

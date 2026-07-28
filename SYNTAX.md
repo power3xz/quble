@@ -161,20 +161,53 @@ CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE /)
 TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK /)
 ```
 
-자식(슬롯) 없는 합성은 self-close로 닫는다(§3.1.1). 자식 블록을 가질 수도 있다(슬롯으로 들어감):
+자식(슬롯) 없는 합성은 self-close로 닫는다(§3.1.1). 슬롯을 정의한 컴포넌트는 자식 블록을
+가질 수 있다(§3.3):
 
 ```
 MyTodoCard: Card(title="할일 목록" variant="primary") {
   p(class=["description"]) { "오늘 완료해야 할 작업들" }
-  TodoItem(id="1" title="문서 작성" completed=false)
+  TodoItem(id="1" title="문서 작성" completed=false /)
 }
 ```
 
 ### 3.3 슬롯
 
+**정의**(컴포넌트 안) - `@slot`은 자식 콘텐츠가 들어갈 자리다.
+
 ```
->>     // 자식 콘텐츠가 들어갈 자리 (Card 내부)
+@slot            // 무기명
+@slot header     // 기명
 ```
+
+한 컴포넌트는 **무기명 하나 또는 기명 여럿** 중 하나만 쓴다 - 섞으면 컴파일 에러.
+둘을 섞지 않으므로 "이름 없는 노드가 어디로 가는가"라는 암묵 규칙이 없다.
+
+**사용**(합성처) - 정의 쪽이 무기명이냐 기명이냐에 따라 갈린다.
+
+```
+// 무기명 - 합성 블록이 통째로 그 자리에 들어간다
+MyTodoCard: Card(title="할일 목록") {
+  p(class=["description"]) { "오늘 완료해야 할 작업들" }
+  TodoItem(id="1" title="문서 작성" /)
+}
+
+// 기명 - `이름 << 노드`로 슬롯을 지목한다
+MyCard: Card(title="…") {
+  Header << h1(class="hd") { {title} }
+  Body   << TodoList( /)
+}
+```
+
+`<<` 오른쪽은 노드 하나, 또는 블록(`Name << { … }`)으로 여러 노드.
+
+정의된 슬롯을 **안 채워도 된다**(props와 다르다 - props는 전부 필수). 안 채운 자리는 비어서
+렌더된다. 채우는 순서는 무관하다 - `Header << … Body << …`와 `Body << … Header << …`는
+같은 결과다(방출 순서는 정의 쪽 선언 순서로 정규화된다).
+
+슬롯 콘텐츠는 **쓰는 쪽 컨텍스트로 해석된다** - 코드는 합성 블록 안에 있지만 보간
+(`{title}`)은 정의한 컴포넌트가 아니라 **쓰는 쪽 props**를 본다. 이벤트 fullname의 경로도
+쓰는 쪽 기준이다(콘텐츠를 쓴 자리가 곧 그 노드의 트리 위치 - DESIGN §1.2 path 축).
 
 ---
 
