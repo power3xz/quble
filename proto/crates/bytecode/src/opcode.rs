@@ -21,7 +21,7 @@ pub enum Op {
     /// 컴포넌트 상수풀 속성명 인덱스 + scope index. 속성값이 변수(`data-id={x}`).
     AttrLVar = 0x0a,
     /// 부모 scope[scope_index] 슬롯 `(kind, index)`을 편집 없이 그대로 자식 인자 버퍼에 push.
-    /// 경로 없는 참조(`Comp(x={a})`)의 인코딩. 뒤따르는 RENDER가 소비. 순서 = 자식 scope index 0,1,2….
+    /// 경로 없는 참조(`Comp(x={a})`)의 인코딩. 뒤따르는 RENDER가 소비. 순서 = 자식 scope index 0,1,2....
     PushThrough = 0x0b,
     /// 분기 시작. scope index 하나(불리언)로 then/else를 가른다. then 가지 코드가 이어진다.
     If = 0x0c,

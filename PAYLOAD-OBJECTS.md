@@ -12,7 +12,7 @@
 일상적이다.
 
 현재 payload/context 값 자리는 **leaf-only**다. field 하나가 scope index 하나로 풀려
-스칼라만 담긴다(codegen `arg_to_field_value` → `var_ref_to_scope_index`, 객체면 `NotLeaf`).
+스칼라만 담긴다(codegen `arg_to_field_value` -> `var_ref_to_scope_index`, 객체면 `NotLeaf`).
 그래서 `{ user }`는 컴파일되지 않는다.
 
 ## 도달한 방향 (요약)
@@ -38,7 +38,7 @@
 전역 테이블을 가리킬 뿐이다.
 
 이 방향은 **조립을 값 레이어에만** 둔다. store(leaf 평탄 배열)도 반응성(leaf 구독)도
-paths(scope index → 경로)도 건드리지 않는다. 객체는 store에 실체가 없고 조립 결과로만
+paths(scope index -> 경로)도 건드리지 않는다. 객체는 store에 실체가 없고 조립 결과로만
 존재한다 - "빈 폼"(leaf가 undefined)도 leaf 값이 그대로 흘러 자연 처리된다.
 
 ## 데이터 흐름
@@ -52,7 +52,7 @@ paths(scope index → 경로)도 건드리지 않는다. 객체는 store에 실�
 
     #0  Scalar
     #1  Object { short:#0, long:#0 }
-    #2  Object { name:#1,  email:#0 }      // user → type_ref 2
+    #2  Object { name:#1,  email:#0 }      // user -> type_ref 2
 
 ### 2) 직렬화 (u16, 개념)
 
@@ -60,18 +60,18 @@ paths(scope index → 경로)도 건드리지 않는다. 객체는 store에 실�
     3      // 엔트리 개수
     0      // #0 tag=Scalar
     1 2    // #1 tag=Object, field_count=2
-    3 0    //    (short, →#0)
-    4 0    //    (long,  →#0)
+    3 0    //    (short, ->#0)
+    4 0    //    (long,  ->#0)
     1 2    // #2 tag=Object, field_count=2
-    1 1    //    (name,  →#1)
-    2 0    //    (email, →#0)   ← #0 재사용(dedup)
+    1 1    //    (name,  ->#1)
+    2 0    //    (email, ->#0)   <- #0 재사용(dedup)
     ── SAVE payload field: user (해당 컴포넌트의 EventDef 안) ──
     0      // name_const_index = user
     2      // type_ref = #2 (전역 테이블 참조)
     3      // leaf_count = 3
     0 1 2  // leaf 인덱스(scope index): user.name.short/long, user.email
 
-### 3) 런타임 - 타입 구조 → 조립 프로그램
+### 3) 런타임 - 타입 구조 -> 조립 프로그램
 
 컴파일 대상은 **type_ref가 가리키는 타입 구조**다(field가 아니라). 그 구조를 walk해
 평탄한 조립 명령열로 만든다:
@@ -122,7 +122,7 @@ paths(scope index → 경로)도 건드리지 않는다. 객체는 store에 실�
 
 ## 미해결
 
-- **manifest.props(사이드카 점경로) 대체 여부.** 타입 테이블이 있으면 경로(scope index →
+- **manifest.props(사이드카 점경로) 대체 여부.** 타입 테이블이 있으면 경로(scope index ->
   store 경로)를 트리 walk로 파생할 수 있어 문자열 사이드카를 없앨 여지가 있다. 이번 조립과는
   독립 - 별개로 볼지, 함께 할지 미정. (묶으면 BYTECODE 계약 + manifest 포맷 동시 변경.)
 - **타입 깊이 상한.** 병리적으로 깊은 타입 입력에 대한 한계/에러 처리.

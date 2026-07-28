@@ -1,6 +1,6 @@
-// 이벤트 발생 통합 테스트 - 실제 컴파일러(.qubc → .qubb, events{}·@click:EVENT → BIND_EVENT)와
-// 실제 runtime.js를 jsdom 위에서 돌린다. 단일 컴포넌트(합성·fullname 없음): 버튼 클릭 → 이벤트
-// 발생 → payload(현재값) 조립 → 핸들러 호출 → 핸들러의 set이 기존 반응성으로 DOM을 갱신.
+// 이벤트 발생 통합 테스트 - 실제 컴파일러(.qubc -> .qubb, events{}·@click:EVENT -> BIND_EVENT)와
+// 실제 runtime.js를 jsdom 위에서 돌린다. 단일 컴포넌트(합성·fullname 없음): 버튼 클릭 -> 이벤트
+// 발생 -> payload(현재값) 조립 -> 핸들러 호출 -> 핸들러의 set이 기존 반응성으로 DOM을 갱신.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
@@ -55,7 +55,7 @@ test("핸들러 data에 payload 필드의 현재값이 필드명 키로 담긴�
   assert.deepEqual(received, { label: "할일", on: true }, "label·on 현재값이 키로");
 });
 
-test("핸들러의 set이 DOM을 갱신한다(클릭 → set → 텍스트 변경)", () => {
+test("핸들러의 set이 DOM을 갱신한다(클릭 -> set -> 텍스트 변경)", () => {
   const { store, button } = instantiate(
     { label: "켜기", on: false },
     {

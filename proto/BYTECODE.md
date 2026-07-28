@@ -40,8 +40,8 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 | 풀                   | 내용                                                         | 정의 위치                                  | 참조 방식       |
 | -------------------- | ------------------------------------------------------------ | ------------------------------------------ | --------------- |
-| **내장 태그 테이블** | 알려진 HTML **태그명만** (`div`, `h1`, `p`, …)               | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 예약 ID (u16)   |
-| **전역 상수풀**      | 흔한 **속성명만** (`class`, `id`, `src`, …)                  | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 전역 ID (u16)   |
+| **내장 태그 테이블** | 알려진 HTML **태그명만** (`div`, `h1`, `p`, ...)               | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 예약 ID (u16)   |
+| **전역 상수풀**      | 흔한 **속성명만** (`class`, `id`, `src`, ...)                  | 언어 스펙에 고정. **파일에 직렬화 안 함.** | 전역 ID (u16)   |
 | **컴포넌트 상수풀**  | 텍스트/속성값/전역에 없는 속성명 등 컴포넌트마다 다른 상수    | 파일의 상수풀 섹션                         | 풀 인덱스 (u16) |
 
 - 내장 태그 테이블/전역 상수풀은 컴파일러/런타임이 **같은 테이블을 코드로** 들고 있다. `div`/`class`는
@@ -124,7 +124,7 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
                                   // type_ref로 자식 타입을 가리켜 중첩·공유를 표현
                  tag 2 (Array)  : elem_type_ref:u16   // 원소 타입. 배열의 배열은 elem이 다시 Array
                                   //   (string[][] = #0 Array(1) -> #1 Array(2) -> #2 Scalar)
-[ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2…)
+[ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2...)
   count      : u16
   defs       : count x (
                  name_const_index : u16  // 상수풀의 컴포넌트명
@@ -238,7 +238,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     - `Comp(x="lit")`(리터럴) -> `PUSH_ARG_LIT const_index`: 부모 슬롯과 분리된 독립 const.
   - **싣는 건 값이 아니라 부모 scope의 (kind, index)**다. 같은 컴포넌트가 use-site마다 다른
     값을 받을 수 있어(§ 정의 vs 사용) 전역 leafIndex가 아니라 부모 슬롯을 한 단계 풀어 준다.
-  - 인자는 **자식 scope index 0,1,2… 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부**
+  - 인자는 **자식 scope index 0,1,2... 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부**
     바인딩한다고 보고 순서만으로 매핑한다. 일부 생략 허용은 미정(빈 자리용 opcode 등).
   - 진입점(최상위)은 외부에서 `render(qubb, comp_id, scope)`로 scope를 직접 준다. 인자 버퍼는
     `RENDER`로 합성할 때만 쓰인다.
@@ -254,7 +254,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   **`TEXT_VAR`와 같은 slot 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 슬롯 배열).
 - **분기 - `IF`/`ELSE`/`IF_END` (마커).** `@if`/`@else`를 세 마커로 감싼다. 형태와 "왜 점프가
   없어야 하는가"는 §5.1에서 따로 설명한다.
-- **반복 - `FOR_* … FOR_END` (마커 경계).** `@for`는 점프가 아니라 **해석단이 본문 구간을 N회
+- **반복 - `FOR_* ... FOR_END` (마커 경계).** `@for`는 점프가 아니라 **해석단이 본문 구간을 N회
   반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계는 `FOR_END` 마커(IF_END와 동형,
   중첩은 깊이로 짝짓기). 여는 opcode는 **count의 컴파일타임 타입**으로 갈린다 - 런타임이 값을 보고
   추정하지 않는다.
@@ -285,13 +285,13 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   - **내용 해시 파일명**은 평탄화 시 동명 충돌을 막고 캐시 버스팅도 겸한다(FNV-1a 64bit). 파일명을
     `<basename>.<hash>`로 두면 충돌하려면 basename/내용 해시가 둘 다 같아야 해 사실상 0.
   - **resId는 모듈 전역 인덱스**다. scope index/comp_id가 모듈 로컬인 것과 같은 결 - 한 모듈
-    안에서만 유효한 0,1,2…. 같은 정규화 경로는 같은 resId로 합친다(컴파일타임 정규화/중복 제거).
+    안에서만 유효한 0,1,2.... 같은 정규화 경로는 같은 resId로 합친다(컴파일타임 정규화/중복 제거).
   - **qubb 안에 리소스 테이블은 두지 않는다.** 빌드가 이미 resId->경로를 알아 qubb에 또 담는 건
     잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
 - **이벤트 - `BIND_EVENT` + 컴포넌트 이벤트 테이블.** 정의와 발생이 나뉜다.
   - **정의**는 컴포넌트 테이블(§4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
     이벤트명/fields(필드명 + type_ref + ref)가 그 컴포넌트의 이벤트 배열에 들어간다.
-    `event_index`는 이 배열의 인덱스(0,1,2…). 각 field는 `type_ref`(타입 테이블)로 조립 구조를,
+    `event_index`는 이 배열의 인덱스(0,1,2...). 각 field는 `type_ref`(타입 테이블)로 조립 구조를,
     **ref**로 그 구조를 채울 값 하나를 가리킨다(슬롯을 안 펼쳐 객체도 ref 하나). ref는 태그로
     Scope(부모 슬롯의 scope_index+offset) / Const(리터럴) / Raw(@for)를 가른다. 컨텍스트와 같은
     인코딩(<FIELDS>, §4).
@@ -299,7 +299,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     `BIND_EVENT click, 0`(click이 일어나면 0번 이벤트)을 낸다. 속성처럼 `ELEM_OPEN`과
     `ELEM_CLOSE_OPEN` 사이에 온다.
   - **발생 시 런타임**: 0번 이벤트 정의를 보고, 각 field의 ref를 현재값으로 읽어 `type_ref`
-    구조대로 **조립**해 `data = { title: … }`를 만들고, 핸들러(fullname으로 찾음)에 넘긴다.
+    구조대로 **조립**해 `data = { title: ... }`를 만들고, 핸들러(fullname으로 찾음)에 넘긴다.
     스칼라 field는 그 슬롯이 값이 되고, 객체 field는 슬롯의 store 위치부터 구조대로 중첩 객체로
     조립된다(조립 절차는 런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다.
     같은 fullname = 같은 핸들러.
@@ -309,7 +309,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   메타데이터. 이벤트와 같은 결로 정의와 활성화가 나뉜다.
   - **정의**는 컴포넌트 테이블(§4)에 둔다. `contexts { Area { userId: assignee } }`가 컨텍스트명/
     fields(이벤트와 같은 인코딩)로 컨텍스트 배열에 들어간다. `context_index`는 이 배열의 인덱스.
-  - **활성화**는 코드의 `ENTER_CONTEXT context_index` … `EXIT_CONTEXT`다. `@with Area { … }`가
+  - **활성화**는 코드의 `ENTER_CONTEXT context_index` ... `EXIT_CONTEXT`다. `@with Area { ... }`가
     이 짝으로 감싼다(IF/IF_END와 동형 - 점프 없는 마커, 중첩 보장).
   - **런타임**: ENTER가 그 컨텍스트를 활성 스택에 올리고(각 field를 type_ref 구조로 조립), 그 범위 안의
     `BIND_EVENT`가 활성 컨텍스트를 핸들러의 `context`로 전달한다(`context.Area.userId` = 발생 시점
@@ -364,7 +364,7 @@ if-else :  IF cond  [then]  ELSE  [else]  IF_END
 0:"greeting" 1:"Hello" 2:"sub" 3:"world"
 ```
 
-컴포넌트 테이블: `[ id 0: name_const_index=1("Hello"), code_off=0, code_len=… ]`
+컴포넌트 테이블: `[ id 0: name_const_index=1("Hello"), code_off=0, code_len=... ]`
 진입: 런타임이 `RENDER 0` 으로 시작.
 
 코드 (들여쓰기는 가독성용, 실제는 평탄):

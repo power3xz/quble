@@ -18,12 +18,12 @@ const ATTRS: &[&str] = &[
     "placeholder", // 10
 ];
 
-/// 전역 속성명 ID → 이름. 범위를 벗어나면 None.
+/// 전역 속성명 ID -> 이름. 범위를 벗어나면 None.
 pub fn attr_name(id: u16) -> Option<&'static str> {
     ATTRS.get(id as usize).copied()
 }
 
-/// 속성명 → 전역 ID. 전역 테이블에 없으면 None(컴포넌트 상수풀로 빠짐).
+/// 속성명 -> 전역 ID. 전역 테이블에 없으면 None(컴포넌트 상수풀로 빠짐).
 pub fn attr_id(name: &str) -> Option<u16> {
     ATTRS.iter().position(|&a| a == name).map(|i| i as u16)
 }

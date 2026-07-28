@@ -19,12 +19,12 @@ const DOM_EVENTS: &[&str] = &[
     "scroll",      // 12
 ];
 
-/// DOM 이벤트 ID → 이름. 범위를 벗어나면 None.
+/// DOM 이벤트 ID -> 이름. 범위를 벗어나면 None.
 pub fn dom_event_name(id: u16) -> Option<&'static str> {
     DOM_EVENTS.get(id as usize).copied()
 }
 
-/// DOM 이벤트명 → ID. 전역 집합에 없으면 None.
+/// DOM 이벤트명 -> ID. 전역 집합에 없으면 None.
 pub fn dom_event_id(name: &str) -> Option<u16> {
     DOM_EVENTS.iter().position(|&e| e == name).map(|i| i as u16)
 }

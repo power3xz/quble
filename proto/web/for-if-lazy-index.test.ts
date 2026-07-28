@@ -1,4 +1,4 @@
-// 회귀 테스트 - @for 안 @if가 "초기 비활성 → 나중 활성화(lazyBuild)"될 때, 그 지연 build되는
+// 회귀 테스트 - @for 안 @if가 "초기 비활성 -> 나중 활성화(lazyBuild)"될 때, 그 지연 build되는
 // 가지 안 이벤트의 회차 인덱스($0)가 정합한지. loopIndexStack이 @for 축의 push/pop 공유 배열이라,
 // lazyBuild 지연 실행 시점엔 이미 pop돼 비어 있을 수 있다 - 그럼 $0가 어긋난다.
 //
@@ -18,7 +18,7 @@ before(() => {
   qubb = buildFixture("for_if_lazy_index");
 });
 
-// props { n: number, flag: bool } → leafIndex n=0, flag=1.
+// props { n: number, flag: bool } -> leafIndex n=0, flag=1.
 // @for (i of n) { @if (flag) { button(@click:PICK) } @else { span } }
 // flag=false로 시작하면 각 회차 then(button)은 lazyBuild 대기(else "off" 활성).
 const instantiate = (n: number, flag: boolean, handlers: THandlers) => {

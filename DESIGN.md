@@ -133,7 +133,7 @@ component TodoItem {
 | `@for (item in list) { ... }`      | 반복 렌더링.                                     |
 | `@click:EVENT`                     | DOM 이벤트를 컴포넌트 이벤트로 위임한다.         |
 | `@slot [name]`                     | 슬롯 정의. 자식 콘텐츠가 들어갈 자리. 한 컴포넌트는 무기명 하나 **또는** 기명 여럿 - 섞을 수 없다. |
-| `Name << 노드`                     | 기명 슬롯에 콘텐츠 주입. 무기명은 합성 블록(`Comp(…) { … }`)이 그대로 들어간다. |
+| `Name << 노드`                     | 기명 슬롯에 콘텐츠 주입. 무기명은 합성 블록(`Comp(...) { ... }`)이 그대로 들어간다. |
 | `{expr}`                           | 표현식 보간.                                     |
 
 ### 2.4 이벤트 위임 흐름
@@ -151,7 +151,7 @@ type TEventHandler<TStore> = (
   data: <events 스키마에서 추론된 페이로드>,
   params: {
     context: <@with로 주입된 컨텍스트 - 컨텍스트명별 메타데이터>,
-    $0, $1, …: number,  // @for 회차 인덱스(바깥 $0, 안쪽 $1). 안정적 key는 미결 §5.1
+    $0, $1, ...: number,  // @for 회차 인덱스(바깥 $0, 안쪽 $1). 안정적 key는 미결 §5.1
     get: () => TStore,
     set: (store: Partial<TStore> | ((s: TStore) => Partial<TStore>)) => void,
   }
@@ -160,7 +160,7 @@ type TEventHandler<TStore> = (
 
 - 핸들러는 단순 콜백이 아니라 **상태 변경(`get`/`set`) + 네비게이션(`goTo`)의 단일 진입점**이다.
 - `data`와 `context`의 타입은 컴파일러가 풀네임에 묶어 자동 생성한다.
-- **`context`** - `@with Area { … }`로 주입한 메타데이터를 컨텍스트명별로 받는다
+- **`context`** - `@with Area { ... }`로 주입한 메타데이터를 컨텍스트명별로 받는다
   (`context.Area.userId`). 값은 `data`와 같은 처리(leafIndex로 바인딩 시점 고정, 발생 시점에
   현재값). 인스턴스 식별과는 성격이 달라 별도 슬롯으로 둔다. (구현: BYTECODE.md `ENTER_CONTEXT`.)
 
@@ -435,7 +435,7 @@ const handlers: TEventHandlers<
   TStore
 > = {
   "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { provided, set }) => {
-    // data: { id, completed, timestamp }  ← events 스키마에서 추론
+    // data: { id, completed, timestamp }  <- events 스키마에서 추론
     set((s) => ({ todos: toggle(s.todos, data.id) }));
   },
   "MyTodoCard.TodoItem.TagBadge.TAG_CLICK": (data, { provided }) => {

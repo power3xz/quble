@@ -30,7 +30,7 @@ export const loadHandlers = async (manifest: TManifest, base: string | URL): Pro
  * @param qubbUrl  .qubb URL (manifest는 확장자만 .manifest.json으로 바꿔 유도)
  * @param rootEl   마운트 대상 DOM 요소
  * @param data     루트 props 초기값 객체. blueprint가 타입 구조대로 store에 편다.
- * @returns        인스턴스({ nodes, store, … }) - store로 반응성을 건다.
+ * @returns        인스턴스({ nodes, store, ... }) - store로 반응성을 건다.
  */
 export const mount = async (qubbUrl: string, rootEl: Element, data: unknown) => {
   const base = new URL(qubbUrl, location.href);

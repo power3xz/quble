@@ -28,8 +28,8 @@ swap 등)뿐이다.
 
 ```
 set(leafIndex, v)
-  → store[leafIndex] = v
-  → subscribers[leafIndex] 의 핸들러들 호출 → DOM 갱신
+  -> store[leafIndex] = v
+  -> subscribers[leafIndex] 의 핸들러들 호출 -> DOM 갱신
 ```
 
 Svelte 5는 Proxy로 **런타임에** "무엇을 구독할지" 알아낸다 - 값을 읽는 순간 접근을 가로채
@@ -54,7 +54,7 @@ Svelte 5는 Proxy로 **런타임에** "무엇을 구독할지" 알아낸다 - �
 
 ```
 컴파일타임:  offset + 바인딩 식 (어느 store 경로를 가리키는지)
-렌더 시점:   할당기가 leafIndex를 동적 배정 → 바인딩 평가해 store 리프로 해석 → 구독 등록
+렌더 시점:   할당기가 leafIndex를 동적 배정 -> 바인딩 평가해 store 리프로 해석 -> 구독 등록
 제거 시:     그 구간 회수 (자유 목록)
 ```
 
@@ -86,7 +86,7 @@ a의 `{name}`과 b의 `{name}`은 로컬 offset이 다르지만 **둘 다 `store
 ## 3.1 슬롯 = (kind, ref)
 
 부모가 자식에게, `@for`가 몸체에 값을 넘길 때 scope 슬롯에 `(kind, ref)`를 꽂는다. 인터리브
-평탄 배열 하나(`argumentSourcePairs = [kind0, ref0, kind1, ref1, …]`), 슬롯 offset은
+평탄 배열 하나(`argumentSourcePairs = [kind0, ref0, kind1, ref1, ...]`), 슬롯 offset은
 `[2*offset]`=kind / `[2*offset+1]`=ref.
 
 ```
@@ -128,7 +128,7 @@ grid = { rows: { cells: string[] }[] },  rows = [ {cells:[a,b]}, {cells:[c,d,e]}
 store.leaves               arrayPool
 --------------------       -----------------------------------------------
 0: arrayInfoIndex 0  ─┐    0 (rows)         elemStartLeafIndices [1, 4]
-1: arrayInfoIndex 1  ←┘    1 (rows[0].cells)                     [2, 3]
+1: arrayInfoIndex 1  <-┘    1 (rows[0].cells)                     [2, 3]
 2: 'a'                     2 (rows[1].cells)                     [5, 6, 7]
 3: 'b'
 4: arrayInfoIndex 2
@@ -150,7 +150,7 @@ rootValue를 **타입 순서로** 순회하며 값까지 심는다(scalar=값 1�
 ```
 videos = [ {title, tags}, {title, tags} ]
 
-leaves:  [ title  tags색인  title  tags색인 │ tags[0]원소…  tags[1]원소… ]
+leaves:  [ title  tags색인  title  tags색인 │ tags[0]원소...  tags[1]원소... ]
            └── 루트 고정부(연속) ──────────┘ └── 레벨1 요소(뒤로) ──┘
 ```
 
@@ -163,7 +163,7 @@ leaves:  [ title  tags색인  title  tags색인 │ tags[0]원소…  tags[1]원
 | `store.user.name`   | 텍스트 노드 핸들러     | textContent 교체                                      |
 | `store.list.length` | **`@for` 블록 핸들러** | 항목 노드 추가/제거 + 파생 리프 인덱스 동적 할당/해제 |
 
-push/pop = length 변경 → `@for` 재구성. length가 **항목 인스턴스의 생애주기를 관장**한다 -
+push/pop = length 변경 -> `@for` 재구성. length가 **항목 인스턴스의 생애주기를 관장**한다 -
 항목 생성 시 할당기에서 base를 받아 리프들을 구독 등록, 제거 시 그 구간을 회수(§3). "구조 변경은
 반응성이 아니라 `@for` 영역"의 구체 메커니즘이 곧 length 토픽이다.
 
@@ -192,7 +192,7 @@ store가 가벼워지고(set은 대입+통지뿐) 책임이 한 곳에 모인다
 
 | 용도           | 활용                                                                       |
 | -------------- | -------------------------------------------------------------------------- |
-| 반응성         | `set(leafIndex, v)` → 구독 노드 갱신                                       |
+| 반응성         | `set(leafIndex, v)` -> 구독 노드 갱신                                       |
 | store 조회     | `get()[leafIndex]`                                                         |
 | 배열 요소 식별 | leafIndex로 인스턴스 식별 (같은 fullname의 두 인스턴스는 leafIndex가 다름) |
 | 이벤트         | 발생 인스턴스의 leafIndex를 페이로드에 실음                                |
@@ -311,7 +311,7 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 초기 활성화도 swap과 동일 경로(`activateBranch`)를 탄다 - `activateBranch`가 첫 활성화면
 `lazyBuild()` 호출·구독 복원·anchor 뒤 부착을 일괄한다. "런타임 생성 + 제거 없음, append만"과 일관.
 
-- **비활성 가지 안의 중첩 if는 skip돼 Region이 안 생긴다** → 그 가지를 swap으로 처음 build할 때
+- **비활성 가지 안의 중첩 if는 skip돼 Region이 안 생긴다** -> 그 가지를 swap으로 처음 build할 때
   비로소 생성된다. 그래서 `regions` 수 = 실제로 build된 가지들이 품은 IF 수.
 - swap 시 노드는 가지 루트에서만 detach/attach(자손 DOM은 따라온다), 구독은 자식 Region까지
   **재귀로** 끊고/복원한다(`shownIndex`로 활성 자식만). off/on 비대칭은 region.ts 참고.
@@ -320,15 +320,15 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 
 - **양쪽 가지 eager build** - 단순하나 안 보이는 가지의 build 비용을 항상 치른다(벤치 build 약점).
   lazy build로 "보이는 한 가지만 build"가 되어 최초 build가 React/Svelte와 동급이 된다.
-- **수동 region/branch 스택 유지** - 한 루프로 IF→ELSE→IF_END를 순차 처리하며 스택 push/pop.
-  재귀 `interpret`이 같은 일을 JS 호출 스택으로 해내므로 제거했다(스택 3개 → `branch` 상수 1개).
+- **수동 region/branch 스택 유지** - 한 루프로 IF->ELSE->IF_END를 순차 처리하며 스택 push/pop.
+  재귀 `interpret`이 같은 일을 JS 호출 스택으로 해내므로 제거했다(스택 3개 -> `branch` 상수 1개).
 - **점프/길이 operand** - 가지 경계를 바이트코드에 박지 않는다. `skipBranch`의 depth 카운팅으로
   런타임에 찾는다(마커만으로 충분, 인코딩을 키우지 않는다).
 
 ### 전제 - `@for` 도입 시 재검토
 
-"IF 위치 1개 → Region 1개"는 지금 `@for`가 없어 성립한다. for의 각 항목이 같은 IF를 품으면
-"IF × 반복 횟수"만큼 Region이 생겨 이 1:1 전제가 깨진다. `@for` 설계 때 함께 다룬다.
+"IF 위치 1개 -> Region 1개"는 지금 `@for`가 없어 성립한다. for의 각 항목이 같은 IF를 품으면
+"IF x 반복 횟수"만큼 Region이 생겨 이 1:1 전제가 깨진다. `@for` 설계 때 함께 다룬다.
 
 ## 구현 현황
 

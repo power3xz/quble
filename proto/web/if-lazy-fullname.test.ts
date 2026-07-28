@@ -1,4 +1,4 @@
-// 회귀 테스트 - 합성 자식 def 안의 @if가 "초기 비활성 → 나중 활성화(lazyBuild)"될 때, 그
+// 회귀 테스트 - 합성 자식 def 안의 @if가 "초기 비활성 -> 나중 활성화(lazyBuild)"될 때, 그
 // 지연 build되는 가지 안 이벤트의 fullname이 부모 합성 세그먼트(Child)를 여전히 누적하는지.
 //
 // pathPrefix를 클로저가 캡처하던 걸 pathSegments 필드(RENDER에서 push/pop)로 바꾼 리팩토링이
@@ -18,7 +18,7 @@ before(() => {
   qubb = buildFixture("if_lazy_fullname");
 });
 
-// Parent(props { cond: bool }) → 자식 Child를 합성. Child 안 @if(cond)의 then 가지에 이벤트 PICK.
+// Parent(props { cond: bool }) -> 자식 Child를 합성. Child 안 @if(cond)의 then 가지에 이벤트 PICK.
 // cond=false로 시작하면 then은 lazyBuild 대기(else "no" 활성). cond leaf는 root prop 하나라 index 0.
 const instantiate = (cond: boolean, handlers: THandlers) => {
   const inst = compile(qubb)(0)({ cond }, handlers);

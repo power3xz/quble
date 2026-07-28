@@ -1,5 +1,5 @@
 // 배열 payload 통합 테스트 - 실제 컴파일러(events { SAVE({ items, tags }) }, items가 객체 배열,
-// tags가 스칼라 배열)와 실제 runtime을 jsdom 위에서 돌린다. 버튼 클릭 → 이벤트 발생 →
+// tags가 스칼라 배열)와 실제 runtime을 jsdom 위에서 돌린다. 버튼 클릭 -> 이벤트 발생 ->
 // 핸들러 data.items/data.tags가 배열로 조립돼 닿는지, 요소가 객체면 중첩 구조인지,
 // leaf 갱신이 조립값에 반영되는지 본다. (object-payload.test.js의 배열 판.)
 

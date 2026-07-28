@@ -149,7 +149,7 @@ fn exec(
                 }
                 // truthy면 다음 op부터 then을 정상 해석한다.
             }
-            // truthy로 then을 해석하고 ELSE에 도달한 경우. else 가지를 통 스킵 → IF_END 다음에 선다
+            // truthy로 then을 해석하고 ELSE에 도달한 경우. else 가지를 통 스킵 -> IF_END 다음에 선다
             // (else 본문엔 매칭 ELSE가 없어 IF_END에서 멈춘다).
             Op::Else => skip_branch(code, &mut pc)?,
             // 정상 종료 마커. 할 일 없음.
@@ -593,7 +593,7 @@ mod tests {
     fn renders_attr_var_global_and_local() {
         let mut pool = ConstPool::new();
         let name = pool.intern("C");
-        let data_x = pool.intern("data-x"); // 전역 테이블에 없는 속성명 → 로컬
+        let data_x = pool.intern("data-x"); // 전역 테이블에 없는 속성명 -> 로컬
         let class_g = bytecode::attrs::attr_id("class").unwrap();
 
         let mut a = Asm::new();
@@ -651,7 +651,7 @@ mod tests {
         render_to_string(&bytes, 0, scope, &[]).unwrap()
     }
 
-    /// if true → then 가지를, false → else 가지를 출력. div() { @if c { "T" } @else { "F" } }
+    /// if true -> then 가지를, false -> else 가지를 출력. div() { @if c { "T" } @else { "F" } }
     #[test]
     fn if_else_picks_branch() {
         let make = || {
@@ -705,13 +705,13 @@ mod tests {
                 .halt();
             (pool, a.code)
         };
-        // a=true, b=true → AB
+        // a=true, b=true -> AB
         let (pool, code) = make();
         assert_eq!(render_one(pool, code, &["true".into(), "true".into()]), "AB");
-        // a=true, b=false → Ab
+        // a=true, b=false -> Ab
         let (pool, code) = make();
         assert_eq!(render_one(pool, code, &["true".into(), "false".into()]), "Ab");
-        // a=false → x (안쪽은 통째로 스킵, 바깥 ELSE를 정확히 찾아야 함)
+        // a=false -> x (안쪽은 통째로 스킵, 바깥 ELSE를 정확히 찾아야 함)
         let (pool, code) = make();
         assert_eq!(render_one(pool, code, &["false".into(), "true".into()]), "x");
     }

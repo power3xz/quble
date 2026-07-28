@@ -69,7 +69,7 @@ Load-bearing invariants any implementation must preserve:
 For the global *Anticipated Change Points* exception (in `~/.claude/CLAUDE.md`), DESIGN.md
 is this project's "committed design source": a change recorded there counts as committed,
 not hypothetical. The typical seam is the **bytecode contract** - opcodes and their
-operands (opcode.rs ↔ runtime.js ↔ disasm.js). When DESIGN.md commits to a feature whose
+operands (opcode.rs <-> runtime.js <-> disasm.js). When DESIGN.md commits to a feature whose
 only clean landing spot is a new opcode or operand, adding that opcode now - even before
 the feature fully lands - localizes the future edit and avoids re-touching the operand
 format and every decoder later. Speculative flexibility for undesigned features is not.

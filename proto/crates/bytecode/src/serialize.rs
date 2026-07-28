@@ -1,4 +1,4 @@
-//! 모듈 ↔ 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
+//! 모듈 <-> 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
 
 use crate::module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
 use crate::pool::{Const, ConstPool};

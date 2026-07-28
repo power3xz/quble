@@ -107,7 +107,7 @@
 - **leaf free가 구독(subscribers)을 회수하지 않음** - leaf-store `free`는 `leaves` 값만 회수하고
   `subscribers[leafIndex]` Set은 안 만진다. 꼬리 회수(`leaves.length = start`)든 중간 free든, 되감은
   자리를 `alloc`이 재사용하면 옛 구독 Set이 남아 새 요소를 오염시킬 수 있다(살아있는 구독이 남아
-  있던 경우). 지금 removeAt 정상 경로는 removeBranchAt(detach→unsubscribe)이 free보다 먼저 불려
+  있던 경우). 지금 removeAt 정상 경로는 removeBranchAt(detach->unsubscribe)이 free보다 먼저 불려
   터지지 않지만, 이는 "free 호출 전 구독이 다 떼여있다"는 암묵 규약에 의존하는 취약한 계약이다
   (freeElem이 free하는 안쪽 배열 sizeLeafIndex는 부모 @for가 구독 중이라 특히 위험). 근본 원인은 한
   leaf의 값(leaf-store alloc/free)과 구독(region/branch detach/restoreBranchSubs)이 서로 다른 모듈·

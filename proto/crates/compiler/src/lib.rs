@@ -1,5 +1,5 @@
-//! Quble 프로토타입 컴파일러: `.qubc` 소스 → 직렬화된 바이트코드(`Box<[u8]>`).
-//! 프론트엔드(lexer/parse → ast)와 백엔드(codegen)를 모듈로 나눠 담는다.
+//! Quble 프로토타입 컴파일러: `.qubc` 소스 -> 직렬화된 바이트코드(`Box<[u8]>`).
+//! 프론트엔드(lexer/parse -> ast)와 백엔드(codegen)를 모듈로 나눠 담는다.
 //! MVP 스코프: 단일 컴포넌트, 문자열 속성값, 표현식 없음. 상세는 proto/BYTECODE.md.
 
 mod ast;
@@ -176,7 +176,7 @@ mod tests {
         let _hello_txt = pool.intern_str("Hello"); // 텍스트, 같은 인덱스
         let sub = pool.intern_str("sub");
         let world = pool.intern_str("world");
-        // "class"는 전역 속성명 → 컴포넌트 상수풀이 아니라 전역 ID로 참조.
+        // "class"는 전역 속성명 -> 컴포넌트 상수풀이 아니라 전역 ID로 참조.
         let class_g = bytecode::attrs::attr_id("class").unwrap();
 
         let mut code = Vec::new();
@@ -228,8 +228,8 @@ mod tests {
         assert_eq!(&got[..], encode(&expected).as_slice());
     }
 
-    /// `class={c}`는 전역 name + 변수값 → AttrGVar(name=전역 ID, value=scope index),
-    /// `data-x={d}`는 로컬 name + 변수값 → AttrLVar(name=상수풀 인덱스, value=scope index).
+    /// `class={c}`는 전역 name + 변수값 -> AttrGVar(name=전역 ID, value=scope index),
+    /// `data-x={d}`는 로컬 name + 변수값 -> AttrLVar(name=상수풀 인덱스, value=scope index).
     #[test]
     fn compiles_attr_var_opcodes() {
         use bytecode::{decode, Op};
@@ -1417,7 +1417,7 @@ mod tests {
         }
     }
 
-    /// 여러 파일이 각자 다른 CSS를 use하면 resId가 모듈 전역으로 0,1,2…로 매겨진다.
+    /// 여러 파일이 각자 다른 CSS를 use하면 resId가 모듈 전역으로 0,1,2...로 매겨진다.
     /// 한 컴포넌트가 여러 CSS를 use하면 LOAD_RES를 여러 개 내고, 이미 쓰인 경로는 resId를
     /// 재사용한다(전역 dedup). entry(app)=0, A(a)=1, B(b)=2, C(app·b·c)는 0·2 재사용 + c=3.
     #[test]
@@ -1583,7 +1583,7 @@ mod tests {
     }
 
     /// 트리셰이킹: use에 나열 안 한 컴포넌트는 병합에서 빠진다.
-    /// parts에 Used·Unused 둘 다 있지만 Used만 use → 산출물에 Used만.
+    /// parts에 Used·Unused 둘 다 있지만 Used만 use -> 산출물에 Used만.
     #[test]
     fn use_excludes_unlisted_components() {
         let entry = r#"
@@ -1599,7 +1599,7 @@ mod tests {
         assert_eq!(names, vec!["Card", "Used"], "Unused는 제외돼야 함");
     }
 
-    /// 같은 파일을 두 곳에서 서로 다른 이름으로 use(다이아몬드) → 둘 다 들어간다(합집합).
+    /// 같은 파일을 두 곳에서 서로 다른 이름으로 use(다이아몬드) -> 둘 다 들어간다(합집합).
     #[test]
     fn use_diamond_unions_wanted_names() {
         let entry = r#"
@@ -1690,7 +1690,7 @@ mod tests {
             .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
             .collect();
 
-        assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 → 세그먼트 둘");
+        assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 -> 세그먼트 둘");
         assert_eq!(
             seg_indices[0], seg_indices[1],
             "같은 type-name은 같은 상수풀 인덱스"
@@ -1743,7 +1743,7 @@ mod tests {
             .map(|(i, _)| u16::from_le_bytes([code[i + 1], code[i + 2]]))
             .collect();
 
-        assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 → 세그먼트 둘");
+        assert_eq!(seg_indices.len(), 2, "Inner 두 번 합성 -> 세그먼트 둘");
         assert_ne!(seg_indices[0], seg_indices[1], "다른 alias는 다른 세그먼트");
         assert_eq!(str_at(&module, seg_indices[0]).unwrap(), "Save");
         assert_eq!(str_at(&module, seg_indices[1]).unwrap(), "Cancel");

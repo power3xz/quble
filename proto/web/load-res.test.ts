@@ -1,4 +1,4 @@
-// LOAD_RES 통합 테스트 - 실제 컴파일러(.qubc → .qubb, use "x.css" → LOAD_RES)와 실제
+// LOAD_RES 통합 테스트 - 실제 컴파일러(.qubc -> .qubb, use "x.css" -> LOAD_RES)와 실제
 // runtime.js를 jsdom 위에서 돌린다. compile(bytes, resmap)이 LOAD_RES를 만나 resId의 URL로
 // <link>를 document.head에 삽입하는지, 같은 URL은 dedup되는지 검증한다.
 
@@ -51,7 +51,7 @@ test("@if 비활성 가지 안의 컴포넌트 CSS는 가지가 켜질 때 로�
   const inst = compile(outerQubb, resmap)(0)({ show: false });
   assert.deepEqual(hrefs(), [], "가지가 꺼져 있으면 자식 CSS는 아직 로드되지 않는다");
 
-  // show=true로 토글 → 가지 활성 → Styled RENDER → LOAD_RES 실행 → <link> 삽입. show=leafIndex 0.
+  // show=true로 토글 -> 가지 활성 -> Styled RENDER -> LOAD_RES 실행 -> <link> 삽입. show=leafIndex 0.
   inst.store.set(0, true);
   assert.deepEqual(hrefs(), resmap, "가지가 켜지면 그때 자식 CSS가 로드된다");
 });

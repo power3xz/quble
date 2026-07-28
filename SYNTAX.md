@@ -3,25 +3,25 @@
 DESIGN.md에 흩어진 문법을 한곳에 정리한다. 이 문서는 **표층 문법(surface syntax)**만
 다룬다. 실행 위치·타입·반응성 같은 의미론은 DESIGN.md와 process.md를 따른다.
 
-> 표기: `EXPR`=표현식 슬롯, `IDENT`=식별자, `…`=반복, `[ ]`=선택적.
+> 표기: `EXPR`=표현식 슬롯, `IDENT`=식별자, `...`=반복, `[ ]`=선택적.
 
 ---
 
 ## 1. 파일 구조
 
 ```
-use Button from "./Button"          // 다른 컴포넌트 import (여러 개: use A, B from "…")
+use Button from "./Button"          // 다른 컴포넌트 import (여러 개: use A, B from "...")
 use "./Card.module.css"             // 에셋 - 이름 없이 경로만
 
 component IDENT {
-  props    { … }   // 선택
-  contexts { … }   // 선택
-  events   { … }   // 선택
-  template { … }   // 필수
+  props    { ... }   // 선택
+  contexts { ... }   // 선택
+  events   { ... }   // 선택
+  template { ... }   // 필수
 }
 ```
 
-한 파일에 `use …`들과 컴포넌트 선언(들). 블록 순서는 위 관례를 따른다.
+한 파일에 `use ...`들과 컴포넌트 선언(들). 블록 순서는 위 관례를 따른다.
 
 ---
 
@@ -75,7 +75,7 @@ contexts {
 }
 ```
 
-`ContextName { key: EXPR, … }`. 각 컨텍스트는 자기 이름공간을 가진다. 값에는 리터럴과
+`ContextName { key: EXPR, ... }`. 각 컨텍스트는 자기 이름공간을 가진다. 값에는 리터럴과
 props 참조(`assignee`, `priority`)가 오며, **객체 prop을 통째로** 넘길 수도 있다(events
 페이로드와 같음 - `PlanContext { plan, general }`의 `general`이 객체면 핸들러가
 `context.PlanContext.general`을 중첩 객체로 받는다). `@with`로 활성화된다.
@@ -112,18 +112,18 @@ events {
 ### 3.1 요소
 
 ```
-tag(attr=VALUE …) { … children … }
+tag(attr=VALUE ...) { ... children ... }
 ```
 
 ```
-div(class="todo-item") { … }
+div(class="todo-item") { ... }
 h3(@click:EDIT) { {title} }
 p() { {description} }                       // 속성 없으면 빈 ()
 span() { "담당자: {assignee}" }             // 문자열 안 보간 허용
 ```
 
 - 속성은 공백 구분: `Badge(text={tag} variant="outline" @click:TAG_CLICK)`
-- 속성 값: 문자열 `"…"`, 표현식 `{EXPR}`, 배열 `[…]`
+- 속성 값: 문자열 `"..."`, 표현식 `{EXPR}`, 배열 `[...]`
 - 클래스 배열: `div(class=["card", styles.variant, styles.priority])`
 
 ### 3.1.1 self-close (자식 없는 요소)
@@ -138,7 +138,7 @@ br( /)                                      // 속성 없어도 ( /)
 hr( /)
 ```
 
-- **`/` 앞 공백 필수** - 속성 유무와 무관하게 예외 없다(`img(… /)`, `br( /)`). 괄호 안은
+- **`/` 앞 공백 필수** - 속성 유무와 무관하게 예외 없다(`img(... /)`, `br( /)`). 괄호 안은
   공백 구분이라(`attr @event` 사이 공백처럼) `/`도 한 토큰이라 앞 공백으로 가른다. (처음엔
   엄격하게 강제하고, 필요가 생기면 나중에 완화 - DESIGN §4.5.)
 - **축약 없음** - 속성이 없어도 `()`를 생략하지 않는다(`br(/)`가 아니라 `br( /)`).
@@ -154,8 +154,8 @@ track wbr`)는 애초에 자식을 못 가지므로 항상 self-close이고, 자
 ### 3.2 컴포넌트 합성 / 별칭
 
 ```
-Component( /)                // 별칭 없음 → 타입명이 경로 마디
-Alias: Component( /)         // 별칭 바인딩 → Alias가 경로 마디
+Component( /)                // 별칭 없음 -> 타입명이 경로 마디
+Alias: Component( /)         // 별칭 바인딩 -> Alias가 경로 마디
 
 CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE /)
 TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK /)
@@ -193,16 +193,16 @@ MyTodoCard: Card(title="할일 목록") {
 }
 
 // 기명 - `이름 << 노드`로 슬롯을 지목한다
-MyCard: Card(title="…") {
+MyCard: Card(title="...") {
   Header << h1(class="hd") { {title} }
   Body   << TodoList( /)
 }
 ```
 
-`<<` 오른쪽은 노드 하나, 또는 블록(`Name << { … }`)으로 여러 노드.
+`<<` 오른쪽은 노드 하나, 또는 블록(`Name << { ... }`)으로 여러 노드.
 
 정의된 슬롯을 **안 채워도 된다**(props와 다르다 - props는 전부 필수). 안 채운 자리는 비어서
-렌더된다. 채우는 순서는 무관하다 - `Header << … Body << …`와 `Body << … Header << …`는
+렌더된다. 채우는 순서는 무관하다 - `Header << ... Body << ...`와 `Body << ... Header << ...`는
 같은 결과다(방출 순서는 정의 쪽 선언 순서로 정규화된다).
 
 슬롯 콘텐츠는 **쓰는 쪽 컨텍스트로 해석된다** - 코드는 합성 블록 안에 있지만 보간
@@ -215,11 +215,11 @@ MyCard: Card(title="…") {
 
 | 문법 | 의미 |
 |---|---|
-| `@with Context { … }` | 블록 내 이벤트에 컨텍스트 메타데이터 주입 |
-| `@if (EXPR) { … }` | 조건부 렌더링 |
-| `@if (EXPR) { … } @else { … }` | 조건부 + 대체 |
-| `@for (IDENT [, IDENT] of EXPR) { … }` | 반복 렌더링 (EXPR = 정수, 숫자 prop, 또는 배열). 둘째 IDENT = 회차 인덱스변수 |
-| `@click:EVENT` | DOM 이벤트 → 컴포넌트 이벤트 위임 (속성 위치) |
+| `@with Context { ... }` | 블록 내 이벤트에 컨텍스트 메타데이터 주입 |
+| `@if (EXPR) { ... }` | 조건부 렌더링 |
+| `@if (EXPR) { ... } @else { ... }` | 조건부 + 대체 |
+| `@for (IDENT [, IDENT] of EXPR) { ... }` | 반복 렌더링 (EXPR = 정수, 숫자 prop, 또는 배열). 둘째 IDENT = 회차 인덱스변수 |
+| `@click:EVENT` | DOM 이벤트 -> 컴포넌트 이벤트 위임 (속성 위치) |
 | `{EXPR}` | 표현식 보간 (자식 위치 또는 문자열 내부) |
 
 예시:
@@ -264,7 +264,7 @@ MyCard: Card(title="…") {
 문법상 EXPR이 등장하는 위치:
 
 1. `{EXPR}` - template 자식 보간
-2. `"… {EXPR} …"` - 문자열 리터럴 내 보간
+2. `"... {EXPR} ..."` - 문자열 리터럴 내 보간
 3. `attr={EXPR}` - 속성 값
 4. `@if (EXPR)` / `@for (_ of EXPR)` - 디렉티브 조건/이터러블
 5. `key: EXPR` - contexts 값, events 페이로드 값

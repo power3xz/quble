@@ -70,7 +70,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     let mut types = TypeTable::new();
     let mut code = Vec::new();
     let mut defs = Vec::new();
-    // 정규화 경로 -> resId. 등장 순서로 0,1,2…. 같은 경로는 같은 resId(모듈 전역 dedup).
+    // 정규화 경로 -> resId. 등장 순서로 0,1,2.... 같은 경로는 같은 resId(모듈 전역 dedup).
     let mut res_ids: Vec<String> = Vec::new();
 
     // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.

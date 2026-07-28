@@ -1,4 +1,4 @@
-// 리터럴 인자 통합 테스트 - 실제 컴파일러(.qubc → .qubb)와 실제 runtime.js를 jsdom 위에서
+// 리터럴 인자 통합 테스트 - 실제 컴파일러(.qubc -> .qubb)와 실제 runtime.js를 jsdom 위에서
 // 돌린다. use-site 리터럴(`Label(text="고정")`)이 부모 scope 없이 PUSH_ARG_LIT로 상수풀에서
 // 자식에 CONST 슬롯으로 전달돼 렌더되는지 본다(store를 거치지 않음).
 

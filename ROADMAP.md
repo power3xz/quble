@@ -68,7 +68,7 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 
 ## 개발 환경
 
-- [x] 컴파일 바이너리 (`quble <qubc>` → dist/qubb)
+- [x] 컴파일 바이너리 (`quble <qubc>` -> dist/qubb)
 - [x] dev 서버 (`quble-serve <path>`) - 컴파일해 메모리에서 바로 서빙(qubb·resmap·res). dist 안 거침.
 - [x] bench 비교 환경 (qubb vs React lazy chunk 네트워크 비용)
 - [x] qubb 인스펙터 - qubb를 qubc로 디컴파일 + 컴포넌트 선택·arg 입력으로 실시간 렌더 (IDEAS.md 컴포넌트 뷰어). 임의 qubb url 로드 지원.

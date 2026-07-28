@@ -1,5 +1,5 @@
 // 객체 payload 통합 테스트 - 실제 컴파일러(events { SAVE({ user }) }, user가 중첩 객체)와 실제
-// runtime을 jsdom 위에서 돌린다. 버튼 클릭 → 이벤트 발생 → 핸들러 data.user가 타입 트리로 조립된
+// runtime을 jsdom 위에서 돌린다. 버튼 클릭 -> 이벤트 발생 -> 핸들러 data.user가 타입 트리로 조립된
 // 중첩 객체로 닿는지, 스칼라 field는 값 그대로인지, leaf 갱신이 조립값에 반영되는지 본다.
 
 import assert from "node:assert/strict";

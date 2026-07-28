@@ -1,4 +1,4 @@
-// 객체 leaf 경로 보간 통합 테스트 - 실제 컴파일러({user.name} → 평탄 scope index)와 실제
+// 객체 leaf 경로 보간 통합 테스트 - 실제 컴파일러({user.name} -> 평탄 scope index)와 실제
 // runtime을 jsdom 위에서 돌린다. 중첩 store + 평탄 점경로 rootPaths로 렌더해, 컴파일러가
 // 낮춘 scope index가 런타임에서 올바른 leaf(중첩 객체 말단)에 닿는지 본다.
 
