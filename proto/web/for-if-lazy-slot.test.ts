@@ -1,6 +1,6 @@
 // 잠재 버그 확인 - @for 몸체 안 @if의 비활성 가지가 회차변수 슬롯(argumentSourcePairs)을 읽을 때,
 // lazyBuild 지연 실행 시점엔 공유 pairs가 이 @for를 지나 이미 pop돼 있다. runIf의 snapshotStacks는
-// ws(loopIndexStack/activeContexts)만 카피하고 pairs는 공유 참조 캡처라, 회차변수({tag})가 어긋날 수 있다.
+// walkStacks(loopIndexStack/activeContexts)만 카피하고 pairs는 공유 참조 캡처라, 회차변수({tag})가 어긋날 수 있다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
