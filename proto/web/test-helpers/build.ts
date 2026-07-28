@@ -17,7 +17,7 @@ const PROTO = join(HERE, "..", ".."); // proto
 const QUBLE_BIN = join(PROTO, "target", "debug", "quble");
 
 // 픽스처는 루트 components/에 `<name>.fixture.qubc`로 산다(데모와 접미사로 구분). 호출부는 stem만
-// 넘기고(`buildFixture("array_payload")`) 여기서 경로·접미사를 붙인다. 컴파일 산출물 stem은
+// 넘기고(`buildFixture("array_payload")`) 여기서 경로/접미사를 붙인다. 컴파일 산출물 stem은
 // `<name>.fixture`라 dist/<name>.fixture.qubb.
 const COMPONENTS = join(PROTO, "..", "components");
 

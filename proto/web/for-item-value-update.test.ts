@@ -1,7 +1,7 @@
 // @for 회차가 가리키는 "객체 요소의 필드 값"을 store에서 수정했을 때, 그 회차 DOM이 반응
 // 갱신되는지 검증한다. 기존 for 테스트는 회차 수(count) 반응만 봤고, 요소 값 자체의 수정->반영은
 // 빈 케이스였다. for_item_object_to_child fixture(List가 item.detail을 자식 Card로 전달)를 재사용해
-// 중첩(회차 객체 -> 자식 컴포넌트 prop)에서도 갱신·교차 오염 없음을 함께 본다.
+// 중첩(회차 객체 -> 자식 컴포넌트 prop)에서도 갱신/교차 오염 없음을 함께 본다.
 //
 // leafIndex는 plant 규칙으로 손계산한다(props 접근 API가 나오기 전까지 잠정): 루트 {items: T[]}는
 // 고정부에 배열칸 하나(leaf 0)만 심고, 요소들을 store 끝에 레벨별로 몬다. 요소 타입 {tag, detail:

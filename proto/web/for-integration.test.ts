@@ -140,7 +140,7 @@ test("count 0으로 갔다 다시 늘려도 회차가 복원된다", () => {
 
 // 반응으로 늘린 회차도 이벤트가 붙고 회차 인덱스($0)가 자기 자리로 온다 - prop count(n) fixture로
 // 늘린 뒤 새로 생긴 마지막 회차 버튼을 클릭한다.
-test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () => {
+test("반응으로 늘린 회차도 이벤트/회차 인덱스가 정상", () => {
   const picks: unknown[] = [];
   const { host, store } = instantiate(
     "for_event_count",
@@ -159,9 +159,9 @@ test("반응으로 늘린 회차도 이벤트·회차 인덱스가 정상", () =
   assert.deepEqual(picks, [2], "늘린 회차의 $0=2로 디스패치");
 });
 
-// 회차를 줄여 떼어낸 뒤 다시 늘려 새로 build된 회차의 이벤트·$값이 옛 회차 잔재 없이 정상인지 -
+// 회차를 줄여 떼어낸 뒤 다시 늘려 새로 build된 회차의 이벤트/$값이 옛 회차 잔재 없이 정상인지 -
 // 떼어낸 회차의 구독/바인딩이 남아 잘못 발화하거나 $값이 어긋나면 안 된다.
-test("회차 제거 후 재추가한 회차의 이벤트·$값이 정상", () => {
+test("회차 제거 후 재추가한 회차의 이벤트/$값이 정상", () => {
   const picks: unknown[] = [];
   const { host, store } = instantiate(
     "for_event_count",
@@ -184,7 +184,7 @@ test("회차 제거 후 재추가한 회차의 이벤트·$값이 정상", () =>
 
 // 회차 몸체가 @if(자식 region)를 품은 반응 @for - 늘린 회차의 자식 region도 붙고(초기 가지 렌더),
 // 그 뒤 flag를 바꾸면 모든 회차의 가지가 swap된다(자식 region 구독이 회차마다 살아 있어야 한다).
-test("반응 @for 몸체의 @if 자식 region이 회차 증가·swap에 정상", () => {
+test("반응 @for 몸체의 @if 자식 region이 회차 증가/swap에 정상", () => {
   const { host, store } = instantiate("for_if_count", { n: 1, flag: true });
   assert.deepEqual(paras(host), ["on"], "초기 n=1, flag=true");
   store.set(0, 3); // n
@@ -193,7 +193,7 @@ test("반응 @for 몸체의 @if 자식 region이 회차 증가·swap에 정상",
   assert.deepEqual(paras(host), ["off", "off", "off"], "flag swap이 모든 회차에 반영");
 });
 
-// -- 객체 prop 필드를 @for count·몸체에서 참조 (of c.count / {c.count}) --------------
+// -- 객체 prop 필드를 @for count/몸체에서 참조 (of c.count / {c.count}) --------------
 // 객체 prop은 leaf로 평탄화되어 c.count가 하나의 leafIndex다. of와 몸체가 그 leaf를 참조한다.
 test("@for (of c.count): 객체 필드를 count로, 몸체에서 값 참조", () => {
   const { host } = instantiate("for_obj_field", { c: { count: 3 } });

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Response Style
 
-핵심만 간략히. 서론·중복·안 할 선택지 나열 금지.
+핵심만 간략히. 서론/중복/안 할 선택지 나열 금지.
 
 ## Read First (new session / after compact)
 

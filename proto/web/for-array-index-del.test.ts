@@ -1,5 +1,5 @@
 // 회차 인덱스 반응성 - array-for 몸체 {i}가 회차 번호를 표시하고, 요소 옆 삭제 버튼이 자기 회차 인덱스($0)로
-// 자기를 지운다(@for 안 element라 fullname은 익명 [$0].DEL). 값 고정·위치 이동 설계라 중간 제거 시 요소는 store에서
+// 자기를 지운다(@for 안 element라 fullname은 익명 [$0].DEL). 값 고정/위치 이동 설계라 중간 제거 시 요소는 store에서
 // 안 움직이고 목록만 당겨지는데, 인덱스는 store leaf(indexLeafIndices)라 removeAt이 뒤 인덱스를 set으로 당긴다.
 // 그래서 (1) 몸체 {i}가 당겨진 새 번호로 자동 갱신되고, (2) 뒤 요소의 삭제 버튼 $0도 당겨진 값이라 자기를 정확히 지운다.
 // (이전 한계: 인덱스가 build 시점 스냅샷이라 안 당겨져, b 지운 뒤 c 버튼이 $0=2로 d를 지우던 버그 - 해소됨.)
@@ -71,7 +71,7 @@ test("맨 앞을 반복해 지우면 매번 앞이 당겨져 인덱스가 재정
   assert.deepEqual(rows(host), ["0:c"], "c:0");
 });
 
-// 전부 제거해 0개가 된 뒤 다시 추가·제거가 이어지는지 - "@for 순회 중"을 indexLeafIndices.length(빈 배열 0)로
+// 전부 제거해 0개가 된 뒤 다시 추가/제거가 이어지는지 - "@for 순회 중"을 indexLeafIndices.length(빈 배열 0)로
 // 판단하면 여기서 인덱스 채움을 건너뛰어 인덱스 없는 요소가 쌓이고, 다음 제거가 region과 어긋나 크래시했다.
 // forRegionIndex 기준으로 고쳤다. 회귀 방지.
 test("전부 제거해 0개가 된 뒤 다시 추가하면 인덱스가 정상 부여된다", () => {
@@ -90,7 +90,7 @@ test("0개 후 재추가한 요소도 삭제가 정상 동작한다(옛 버그: 
   add.click();
   add.click(); // [0:n, 1:n]
   delButton(host, 0).click(); // 크래시 없이 앞을 제거, 뒤 당김
-  assert.deepEqual(rows(host), ["0:n"], "재추가분도 제거·당김 정상");
+  assert.deepEqual(rows(host), ["0:n"], "재추가분도 제거/당김 정상");
   delButton(host, 0).click();
   assert.deepEqual(rows(host), [], "다시 0개까지");
 });

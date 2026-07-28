@@ -72,11 +72,11 @@ fn main() -> ExitCode {
 
 /// 컴파일해 메모리에 적재한 산출물. 디스크에 떨구지 않고 전부 메모리에서 제공한다.
 struct Loaded {
-    /// name(확장자 제외) → qubb 바이트.
+    /// name(확장자 제외) -> qubb 바이트.
     components: HashMap<String, Vec<u8>>,
-    /// name → resId별 산출 리소스 경로(`res/<hash>.css`).
+    /// name -> resId별 산출 리소스 경로(`res/<hash>.css`).
     resmaps: HashMap<String, Vec<String>>,
-    /// 산출 경로(`res/<hash>.css`) → CSS 내용. `/res/...` 요청에 응답.
+    /// 산출 경로(`res/<hash>.css`) -> CSS 내용. `/res/...` 요청에 응답.
     assets: HashMap<String, Vec<u8>>,
 }
 
@@ -128,7 +128,7 @@ fn handle(mut stream: TcpStream, loaded: &Loaded) {
     if reader.read_line(&mut request_line).is_err() {
         return;
     }
-    // "GET /card.qubb HTTP/1.1" → 가운데 토큰.
+    // "GET /card.qubb HTTP/1.1" -> 가운데 토큰.
     let Some(target) = request_line.split_whitespace().nth(1) else {
         return;
     };

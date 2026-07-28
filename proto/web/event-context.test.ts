@@ -1,4 +1,4 @@
-// @with 컨텍스트 전달 통합 테스트 - 실제 컴파일러(contexts{}·@with -> ENTER_CONTEXT)와 실제
+// @with 컨텍스트 전달 통합 테스트 - 실제 컴파일러(contexts{}/@with -> ENTER_CONTEXT)와 실제
 // runtime을 jsdom 위에서 돌린다. 버튼 클릭 -> 이벤트 발생 -> 활성 컨텍스트를 핸들러의 context로
 // 전달. context.<이름>.<필드>는 발생 시점 현재값(리터럴은 상수, 변수는 prop의 현재값).
 

@@ -1,6 +1,6 @@
 # Issues
 
-알려진 문제를 추적한다. 증상·재현만 적고 해결책은 정해지면 채운다(방법 미정이면 비워 둔다).
+알려진 문제를 추적한다. 증상/재현만 적고 해결책은 정해지면 채운다(방법 미정이면 비워 둔다).
 
 ## 해결됨
 
@@ -14,10 +14,10 @@
   `@for` 회차 붙이기)을 `while (fragment.firstChild) parent.appendChild(fragment.firstChild)`
   스냅샷 순회로 바꿨다. 다른 `childNodes` 사용처는 이미 `Array.from`으로 스냅샷을 떠 안전했다.
 
-- **void 요소 구분 없음** - `input`·`img` 등 void 요소도 자식·닫는 태그를 갖는 일반 요소처럼
+- **void 요소 구분 없음** - `input`/`img` 등 void 요소도 자식/닫는 태그를 갖는 일반 요소처럼
   렌더됐다(`input(@input:EDIT) { {value} }` -> `<input>A</input>`). **해결:** self-close 문법
   (`tag(attrs /)`, SYNTAX §3.1.1)을 구현하고 void 집합을 컴파일러가 알게 했다. void 요소는
-  self-close 필수 - 자식 블록/무슨 자식이든 컴파일 에러. 자식 없는 요소·컴포넌트는 모두
+  self-close 필수 - 자식 블록/무슨 자식이든 컴파일 에러. 자식 없는 요소/컴포넌트는 모두
   self-close로만 쓴다(빈 블록 `{}` 금지, 처음엔 엄격하게 - DESIGN §4.5). 자식 없는 요소는
   `ELEM_OPEN..ELEM_CLOSE_OPEN..ELEM_END`로 그대로 나가 새 opcode 없이 `<input>`(내용 없음)으로
   렌더된다.
@@ -63,34 +63,34 @@
 - **같은 컨텍스트명 중첩** - 방향성: 맥락(컨텍스트)이라는 정보는 그 성격상 같은 이름이 중복으로
   쌓이지 않는 게 맞다. `@with Area`가 합성 경계를 넘어 중첩되면(`Outer`의 `@with Area` 안에 합성된
   `Inner`가 또 `@with Area`) 활성 스택에 같은 이름이 쌓인다. **지금 처리:** `context.Area`는 가장
-  안쪽 것으로 통째 덮어쓰고(필드 머지·바깥 보존 안 함), 런타임이 push 시 같은 이름을 발견하면
+  안쪽 것으로 통째 덮어쓰고(필드 머지/바깥 보존 안 함), 런타임이 push 시 같은 이름을 발견하면
   console.warn으로 알린다. 컴파일타임 금지는 불가 - 독립 컴파일/머지하면 합성 경계 너머 중첩을
-  codegen이 못 본다. 더 나은 방법(안정적 식별·중복 방지 메커니즘)은 나중에 고민한다.
+  codegen이 못 본다. 더 나은 방법(안정적 식별/중복 방지 메커니즘)은 나중에 고민한다.
 
 - **DOM 입력값을 이벤트 payload로 못 보냄** - `@input:INPUT`으로 이벤트는 걸 수 있지만,
   그 입력 요소의 현재 값(React의 `e.target.value`)을 payload에 실을 문법이 없다. payload 식은
-  props 변수·리터럴·표현식만 참조한다(SYNTAX.md §2.3). (재현: `TextInput`이 입력값을 핸들러로
+  props 변수/리터럴/표현식만 참조한다(SYNTAX.md §2.3). (재현: `TextInput`이 입력값을 핸들러로
   보내려 해도 선언 시점 prop만 참조 가능 - 실제 타이핑된 값을 가리킬 방법이 없다.) 폼 입력은
   가장 흔한 패턴이라 LLM 분리 추론(UI/로직 분리) 셀링포인트의 실제 검증에도 걸린다. 이벤트
-  발생 지점(DOM 요소)의 값을 payload가 참조하는 문법·의미가 미설계.
+  발생 지점(DOM 요소)의 값을 payload가 참조하는 문법/의미가 미설계.
 
 - **인덱스 상한 가드 없음** - `FieldValue`(이벤트/컨텍스트 fields의 값 출처)는 u16 한 칸에
   kind 표지 + 인덱스로 패킹한다. STACK(`@for`) 대비로 kind가 3진이 되면 비대칭 인코딩을
   쓴다 - Const는 상수풀이 문자열 전반을 공유해 상한 리스크가 커 15비트(0x7fff) 유지, 여유
   있는 Scope/Stack은 14비트(0x3fff). 그래서 **상한이 축별로 다르다**. 초과를 막는 가드가
   없어 조용히 깨진다(인덱스가 kind 비트를 오염, 엉뚱한 축으로 디코드). 가드의 자리는 인덱스
-  발급 지점(prop 인덱싱·`ConstPool::intern`) - 개수는 파서가 모르고 발급 시점에야 늘어난다.
+  발급 지점(prop 인덱싱/`ConstPool::intern`) - 개수는 파서가 모르고 발급 시점에야 늘어난다.
   단 발급 지점은 Const/Scope 축을 모르고 pool 인덱스는 leaf 아닌 자리(속성값 등)에도 쓰여
   u16 전체가 정당하므로, 상한 검사는 **leaf로 인코딩되는 지점**(FieldValue 생성/encode)에서
   축별로 걸어야 정확하다. FieldValue 작업에 딸린 별개 스텝.
 
 - **핸들러 타입 공급이 d.ts 파일 방식 (LSP 아님)** - 확장이 `.qubc`를 컴파일해 짝
   `x.qubc.d.ts`(`Handlers` 인터페이스)를 디스크에 쓰고, handlers.ts가 `import type { Handlers }
-  from './x.qubc'`로 받아 키·payload·context를 타입으로 강제한다(잘못된 fullname은 컴파일 에러,
+  from './x.qubc'`로 받아 키/payload/context를 타입으로 강제한다(잘못된 fullname은 컴파일 에러,
   리터럴은 literal type). 한계: (1) import 한 줄이 필요하다 - `.ts`<->`.d.ts` 같은 basename
   자동 짝은 TS가 안 묶고(실험으로 확인), Svelte식 "옆에 두면 자동"은 비-TS 소스(`.svelte`)
   모듈 해석이라 우리 `.ts` 핸들러엔 안 통한다. (2) d.ts가 디스크 부산물이다(gitignore). (3)
-  생성이 handlers.ts 열림·`.qubc` 저장 시 매번 풀 컴파일이고, 컴파일러 경로가 워크스페이스
+  생성이 handlers.ts 열림/`.qubc` 저장 시 매번 풀 컴파일이고, 컴파일러 경로가 워크스페이스
   루트 기준 하드코딩이다(다른 레포에서 쓰려면 못 씀). 더 깔끔한 길은 **TS Language Service
   plugin(또는 LSP)** 으로 메모리상 가상 타입을 주입하는 것 - import도 파일도 없이 `handlers`에
   타입이 붙는다(Svelte의 `svelte2tsx`+`svelte-language-server`가 이 층위). 비용이 커서
@@ -99,7 +99,7 @@
 
 - **지연 로드(lazy load) 미구현** - 지연 build는 하지만(비활성 `@if` 가지는 켜질 때 해석),
   그 가지의 자식 def는 이미 qubb에 통째로 들어있다. "가지 켜질 때 그 코드를 그제서야 받는" 진짜
-  지연 로드가 없다. 걸림돌: 떼어낸 조각이 전역 인덱스(상수풀·def ID·resId·leafIndex)를 어떻게
+  지연 로드가 없다. 걸림돌: 떼어낸 조각이 전역 인덱스(상수풀/def ID/resId/leafIndex)를 어떻게
   이어받나 - "한 모듈 = 하나의 전역 인덱스 공간" 전제를 조각화가 깬다. 포맷 전반에 걸친 문제.
   해법 방향: C의 `.o`/동적 링킹처럼 조각은 절대 인덱스 대신 심볼+재배치 표식을 남기고, 로드
   시점에 간접 테이블(import table)로 해소 - 인덱스별 문제를 한 메커니즘으로 통일.
@@ -110,7 +110,7 @@
   있던 경우). 지금 removeAt 정상 경로는 removeBranchAt(detach->unsubscribe)이 free보다 먼저 불려
   터지지 않지만, 이는 "free 호출 전 구독이 다 떼여있다"는 암묵 규약에 의존하는 취약한 계약이다
   (freeElem이 free하는 안쪽 배열 sizeLeafIndex는 부모 @for가 구독 중이라 특히 위험). 근본 원인은 한
-  leaf의 값(leaf-store alloc/free)과 구독(region/branch detach/restoreBranchSubs)이 서로 다른 모듈·
-  타이밍에 회수돼 예측이 어렵다는 것. 방향 후보 - ① free가 subscribers 슬롯까지 비움(최소),
-  ② 구독 소유를 branch에서 leaf-store로 이전(중간), ③ 요소·회차·생애를 branch free 하나로 통합
-  (최대). ②/③ 필요 여부는 restoreBranchSubs 재구독 왕복 얽힘 확인 후 판단. 인덱스 반응성 작업 뒤 착수.
+  leaf의 값(leaf-store alloc/free)과 구독(region/branch detach/restoreBranchSubs)이 서로 다른 모듈/
+  타이밍에 회수돼 예측이 어렵다는 것. 방향 후보 - (1) free가 subscribers 슬롯까지 비움(최소),
+  (2) 구독 소유를 branch에서 leaf-store로 이전(중간), (3) 요소/회차/생애를 branch free 하나로 통합
+  (최대). (2)/(3) 필요 여부는 restoreBranchSubs 재구독 왕복 얽힘 확인 후 판단. 인덱스 반응성 작업 뒤 착수.

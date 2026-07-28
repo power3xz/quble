@@ -1,6 +1,6 @@
 // 잠재 버그 확인 - 중첩 @for에서 안쪽 배열이 grow(onSize 발화)로 늘 때, 새 회차 build가 쓰는
 // walkStacks(walk 스택)는 build 시점 공유 스택이라 발화 시점엔 바깥 회차가 이미 pop돼 있다. 그럼 grow된
-// 셀의 이벤트가 바깥 인덱스 $0를 잃어 fullname([$0][$1])·발화 $n이 어긋날 수 있다.
+// 셀의 이벤트가 바깥 인덱스 $0를 잃어 fullname([$0][$1])/발화 $n이 어긋날 수 있다.
 // (@if lazyBuild와 동형의 지연 실행인데 snapshotStacks가 없다 - 확인용 테스트.)
 
 import assert from "node:assert/strict";

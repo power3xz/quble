@@ -16,16 +16,16 @@ pub enum FieldValue {
 }
 
 /// payload/context가 담는 객체 타입의 구조. 모듈 전역 테이블(Module.types)에 dedup 저장.
-/// 조립 명세다 - 값도 인덱스도 없이 구조(필드명·중첩)만 담고, 런타임이 field.refs를
+/// 조립 명세다 - 값도 인덱스도 없이 구조(필드명/중첩)만 담고, 런타임이 field.refs를
 /// 받아 이 구조로 객체를 조립한다. object 필드는 자식을 type_ref(테이블 인덱스)로 가리켜
-/// 중첩·공유를 표현한다.
+/// 중첩/공유를 표현한다.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeEntry {
     Scalar,
     /// (name_const_index, type_ref) 목록. 선언 순서 = 조립 시 값 소비 순서.
     Object(Vec<(u16, u16)>),
     /// 원소 타입을 type_ref로 가리킨다. `string[][]`은 Array(Array(Scalar)) 세 엔트리로 편다.
-    /// 하위(말단 Scalar 방향) 참조만 - 자기·조상 참조(재귀 타입)는 컴파일러가 내지 않는다.
+    /// 하위(말단 Scalar 방향) 참조만 - 자기/조상 참조(재귀 타입)는 컴파일러가 내지 않는다.
     Array(u16),
 }
 

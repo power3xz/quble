@@ -235,7 +235,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     _ => Token::Ident(s),
                 });
             }
-            // 숫자 리터럴. 원문을 그대로 담고 값 파싱은 이후 단계(parse). 정수·소수만, 음수·지수는
+            // 숫자 리터럴. 원문을 그대로 담고 값 파싱은 이후 단계(parse). 정수/소수만, 음수/지수는
             // 표현식 영역이라 지금은 다루지 않는다(SYNTAX.md 미결).
             c if c.is_ascii_digit() => {
                 let mut s = String::new();

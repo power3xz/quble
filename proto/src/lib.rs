@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-/// 콘텐츠 해시(FNV-1a 64bit). 자산 파일명·dedup용. 알고리즘이 고정 상수(offset basis·prime)라
+/// 콘텐츠 해시(FNV-1a 64bit). 자산 파일명/dedup용. 알고리즘이 고정 상수(offset basis/prime)라
 /// 버전 간 안정 - 표준 라이브러리 해시류와 달리 산출물 식별자로 오래 쓸 수 있다.
 pub fn content_hash(bytes: &[u8]) -> String {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
@@ -15,7 +15,7 @@ pub fn content_hash(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
-/// 원본 경로 + 내용 → 산출 자산 경로 `res/<basename>.<내용해시>.<ext>`.
+/// 원본 경로 + 내용 -> 산출 자산 경로 `res/<basename>.<내용해시>.<ext>`.
 /// 평탄화 시 동명 충돌 방지 + 캐시 버스팅.
 pub fn asset_path(origin: &Path, content: &[u8]) -> String {
     let stem = origin.file_stem().and_then(|s| s.to_str()).unwrap_or("res");
@@ -28,9 +28,9 @@ pub fn asset_path(origin: &Path, content: &[u8]) -> String {
     }
 }
 
-/// 문자열 배열을 JSON 배열 문자열로(의존 없이 직접 조립). 따옴표·백슬래시만 이스케이프 -
+/// 문자열 배열을 JSON 배열 문자열로(의존 없이 직접 조립). 따옴표/백슬래시만 이스케이프 -
 /// 경로엔 제어문자가 없다고 본다.
-/// 문자열 하나를 JSON 문자열 리터럴(`"..."`)로. `"`·`\`만 이스케이프(경로엔 이 둘이면 충분).
+/// 문자열 하나를 JSON 문자열 리터럴(`"..."`)로. `"`/`\`만 이스케이프(경로엔 이 둘이면 충분).
 fn json_string(s: &str) -> String {
     let mut out = String::from("\"");
     for ch in s.chars() {

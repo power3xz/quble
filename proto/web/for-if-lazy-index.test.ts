@@ -2,7 +2,7 @@
 // 가지 안 이벤트의 회차 인덱스($0)가 정합한지. loopIndexStack이 @for 축의 push/pop 공유 배열이라,
 // lazyBuild 지연 실행 시점엔 이미 pop돼 비어 있을 수 있다 - 그럼 $0가 어긋난다.
 //
-// pathPrefix(문자열)는 값으로 캡처돼 파라미터면 안전했지만, loopIndexStack(배열)은 공유·가변이라
+// pathPrefix(문자열)는 값으로 캡처돼 파라미터면 안전했지만, loopIndexStack(배열)은 공유/가변이라
 // 파라미터로 넘겨도 같은 배열이 pop되면 잃는다. 이 테스트가 그 축을 잡는다.
 
 import assert from "node:assert/strict";

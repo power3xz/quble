@@ -1,6 +1,6 @@
 // 중첩 배열 요소의 재귀 회수 - 요소가 {label, cells: string[]}라 요소 제거 시 안쪽 cells 배열의 arrayInfo와
 // 요소 leaf까지 재귀로 반납돼야 한다(freeElem). 제거된 요소 서브트리는 어디서도 참조되지 않으므로 누수 없이
-// 안쪽까지 회수. 검증: 제거 후 push해도 arrayPool·leaves 길이가 안 늘면(반납분 재사용) 회수가 된 것이다.
+// 안쪽까지 회수. 검증: 제거 후 push해도 arrayPool/leaves 길이가 안 늘면(반납분 재사용) 회수가 된 것이다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
@@ -61,7 +61,7 @@ test("중첩 배열 요소를 제거하면 안쪽 셀까지 그 행이 통째로
   assert.deepEqual(rows(host), ["R2c"], "R1 행이 안쪽 셀까지 사라짐");
 });
 
-test("제거 후 push는 arrayPool을 안 늘린다(내부 배열 arrayInfo까지 재귀 회수·재사용)", () => {
+test("제거 후 push는 arrayPool을 안 늘린다(내부 배열 arrayInfo까지 재귀 회수/재사용)", () => {
   const { del, add, inst } = instantiate(initial, [{ label: "R3", cells: ["z"] }], [0]);
   const poolBefore = inst.arrayPool.entries.length;
   del.click(); // R1 제거 -> 내부 cells arrayInfo 재귀 반납

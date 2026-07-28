@@ -23,11 +23,11 @@ pub enum CodegenError {
     UnknownContext(String),
     /// prop 경로가 존재하지 않는 필드를 가리킴(객체 아닌 값에 `.field`, 또는 없는 필드명).
     UnknownField { root: String, field: String },
-    /// 값 자리(보간·속성·payload·context)에 leaf(원시)가 아닌 객체/배열 경로가 왔다.
-    /// 반응성·값 자리엔 leaf만 올 수 있다 - 객체 통째는 안 넘긴다.
+    /// 값 자리(보간/속성/payload/context)에 leaf(원시)가 아닌 객체/배열 경로가 왔다.
+    /// 반응성/값 자리엔 leaf만 올 수 있다 - 객체 통째는 안 넘긴다.
     NotLeaf(String),
     /// 객체 통째 전달(`user={user}`)에서 넘긴 경로의 도달 타입이 자식 prop 타입과 구조가 다르다.
-    /// leaf를 순서로 짝지으므로 필드 이름·순서·타입이 일치해야 한다.
+    /// leaf를 순서로 짝지으므로 필드 이름/순서/타입이 일치해야 한다.
     PropTypeMismatch { comp: String, prop: String },
     /// scope_index/offset이 u8(255)를 넘었다(BYTECODE.md - 둘 다 u8 operand). 안 펼쳐 슬롯 =
     /// props/for_var 개수라 정상 컴포넌트는 안 넘지만, 넘으면 넘친 변수 참조를 담아 위치를 알린다.
@@ -63,7 +63,7 @@ impl<'a> CompLookup<'a> {
 
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
 /// 두 번째 반환값은 리소스 사이드맵 - 인덱스가 모듈 전역 resId, 값이 정규화 경로.
-/// 빌드 단계가 이걸 받아 내용 해시·복사·URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
+/// 빌드 단계가 이걸 받아 내용 해시/복사/URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
 pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenError> {
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
@@ -177,7 +177,7 @@ fn store_size(ty: &Type) -> u16 {
 
 /// prop 참조(root + 필드 경로)를 슬롯 위치로 짚는다 - scope_index(넘길 슬롯 번호) + offset
 /// (root 안에서 도달 필드까지의 store 칸 거리) + 도달 타입. 객체를 펼치지 않으므로 scope_index는
-/// props/for_var를 하나씩 센 순번이고(객체·배열도 슬롯 하나), offset은 root가 객체일 때 그 필드
+/// props/for_var를 하나씩 센 순번이고(객체/배열도 슬롯 하나), offset은 root가 객체일 때 그 필드
 /// 위치다. path가 비면 offset 0(THROUGH), 있으면 필드 거리(FIELD). u8 상한 가드는 emit이 건다.
 ///
 ///   {tag}        root=tag(for_var)   path=[]       -> (for_var 슬롯, 0)
@@ -239,7 +239,7 @@ fn var_ref_to_slot<'a>(
     Ok((scope_index, offset, ty))
 }
 
-/// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. 값·반응성 자리(보간·속성·@if 조건)엔
+/// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. 값/반응성 자리(보간/속성/@if 조건)엔
 /// leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `var_ref_to_slot` 위 leaf-only 래퍼.
 fn var_ref_to_leaf_slot(
     var: &VarRef,
@@ -253,9 +253,9 @@ fn var_ref_to_leaf_slot(
     }
 }
 
-/// 두 타입이 구조적으로 동일한가 - 필드 이름·순서·타입이 재귀로 일치. 객체 통째 전달에서
+/// 두 타입이 구조적으로 동일한가 - 필드 이름/순서/타입이 재귀로 일치. 객체 통째 전달에서
 /// 넘긴 경로의 도달 타입과 자식 prop 타입이 같은 leaf 배치인지 검사(순서만으로 leaf를 짝지으므로
-/// 이름·순서가 어긋나면 엉뚱하게 이어진다). (Ref/Omit/Pick은 expand가 이미 Object로 풀었다.)
+/// 이름/순서가 어긋나면 엉뚱하게 이어진다). (Ref/Omit/Pick은 expand가 이미 Object로 풀었다.)
 fn types_match(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Bool, Type::Bool) | (Type::Number, Type::Number) | (Type::String, Type::String) => {
@@ -284,7 +284,7 @@ fn var_ref_display(var: &VarRef) -> String {
 
 /// 모듈 전역 타입 테이블(dedup). Type을 intern해 type_ref를 발급한다. 자식부터 등록해
 /// 참조가 먼저 존재하게 한다(Object 필드가 자식 type_ref를 가리킴). 같은 구조는 한 엔트리 공유
-/// - TypeEntry 자체가 키라, 필드명(상수풀 인덱스)·순서·자식 type_ref가 모두 같아야 동일 엔트리다.
+/// - TypeEntry 자체가 키라, 필드명(상수풀 인덱스)/순서/자식 type_ref가 모두 같아야 동일 엔트리다.
 struct TypeTable {
     entries: Vec<TypeEntry>,
     cache: std::collections::HashMap<TypeEntry, u16>,
@@ -389,7 +389,7 @@ impl ForScope<'_> {
 /// @for 회차변수 하나. name = 루프 변수명(`@for (tag of ..)`의 tag). 인덱스변수는 이름이 없을 수
 /// 있어(`@for (row of rows)` - 인덱스 슬롯은 잡되 몸체 참조 불가) Option이다 - None이면 이름 조회에
 /// 안 걸린다(슬롯만 점유). offset = 이 변수가 앉는 scope 슬롯(props leaf 뒤에 회차 진입 순서로 이어짐),
-/// type_ = 요소 타입(배열 inner) 또는 Number(count 회차값·인덱스).
+/// type_ = 요소 타입(배열 inner) 또는 Number(count 회차값/인덱스).
 #[derive(Clone)]
 struct ForVar {
     name: Option<String>,
@@ -583,7 +583,7 @@ fn emit_node(
             code.push(Op::IfEnd as u8);
         }
         Node::For { item, index, count, body } => {
-            // 이름 충돌 검사(섀도잉 금지 - 조회를 순서 무관하게 유지). item·index 둘 다 props/바깥 회차변수와
+            // 이름 충돌 검사(섀도잉 금지 - 조회를 순서 무관하게 유지). item/index 둘 다 props/바깥 회차변수와
             // 안 겹쳐야 한다. item==index도 금지(같은 이름 두 슬롯).
             let mut names: Vec<&String> = vec![item];
             if let Some(idx) = index {

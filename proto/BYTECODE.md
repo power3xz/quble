@@ -51,7 +51,7 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 - **속성값은 항상 컴포넌트 상수풀.** `"card"` 같은 값은 컴포넌트마다 달라 전역에 못 넣는다.
 - **컴포넌트 상수풀 엔트리는 타입을 갖는다**(Str/Num/Bool). quble이 타입을 소유하므로 리터럴은
   소스의 타입대로 실리고(`42`->Num, `true`->Bool), 런타임이 인덱스로 꺼내면 이미 올바른 값이다 -
-  `@if` 등 소비 지점이 문자열을 다시 해석하지 않는다. 이름·텍스트·속성값은 Str.
+  `@if` 등 소비 지점이 문자열을 다시 해석하지 않는다. 이름/텍스트/속성값은 Str.
 - 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(§4). `ELEM_OPEN`의 operand는
   내장 태그 ID, `ATTR_G`의 name은 전역 상수풀 ID, `ATTR_L`의 name과 모든 value/`TEXT`는
   컴포넌트 상수풀 인덱스. (`ELEM_END`는 operand가 없다 - §5.)
@@ -121,7 +121,7 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   entries    : count x ( tag:u8, payload )
                  tag 0 (Scalar) : payload 없음
                  tag 1 (Object) : field_count:u16, fields:field_count x ( name_const_index:u16, type_ref:u16 )
-                                  // type_ref로 자식 타입을 가리켜 중첩·공유를 표현
+                                  // type_ref로 자식 타입을 가리켜 중첩/공유를 표현
                  tag 2 (Array)  : elem_type_ref:u16   // 원소 타입. 배열의 배열은 elem이 다시 Array
                                   //   (string[][] = #0 Array(1) -> #1 Array(2) -> #2 Scalar)
 [ 컴포넌트 테이블 ]        // ID = 배열 인덱스 (0,1,2...)
@@ -168,9 +168,9 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 - 내장 태그 테이블/전역 상수풀은 파일에 없다 - 헤더의 version이 이 테이블들의 버전을 함께
   결정한다고 본다.
-- **타입 테이블은 모듈 전역·dedup.** payload/context가 담는 타입 + **모든 comp의 props 타입**을
+- **타입 테이블은 모듈 전역/dedup.** payload/context가 담는 타입 + **모든 comp의 props 타입**을
   등록한다(props는 핸들러가 접근하려면 선언 전체가 필요). Object 필드가 자식을 `type_ref`로 가리켜
-  중첩·공유를 표현한다. field는
+  중첩/공유를 표현한다. field는
   `type_ref`로 이 테이블을 참조하고 값 출처(`ref`)만 따로 싣는다 - 구조는 전역에, 인스턴스는
   컴포넌트 field에. 슬롯을 펼치지 않으므로 객체 field도 ref 하나로 그 슬롯을 가리킨다(런타임이
   type_ref 구조로 store에서 조립). 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
@@ -215,7 +215,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `FOR_END`         | 0x17 | -                     | -                         | `@for` 몸체 끝(IF_END 동형 마커). 중첩은 깊이로 짝짓기.                    |
 | `PUSH_PATH_INDEX_SEGMENT` | 0x18 | depth: u16    | -                         | 합성 경로에 `@for` 회차 인덱스 세그먼트를 민다. `depth`는 loopIndexStack에서 읽을 위치. 직전 이름 세그먼트에 접미(`VideoItem[3]`)하거나, 직전 이름이 없으면 익명 세그먼트(`[3]`). |
 | `PUSH_FIELD`      | 0x19 | scope_index:u8, offset:u8 | scope                 | 부모 `scope[scope_index]`에서 필드로 내려가 `(kind, base+offset)`을 자식에 push(경로 참조 `{user.name}`). kind(출처)는 부모 슬롯 그대로 전파, 위치만 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다(leaf면 `store.get`, object면 base+offset, array면 `arrayPool[store.get()]`). |
-| `FOR_ARRAY_VAR`   | 0x1a | scope_index:u8, offset:u8 | scope                 | count가 배열 슬롯인 반복(`@for (item of arr)`). 그 칸의 `arrayInfoIndex`로 요소 수·위치를 얻어 요소 수만큼 반복하며, 회차마다 회차변수 슬롯을 그 요소 leaf에 바인딩. |
+| `FOR_ARRAY_VAR`   | 0x1a | scope_index:u8, offset:u8 | scope                 | count가 배열 슬롯인 반복(`@for (item of arr)`). 그 칸의 `arrayInfoIndex`로 요소 수/위치를 얻어 요소 수만큼 반복하며, 회차마다 회차변수 슬롯을 그 요소 leaf에 바인딩. |
 
 설계 메모:
 
@@ -223,7 +223,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   최근에 연 태그**를 닫을 수밖에 없다 - 어느 태그인지 명시할 필요가 없다. 닫을 대상은 런타임이
   스택으로 안다: SSR 렌더러는 `</TAG>`를 써야 해 **태그 이름 스택**을, JS 런타임은 부모로
   복귀만 하면 돼 **DOM 노드 스택**을 유지한다. (이전엔 END가 tag ID를 들었으나 잉여라 제거.
-  요소당 2B 절감 - grid raw −8.7% 실측.)
+  요소당 2B 절감 - grid raw -8.7% 실측.)
 - 빈 요소 `h1() {}`도 OPEN -> CLOSE_OPEN -> END (`<h1></h1>`). void element 최적화는 나중.
 - **합성 - `PUSH_THROUGH`/`PUSH_FIELD`/`PUSH_ARG_LIT` + `RENDER`.** 부모가 자식을 호출할 때,
   use-site 바인딩을 자식 scope index 순서대로 쌓고 `RENDER comp_id`가 그 인자 버퍼를 **자식
@@ -263,7 +263,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     `a.count`라 offset). 런타임이 그 leaf 값을 횟수로. STORE면 count leaf 구독으로 꼬리 회차를
     늘리고/줄인다(전용 region). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인.
   - `FOR_ARRAY_VAR scope_index:u8, offset:u8` - count가 배열 슬롯(`@for (item of arr)`). 배열
-    칸은 `arrayInfoIndex` 하나라(슬롯 안 펼침) 그 값으로 arrayPool에서 요소 수·위치를 얻어 요소
+    칸은 `arrayInfoIndex` 하나라(슬롯 안 펼침) 그 값으로 arrayPool에서 요소 수/위치를 얻어 요소
     수만큼 반복한다. 회차마다 **회차변수(item)** 슬롯을 그 요소 leaf에 바인딩해 본문의
     `TEXT_VAR`/push가 요소값을 쓴다.
   - **회차변수 슬롯은 operand에 없다.** codegen이 `props 슬롯 수 + 바깥 @for 깊이`로 정해 `{item}`을

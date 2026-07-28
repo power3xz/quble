@@ -21,7 +21,7 @@ pub enum CompileError {
 }
 
 /// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 - 빌드 파이프라인이 사이드맵으로
-/// 내용 해시·복사·URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
+/// 내용 해시/복사/URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
 pub struct CompileOutput {
     pub bytecode: Box<[u8]>,
     /// 인덱스 = 모듈 전역 resId, 값 = 리소스 정규화 경로.
@@ -72,7 +72,7 @@ mod tests {
     use crate::ast::{AttrValue, Node};
     use bytecode::Const;
 
-    /// 상수풀 인덱스의 문자열 값(테스트용). 이름·속성명 등 문자열 상수 검사에 쓴다.
+    /// 상수풀 인덱스의 문자열 값(테스트용). 이름/속성명 등 문자열 상수 검사에 쓴다.
     /// 문자열이 아닌 엔트리(Num/Bool)면 None.
     fn str_at(module: &bytecode::Module, index: u16) -> Option<&str> {
         match module.pool.get(index) {
@@ -301,7 +301,7 @@ mod tests {
         );
     }
 
-    /// void 요소(img·input 등)는 self-close가 필수 - 자식 블록을 쓰면 파스 에러.
+    /// void 요소(img/input 등)는 self-close가 필수 - 자식 블록을 쓰면 파스 에러.
     #[test]
     fn void_element_with_child_block_errors() {
         let src = r#"component C { template { img(src="a.png") {} } }"#;
@@ -942,7 +942,7 @@ mod tests {
     }
 
     /// 같은 구조의 두 객체를 각각 payload에 담으면 타입 테이블에서 한 엔트리로 dedup된다
-    /// (필드명·순서·자식 타입이 모두 같으면 같은 type_ref).
+    /// (필드명/순서/자식 타입이 모두 같으면 같은 type_ref).
     #[test]
     fn identical_object_types_dedup() {
         use bytecode::decode;
@@ -1039,7 +1039,7 @@ mod tests {
     }
 
     /// expand가 푼 루트 props를 leaf 경로로 펼쳐(객체는 필드까지, 배열은 요소 타입) 유틸
-    /// 타입(Ref/Omit/Pick) 해소·선언 순서·객체 재귀 순서를 검증한다. 펼침은 이 검증만의 관찰
+    /// 타입(Ref/Omit/Pick) 해소/선언 순서/객체 재귀 순서를 검증한다. 펼침은 이 검증만의 관찰
     /// 창이라 테스트 지역에 둔다(런타임은 타입 테이블로 심어 이 leaf 경로를 안 쓴다).
     fn compile_props(src: &str) -> Vec<String> {
         let comps = flatten::flatten("entry", src, &(|_: &str, _: &str| None)).unwrap();
@@ -1284,7 +1284,7 @@ mod tests {
     }
 
     /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`{a}`)에 객체를 넣으면 여전히 NotLeaf.
-    /// 값·반응성 자리엔 leaf만 온다는 경계가 인자 허용으로 무너지지 않아야 한다.
+    /// 값/반응성 자리엔 leaf만 온다는 경계가 인자 허용으로 무너지지 않아야 한다.
     #[test]
     fn object_in_text_node_still_errors() {
         let src = r#"
@@ -1419,7 +1419,7 @@ mod tests {
 
     /// 여러 파일이 각자 다른 CSS를 use하면 resId가 모듈 전역으로 0,1,2...로 매겨진다.
     /// 한 컴포넌트가 여러 CSS를 use하면 LOAD_RES를 여러 개 내고, 이미 쓰인 경로는 resId를
-    /// 재사용한다(전역 dedup). entry(app)=0, A(a)=1, B(b)=2, C(app·b·c)는 0·2 재사용 + c=3.
+    /// 재사용한다(전역 dedup). entry(app)=0, A(a)=1, B(b)=2, C(app/b/c)는 0/2 재사용 + c=3.
     #[test]
     fn res_ids_are_module_global() {
         use bytecode::{decode, Op};
@@ -1439,7 +1439,7 @@ mod tests {
             use "./b.css"
             component B { template { p( /) } }
         "#;
-        // C는 여러 CSS를 use - app·b는 이미 발급된 resId 재사용, c만 신규.
+        // C는 여러 CSS를 use - app/b는 이미 발급된 resId 재사용, c만 신규.
         let c = r#"
             use "./app.css"
             use "./b.css"
@@ -1460,7 +1460,7 @@ mod tests {
         let output = compile_src("entry", entry, &loader).unwrap();
 
         // 사이드맵: 등장 순서대로 전역 0,1,2,3. entry(app), a, b, 그다음 C의 신규 c.
-        // C의 app·b는 재사용이라 사이드맵에 새로 추가되지 않는다.
+        // C의 app/b는 재사용이라 사이드맵에 새로 추가되지 않는다.
         assert_eq!(
             output.resources,
             vec![
@@ -1498,11 +1498,11 @@ mod tests {
         assert_eq!(load_res_ids(id_of("App")), vec![0], "App은 app.css=0");
         assert_eq!(load_res_ids(id_of("A")), vec![1], "A는 a.css=1");
         assert_eq!(load_res_ids(id_of("B")), vec![2], "B는 b.css=2");
-        // C는 app(0)·b(2) 재사용 + c(3) 신규 - use 순서대로 셋.
+        // C는 app(0)/b(2) 재사용 + c(3) 신규 - use 순서대로 셋.
         assert_eq!(
             load_res_ids(id_of("C")),
             vec![0, 2, 3],
-            "C는 app=0·b=2 재사용 + c=3"
+            "C는 app=0/b=2 재사용 + c=3"
         );
     }
 
@@ -1583,7 +1583,7 @@ mod tests {
     }
 
     /// 트리셰이킹: use에 나열 안 한 컴포넌트는 병합에서 빠진다.
-    /// parts에 Used·Unused 둘 다 있지만 Used만 use -> 산출물에 Used만.
+    /// parts에 Used/Unused 둘 다 있지만 Used만 use -> 산출물에 Used만.
     #[test]
     fn use_excludes_unlisted_components() {
         let entry = r#"
@@ -1607,7 +1607,7 @@ mod tests {
             use Right from "./right.qubc"
             component Card { template { Left( /) Right( /) } }
         "#;
-        // Left·Right는 같은 parts에서 각각 X·Y를 use한다.
+        // Left/Right는 같은 parts에서 각각 X/Y를 use한다.
         let left = r#"
             use X from "./parts.qubc"
             component Left { template { X( /) } }

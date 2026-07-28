@@ -25,7 +25,7 @@ const instantiate = (values: unknown, handlers: THandlers = {}) => {
 
 test("초기 렌더: 각 회차가 자기 인덱스를 텍스트로 표시", () => {
   const { host } = instantiate({ count: 3 });
-  assert.deepEqual(rows(host), ["인덱스 0", "인덱스 1", "인덱스 2"], "count=3 -> 0·1·2");
+  assert.deepEqual(rows(host), ["인덱스 0", "인덱스 1", "인덱스 2"], "count=3 -> 0/1/2");
 });
 
 test("count 0이면 회차 없음", () => {
@@ -40,7 +40,7 @@ test("grow: 늘린 꼬리 회차도 자기 인덱스를 표시", () => {
   assert.deepEqual(
     rows(host),
     ["인덱스 0", "인덱스 1", "인덱스 2", "인덱스 3", "인덱스 4"],
-    "count=5 -> 늘린 회차가 2·3·4",
+    "count=5 -> 늘린 회차가 2/3/4",
   );
 });
 
@@ -49,5 +49,5 @@ test("shrink 후 재grow: 재추가된 회차 인덱스에 잔재 없음", () =>
   store.set(0, 1); // 회차 1,2 제거
   assert.deepEqual(rows(host), ["인덱스 0"], "count=1");
   store.set(0, 3); // 재추가(새로 build)
-  assert.deepEqual(rows(host), ["인덱스 0", "인덱스 1", "인덱스 2"], "재추가 회차도 1·2");
+  assert.deepEqual(rows(host), ["인덱스 0", "인덱스 1", "인덱스 2"], "재추가 회차도 1/2");
 });

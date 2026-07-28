@@ -1,5 +1,5 @@
 //! `.qubc` 소스에서 핸들러 타입(`.d.ts`)을 낸다. 바이트코드를 거치지 않고 AST를 직접 걸어,
-//! 합성 트리의 fullname마다 data(payload)·props·context 타입을 산출한다. 바이트코드는 props
+//! 합성 트리의 fullname마다 data(payload)/props/context 타입을 산출한다. 바이트코드는 props
 //! 이름을 버리므로(scope 인덱스만) 이름이 살아 있는 AST에서 뽑는 게 유일한 길이다.
 //!
 //! props는 값이 아니라 leafIndex(주소기)라 `LeafIndex<T>`로 낸다 - `get(k)`가 T를 내주고
@@ -129,7 +129,7 @@ fn type_to_ts(ty: &Type) -> String {
     }
 }
 
-/// 값 필드(payload/context)의 TS 타입. 리터럴은 그 값으로 좁히고(문자열은 "..", 숫자·불리언은
+/// 값 필드(payload/context)의 TS 타입. 리터럴은 그 값으로 좁히고(문자열은 "..", 숫자/불리언은
 /// 값 그대로), 변수는 string(소스에 타입 없음 - Var 타입은 다음 스텝).
 fn value_type(v: &ArgValue) -> String {
     match v {
@@ -162,7 +162,7 @@ fn seg_index_suffix(pending: &[u16]) -> String {
 /// 합성 트리를 걷는다(disasm.js collectEventFullnames와 같은 규칙).
 /// path_prefix: alias/type-name 세그먼트 누적. context_stack: 활성 @with(바깥->안쪽).
 /// pending: 접미 대기 중인 @for 깊이(위 참고). 자식 컴포넌트 use-site의 @for 깊이를 이어받는다.
-/// @if는 then·else 둘 다 순회(어느 가지든 발생 가능). 같은 fullname은 한 번만(의도된 공유).
+/// @if는 then/else 둘 다 순회(어느 가지든 발생 가능). 같은 fullname은 한 번만(의도된 공유).
 fn walk(
     comps: &[FlatComp],
     comp_id: usize,
@@ -209,7 +209,7 @@ fn walk_nodes(
             } => {
                 // 이벤트가 @for 직속(세그먼트 만드는 컴포넌트 없이)이면 익명 세그먼트로 인덱스를
                 // 싣는다([$0].SELECT). element는 세그먼트를 안 만들어 pending을 소비하지 않는다 -
-                // 같은 @for 안 형제·중첩 element가 모두 같은 인덱스를 실을 수 있게 유지한다.
+                // 같은 @for 안 형제/중첩 element가 모두 같은 인덱스를 실을 수 있게 유지한다.
                 let suffix = seg_index_suffix(pending);
                 let event_prefix = if suffix.is_empty() {
                     path_prefix.to_string()
@@ -393,7 +393,7 @@ mod tests {
         assert!(out.contains("type Handler<Data, Props, Ctx, Loop> = ("));
     }
 
-    /// 단순 event - data(값)·props(leafIndex). context 없으면 Ctx는 {}.
+    /// 단순 event - data(값)/props(leafIndex). context 없으면 Ctx는 {}.
     /// props 타입이 leafIndex의 T로 매핑된다(string/number/bool 각각).
     #[test]
     fn single_event_props_and_leafindex() {
@@ -409,7 +409,7 @@ mod tests {
         ), "실제 출력:\n{out}");
     }
 
-    /// 배열·객체 prop 타입이 재귀적으로 TS 타입으로 매핑된다(T[], { k: T }).
+    /// 배열/객체 prop 타입이 재귀적으로 TS 타입으로 매핑된다(T[], { k: T }).
     #[test]
     fn array_and_object_prop_types() {
         let out = dts(r#"
@@ -509,7 +509,7 @@ mod tests {
         );
     }
 
-    /// @if 양가지를 다 순회한다 - then·else 안의 이벤트가 둘 다 나온다.
+    /// @if 양가지를 다 순회한다 - then/else 안의 이벤트가 둘 다 나온다.
     #[test]
     fn if_visits_both_branches() {
         let out = dts(r#"
@@ -569,7 +569,7 @@ mod tests {
         assert!(out.contains("'B[$0].CLICK':"), "실제 출력:\n{out}");
     }
 
-    /// 같은 @for 안 중첩 element - 형제·중첩 모두 같은 회차라 같은 [$0]을 싣는다(소진 아님).
+    /// 같은 @for 안 중첩 element - 형제/중첩 모두 같은 회차라 같은 [$0]을 싣는다(소진 아님).
     #[test]
     fn for_nested_element_same_index() {
         let out = dts(r#"

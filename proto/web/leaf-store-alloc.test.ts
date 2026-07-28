@@ -1,8 +1,8 @@
-// store의 요소 자리 확보/회수(alloc/free) - 배열 요소 추가·제거의 leaf 관리. createLeafStoreSubject(leaves)는
-// leaves를 클로저에 갇으므로, 테스트가 그 배열을 직접 넘겨 길이·내용으로 회수 동작을 검증한다(노출 불필요).
+// store의 요소 자리 확보/회수(alloc/free) - 배열 요소 추가/제거의 leaf 관리. createLeafStoreSubject(leaves)는
+// leaves를 클로저에 갇으므로, 테스트가 그 배열을 직접 넘겨 길이/내용으로 회수 동작을 검증한다(노출 불필요).
 //
 // 규칙: alloc은 같은 크기 빈 블록이 free list에 있으면 재사용(뒤로 안 늘림) 없으면 끝에 확보. free는 그 블록이
-// leaves 끝이면 length를 줄여 되감고(pool 축소), 중간이면 크기별 free list에 반납. 전부 O(1), 병합·정렬 없음.
+// leaves 끝이면 length를 줄여 되감고(pool 축소), 중간이면 크기별 free list에 반납. 전부 O(1), 병합/정렬 없음.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -51,7 +51,7 @@ test("free list는 크기별로 분리 - 다른 크기는 재사용 안 하고 �
 });
 
 test("같은 크기 두 자리를 반납하면 두 alloc이 각각 재사용해 새 칸을 안 늘린다", () => {
-  // 배열 요소 제거는 요소 leaf와 인덱스 leaf(둘 다 size 1)를 함께 반납하고, 뒤이은 push는 요소·인덱스를 함께
+  // 배열 요소 제거는 요소 leaf와 인덱스 leaf(둘 다 size 1)를 함께 반납하고, 뒤이은 push는 요소/인덱스를 함께
   // alloc한다 - 같은 크기 두 자리가 반납됐다 두 번 alloc되는 패턴. free list가 둘을 다 재사용해 pool을 안 늘려야 한다.
   const leaves: unknown[] = [];
   const store = createLeafStoreSubject(leaves);

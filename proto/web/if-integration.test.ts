@@ -46,7 +46,7 @@ const branchOf = (inst: any, region: any, slot: number) => inst.branchPool.entri
 const childRegion = (inst: any, regionIndex: number, slot: number, nth = 0) =>
   inst.regionPool.entries[branchOf(inst, inst.regionPool.entries[regionIndex], slot).childRegionIndices[nth]];
 
-// 텍스트만 추출(주석 anchor·태그 제외) - swap 가시화 확인용.
+// 텍스트만 추출(주석 anchor/태그 제외) - swap 가시화 확인용.
 const texts = (host: ParentNode) => [...host.querySelectorAll("p")].map((p) => p.textContent);
 
 // ── 단일 if ──────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ test("단일 if: 활성 가지 set은 즉시 반영", () => {
 });
 
 // ── 중첩 if ──────────────────────────────────────────────────────────
-test("중첩 if: 바깥 then 활성 시 안쪽 if도 build·자식 등록", () => {
+test("중첩 if: 바깥 then 활성 시 안쪽 if도 build/자식 등록", () => {
   const { inst, host } = instantiate("nested_if", ["outer", "inner", "a", "b", "c"], {
     outer: true,
     inner: true,
@@ -173,14 +173,14 @@ test("3단 중첩: 최하단까지 렌더, 최상단 swap이 전부 detach", () 
   set("c3", false);
   assert.deepEqual(texts(host), ["B"], "최하단만 else(b)");
   set("c1", false);
-  assert.deepEqual(texts(host), ["D"], "최상단 else(d) - 2·3단 통째 사라짐");
+  assert.deepEqual(texts(host), ["D"], "최상단 else(d) - 2/3단 통째 사라짐");
   set("c1", true);
   assert.deepEqual(texts(host), ["B"], "복귀 시 안쪽 상태(c3=false) 유지 -> b");
 });
 
 // ── @if 가지 안의 @with ──────────────────────────────────────────────
 // 회귀: runtime.js operandLen에 ENTER/EXIT_CONTEXT가 빠져, @with를 품은 가지를 lazy build하며
-// 스캔할 때 "bad opcode 0x13"으로 죽었다. then(@with) 가지가 build·swap될 때 터지지 않아야 한다.
+// 스캔할 때 "bad opcode 0x13"으로 죽었다. then(@with) 가지가 build/swap될 때 터지지 않아야 한다.
 test("@if 가지 안 @with: lazy build 시 context opcode를 건너뛴다", () => {
   // 초기 else 활성 - then(@with 가지)은 미build 상태로 둔다.
   const { host, set } = instantiate("if_with_context", ["cond", "a", "b"], { cond: false, a: "A", b: "B" });
@@ -202,7 +202,7 @@ test("리터럴 bool @if: cond=false가 실제 boolean이라 else로 간다", ()
 });
 
 // ── 컴포넌트 합성 ─────────────────────────────────────────────────────
-// triple_if를 부모(바깥 c1) + 자식 InnerPair(c2/c3)로 쪼개 RENDER로 합성. 같은 store·path를 쓰므로
+// triple_if를 부모(바깥 c1) + 자식 InnerPair(c2/c3)로 쪼개 RENDER로 합성. 같은 store/path를 쓰므로
 // triple_if와 동일한 set/texts 시퀀스가 그대로 통과해야 한다(합성이 단일 컴포넌트와 동등).
 test("합성 3단: triple_if를 부모+자식으로 쪼개도 동일 동작", () => {
   const { host, set } = instantiate("composed_triple", ["c1", "c2", "c3", "a", "b", "c", "d"], {
@@ -218,7 +218,7 @@ test("합성 3단: triple_if를 부모+자식으로 쪼개도 동일 동작", ()
   set("c3", false);
   assert.deepEqual(texts(host), ["B"], "최하단만 else(b)");
   set("c1", false);
-  assert.deepEqual(texts(host), ["D"], "최상단 else(d) - 자식(2·3단) 통째 사라짐");
+  assert.deepEqual(texts(host), ["D"], "최상단 else(d) - 자식(2/3단) 통째 사라짐");
   set("c1", true);
   assert.deepEqual(texts(host), ["B"], "복귀 시 자식 안쪽 상태(c3=false) 유지 -> b");
 });

@@ -7,14 +7,14 @@ Quble 컴포넌트 언어(`.qubc`) 신택스 하이라이팅.
 - 키워드 `component` `props` `contexts` `events` `template` `use` `from`
 - 디렉티브 `@with` `@if` `@else`
 - DOM 이벤트 위임 `@click` `@input` `@change` `@submit` `@focus` `@blur` `@keydown` `@keyup` `@mousedown` `@mouseup` `@mouseenter` `@mouseleave` `@scroll`
-- 합성·별칭 `Alias: Comp(...)`, 이벤트명(대문자 스네이크), 태그(소문자), 속성, 문자열, `{var}` 보간
+- 합성/별칭 `Alias: Comp(...)`, 이벤트명(대문자 스네이크), 태그(소문자), 속성, 문자열, `{var}` 보간
 
 ## 핸들러 타입 생성
 
 `*.qubc.handlers.ts`를 열거나 짝 `.qubc`를 저장하면, 확장이 짝 `x.qubc.d.ts`(`Handlers`
-인터페이스)를 생성한다. handlers.ts가 이를 `import type`으로 받으면 TS가 fullname·payload·props·
+인터페이스)를 생성한다. handlers.ts가 이를 `import type`으로 받으면 TS가 fullname/payload/props/
 context를 타입으로 강제한다 - 잘못된 이벤트명은 컴파일 에러, payload 필드는 정확한 타입(리터럴은
-그 값으로 좁힘), `params.context.<이름>.<필드>`·`params.props.<이름>`까지 잡힌다. `props`는 값이
+그 값으로 좁힘), `params.context.<이름>.<필드>`/`params.props.<이름>`까지 잡힌다. `props`는 값이
 아니라 leafIndex(`LeafIndex<T>`)라 `get`/`set`으로 읽고 쓴다.
 
 ```ts
@@ -22,7 +22,7 @@ context를 타입으로 강제한다 - 잘못된 이벤트명은 컴파일 에�
 import type { Handlers } from "./card.qubc";
 
 const handlers: Handlers = {
-  // 키를 치면 fullname 후보가 뜨고, 빠진 핸들러·없는 이벤트명을 TS가 잡는다.
+  // 키를 치면 fullname 후보가 뜨고, 빠진 핸들러/없는 이벤트명을 TS가 잡는다.
   'MainThumb.CLICK_THUMBNAIL': (data, { props, context, get, set }) => {
     data.avatar;                    // string (payload 값)
     context.HoverArea.title;        // 리터럴이면 그 값으로 좁혀짐

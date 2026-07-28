@@ -1,4 +1,4 @@
-//! AST. 한 파일에 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간(텍스트·속성).
+//! AST. 한 파일에 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간(텍스트/속성).
 
 /// 한 소스 파일(.qubc 하나)의 파싱 결과: 최상위 use 문들 + 컴포넌트 정의들.
 #[derive(Debug, PartialEq)]
@@ -10,7 +10,7 @@ pub struct SourceFile {
     pub comps: Vec<Component>,
 }
 
-/// `use A, B from "path"` - path 소스에서 이름 A·B를 현재 스코프로 가져온다.
+/// `use A, B from "path"` - path 소스에서 이름 A/B를 현재 스코프로 가져온다.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Use {
     pub names: Vec<String>,
@@ -33,12 +33,12 @@ pub struct Prop {
     pub type_: Type,
 }
 
-/// prop 타입. quble이 온전히 소유하는 재귀 구조 - 원시 3종을 잎으로 배열·객체를 조합한다.
+/// prop 타입. quble이 온전히 소유하는 재귀 구조 - 원시 3종을 잎으로 배열/객체를 조합한다.
 /// d.ts가 TS 타입으로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 ///
 /// Ref/Omit/Pick은 "다른 곳의 타입을 참조/가공"하는 표기라, expand 단계가 이를 그
 /// 실제 필드 목록(Object)으로 바꿔치기한다. 예: `Section`의 props가 `{ title, on }`이면
-/// `Omit<Section, 'title'>` → `Object([("on", ...)])`. 그래서 codegen에는 Object만 오고
+/// `Omit<Section, 'title'>` -> `Object([("on", ...)])`. 그래서 codegen에는 Object만 오고
 /// Ref/Omit/Pick은 남지 않는다.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
@@ -85,7 +85,7 @@ pub enum Node {
         children: Vec<Node>,
     },
     Text(String),
-    /// `{name}`·`{assignee.name}` 보간 - prop 참조. codegen이 scope 인덱스로 해석.
+    /// `{name}`/`{assignee.name}` 보간 - prop 참조. codegen이 scope 인덱스로 해석.
     Var(VarRef),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
@@ -105,7 +105,7 @@ pub enum Node {
     },
     /// `@for (item[, index] of count) { body }` - count 회 반복 렌더. count는 정수 리터럴 또는 숫자
     /// prop 참조(ForCount). item은 요소(배열) 또는 회차값(count). index는 선택적 회차 인덱스변수 이름
-    /// (`@for (row, i of rows)`의 i) - 몸체 `{i}`·이벤트 `$n`이 읽는다. 없으면 None(인덱스 슬롯은 잡되
+    /// (`@for (row, i of rows)`의 i) - 몸체 `{i}`/이벤트 `$n`이 읽는다. 없으면 None(인덱스 슬롯은 잡되
     /// 몸체에서 이름 참조 불가). item과 index는 별개 슬롯이라 count-for든 array-for든 둘 다 쓸 수 있다.
     For {
         item: String,
@@ -138,7 +138,7 @@ pub enum AttrValue {
     Var(VarRef),
 }
 
-/// prop 참조 - 어느 prop(root)의 어느 경로(path)인가. 텍스트 보간·속성값·합성 인자·
+/// prop 참조 - 어느 prop(root)의 어느 경로(path)인가. 텍스트 보간/속성값/합성 인자/
 /// payload/context 값이 공유한다. 스칼라는 path 빈 벡터(`title` -> root="title", path=[]),
 /// 객체 접근은 필드들(`assignee.name` -> root="assignee", path=["name"]). root/path 분리:
 /// 나중에 AST에서 객체 단위 처리(root 통째)가 필요할 수 있어 root를 분리해 둔다.

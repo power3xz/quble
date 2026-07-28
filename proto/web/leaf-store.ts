@@ -10,7 +10,7 @@
 type LeafIndex = number;
 
 // ── leafStore (데이터만) ─────────────────────────────────────────────
-// 평탄 leaves 배열을 감싸 leafIndex로 값을 읽고/쓴다. 반응성(구독·통지)은 없다
+// 평탄 leaves 배열을 감싸 leafIndex로 값을 읽고/쓴다. 반응성(구독/통지)은 없다
 // - createLeafStoreSubject가 위에 얹는다. leaves는 비공개 - get/set이 유일한 관문이다.
 //
 // @param leaves    진입점이 타입 구조대로 펴 넣은 초기값 배열(leafIndex = 배열 인덱스)
@@ -28,7 +28,7 @@ const createLeafStore = (leaves: unknown[]) => {
 };
 
 // ── leafStoreSubject (leafStore + 반응성 + 동적 칸) ──────────────────
-// leafStore를 감싸 구독·통지(subscribe/set 통지)와 동적 칸(alloc/free - 배열 요소 추가/제거)을
+// leafStore를 감싸 구독/통지(subscribe/set 통지)와 동적 칸(alloc/free - 배열 요소 추가/제거)을
 // 얹는다(Subject - 값을 들고 변경을 구독자에게 통지하는 주체).
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
@@ -42,7 +42,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
   const subscribers: Array<Set<(v: unknown) => void> | undefined> = []; // leafIndex -> Set<(v)=>void>. Set이라 unsubscribe가 O(1).
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
-  // 정적·유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합·split·정렬 없이 O(1) 재사용/반납.
+  // 정적/유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합/split/정렬 없이 O(1) 재사용/반납.
   const freeBySize = new Map<number, LeafIndex[]>();
 
   const set = (leafIndex: LeafIndex, value: unknown): void => {

@@ -38,7 +38,7 @@ const pushHandler = (queue: string[]) => ({
 
 test("초기 렌더: 초기 배열 요소를 순회해 표시", () => {
   const { host } = instantiate({ tags: ["a", "b"] });
-  assert.deepEqual(tags(host), ["a", "b"], "초기 a·b");
+  assert.deepEqual(tags(host), ["a", "b"], "초기 a/b");
 });
 
 test("빈 배열도 렌더된다(회차 0)", () => {

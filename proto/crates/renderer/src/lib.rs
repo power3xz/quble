@@ -1,5 +1,5 @@
 //! Quble SSR 렌더러: 직렬화된 바이트코드(`&[u8]`)를 받아 HTML 문자열로 렌더한다.
-//! 출력은 SSR 문자열(브라우저 DOM 아님). 일회성·무상태 순수 함수. 상세는 proto/BYTECODE.md.
+//! 출력은 SSR 문자열(브라우저 DOM 아님). 일회성/무상태 순수 함수. 상세는 proto/BYTECODE.md.
 
 use bytecode::{DecodeError, Module, Op};
 use std::collections::HashSet;
@@ -129,7 +129,7 @@ fn exec(
                 args.push(val.clone());
             }
             // 리터럴 인자: 상수풀 값을 그대로 자식 scope로 넘긴다. SSR은 정적 렌더라 자식이
-            // 수정하든 말든 상관없어(leaf·반응성 없음) 변수 인자와 같은 문자열로 취급한다.
+            // 수정하든 말든 상관없어(leaf/반응성 없음) 변수 인자와 같은 문자열로 취급한다.
             Op::PushArgLit => {
                 let value_const_index = read_u16(code, &mut pc)?;
                 args.push(get_const(module, value_const_index)?.to_string());
@@ -168,7 +168,7 @@ fn exec(
                 }
             }
             // 이벤트 배선. SSR은 정적 HTML이라 리스너가 없다 - operand만 소비하고 무시한다
-            // (이벤트는 클라 런타임이 단다). event_type·event_index 4바이트.
+            // (이벤트는 클라 런타임이 단다). event_type/event_index 4바이트.
             Op::BindEvent => {
                 read_u16(code, &mut pc)?;
                 read_u16(code, &mut pc)?;
@@ -195,7 +195,7 @@ fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, RenderError> {
     Ok(u16::from_le_bytes([b[0], b[1]]))
 }
 
-/// 불리언 scope 값의 truthy 판정. 빈 문자열·"false"·"0"은 falsy, 그 외 truthy.
+/// 불리언 scope 값의 truthy 판정. 빈 문자열/"false"/"0"은 falsy, 그 외 truthy.
 /// (cond는 불리언 scope index 하나 - BYTECODE.md §5.1)
 fn truthy(val: &str) -> bool {
     !(val.is_empty() || val == "false" || val == "0")
@@ -588,7 +588,7 @@ mod tests {
         );
     }
 
-    /// 속성값 변수: 전역 name(class)·로컬 name(data-x) 둘 다 scope에서 채우고 속성 이스케이프를 적용.
+    /// 속성값 변수: 전역 name(class)/로컬 name(data-x) 둘 다 scope에서 채우고 속성 이스케이프를 적용.
     #[test]
     fn renders_attr_var_global_and_local() {
         let mut pool = ConstPool::new();

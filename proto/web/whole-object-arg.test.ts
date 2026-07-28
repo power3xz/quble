@@ -1,6 +1,6 @@
 // 객체 통째 전달(`Child(row={row})`) 통합 테스트 - 실제 컴파일러가 부모 객체 prop을 자식
 // 객체 prop에 leaf마다 PushArg로 쪼개 넘긴 걸, 실제 runtime이 jsdom 위에서 렌더한다.
-// 쪼갠 scope index들이 자식 leaf(라벨·불리언)에 올바로 닿아 텍스트/분기가 나오는지 본다.
+// 쪼갠 scope index들이 자식 leaf(라벨/불리언)에 올바로 닿아 텍스트/분기가 나오는지 본다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";

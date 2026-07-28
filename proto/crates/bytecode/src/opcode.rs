@@ -63,7 +63,7 @@ pub enum Op {
     /// 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다. 뒤따르는 RENDER가 소비.
     PushField = 0x19,
     /// `@for (item of arr)` 반복 - count가 배열 slot. operand: 배열의 scope index u8, offset u8
-    /// (배열이 필드면 base로부터의 거리). 런타임이 그 칸의 arrayInfoIndex로 요소 수·위치를 얻어
+    /// (배열이 필드면 base로부터의 거리). 런타임이 그 칸의 arrayInfoIndex로 요소 수/위치를 얻어
     /// 요소 수만큼 반복하며, 회차마다 회차변수(item) slot을 그 요소 leaf에 바인딩한다. item slot은
     /// operand에 없다 - 런타임이 codegen과 같은 규칙(props 슬롯 수 + 현재 @for 깊이)으로 구한다.
     /// count가 숫자면 ForCountVar.

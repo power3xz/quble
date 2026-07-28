@@ -1,5 +1,5 @@
-// @for 회차 증감 시 branch/region 칸이 freelist로 반납·재사용되는지 검증한다. 화면 결과가 아니라
-// pool 길이와 freelist 상태를 직접 본다 - 재사용이 깨져 늘 append해도 화면·이벤트는 같아
+// @for 회차 증감 시 branch/region 칸이 freelist로 반납/재사용되는지 검증한다. 화면 결과가 아니라
+// pool 길이와 freelist 상태를 직접 본다 - 재사용이 깨져 늘 append해도 화면/이벤트는 같아
 // for-integration.test.js가 못 잡기 때문.
 
 import assert from "node:assert/strict";

@@ -1,4 +1,4 @@
-//! Quble 컴파일러 바이너리: .qubc 소스 파일 → 컴파일 → 현재 디렉토리의 dist/<name>.qubb.
+//! Quble 컴파일러 바이너리: .qubc 소스 파일 -> 컴파일 -> 현재 디렉토리의 dist/<name>.qubb.
 //! 사용: quble <path/to/component.qubc>
 
 use std::path::Path;

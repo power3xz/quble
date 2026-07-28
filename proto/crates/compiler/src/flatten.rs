@@ -212,7 +212,7 @@ fn collect(
 
     // 리소스 경로를 정규화한다(컴포넌트 import와 같은 loader). 정규화 경로의 동일성이
     // 모듈 전역 resId dedup 키 - 상대경로가 달라도 같은 파일이면 합쳐진다. 소스 텍스트는
-    // 버린다(내용 해시·복사·URL화는 빌드 단계). drop으로 즉시 반납돼 누적되지 않는다.
+    // 버린다(내용 해시/복사/URL화는 빌드 단계). drop으로 즉시 반납돼 누적되지 않는다.
     let mut resources = Vec::with_capacity(source.resources.len());
     for res_path in &source.resources {
         let (canonical, _src) =

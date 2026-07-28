@@ -48,12 +48,12 @@ export type TRegion = {
 // @for가 순회하는 배열 하나의 요소 위치. elemSize = 요소 하나가 차지하는 leaf 수(스칼라 1, 객체는
 // 필드 수) - 요소 안은 시작에서 이만큼 연속. elemStartLeafIndices[i] = i번째 요소의 시작 leafIndex -
 // 요소가 흩어져 할당돼 연속을 못 믿으므로 회차마다 시작을 명시로 든다(요소 사이는 리스트, 요소
-// 안은 elemSize 산술). 요소 추가/제거 시 이 목록으로 유지·회수 대상을 가른다.
+// 안은 elemSize 산술). 요소 추가/제거 시 이 목록으로 유지/회수 대상을 가른다.
 export type TArrayInfo = {
   elemSize: number;
   elemTypeRef: number; // 요소 하나의 타입 - 요소 추가(push)가 값을 이 타입대로 store에 펴 심는다.
   elemStartLeafIndices: number[];
-  indexLeafIndices: number[]; // elemStartLeafIndices와 나란한 요소별 인덱스 leaf - [i]=i번째 요소의 회차 번호를 담은 store 칸. 몸체 {i}·$0가 이 leaf를 읽어, 중간 제거(removeAt) 시 뒤 칸을 set으로 당기면 자동 갱신된다(값 고정·위치 이동 설계의 인덱스 반응성). @for 순회될 때만 lazy로 채운다(sizeLeafIndex와 같은 결). count-for는 중간 제거가 없어(꼬리만) 이걸 안 쓴다.
+  indexLeafIndices: number[]; // elemStartLeafIndices와 나란한 요소별 인덱스 leaf - [i]=i번째 요소의 회차 번호를 담은 store 칸. 몸체 {i}/$0가 이 leaf를 읽어, 중간 제거(removeAt) 시 뒤 칸을 set으로 당기면 자동 갱신된다(값 고정/위치 이동 설계의 인덱스 반응성). @for 순회될 때만 lazy로 채운다(sizeLeafIndex와 같은 결). count-for는 중간 제거가 없어(꼬리만) 이걸 안 쓴다.
   sizeLeafIndex: number | null; // 이 배열이 @for 순회 대상이 되면(그때만) 요소 수를 담는 store 칸을 lazy 확보 - 그 칸 구독이 grow/shrink 발화. @for에 안 쓰이면 null(길이 칸 낭비 없음).
   forRegionIndex: number | null; // 이 배열을 순회하는 @for region. 요소 중간 제거(removeAt)가 이 region의 i번째 회차 DOM을 뗀다. @for에 안 쓰이면 null(뗄 DOM 없음).
 };
@@ -181,8 +181,8 @@ export const appendIfRegion = (regionPool: Pool<TRegion>, branchPool: Pool<TBran
   return regionIndex;
 };
 
-// region에서 지정 가지를 활성화한다. 현재 가지는 끄고(노드·구독 자식까지 재귀 detach),
-// 다음 가지를 켠다(노드·구독 자식까지 재귀 attach). 이미 그 가지면 무동작.
+// region에서 지정 가지를 활성화한다. 현재 가지는 끄고(노드/구독 자식까지 재귀 detach),
+// 다음 가지를 켠다(노드/구독 자식까지 재귀 attach). 이미 그 가지면 무동작.
 // shownIndex: region.branchIndices 안의 슬롯(THEN=0/ELSE=1)이지 전역 branchPool 인덱스가 아니다.
 // 전역 branchIndex는 region.branchIndices[shownIndex]로 한 번 더 푼다.
 export const activateIf = (
@@ -201,7 +201,7 @@ export const activateIf = (
   }
   const nextBranch = branchPool.entries[region.branchIndices[shownIndex]];
   if (!nextBranch.built) {
-    // 생애 첫 활성화 - 지금(런타임) 처음 build해 nodes·구독을 채운다. 이후엔 detach/attach만.
+    // 생애 첫 활성화 - 지금(런타임) 처음 build해 nodes/구독을 채운다. 이후엔 detach/attach만.
     (nextBranch.lazyBuild as () => void)();
     nextBranch.built = true;
     // 방금 build하며 구독은 현재 가지에 모인 채다(즉시 구독 안 함, attachIf가 켠다).
@@ -248,7 +248,7 @@ export const appendForRegion = (regionPool: Pool<TRegion>, countLeafIndex: numbe
 };
 
 // @for region에 회차 Branch 하나를 더하고 그 branchIndex(전역)를 돌려준다. runtime.ts가 그 인덱스를
-// startBranchIndex로 interpret해 노드·구독·자식region을 이 회차에 격리한다.
+// startBranchIndex로 interpret해 노드/구독/자식region을 이 회차에 격리한다.
 export const appendBranchOfForRegion = (
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
@@ -337,7 +337,7 @@ export const truncateFor = (
 
 // @for region(regionIndex)의 i번째 회차만 떼어낸다(배열 요소 중간 제거). truncateFor가 꼬리에 하던
 // detach+반납을 임의 i 하나에 하고 branchIndices에서 그 자리를 뺀다. 나머지 회차는 자기 요소 leaf를 그대로
-// 보므로 무손상이다(요소는 store에서 안 움직이고 목록만 당겨진다) - 재빌드·재바인딩 없음.
+// 보므로 무손상이다(요소는 store에서 안 움직이고 목록만 당겨진다) - 재빌드/재바인딩 없음.
 export const removeBranchAt = (
   store: Store,
   regionPool: Pool<TRegion>,

@@ -1,4 +1,4 @@
-//! Quble 프로토타입 바이트코드: 포맷의 단일 정의처(컴파일러·렌더러·런타임 공용).
+//! Quble 프로토타입 바이트코드: 포맷의 단일 정의처(컴파일러/렌더러/런타임 공용).
 //! 상세는 proto/BYTECODE.md 참고.
 
 pub mod attrs;
@@ -96,7 +96,7 @@ mod tests {
         assert_eq!(pool.len(), 1);
     }
 
-    /// 상수풀 dedup은 값·타입 둘 다 같아야 동일 엔트리 - 문자열 "1"과 숫자 1은 다르다.
+    /// 상수풀 dedup은 값/타입 둘 다 같아야 동일 엔트리 - 문자열 "1"과 숫자 1은 다르다.
     #[test]
     fn pool_dedup_distinguishes_type() {
         let mut pool = ConstPool::new();
@@ -106,7 +106,7 @@ mod tests {
         assert_ne!(s, n);
         assert_ne!(n, b);
         assert_eq!(pool.len(), 3);
-        // 같은 값·타입은 같은 인덱스.
+        // 같은 값/타입은 같은 인덱스.
         assert_eq!(pool.intern(Const::Num(1.0)), n);
         assert_eq!(pool.len(), 3);
     }

@@ -1,7 +1,7 @@
 // 중첩 배열의 회차 인덱스 반응성 - 바깥 @for (row, i of rows) 안에 안쪽 @for (cell, j of row.cells)를 두고,
 // 안쪽 셀 옆 삭제 버튼(fullname [$0][$1].DEL_CELL)이 자기 두 인덱스로 자기를 지운다. 안쪽 배열도 요소별
 // 인덱스 leaf(indexLeafIndices)를 갖는지, 안쪽 중간 제거 시 그 배열의 뒤 인덱스만 당겨지고(안쪽 {j} 갱신)
-// 다른 행은 무손상인지 검증한다. 바깥·안쪽이 각자 독립된 arrayInfo라 인덱스도 독립으로 재정렬된다.
+// 다른 행은 무손상인지 검증한다. 바깥/안쪽이 각자 독립된 arrayInfo라 인덱스도 독립으로 재정렬된다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";

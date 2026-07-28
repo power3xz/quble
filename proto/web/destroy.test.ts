@@ -1,4 +1,4 @@
-// destroy - 인스턴스 해체: 붙은 DOM·구독을 region 재귀로 떼고(detach), 루트 anchor와 document
+// destroy - 인스턴스 해체: 붙은 DOM/구독을 region 재귀로 떼고(detach), 루트 anchor와 document
 // 위임 리스너를 제거한다. 리스너 클로저가 인터프리터(store/pool)를 잡아 살려두므로, destroy 없인
 // 인스턴스가 GC되지 않는다. 해제 후 클릭은 핸들러를 부르지 않고, 다른 인스턴스는 무손상(격리).
 

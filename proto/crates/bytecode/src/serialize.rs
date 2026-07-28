@@ -112,7 +112,7 @@ fn put_const(out: &mut Vec<u8>, c: &Const) {
 }
 
 /// 타입 테이블 엔트리: 태그 1바이트 + payload. Scalar는 payload 없음, Object는 field_count +
-/// [(name_const_index, type_ref)], Array는 elem_type_ref. type_ref로 자식을 가리켜 중첩·공유를
+/// [(name_const_index, type_ref)], Array는 elem_type_ref. type_ref로 자식을 가리켜 중첩/공유를
 /// 표현(BYTECODE.md §4).
 fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
     match t {

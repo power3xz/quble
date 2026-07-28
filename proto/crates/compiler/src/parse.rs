@@ -1,4 +1,4 @@
-//! 재귀하강 파서: 토큰 → AST. MVP 문법.
+//! 재귀하강 파서: 토큰 -> AST. MVP 문법.
 //!
 //! component IDENT { [PROPS] template { NODE* } }
 //! PROPS   = props { IDENT : TYPE (, IDENT : TYPE)* }   (선택)
@@ -103,7 +103,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // prop 참조 하나: `root` 또는 `root.field.field…`. root는 prop 이름, 뒤는 객체 필드 경로.
+    // prop 참조 하나: `root` 또는 `root.field.field...`. root는 prop 이름, 뒤는 객체 필드 경로.
     // leaf 여부(경로 끝이 원시냐)는 여기서 안 본다 - 타입을 모르는 파서의 몫이 아니라 codegen이
     // props 타입과 대조해 판단한다.
     fn var_ref(&mut self) -> Result<VarRef, ParseError> {
@@ -169,7 +169,7 @@ impl<'a> Parser<'a> {
     // 리소스:           use STRING
     fn use_decl(&mut self) -> Result<UseDecl, ParseError> {
         self.keyword("use")?;
-        // `use` 다음이 문자열이면 리소스(컴포넌트명·from 없음).
+        // `use` 다음이 문자열이면 리소스(컴포넌트명/from 없음).
         if let Some(Token::Str(path)) = self.peek() {
             let path = path.clone();
             self.next()?;
@@ -525,7 +525,7 @@ impl<'a> Parser<'a> {
 
     // @for ( IDENT [, IDENT] of ( NUM | VAR_REF ) ) { NODE* }
     // count는 정수 리터럴(of 3) 또는 숫자 prop 참조(of count). of는 문맥 키워드(Ident("of")).
-    // 선택적 둘째 변수(, i)는 회차 인덱스변수 - 몸체 {i}·이벤트 $n이 읽는다(item과 별개 슬롯).
+    // 선택적 둘째 변수(, i)는 회차 인덱스변수 - 몸체 {i}/이벤트 $n이 읽는다(item과 별개 슬롯).
     fn for_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::For))?;
         self.expect(&Token::LParen)?;
@@ -611,7 +611,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 return Err(ParseError::Expected {
-                    want: format!("self-close ({name}( … /)) - 컴포넌트는 슬롯 미지원이라 자식 블록 불가"),
+                    want: format!("self-close ({name}( ... /)) - 컴포넌트는 슬롯 미지원이라 자식 블록 불가"),
                     got: format!("{:?}", self.peek()),
                 });
             }
@@ -662,7 +662,7 @@ impl<'a> Parser<'a> {
     }
 
     // IDENT ( (ATTR | @click:EVENT)* [/] ) [{ NODE* }]
-    // self-close(`tag(attrs /)`)면 자식 블록을 안 읽는다. void 요소(input·img 등)는
+    // self-close(`tag(attrs /)`)면 자식 블록을 안 읽는다. void 요소(input/img 등)는
     // self-close가 필수 - 아니면 에러(SYNTAX §3.1.1, DESIGN §4.5).
     fn element(&mut self) -> Result<Node, ParseError> {
         let tag = self.ident()?;
@@ -686,7 +686,7 @@ impl<'a> Parser<'a> {
 
         if is_void_tag(&tag) && !self_close {
             return Err(ParseError::Expected {
-                want: format!("self-close for void element ({tag}( … /))"),
+                want: format!("self-close for void element ({tag}( ... /))"),
                 got: format!("void element '{tag}' with child block"),
             });
         }
@@ -700,7 +700,7 @@ impl<'a> Parser<'a> {
             // 자식 없으면 self-close 필수 - 빈 블록 금지(SYNTAX §3.1.1, DESIGN §4.5).
             if children.is_empty() {
                 return Err(ParseError::Expected {
-                    want: format!("self-close for childless element ({tag}( … /))"),
+                    want: format!("self-close for childless element ({tag}( ... /))"),
                     got: "empty child block {}".into(),
                 });
             }
