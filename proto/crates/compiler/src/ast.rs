@@ -95,7 +95,15 @@ pub enum Node {
         alias: Option<String>,
         name: String,
         args: Vec<(String, ArgValue)>,
+        /// 자식 블록으로 넘긴 슬롯 콘텐츠. 빈 벡터면 self-close(`Comp( /)`) - 슬롯 안 채움.
+        /// 무기명은 `SlotPlaceholderContent { name: None }` 하나, 기명은 이름별로 여럿.
+        /// 채우는 순서는 무관 - codegen이 자식 선언 순서로 정규화한다.
+        contents: Vec<SlotPlaceholderContent>,
     },
+    /// `@slot()` / `@slot(header)` - 자식 콘텐츠가 들어갈 자리(정의쪽). name이 None이면 무기명.
+    /// 한 컴포넌트는 무기명 하나 또는 기명 여럿 중 하나만 - 섞으면 컴파일 에러(SYNTAX §3.3).
+    /// 선언 순서가 slot_placeholder_index(컴포넌트-로컬)이고, 사용쪽 SlotPlaceholderContent가 같은 공간을 쓴다.
+    SlotPlaceholderDef { name: Option<String> },
     /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop 참조(경로 허용,
     /// `gen.open`)이고 leaf여야 한다(표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
     If {
@@ -119,6 +127,16 @@ pub enum Node {
         context: String,
         children: Vec<Node>,
     },
+}
+
+/// 합성처에서 슬롯에 넣는 콘텐츠 한 덩이. `Header << 노드`(기명) 또는 합성 블록 전체(무기명).
+/// nodes는 쓰는 쪽 컨텍스트로 해석된다 - 보간·이벤트 경로가 정의한 컴포넌트가 아니라
+/// 쓰는 쪽 기준(SYNTAX §3.3).
+#[derive(Debug, PartialEq)]
+pub struct SlotPlaceholderContent {
+    /// 기명이면 슬롯 이름, 무기명이면 None.
+    pub name: Option<String>,
+    pub nodes: Vec<Node>,
 }
 
 /// `@for`의 반복 횟수 출처. codegen이 이걸로 ForRaw(리터럴) / ForScopeIndex(prop) opcode를 가른다.

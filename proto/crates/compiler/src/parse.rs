@@ -10,8 +10,8 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, Prop, SourceFile,
-    Type, Use, VarRef,
+    ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, SlotPlaceholderContent,
+    Prop, SourceFile, Type, Use, VarRef,
 };
 use crate::lexer::{Directive, Token};
 
@@ -19,6 +19,12 @@ use crate::lexer::{Directive, Token};
 pub enum ParseError {
     UnexpectedEnd,
     Expected { want: String, got: String },
+    /// 같은 슬롯을 두 번 채웠다(`Header << ... Header << ...`).
+    DuplicateSlotPlaceholderFill { comp: String, slot: String },
+    /// 한 합성 블록에 기명 채움과 무기명 노드가 섞였다. 정의 쪽이 둘 중 하나라 어느 쪽도 성립 못 한다.
+    MixedSlotPlaceholderFill { comp: String },
+    /// 빈 자식 블록(`Comp() { }`) - 슬롯을 안 채우면 self-close로 쓴다(DESIGN §4.5).
+    EmptyBlock(String),
 }
 
 /// `use` 문 한 줄의 두 형태. 컴포넌트 import(`use A from "..."`)와 리소스(`use "..."`)는
@@ -471,31 +477,55 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 Some(Token::RBrace) | None => break,
-                Some(Token::Str(_)) => {
-                    if let Token::Str(s) = self.next()? {
-                        nodes.push(Node::Text(s.clone()));
-                    }
-                }
-                // `{ IDENT }` 보간. (자식 자리의 `{`는 블록이 아니라 보간만 온다.)
-                Some(Token::LBrace) => nodes.push(self.var()?),
-                // @if 분기.
-                Some(Token::At(Directive::If)) => nodes.push(self.if_node()?),
-                // @for 반복.
-                Some(Token::At(Directive::For)) => nodes.push(self.for_node()?),
-                // @with 컨텍스트.
-                Some(Token::At(Directive::With)) => nodes.push(self.with_node()?),
-                // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
-                Some(Token::Ident(s)) if starts_upper(s) => nodes.push(self.component_call()?),
-                Some(Token::Ident(_)) => nodes.push(self.element()?),
-                Some(t) => {
-                    return Err(ParseError::Expected {
-                        want: "node (element, string, or {var})".into(),
-                        got: format!("{t:?}"),
-                    })
-                }
+                _ => nodes.push(self.node()?),
             }
         }
         Ok(nodes)
+    }
+
+    // 노드 하나. 슬롯 채움(`Header << 노드`)도 오른쪽에 노드 하나를 받아 이걸 공유한다.
+    fn node(&mut self) -> Result<Node, ParseError> {
+        match self.peek() {
+            Some(Token::Str(_)) => match self.next()? {
+                Token::Str(s) => Ok(Node::Text(s.clone())),
+                // 위 peek이 Str임을 확인했으므로 도달 불가.
+                got => Err(ParseError::Expected {
+                    want: "string".into(),
+                    got: format!("{got:?}"),
+                }),
+            },
+            // `{ IDENT }` 보간. (자식 자리의 `{`는 블록이 아니라 보간만 온다.)
+            Some(Token::LBrace) => self.var(),
+            // @if 분기.
+            Some(Token::At(Directive::If)) => self.if_node(),
+            // @for 반복.
+            Some(Token::At(Directive::For)) => self.for_node(),
+            // @with 컨텍스트.
+            Some(Token::At(Directive::With)) => self.with_node(),
+            // @slot 정의 - 자식 콘텐츠가 들어갈 자리.
+            Some(Token::At(Directive::Slot)) => self.slot_node(),
+            // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
+            Some(Token::Ident(s)) if starts_upper(s) => self.component_call(),
+            Some(Token::Ident(_)) => self.element(),
+            got => Err(ParseError::Expected {
+                want: "node (element, string, or {var})".into(),
+                got: format!("{got:?}"),
+            }),
+        }
+    }
+
+    // @slot( [IDENT] ) - 이름 생략(`@slot()`)이면 무기명.
+    // 괄호는 필수다: 렉서가 줄바꿈을 안 넘겨 `@slot` 뒤 Ident가 슬롯명인지 다음 형제 노드인지
+    // (`@slot` 다음 줄의 `p()`) 가릴 수 없다. 괄호가 그 경계를 준다(@if/@for와 같은 축).
+    fn slot_node(&mut self) -> Result<Node, ParseError> {
+        self.expect(&Token::At(Directive::Slot))?;
+        self.expect(&Token::LParen)?;
+        let name = match self.peek() {
+            Some(Token::Ident(_)) => Some(self.ident()?),
+            _ => None,
+        };
+        self.expect(&Token::RParen)?;
+        Ok(Node::SlotPlaceholderDef { name })
     }
 
     // @if ( IDENT ) { NODE* } [ @else { NODE* } ]
@@ -596,9 +626,9 @@ impl<'a> Parser<'a> {
         let name = self.ident()?;
         self.expect(&Token::LParen)?;
         let args = self.component_args()?;
-        // 슬롯 미지원이라 컴포넌트 합성은 자식이 없다 - self-close 필수(빈 블록 `{}` 금지).
+        // 슬롯을 안 채우면 self-close(`Comp( ... /)`), 채우면 `)` 뒤 자식 블록.
         // `/` 앞 공백 강제(SYNTAX §3.1.1, DESIGN §4.5).
-        match self.peek() {
+        let contents = match self.peek() {
             Some(Token::Slash(spaced)) => {
                 if !spaced {
                     return Err(ParseError::Expected {
@@ -608,15 +638,62 @@ impl<'a> Parser<'a> {
                 }
                 self.next()?; // /
                 self.expect(&Token::RParen)?;
+                Vec::new()
             }
             _ => {
-                return Err(ParseError::Expected {
-                    want: format!("self-close ({name}( ... /)) - 컴포넌트는 슬롯 미지원이라 자식 블록 불가"),
-                    got: format!("{:?}", self.peek()),
-                });
+                self.expect(&Token::RParen)?;
+                self.slot_placeholder_contents(&name)?
+            }
+        };
+        Ok(Node::Component { alias, name, args, contents })
+    }
+
+    // 합성의 자식 블록 `{ ... }`을 슬롯 콘텐츠로 읽는다. 두 형태가 갈리고 섞을 수 없다(SYNTAX §3.3):
+    // - 기명: `Header << 노드` 들만. `<<` 오른쪽은 노드 하나 또는 블록(`Header << { ... }`).
+    // - 무기명: 그 외 노드들. 블록 전체가 무기명 슬롯 콘텐츠 하나가 된다.
+    fn slot_placeholder_contents(&mut self, comp: &str) -> Result<Vec<SlotPlaceholderContent>, ParseError> {
+        self.expect(&Token::LBrace)?;
+        let mut named: Vec<SlotPlaceholderContent> = Vec::new();
+        let mut anonymous: Vec<Node> = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::RBrace) | None => break,
+                // `Ident <<` = 기명 슬롯 채움. 한 칸 앞 `<<`로 갈려 일반 노드와 모호하지 않다.
+                Some(Token::Ident(_)) if matches!(self.tokens.get(self.pos + 1), Some(Token::LtLt)) => {
+                    let slot = self.ident()?;
+                    self.expect(&Token::LtLt)?;
+                    // 오른쪽은 블록(여러 노드) 또는 노드 하나.
+                    let nodes = match self.peek() {
+                        Some(Token::LBrace) => {
+                            self.next()?; // {
+                            let nodes = self.nodes()?;
+                            self.expect(&Token::RBrace)?;
+                            nodes
+                        }
+                        _ => vec![self.node()?],
+                    };
+                    if named.iter().any(|c| c.name.as_deref() == Some(slot.as_str())) {
+                        return Err(ParseError::DuplicateSlotPlaceholderFill {
+                            comp: comp.to_string(),
+                            slot,
+                        });
+                    }
+                    named.push(SlotPlaceholderContent { name: Some(slot), nodes });
+                }
+                _ => anonymous.push(self.node()?),
             }
         }
-        Ok(Node::Component { alias, name, args })
+        self.expect(&Token::RBrace)?;
+        // 무기명/기명은 정의 쪽에서 이미 갈리므로 사용 쪽에서 섞이면 어느 쪽도 성립하지 않는다.
+        if !named.is_empty() && !anonymous.is_empty() {
+            return Err(ParseError::MixedSlotPlaceholderFill { comp: comp.to_string() });
+        }
+        match named.is_empty() {
+            // 빈 블록(`Comp() { }`)은 self-close로 쓴다 - 빈 블록 금지(DESIGN §4.5).
+            true if anonymous.is_empty() => Err(ParseError::EmptyBlock(comp.to_string())),
+            true => Ok(vec![SlotPlaceholderContent { name: None, nodes: anonymous }]),
+            false => Ok(named),
+        }
     }
 
     // RParen 전까지 `prop = {var}`(부모 변수) 또는 `prop = "lit"`(리터럴) 인자를 모은다.
