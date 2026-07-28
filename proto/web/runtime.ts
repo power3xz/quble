@@ -110,6 +110,9 @@ const OP = {
   PUSH_PATH_INDEX_SEGMENT: 0x18,
   PUSH_FIELD: 0x19,
   FOR_ARRAY_VAR: 0x1a,
+  PUSH_SLOT_PLACEHOLDER_CONTENT: 0x1b,
+  SLOT_PLACEHOLDER_CONTENT_END: 0x1c,
+  FILL_SLOT_PLACEHOLDER: 0x1d,
 } as const;
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -128,6 +131,7 @@ const operandLen = (op: number) => {
     case OP.IF_END:
     case OP.EXIT_CONTEXT:
     case OP.FOR_END:
+    case OP.SLOT_PLACEHOLDER_CONTENT_END:
       return 0;
     case OP.PUSH_THROUGH: // scope_index: u8
       return 1;
@@ -145,6 +149,8 @@ const operandLen = (op: number) => {
     case OP.FOR_COUNT_VAR: // scope_index: u8, offset: u8
     case OP.FOR_ARRAY_VAR: // scope_index: u8, offset: u8
     case OP.PUSH_PATH_INDEX_SEGMENT:
+    case OP.PUSH_SLOT_PLACEHOLDER_CONTENT:
+    case OP.FILL_SLOT_PLACEHOLDER:
       return 2;
     case OP.ATTR_G:
     case OP.ATTR_L:
@@ -214,6 +220,34 @@ const forBodyEnd = (code: Uint8Array, bodyStart: number) => {
     }
   }
   throw new Error("unbalanced @for - no matching FOR_END");
+};
+
+// 슬롯 콘텐츠 구간 끝(SLOT_PLACEHOLDER_CONTENT_END)의 pc를 찾는다.
+//
+//   PUSH_SLOT_PLACEHOLDER_CONTENT | idx | 콘텐츠 ........ | SLOT_PLACEHOLDER_CONTENT_END
+//                                       ^contentStart    ^반환 pc(호출자가 마커 소비)
+//
+// 콘텐츠 안에서 또 합성하며 슬롯을 채울 수 있어 깊이를 센다. IF/@for는 자기 마커로 닫히므로
+// 여기 깊이에 관여하지 않는다.
+const slotPlaceholderContentEnd = (code: Uint8Array, contentStart: number) => {
+  let pc = contentStart;
+  let depth = 0;
+  while (pc < code.length) {
+    const markerPc = pc;
+    const op = code[pc++];
+    if (op === OP.PUSH_SLOT_PLACEHOLDER_CONTENT) {
+      depth += 1;
+      pc += operandLen(op);
+    } else if (op === OP.SLOT_PLACEHOLDER_CONTENT_END) {
+      if (depth === 0) {
+        return markerPc;
+      }
+      depth -= 1;
+    } else {
+      pc += operandLen(op);
+    }
+  }
+  throw new Error("unbalanced slot content - no matching SLOT_PLACEHOLDER_CONTENT_END");
 };
 
 // IF 블록의 if/else 몸체 코드 경계를 구한다(순수 - code와 if 몸체 시작 pc만 본다).
@@ -314,6 +348,23 @@ const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
 type TWalkStacks = {
   loopIndexStack: number[];
   activeContexts: number[];
+};
+
+// 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
+// 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
+// 보간/이벤트 경로는 콘텐츠를 쓴 곳(부모) 기준이다(SYNTAX §3.3).
+// argumentSourcePairs/walkStacks는 카피 - 실행이 RENDER 뒤(자식 안)로 밀리는데 그 사이 부모
+// @for 회차가 끝나 슬롯/스택이 pop돼 있을 수 있다. 참조로 들면 회차변수/인덱스/컨텍스트가
+// 어긋난다(@if lazyBuild가 같은 이유로 카피를 뜬다).
+type TSlotPlaceholderContent = {
+  startPc: number;
+  endPc: number;
+  argumentSourcePairs: TScope;
+  compId: number;
+  pathPrefix: string;
+  loopIndexBase: number;
+  walkStacks: TWalkStacks;
+  branchIndex: number; // 구독이 쌓일 가지 = 콘텐츠를 쓴 부모 가지
 };
 
 // lazyBuild(@if 비활성 가지)에 넘길 스냅샷 - 가변 스택을 딥카피해 build 후 원본이 pop돼도
@@ -803,6 +854,7 @@ class Interpreter {
   // IF/FOR 지점을 회차 수만큼 재해석하며 매번 몸체를 재스캔하는 낭비를 없앤다. 키는 시작 pc.
   forEndCache = new Map<number, number>();
   ifRangesCache = new Map<number, { ifBodyEnd: number; elseBodyStart: number; ifEndPc: number }>();
+  slotContentEndCache = new Map<number, number>();
 
   constructor(
     module: TModule,
@@ -835,6 +887,17 @@ class Interpreter {
     if (end === undefined) {
       end = forBodyEnd(this.code, bodyStart);
       this.forEndCache.set(bodyStart, end);
+    }
+    return end;
+  };
+
+  // slotPlaceholderContentEnd의 캐시 통과 조회. @for 몸체 안 합성이면 회차마다 같은 pc를
+  // 재스캔하므로 forEndCache와 같은 이유로 캐시한다.
+  cachedSlotContentEnd = (contentStart: number): number => {
+    let end = this.slotContentEndCache.get(contentStart);
+    if (end === undefined) {
+      end = slotPlaceholderContentEnd(this.code, contentStart);
+      this.slotContentEndCache.set(contentStart, end);
     }
     return end;
   };
@@ -1360,6 +1423,7 @@ class Interpreter {
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다(불변 값).
   // @param loopIndexBase    자식 @for 세그먼트 인덱스의 base(누적 @for 깊이). RENDER가 늘린다(불변 값).
   // @param walkStacks               가변 walk 스택(loopIndexStack/activeContexts). @for/RENDER는 이어 쓰고, @if 비활성 가지는 카피본을 쓴다.
+  // @param slotPlaceholderContents  사용쪽(부모)이 RENDER로 넘긴 슬롯 콘텐츠. 인덱스 = 이 def의 @slot 선언 순서, 미채움 슬롯은 구멍(undefined).
   // @returns                직속 노드를 담은 DocumentFragment
   interpret = (
     argumentSourcePairs: TScope,
@@ -1370,12 +1434,16 @@ class Interpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
+    slotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [],
   ): DocumentFragment => {
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
     let args = [];
     let segment: string | null = null; // 다음 RENDER/BIND_EVENT가 소비할 경로 세그먼트(PUSH_PATH_SEGMENT/INDEX가 적재)
+    // 다음 RENDER가 소비할 슬롯 콘텐츠(PUSH_SLOT_PLACEHOLDER_CONTENT가 적재). args와 같은 생애 -
+    // RENDER가 자식에 넘기고 비운다. 인덱스 = 자식 def의 @slot 선언 순서라 미채움은 구멍으로 남는다.
+    let pendingSlotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [];
     let pc = startPc;
 
     // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
@@ -1606,10 +1674,52 @@ class Interpreter {
           walkStacks.activeContexts.pop();
           break;
         }
+        case OP.PUSH_SLOT_PLACEHOLDER_CONTENT: {
+          // 콘텐츠 구간을 재서 담아두기만 한다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서.
+          // 지금 컨텍스트(부모)를 함께 캡처한다: 콘텐츠는 부모 def 안이라 부모 scope/path로 읽힌다.
+          const slotPlaceholderIndex = u16at();
+          const contentStart = pc;
+          const contentEndPc = this.cachedSlotContentEnd(contentStart);
+          pendingSlotPlaceholderContents[slotPlaceholderIndex] = {
+            startPc: contentStart,
+            endPc: contentEndPc,
+            argumentSourcePairs: [...argumentSourcePairs],
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            walkStacks: snapshotStacks(walkStacks),
+            branchIndex: startBranchIndex,
+          };
+          pc = contentEndPc + 1; // SLOT_PLACEHOLDER_CONTENT_END 마커 소비
+          break;
+        }
+        case OP.FILL_SLOT_PLACEHOLDER: {
+          // `@slot` 자리(정의쪽). 부모가 안 채웠으면 구멍이라 아무것도 안 넣는다(미채움 허용).
+          const content = slotPlaceholderContents[u16at()];
+          if (content === undefined) {
+            break;
+          }
+          // 세 축이 갈린다: 해석 컨텍스트/수명(구독 가지)은 부모 것, DOM 부착 위치만 자식 자리.
+          // 콘텐츠 안 합성은 자기 슬롯을 스스로 채우므로 여기 재진입엔 넘길 게 없다.
+          const slotFragment = this.interpret(
+            content.argumentSourcePairs,
+            content.compId,
+            content.startPc,
+            content.endPc,
+            content.branchIndex,
+            content.pathPrefix,
+            content.loopIndexBase,
+            content.walkStacks,
+          );
+          nodeTop().appendChild(slotFragment);
+          break;
+        }
         case OP.RENDER: {
           const childCompId = u16at();
           const childArgumentSourcePairs = args;
           args = [];
+          const childSlotPlaceholderContents = pendingSlotPlaceholderContents;
+          pendingSlotPlaceholderContents = [];
           // 자식 경로 prefix = 부모 prefix + 세그먼트. 이벤트 fullname의 path 축을 누적한다.
           const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
           segment = null;
@@ -1628,6 +1738,7 @@ class Interpreter {
             childPrefix!,
             walkStacks.loopIndexStack.length / 2, // 자식 세그먼트 인덱스의 base = 여기까지 누적된 @for 깊이(스택은 인터리브라 /2)
             walkStacks, // 회차 인덱스/컨텍스트 스택을 공유로 물려준다 - @for/@with 경계가 push/pop으로 원복(복사 없음)
+            childSlotPlaceholderContents, // 자식 @slot 자리가 꺼내 쓸 콘텐츠(부모 컨텍스트를 이미 캡처해 둠)
           );
           // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
           // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
