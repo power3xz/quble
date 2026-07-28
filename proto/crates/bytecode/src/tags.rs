@@ -23,6 +23,7 @@ const TAGS: &[&str] = &[
     "aside",   // 17
     "label",   // 18
     "input",   // 19
+    "em",      // 20
 ];
 
 /// 태그 ID -> 태그명. 범위를 벗어나면 None.

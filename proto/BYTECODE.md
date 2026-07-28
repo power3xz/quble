@@ -62,7 +62,8 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 ```
 0:div  1:span  2:p  3:h1  4:h2  5:h3  6:a  7:ul  8:li  9:button  10:article  11:img
-12:section  13:header  14:footer  15:nav  16:main  17:aside  18:label
+12:section  13:header  14:footer  15:nav  16:main  17:aside  18:label  19:input
+20:em
 ```
 
 추가만, 재배치 금지(예약 ID 안정). 시맨틱 태그(section~label)는 알림 패널 데모에서 편입.

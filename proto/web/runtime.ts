@@ -62,6 +62,7 @@ const TAGS = [
   "aside",
   "label",
   "input",
+  "em",
 ] as const;
 const ATTRS = ["class", "id", "src", "alt", "href", "type", "name", "value", "title", "style", "placeholder"] as const;
 // 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
