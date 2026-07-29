@@ -413,7 +413,7 @@ HALT
 ## 7. Rust 크레이트 구조
 
 ```
-proto/
+core/
   Cargo.toml            # workspace
   crates/
     bytecode/   # opcode, 내장 태그 테이블, 전역 상수풀(속성명), 컴포넌트 상수풀, 직렬화/역직렬화

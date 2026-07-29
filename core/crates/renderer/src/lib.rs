@@ -1,5 +1,5 @@
 //! Quble SSR 렌더러: 직렬화된 바이트코드(`&[u8]`)를 받아 HTML 문자열로 렌더한다.
-//! 출력은 SSR 문자열(브라우저 DOM 아님). 일회성/무상태 순수 함수. 상세는 proto/BYTECODE.md.
+//! 출력은 SSR 문자열(브라우저 DOM 아님). 일회성/무상태 순수 함수. 상세는 core/BYTECODE.md.
 
 use bytecode::{DecodeError, Module, Op};
 use std::collections::HashSet;

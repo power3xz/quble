@@ -326,7 +326,7 @@ const ifBranchRanges = (code: Uint8Array, ifBodyStart: number) => {
   return { ifBodyEnd, elseBodyStart: -1, ifEndPc: ifBodyEnd }; // else 없는 if
 };
 
-// ── 디코드 (proto/BYTECODE.md 포맷) ───────────────────────────────────
+// ── 디코드 (core/BYTECODE.md 포맷) ───────────────────────────────────
 class Reader {
   bytes: Uint8Array;
   pos: number;
@@ -786,7 +786,7 @@ const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayIn
   return { leaves, rootFlat };
 };
 
-// qubb 바이트를 TModule로 디코드한다(proto/BYTECODE.md 포맷).
+// qubb 바이트를 TModule로 디코드한다(core/BYTECODE.md 포맷).
 const decode = (bytes: Uint8Array) => {
   const r = new Reader(bytes);
   const magic = r.take(4);

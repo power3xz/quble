@@ -7,13 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": [
-      "proto/web/**",
-      "proto/build/**",
-      "!**/node_modules",
-      "!**/dist",
-      "!**/*.qubc.d.ts"
-    ]
+    "includes": ["core/web/**", "core/build/**", "!**/node_modules", "!**/dist", "!**/*.qubc.d.ts"]
   },
   "formatter": {
     "enabled": true,
@@ -29,7 +23,7 @@
   },
   "overrides": [
     {
-      "includes": ["proto/web/**/*.test.ts"],
+      "includes": ["core/web/**/*.test.ts"],
       "linter": {
         "rules": {
           "style": { "noNonNullAssertion": "off" },

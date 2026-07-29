@@ -2,7 +2,7 @@
 
 검토한 아이디어 모음. **미적용**은 아직 안 갔거나 보류/거부한 길(측정 근거/거부 이유 포함),
 **구현됨**은 적용 완료해 확정 설계로 승격됐으나 거부 대안/근거는 기록으로 남겨둔 것이다.
-확정 설계는 DESIGN.md/REACTIVITY.md, 바이트코드 명세는 proto/BYTECODE.md 참고.
+확정 설계는 DESIGN.md/REACTIVITY.md, 바이트코드 명세는 core/BYTECODE.md 참고.
 
 ## 미적용 아이디어
 
@@ -145,7 +145,7 @@ qubb에 못 박는다). 런타임은 `resourceMap[resId]`로 url 찾아 로드, 
 **각 속성명이 몇 개 컴포넌트에서 쓰이는지** 추적한다. 그 데이터를 보고 전역 테이블에 추가할지
 말지 결정한다.
 
-- 현재는 전역 속성명 테이블(`proto/crates/bytecode/src/attrs.rs`)을 흔한 HTML 속성명으로
+- 현재는 전역 속성명 테이블(`core/crates/bytecode/src/attrs.rs`)을 흔한 HTML 속성명으로
   손수 박아둔 상태.
 - usage 추적이 있으면 실제 코드베이스 기준으로 전역 편입 여부를 데이터로 판단 가능.
 - 값(속성값)은 대상 아님 - '흔한 값'의 기준이 없어 값은 항상 컴포넌트 상수풀에 둔다.
@@ -282,4 +282,4 @@ interpret(startPc, endPc, regionIndex, branchIndex)
 
 검증 순서: (1) 스킵 없는 버전(양쪽 다 build, IF_END에서 비활성 구독 해제)으로 뼈대 확인 ->
 (2) cond 변경 swap 동작 확인 -> (3) skip + lazy build 도입. **(1)/(2)/(3) 모두 완료**
-(`proto/web/runtime.ts` 해석, `region.ts`, 테스트는 `if-integration.test.ts`로 이관).
+(`core/web/runtime.ts` 해석, `region.ts`, 테스트는 `if-integration.test.ts`로 이관).

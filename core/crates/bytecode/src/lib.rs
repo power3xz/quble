@@ -1,5 +1,5 @@
 //! Quble 프로토타입 바이트코드: 포맷의 단일 정의처(컴파일러/렌더러/런타임 공용).
-//! 상세는 proto/BYTECODE.md 참고.
+//! 상세는 core/BYTECODE.md 참고.
 
 pub mod attrs;
 pub mod dom_events;

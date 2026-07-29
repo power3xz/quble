@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
 
 // 레포 내 고정 위치 - 워크스페이스 루트 기준 상대경로(PoC. 나중에 설정으로 뺀다).
-const DTS_BIN_REL = "proto/target/debug/quble-dts";
+const DTS_BIN_REL = "core/target/debug/quble-dts";
 
 // 진단용 출력 채널 - "출력" 패널에서 Quble 선택. 실패 원인을 여기에 찍는다.
 const log = vscode.window.createOutputChannel("Quble");

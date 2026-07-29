@@ -77,7 +77,7 @@
       }
     },
     "interpolation": {
-      "comment": "{var} 보간 — proto는 단일 prop 참조만(표현식 미구현). 블록 본문의 `{`와 구별하려고 `{ 식별자 }` 한 덩어리만 매칭한다(begin/end로 열면 블록 `{`를 삼킨다).",
+      "comment": "{var} 보간 - 단일 prop 참조만(표현식 미구현). 블록 본문의 `{`와 구별하려고 `{ 식별자 }` 한 덩어리만 매칭한다(begin/end로 열면 블록 `{`를 삼킨다).",
       "match": "(\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
       "captures": {
         "1": { "name": "punctuation.section.embedded.begin.quble" },

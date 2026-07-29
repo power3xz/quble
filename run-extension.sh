@@ -10,7 +10,7 @@ EXT_DIR="$REPO_ROOT/editors/vscode"
 DATA_DIR="$EXT_DIR/.dev-host-data"
 
 # 확장이 호출하는 d.ts 생성 바이너리 빌드(없으면 타입 생성이 조용히 실패).
-( cd "$REPO_ROOT/proto" && cargo build --quiet --bin quble-dts )
+( cd "$REPO_ROOT/core" && cargo build --quiet --bin quble-dts )
 
 # 깨끗한 프로필로 새 인스턴스를 띄운다(흡수 방지).
 rm -rf "$DATA_DIR"

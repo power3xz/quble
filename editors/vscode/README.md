@@ -41,7 +41,7 @@ export default handlers;
 전제: 확장이 호출하는 `quble-dts` 바이너리가 빌드돼 있어야 한다.
 
 ```
-cd proto && cargo build --bin quble-dts
+cd core && cargo build --bin quble-dts
 ```
 
 개발 호스트로 띄워 시험하려면 레포 루트의 `run-extension.sh`를 쓴다(바이너리 빌드까지 함께 한다).

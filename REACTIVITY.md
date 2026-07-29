@@ -342,7 +342,7 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 - [x] `@for` - `FOR_RAW`/`FOR_COUNT_VAR`(숫자)/`FOR_ARRAY_VAR`(배열). 회차변수 `{item}`/`{item.f}`
       보간, 회차변수 객체 필드 자식 전달, fullname `[$n]` 인덱스.
 - [x] `@if` Region + 재진입 `interpret` + lazy build(§8) - 활성 가지만 build/구독, 비활성은 첫 swap
-      때 build. 단일/중첩/형제 if, 합성 경계 넘는 if. (`proto/web/runtime.ts`, `region.ts`)
+      때 build. 단일/중첩/형제 if, 합성 경계 넘는 if. (`core/web/runtime.ts`, `region.ts`)
 - [x] free list - `@for` 회차 제거 시 branch/region/arrayPool 칸을 freelist로 회수/재사용
       (`freeBranches`/`freeRegions`/`freeArrays`, `truncateFor`).
 - [ ] 배열 length 토픽/push/pop 반응 - 지금 배열은 정적(초기 요소만). §4는 목표.

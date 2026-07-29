@@ -1,6 +1,6 @@
 //! Quble 프로토타입 컴파일러: `.qubc` 소스 -> 직렬화된 바이트코드(`Box<[u8]>`).
 //! 프론트엔드(lexer/parse -> ast)와 백엔드(codegen)를 모듈로 나눠 담는다.
-//! MVP 스코프: 단일 컴포넌트, 문자열 속성값, 표현식 없음. 상세는 proto/BYTECODE.md.
+//! MVP 스코프: 단일 컴포넌트, 문자열 속성값, 표현식 없음. 상세는 core/BYTECODE.md.
 
 mod ast;
 mod codegen;

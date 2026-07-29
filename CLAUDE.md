@@ -21,15 +21,15 @@ remembered claim (a past summary once mislabeled DESIGN §5.1 - verify, don't in
 - **REACTIVITY.md** - reactivity + handler model (store, `get`/`set`) - the settled conclusion.
 - **ROADMAP.md** - feature progress by domain (what is done / in-flight / not started).
 - **ISSUES.md** - known problems (symptom + repro; fix filled in once decided).
-- **proto/BYTECODE.md** - bytecode (qubb) format and opcode contract.
+- **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
 - **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
 ## Project Status
 
-Past design-stage; implementation now lives in `proto/`: a Rust compiler
-(`proto/crates/compiler`, `proto/crates/bytecode`) that emits qubb bytecode, and a JS
-runtime (`proto/web/`) that decodes and renders it. DESIGN.md remains authoritative for
-intent - `proto/` is the tool that validates the design, not the source of truth. The
+Past design-stage; implementation now lives in `core/`: a Rust compiler
+(`core/crates/compiler`, `core/crates/bytecode`) that emits qubb bytecode, and a JS
+runtime (`core/web/`) that decodes and renders it. DESIGN.md remains authoritative for
+intent - `core/` is the tool that validates the design, not the source of truth. The
 renderer (SSR) crate is parked (ISSUES.md).
 
 ## What This Project Is

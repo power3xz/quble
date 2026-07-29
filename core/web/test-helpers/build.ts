@@ -12,14 +12,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const HERE = dirname(fileURLToPath(import.meta.url)); // proto/web/test-helpers
-const PROTO = join(HERE, "..", ".."); // proto
-const QUBLE_BIN = join(PROTO, "target", "debug", "quble");
+const HERE = dirname(fileURLToPath(import.meta.url)); // core/web/test-helpers
+const CORE = join(HERE, "..", ".."); // core
+const QUBLE_BIN = join(CORE, "target", "debug", "quble");
 
 // 픽스처는 루트 components/에 `<name>.fixture.qubc`로 산다(데모와 접미사로 구분). 호출부는 stem만
 // 넘기고(`buildFixture("array_payload")`) 여기서 경로/접미사를 붙인다. 컴파일 산출물 stem은
 // `<name>.fixture`라 dist/<name>.fixture.qubb.
-const COMPONENTS = join(PROTO, "..", "components");
+const COMPONENTS = join(CORE, "..", "components");
 
 // components/<name>.fixture.qubc를 컴파일하고 dist/<name>.fixture.qubb 바이트(Uint8Array)를 돌려준다.
 export const buildFixture = (name: string): Uint8Array => {
@@ -27,17 +27,17 @@ export const buildFixture = (name: string): Uint8Array => {
     throw new Error(`quble 바이너리 없음(${QUBLE_BIN}). 테스트 전에 'cargo build'를 실행하세요.`);
   }
   execFileSync(QUBLE_BIN, [join(COMPONENTS, `${name}.fixture.qubc`)], {
-    cwd: PROTO,
+    cwd: CORE,
     stdio: ["ignore", "ignore", "inherit"],
   });
-  return new Uint8Array(readFileSync(join(PROTO, "dist", `${name}.fixture.qubb`)));
+  return new Uint8Array(readFileSync(join(CORE, "dist", `${name}.fixture.qubb`)));
 };
 
 // 위와 같이 빌드하되 { qubb, resmap }를 돌려준다. resmap은 manifest의 resources 배열
 // (dist/<name>.fixture.manifest.json). manifest는 항상 생성되고, 리소스 없으면 resources는 빈 배열.
 export const buildFixtureWithResmap = (name: string) => {
   const qubb = buildFixture(name);
-  const manifestPath = join(PROTO, "dist", `${name}.fixture.manifest.json`);
+  const manifestPath = join(CORE, "dist", `${name}.fixture.manifest.json`);
   const resmap = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")).resources : [];
   return { qubb, resmap };
 };

@@ -2,8 +2,8 @@
   "name": "quble",
   "private": true,
   "type": "module",
-  "description": "Quble 모노레포 루트 - JS/TS 툴체인(Biome/TS) 고정점. 워크스페이스 멤버는 proto/web.",
-  "workspaces": ["proto/web"],
+  "description": "Quble 모노레포 루트 - JS/TS 툴체인(Biome/TS) 고정점. 워크스페이스 멤버는 core/web.",
+  "workspaces": ["core/web"],
   "scripts": {
     "lint": "biome check .",
     "format": "biome format --write .",
