@@ -37,6 +37,15 @@
   컴파일타임 슬롯과 `alloc`으로 직접 받는다), 누적도 배열 항목 제거 시 크기별 free list로 회수하게
   됐다.
 
+- **DOM 입력값을 핸들러가 못 읽음** - `@input:EDIT`으로 이벤트는 걸리는데 그 요소의 현재 값
+  (React의 `e.target.value`)에 도달할 길이 없었다. payload 식은 props 변수/리터럴만 참조해
+  (SYNTAX.md §2.3) 선언 시점 store 값에 묶이고, 타이핑한 값은 어디에도 안 실렸다. **해결:**
+  payload 문법을 늘리지 않고 핸들러 ctx에 발화한 DOM `Event`를 그대로 넘긴다(`ctx.event`,
+  runtime.ts dispatch). 값은 `event.target.value`로 읽고, 필요하면 `set`으로 store에 되먹여
+  형제 보간을 갱신한다 - 입력 요소 자신은 재대입하지 않는 **uncontrolled** 방식이다(DOM이 표시값의
+  주인, store는 되먹인 값만 가짐). payload는 여전히 store 값이라 타이핑 값과 다르고, 그 구분까지
+  테스트가 못박는다(`core/web/event-dom-types.test.ts`).
+
 ## 미해결
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
@@ -66,13 +75,6 @@
   안쪽 것으로 통째 덮어쓰고(필드 머지/바깥 보존 안 함), 런타임이 push 시 같은 이름을 발견하면
   console.warn으로 알린다. 컴파일타임 금지는 불가 - 독립 컴파일/머지하면 합성 경계 너머 중첩을
   codegen이 못 본다. 더 나은 방법(안정적 식별/중복 방지 메커니즘)은 나중에 고민한다.
-
-- **DOM 입력값을 이벤트 payload로 못 보냄** - `@input:INPUT`으로 이벤트는 걸 수 있지만,
-  그 입력 요소의 현재 값(React의 `e.target.value`)을 payload에 실을 문법이 없다. payload 식은
-  props 변수/리터럴/표현식만 참조한다(SYNTAX.md §2.3). (재현: `TextInput`이 입력값을 핸들러로
-  보내려 해도 선언 시점 prop만 참조 가능 - 실제 타이핑된 값을 가리킬 방법이 없다.) 폼 입력은
-  가장 흔한 패턴이라 LLM 분리 추론(UI/로직 분리) 셀링포인트의 실제 검증에도 걸린다. 이벤트
-  발생 지점(DOM 요소)의 값을 payload가 참조하는 문법/의미가 미설계.
 
 - **인덱스 상한 가드 없음** - `FieldValue`(이벤트/컨텍스트 fields의 값 출처)는 u16 한 칸에
   kind 표지 + 인덱스로 패킹한다. STACK(`@for`) 대비로 kind가 3진이 되면 비대칭 인코딩을
