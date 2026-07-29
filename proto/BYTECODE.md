@@ -63,10 +63,14 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 ```
 0:div  1:span  2:p  3:h1  4:h2  5:h3  6:a  7:ul  8:li  9:button  10:article  11:img
 12:section  13:header  14:footer  15:nav  16:main  17:aside  18:label  19:input
-20:em
+20:em  21:b  22:strong  23:i  24:small  25:code  26:pre  27:h4  28:h5  29:h6
+30:br  31:hr  32:ol  33:dl  34:dt  35:dd  36:table  37:thead  38:tbody  39:tr
+40:th  41:td  42:form  43:textarea  44:select  45:option  46:figure  47:figcaption
+48:time  49:blockquote  50:video  51:audio  52:canvas
 ```
 
 추가만, 재배치 금지(예약 ID 안정). 시맨틱 태그(section~label)는 알림 패널 데모에서 편입.
+SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 필요해 이 테이블로 안 다룬다.
 
 ### 전역 상수풀 - 속성명 (프로토타입 시작 집합)
 
@@ -75,6 +79,8 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 ```
 0:class  1:id  2:src  3:alt  4:href  5:type  6:name  7:value  8:title  9:style  10:placeholder
+11:for  12:disabled  13:checked  14:readonly  15:required  16:rel  17:target  18:width
+19:height  20:colspan  21:rowspan  22:role  23:tabindex  24:datetime  25:controls
 ```
 
 (프로토타입이라 ID 호환성은 신경 쓰지 않는다 - 필요하면 재배치.)

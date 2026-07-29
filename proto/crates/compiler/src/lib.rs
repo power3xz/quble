@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn unknown_tag_errors() {
-        let src = r#"component C { template { table( /) } }"#;
+        let src = r#"component C { template { svg( /) } }"#;
         assert!(matches!(
             compile(src),
             Err(CompileError::Codegen(codegen::CodegenError::UnknownTag(_)))

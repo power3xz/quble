@@ -172,7 +172,8 @@ mod tests {
     fn tag_table_roundtrips() {
         assert_eq!(tags::tag_name(0), Some("div"));
         assert_eq!(tags::tag_id("button"), Some(9));
-        assert_eq!(tags::tag_id("table"), None);
+        assert_eq!(tags::tag_id("table"), Some(36));
+        assert_eq!(tags::tag_id("svg"), None); // SVG는 네임스페이스가 달라 이 테이블에 없다
     }
 
     #[test]
