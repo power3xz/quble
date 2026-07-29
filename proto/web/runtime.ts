@@ -412,9 +412,10 @@ type TWalkStacks = {
 // 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
 // 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
 // 보간/이벤트 경로는 콘텐츠를 쓴 곳(부모) 기준이다(SYNTAX §3.3).
-// argumentSourcePairs/walkStacks는 카피 - 실행이 RENDER 뒤(자식 안)로 밀리는데 그 사이 부모
-// @for 회차가 끝나 슬롯/스택이 pop돼 있을 수 있다. 참조로 들면 회차변수/인덱스/컨텍스트가
-// 어긋난다(@if lazyBuild가 같은 이유로 카피를 뜬다).
+// argumentSourcePairs/walkStacks는 카피 - 이 구조체가 담는 건 "이 자리에서 본 부모 컨텍스트"라
+// 값이어야 한다. 가변 배열을 참조로 들면 부모가 이후 push/pop한 상태가 비쳐 들어와, 담은 것이
+// 그 시점의 컨텍스트가 아니게 된다. 지금은 실행이 pop 전(즉시)이거나 이미 카피본 위(@if
+// lazyBuild)라 참조로도 값이 같지만, 그건 호출 경로가 우연히 그런 것이고 이 값의 계약이 아니다.
 type TSlotPlaceholderContent = {
   startPc: number;
   endPc: number;
