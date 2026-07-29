@@ -1,5 +1,7 @@
 //! 렉서: `.qubc` 소스를 토큰으로. MVP 문법만 - 식별자, 괄호/중괄호, `=`, `,`, 문자열.
 
+use crate::src_range::SrcRange;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Ident(String),
@@ -78,21 +80,36 @@ impl Directive {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum LexError {
+pub enum LexErrorKind {
     UnterminatedString,
     UnexpectedChar(char),
     /// `@` 뒤에 알 수 없는 디렉티브 키워드.
     UnknownDirective(String),
 }
 
-pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
+/// 렉스 실패 - 무엇이(kind) 어디서(range) 틀렸나. range는 문제가 시작된 문자/토큰 구간이다.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LexError {
+    pub kind: LexErrorKind,
+    pub range: SrcRange,
+}
+
+/// 토큰과 그 소스 구간. 길이가 같은 병렬 배열로, i번 토큰의 구간이 ranges[i]다.
+/// 파서는 이미 `pos`로 토큰을 인덱싱하므로 같은 인덱스로 구간을 집는다.
+pub struct Lexed {
+    pub tokens: Vec<Token>,
+    pub ranges: Vec<SrcRange>,
+}
+
+pub fn lex(src: &str) -> Result<Lexed, LexError> {
     let mut toks = Vec::new();
-    let mut chars = src.chars().peekable();
+    let mut ranges = Vec::new();
+    let mut chars = src.char_indices().peekable();
     // 직전 문자가 공백이었나 - `/`(self-close)의 앞 공백 강제 검증용. 공백 분기에서 세우고
     // 그 외 토큰을 낼 때마다 리셋한다.
     let mut prev_ws = false;
 
-    while let Some(&c) = chars.peek() {
+    while let Some(&(start, c)) = chars.peek() {
         // `/`만 prev_ws를 읽는다. 아래에서 self-close 판단에 쓰고, 이 분기 밖 토큰은 모두 리셋.
         let ws_before = prev_ws;
         prev_ws = false;
@@ -148,7 +165,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             '<' => {
                 chars.next();
                 // `<<`(슬롯 채움)와 `<`(제네릭 타입)를 가른다 - template과 타입으로 문맥이 갈려 충돌하지 않는다.
-                match chars.peek() {
+                match chars.peek().map(|&(_, ch)| ch) {
                     Some('<') => {
                         chars.next();
                         toks.push(Token::LtLt);
@@ -167,7 +184,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             '@' => {
                 chars.next(); // @
                 let mut s = String::new();
-                while let Some(&ch) = chars.peek() {
+                while let Some(&(_, ch)) = chars.peek() {
                     if is_ident_part(ch) {
                         s.push(ch);
                         chars.next();
@@ -194,7 +211,14 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     "mouseenter" => Directive::MouseEnter,
                     "mouseleave" => Directive::MouseLeave,
                     "scroll" => Directive::Scroll,
-                    _ => return Err(LexError::UnknownDirective(s)),
+                    _ => {
+                        // `@`부터 읽어들인 키워드 끝까지 - 통째로 가리켜야 무엇이 안 알려진 건지 보인다.
+                        let end = start + 1 + s.len();
+                        return Err(LexError {
+                            kind: LexErrorKind::UnknownDirective(s),
+                            range: SrcRange::new(start, end),
+                        });
+                    }
                 };
                 toks.push(Token::At(kw));
             }
@@ -204,9 +228,15 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 let mut s = String::new();
                 loop {
                     match chars.next() {
-                        Some('"') => break,
-                        Some(ch) => s.push(ch),
-                        None => return Err(LexError::UnterminatedString),
+                        Some((_, '"')) => break,
+                        Some((_, ch)) => s.push(ch),
+                        // 여는 따옴표부터 소스 끝까지 - 닫는 짝이 없으니 그 뒤 전부가 문자열로 먹혔다.
+                        None => {
+                            return Err(LexError {
+                                kind: LexErrorKind::UnterminatedString,
+                                range: SrcRange::new(start, src.len()),
+                            })
+                        }
                     }
                 }
                 toks.push(Token::Str(s));
@@ -217,16 +247,21 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 let mut s = String::new();
                 loop {
                     match chars.next() {
-                        Some('\'') => break,
-                        Some(ch) => s.push(ch),
-                        None => return Err(LexError::UnterminatedString),
+                        Some((_, '\'')) => break,
+                        Some((_, ch)) => s.push(ch),
+                        None => {
+                            return Err(LexError {
+                                kind: LexErrorKind::UnterminatedString,
+                                range: SrcRange::new(start, src.len()),
+                            })
+                        }
                     }
                 }
                 toks.push(Token::TypeKey(s));
             }
             c if is_ident_start(c) => {
                 let mut s = String::new();
-                while let Some(&ch) = chars.peek() {
+                while let Some(&(_, ch)) = chars.peek() {
                     if is_ident_part(ch) {
                         s.push(ch);
                         chars.next();
@@ -249,7 +284,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             // 표현식 영역이라 지금은 다루지 않는다(SYNTAX.md 미결).
             c if c.is_ascii_digit() => {
                 let mut s = String::new();
-                while let Some(&ch) = chars.peek() {
+                while let Some(&(_, ch)) = chars.peek() {
                     if ch.is_ascii_digit() || ch == '.' {
                         s.push(ch);
                         chars.next();
@@ -259,10 +294,23 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 }
                 toks.push(Token::Num(s));
             }
-            other => return Err(LexError::UnexpectedChar(other)),
+            other => {
+                return Err(LexError {
+                    kind: LexErrorKind::UnexpectedChar(other),
+                    range: SrcRange::new(start, start + other.len_utf8()),
+                })
+            }
         }
+        // 이 회차가 낸 토큰에 구간을 붙인다 - push 지점(20곳)마다 적지 않아 빠뜨릴 수 없다.
+        // 끝은 다음 문자의 오프셋(없으면 소스 끝). 공백 회차는 토큰이 0개라 아무것도 안 붙고,
+        // 토큰을 낸 회차는 resize가 그 하나를 이 구간으로 채운다.
+        let end = chars.peek().map_or(src.len(), |&(i, _)| i);
+        ranges.resize(toks.len(), SrcRange::new(start, end));
     }
-    Ok(toks)
+    Ok(Lexed {
+        tokens: toks,
+        ranges,
+    })
 }
 
 fn is_ident_start(c: char) -> bool {

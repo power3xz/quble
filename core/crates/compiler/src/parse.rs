@@ -13,10 +13,11 @@ use crate::ast::{
     ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, SlotPlaceholderContent,
     Prop, SourceFile, Type, Use, VarRef,
 };
-use crate::lexer::{Directive, Token};
+use crate::lexer::{Directive, Lexed, Token};
+use crate::src_range::SrcRange;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ParseError {
+pub enum ParseErrorKind {
     UnexpectedEnd,
     Expected { want: String, got: String },
     /// 같은 슬롯을 두 번 채웠다(`Header << ... Header << ...`).
@@ -25,6 +26,13 @@ pub enum ParseError {
     MixedSlotPlaceholderFill { comp: String },
     /// 빈 자식 블록(`Comp() { }`) - 슬롯을 안 채우면 self-close로 쓴다(DESIGN §4.5).
     EmptyBlock(String),
+}
+
+/// 파싱 실패 - 무엇이(kind) 어디서(range) 틀렸나.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ParseError {
+    pub kind: ParseErrorKind,
+    pub range: SrcRange,
 }
 
 /// `use` 문 한 줄의 두 형태. 컴포넌트 import(`use A from "..."`)와 리소스(`use "..."`)는
@@ -36,8 +44,14 @@ enum UseDecl {
 
 /// 한 소스를 파싱. 최상위 use 문(있으면 component 앞)과 컴포넌트 정의들을 모은다.
 /// 컴포넌트 정의 순서는 codegen에서 의미를 갖지 않는다(CompLookup이 forward 참조 허용).
-pub fn parse(tokens: &[Token]) -> Result<SourceFile, ParseError> {
-    let mut p = Parser { tokens, pos: 0 };
+/// src_len은 토큰이 다 떨어진 자리(소스 끝)를 가리키는 데만 쓴다.
+pub fn parse(lexed: &Lexed, src_len: usize) -> Result<SourceFile, ParseError> {
+    let mut p = Parser {
+        tokens: &lexed.tokens,
+        ranges: &lexed.ranges,
+        src_len,
+        pos: 0,
+    };
     let mut uses = Vec::new();
     let mut resources = Vec::new();
     let mut comps = Vec::new();
@@ -50,19 +64,21 @@ pub fn parse(tokens: &[Token]) -> Result<SourceFile, ParseError> {
             },
             "component" => comps.push(p.component()?),
             other => {
-                return Err(ParseError::Expected {
+                let kind = ParseErrorKind::Expected {
                     want: "use or component".into(),
                     got: other.to_string(),
-                })
+                };
+                return Err(p.err_here(kind));
             }
         }
     }
     // 토큰이 남았는데 Ident가 아니면 최상위에 올 수 없는 토큰.
     if let Some(t) = p.peek() {
-        return Err(ParseError::Expected {
+        let kind = ParseErrorKind::Expected {
             want: "use or component".into(),
             got: format!("{t:?}"),
-        });
+        };
+        return Err(p.err_here(kind));
     }
     Ok(SourceFile {
         uses,
@@ -73,6 +89,10 @@ pub fn parse(tokens: &[Token]) -> Result<SourceFile, ParseError> {
 
 struct Parser<'a> {
     tokens: &'a [Token],
+    /// tokens와 길이가 같은 병렬 배열 - i번 토큰의 소스 구간.
+    ranges: &'a [SrcRange],
+    /// 토큰이 다 떨어졌을 때 가리킬 자리(소스 끝).
+    src_len: usize,
     pos: usize,
 }
 
@@ -81,8 +101,64 @@ impl<'a> Parser<'a> {
         self.tokens.get(self.pos)
     }
 
+    // 에러가 가리킬 자리는 두 가지뿐이다 - 토큰을 소비했으면 그 토큰(just_read), 아직
+    // peek만 했으면 앞에 놓인 토큰(here). 둘을 헷갈리면 밑줄이 한 칸 밀린다.
+    //
+    //     div(class="x" {         <- `)` 자리에 `{`가 왔다
+    //                   ^ 여기를 가리켜야 한다
+
+    /// pos가 가리키는(=아직 안 읽은) 토큰의 구간. peek으로만 보고 튕겨낼 때 쓴다.
+    ///
+    /// ```text
+    /// match self.peek() {
+    ///     got => Err(self.err_here(...)),   // got이 곧 pos 토큰
+    /// }
+    /// ```
+    ///
+    /// 토큰이 다 떨어졌으면 소스 끝(빈 구간)을 가리킨다.
+    fn here(&self) -> SrcRange {
+        self.ranges
+            .get(self.pos)
+            .copied()
+            .unwrap_or_else(|| SrcRange::eof(self.src_len))
+    }
+
+    /// 직전에 소비한 토큰(pos - 1)의 구간. `next()`로 읽고 나서 그 토큰을 탓할 때 쓴다.
+    ///
+    /// ```text
+    /// let got = self.next()?;              // pos가 이미 다음으로 넘어갔다
+    /// Err(self.err_read(...))              // here()면 got의 *다음* 토큰을 가리킨다
+    /// ```
+    ///
+    /// 아무것도 안 읽었으면(pos = 0) 가리킬 이전 토큰이 없어 here()로 떨어진다.
+    fn just_read(&self) -> SrcRange {
+        match self.pos {
+            0 => self.here(),
+            _ => self.ranges[self.pos - 1],
+        }
+    }
+
+    /// 앞에 놓인 토큰을 가리키는 에러(peek 계열).
+    fn err_here(&self, kind: ParseErrorKind) -> ParseError {
+        ParseError {
+            kind,
+            range: self.here(),
+        }
+    }
+
+    /// 방금 읽은 토큰을 가리키는 에러(next 계열).
+    fn err_read(&self, kind: ParseErrorKind) -> ParseError {
+        ParseError {
+            kind,
+            range: self.just_read(),
+        }
+    }
+
     fn next(&mut self) -> Result<&Token, ParseError> {
-        let t = self.tokens.get(self.pos).ok_or(ParseError::UnexpectedEnd)?;
+        // 토큰이 없어서 나는 에러라 here()가 소스 끝을 가리킨다. pos를 올리기 전에 만들어야
+        // 하고(올린 뒤 just_read()를 쓰면 마지막 토큰을 엉뚱하게 탓한다), 성공하면 버려진다.
+        let at_end = self.err_here(ParseErrorKind::UnexpectedEnd);
+        let t = self.tokens.get(self.pos).ok_or(at_end)?;
         self.pos += 1;
         Ok(t)
     }
@@ -92,20 +168,24 @@ impl<'a> Parser<'a> {
         if got == want {
             Ok(())
         } else {
-            Err(ParseError::Expected {
+            let kind = ParseErrorKind::Expected {
                 want: format!("{want:?}"),
                 got: format!("{got:?}"),
-            })
+            };
+            Err(self.err_read(kind))
         }
     }
 
     fn ident(&mut self) -> Result<String, ParseError> {
         match self.next()? {
             Token::Ident(s) => Ok(s.clone()),
-            got => Err(ParseError::Expected {
-                want: "identifier".into(),
-                got: format!("{got:?}"),
-            }),
+            got => {
+                let kind = ParseErrorKind::Expected {
+                    want: "identifier".into(),
+                    got: format!("{got:?}"),
+                };
+                Err(self.err_read(kind))
+            }
         }
     }
 
@@ -130,31 +210,43 @@ impl<'a> Parser<'a> {
             Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
                 Ok(ArgValue::Literal(self.lit_value()?))
             }
-            got => Err(ParseError::Expected {
-                want: "value (prop, \"str\", 42, true)".into(),
-                got: format!("{got:?}"),
-            }),
+            got => {
+                let kind = ParseErrorKind::Expected {
+                    want: "value (prop, \"str\", 42, true)".into(),
+                    got: format!("{got:?}"),
+                };
+                Err(self.err_here(kind))
+            }
         }
     }
 
     /// 리터럴 토큰 하나를 LitValue로 소비. 숫자는 f64로 파싱한다(원문이 렉서를 통과해도
     /// 형태가 어긋나면 여기서 잡힌다). 호출부가 리터럴 토큰임을 확인한 뒤 부른다.
     fn lit_value(&mut self) -> Result<LitValue, ParseError> {
+        // next()가 빌려준 토큰을 아래 팔들이 쓰고 있어 그 안에서 just_read()를 못 부른다
+        // (self 재빌림) - 소비 전에 이 리터럴 자리를 잡아둔다.
+        let lit_range = self.here();
         match self.next()? {
             Token::Str(s) => Ok(LitValue::Str(s.clone())),
             Token::Bool(b) => Ok(LitValue::Bool(*b)),
             Token::Num(n) => {
                 n.parse::<f64>()
                     .map(LitValue::Number)
-                    .map_err(|_| ParseError::Expected {
-                        want: "number literal".into(),
-                        got: n.clone(),
+                    .map_err(|_| ParseError {
+                        kind: ParseErrorKind::Expected {
+                            want: "number literal".into(),
+                            got: n.clone(),
+                        },
+                        range: lit_range,
                     })
             }
-            got => Err(ParseError::Expected {
-                want: "literal (\"str\", 42, true)".into(),
-                got: format!("{got:?}"),
-            }),
+            got => {
+                let kind = ParseErrorKind::Expected {
+                    want: "literal (\"str\", 42, true)".into(),
+                    got: format!("{got:?}"),
+                };
+                Err(ParseError { kind, range: lit_range })
+            }
         }
     }
 
@@ -164,10 +256,11 @@ impl<'a> Parser<'a> {
         if s == kw {
             Ok(())
         } else {
-            Err(ParseError::Expected {
+            let kind = ParseErrorKind::Expected {
                 want: kw.into(),
                 got: s,
-            })
+            };
+            Err(self.err_read(kind))
         }
     }
 
@@ -191,10 +284,11 @@ impl<'a> Parser<'a> {
         let path = match self.next()? {
             Token::Str(s) => s.clone(),
             got => {
-                return Err(ParseError::Expected {
+                let kind = ParseErrorKind::Expected {
                     want: "string path".into(),
                     got: format!("{got:?}"),
-                })
+                };
+                return Err(self.err_read(kind));
             }
         };
         Ok(UseDecl::Component(Use { names, path }))
@@ -297,10 +391,11 @@ impl<'a> Parser<'a> {
                 Type::Ref(name)
             }
             other => {
-                return Err(ParseError::Expected {
+                let kind = ParseErrorKind::Expected {
                     want: "bool, number, string, {, or 컴포넌트명".into(),
                     got: format!("{other:?}"),
-                })
+                };
+                return Err(self.err_here(kind));
             }
         };
         // 후위 [] 반복: string[] -> Array(String), number[][] -> Array(Array(Number)).
@@ -327,10 +422,13 @@ impl<'a> Parser<'a> {
     fn type_key(&mut self) -> Result<String, ParseError> {
         match self.next()? {
             Token::TypeKey(s) => Ok(s.clone()),
-            other => Err(ParseError::Expected {
-                want: "타입 키('...')".into(),
-                got: format!("{other:?}"),
-            }),
+            other => {
+                let kind = ParseErrorKind::Expected {
+                    want: "타입 키('...')".into(),
+                    got: format!("{other:?}"),
+                };
+                Err(self.err_read(kind))
+            }
         }
     }
 
@@ -404,10 +502,11 @@ impl<'a> Parser<'a> {
                     payload.push((field, value));
                 }
                 Some(t) => {
-                    return Err(ParseError::Expected {
+                    let kind = ParseErrorKind::Expected {
                         want: "payload field or }".into(),
                         got: format!("{t:?}"),
-                    })
+                    };
+                    return Err(self.err_here(kind));
                 }
             }
         }
@@ -461,10 +560,11 @@ impl<'a> Parser<'a> {
                     fields.push((key, value));
                 }
                 Some(t) => {
-                    return Err(ParseError::Expected {
+                    let kind = ParseErrorKind::Expected {
                         want: "context field or }".into(),
                         got: format!("{t:?}"),
-                    })
+                    };
+                    return Err(self.err_here(kind));
                 }
             }
         }
@@ -489,10 +589,13 @@ impl<'a> Parser<'a> {
             Some(Token::Str(_)) => match self.next()? {
                 Token::Str(s) => Ok(Node::Text(s.clone())),
                 // 위 peek이 Str임을 확인했으므로 도달 불가.
-                got => Err(ParseError::Expected {
-                    want: "string".into(),
-                    got: format!("{got:?}"),
-                }),
+                got => {
+                    let kind = ParseErrorKind::Expected {
+                        want: "string".into(),
+                        got: format!("{got:?}"),
+                    };
+                    Err(self.err_read(kind))
+                }
             },
             // `{ IDENT }` 보간. (자식 자리의 `{`는 블록이 아니라 보간만 온다.)
             Some(Token::LBrace) => self.var(),
@@ -507,10 +610,13 @@ impl<'a> Parser<'a> {
             // 대문자 시작 = 컴포넌트 호출(합성), 소문자 = HTML 태그.
             Some(Token::Ident(s)) if starts_upper(s) => self.component_call(),
             Some(Token::Ident(_)) => self.element(),
-            got => Err(ParseError::Expected {
-                want: "node (element, string, or {var})".into(),
-                got: format!("{got:?}"),
-            }),
+            got => {
+                let kind = ParseErrorKind::Expected {
+                    want: "node (element, string, or {var})".into(),
+                    got: format!("{got:?}"),
+                };
+                Err(self.err_here(kind))
+            }
         }
     }
 
@@ -569,17 +675,22 @@ impl<'a> Parser<'a> {
         match self.next()? {
             Token::Ident(s) if s == "of" => {}
             got => {
-                return Err(ParseError::Expected {
+                let kind = ParseErrorKind::Expected {
                     want: "of".into(),
                     got: format!("{got:?}"),
-                })
+                };
+                return Err(self.err_read(kind));
             }
         }
         let count = match self.peek() {
             Some(Token::Num(n)) => {
-                let count = n.parse::<u16>().map_err(|_| ParseError::Expected {
-                    want: "0..=65535 정수 반복 횟수".into(),
-                    got: n.clone(),
+                let range = self.here(); // 아직 소비 전이라 이 숫자 토큰이 pos에 있다
+                let count = n.parse::<u16>().map_err(|_| ParseError {
+                    kind: ParseErrorKind::Expected {
+                        want: "0..=65535 정수 반복 횟수".into(),
+                        got: n.clone(),
+                    },
+                    range,
                 })?;
                 self.next()?;
                 ForCount::Literal(count)
@@ -631,10 +742,12 @@ impl<'a> Parser<'a> {
         let contents = match self.peek() {
             Some(Token::Slash(spaced)) => {
                 if !spaced {
-                    return Err(ParseError::Expected {
+                    let kind = ParseErrorKind::Expected {
                         want: "space before '/' (self-close)".into(),
                         got: "'/' without preceding space".into(),
-                    });
+                    };
+                    // 아직 `/`를 소비하지 않았다 - 공백이 빠진 그 `/`를 가리킨다.
+                    return Err(self.err_here(kind));
                 }
                 self.next()?; // /
                 self.expect(&Token::RParen)?;
@@ -660,6 +773,9 @@ impl<'a> Parser<'a> {
                 Some(Token::RBrace) | None => break,
                 // `Ident <<` = 기명 슬롯 채움. 한 칸 앞 `<<`로 갈려 일반 노드와 모호하지 않다.
                 Some(Token::Ident(_)) if matches!(self.tokens.get(self.pos + 1), Some(Token::LtLt)) => {
+                    // 중복 검사는 콘텐츠까지 읽은 뒤라 그때 just_read()를 쓰면 콘텐츠 끝을
+                    // 가리킨다 - 탓할 대상인 슬롯 이름 자리를 지금 잡아둔다.
+                    let slot_range = self.here();
                     let slot = self.ident()?;
                     self.expect(&Token::LtLt)?;
                     // 오른쪽은 블록(여러 노드) 또는 노드 하나.
@@ -673,9 +789,12 @@ impl<'a> Parser<'a> {
                         _ => vec![self.node()?],
                     };
                     if named.iter().any(|c| c.name.as_deref() == Some(slot.as_str())) {
-                        return Err(ParseError::DuplicateSlotPlaceholderFill {
-                            comp: comp.to_string(),
-                            slot,
+                        return Err(ParseError {
+                            kind: ParseErrorKind::DuplicateSlotPlaceholderFill {
+                                comp: comp.to_string(),
+                                slot,
+                            },
+                            range: slot_range,
                         });
                     }
                     named.push(SlotPlaceholderContent { name: Some(slot), nodes });
@@ -684,13 +803,17 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(&Token::RBrace)?;
+        // 아래 둘은 블록 전체가 문제라 방금 읽은 닫는 `}`를 가리킨다.
         // 무기명/기명은 정의 쪽에서 이미 갈리므로 사용 쪽에서 섞이면 어느 쪽도 성립하지 않는다.
         if !named.is_empty() && !anonymous.is_empty() {
-            return Err(ParseError::MixedSlotPlaceholderFill { comp: comp.to_string() });
+            let kind = ParseErrorKind::MixedSlotPlaceholderFill { comp: comp.to_string() };
+            return Err(self.err_read(kind));
         }
         match named.is_empty() {
             // 빈 블록(`Comp() { }`)은 self-close로 쓴다 - 빈 블록 금지(DESIGN §4.5).
-            true if anonymous.is_empty() => Err(ParseError::EmptyBlock(comp.to_string())),
+            true if anonymous.is_empty() => {
+                Err(self.err_read(ParseErrorKind::EmptyBlock(comp.to_string())))
+            }
             true => Ok(vec![SlotPlaceholderContent { name: None, nodes: anonymous }]),
             false => Ok(named),
         }
@@ -719,19 +842,21 @@ impl<'a> Parser<'a> {
                             ArgValue::Literal(self.lit_value()?)
                         }
                         got => {
-                            return Err(ParseError::Expected {
+                            let kind = ParseErrorKind::Expected {
                                 want: "component arg value ({var}, \"str\", 42, true)".into(),
                                 got: format!("{got:?}"),
-                            })
+                            };
+                            return Err(self.err_here(kind));
                         }
                     };
                     args.push((prop, value));
                 }
                 Some(t) => {
-                    return Err(ParseError::Expected {
+                    let kind = ParseErrorKind::Expected {
                         want: "component arg (prop={var} or prop=\"lit\") or )".into(),
                         got: format!("{t:?}"),
-                    })
+                    };
+                    return Err(self.err_here(kind));
                 }
             }
         }
@@ -742,6 +867,9 @@ impl<'a> Parser<'a> {
     // self-close(`tag(attrs /)`)면 자식 블록을 안 읽는다. void 요소(input/img 등)는
     // self-close가 필수 - 아니면 에러(SYNTAX §3.1.1, DESIGN §4.5).
     fn element(&mut self) -> Result<Node, ParseError> {
+        // 아래 void/빈블록 검사는 여는 태그를 다 읽은 뒤라 그때는 태그 이름이 pos에서 멀다 -
+        // 두 에러가 탓할 대상인 태그 자리를 지금 잡아둔다.
+        let tag_range = self.here();
         let tag = self.ident()?;
         self.expect(&Token::LParen)?;
         let (attrs, event_bindings) = self.attrs()?;
@@ -749,10 +877,12 @@ impl<'a> Parser<'a> {
         let self_close = match self.peek() {
             Some(Token::Slash(spaced)) => {
                 if !spaced {
-                    return Err(ParseError::Expected {
+                    let kind = ParseErrorKind::Expected {
                         want: "space before '/' (self-close)".into(),
                         got: "'/' without preceding space".into(),
-                    });
+                    };
+                    // 아직 `/`를 소비하지 않았다 - 공백이 빠진 그 `/`를 가리킨다.
+                    return Err(self.err_here(kind));
                 }
                 self.next()?; // /
                 true
@@ -762,9 +892,12 @@ impl<'a> Parser<'a> {
         self.expect(&Token::RParen)?;
 
         if is_void_tag(&tag) && !self_close {
-            return Err(ParseError::Expected {
-                want: format!("self-close for void element ({tag}( ... /))"),
-                got: format!("void element '{tag}' with child block"),
+            return Err(ParseError {
+                kind: ParseErrorKind::Expected {
+                    want: format!("self-close for void element ({tag}( ... /))"),
+                    got: format!("void element '{tag}' with child block"),
+                },
+                range: tag_range,
             });
         }
 
@@ -776,9 +909,12 @@ impl<'a> Parser<'a> {
             self.expect(&Token::RBrace)?;
             // 자식 없으면 self-close 필수 - 빈 블록 금지(SYNTAX §3.1.1, DESIGN §4.5).
             if children.is_empty() {
-                return Err(ParseError::Expected {
-                    want: format!("self-close for childless element ({tag}( ... /))"),
-                    got: "empty child block {}".into(),
+                return Err(ParseError {
+                    kind: ParseErrorKind::Expected {
+                        want: format!("self-close for childless element ({tag}( ... /))"),
+                        got: "empty child block {}".into(),
+                    },
+                    range: tag_range,
                 });
             }
             children
@@ -803,21 +939,26 @@ impl<'a> Parser<'a> {
                 Some(Token::RParen | Token::Slash(_)) | None => break,
                 // `@click:EVENT` - DOM 이벤트 바인딩. 디렉티브는 닫힌 집합(Directive).
                 Some(Token::At(_)) => {
+                    // next()가 빌려준 토큰을 아래 두 팔이 쓰고 있어 그 안에서 just_read()를
+                    // 못 부른다(self 재빌림) - 소비 전에 이 `@...` 자리를 잡아 공유한다.
+                    let directive_range = self.here();
                     let dom_event = match self.next()? {
                         Token::At(directive) => match directive.dom_event_name() {
                             Some(name) => name.to_string(),
                             None => {
-                                return Err(ParseError::Expected {
+                                let kind = ParseErrorKind::Expected {
                                     want: "DOM event directive (e.g. @click)".into(),
                                     got: format!("{directive:?}"),
-                                })
+                                };
+                                return Err(ParseError { kind, range: directive_range });
                             }
                         },
                         got => {
-                            return Err(ParseError::Expected {
+                            let kind = ParseErrorKind::Expected {
                                 want: "DOM event directive (e.g. @click)".into(),
                                 got: format!("{got:?}"),
-                            })
+                            };
+                            return Err(ParseError { kind, range: directive_range });
                         }
                     };
                     self.expect(&Token::Colon)?;
@@ -840,19 +981,21 @@ impl<'a> Parser<'a> {
                             AttrValue::Var(var)
                         }
                         got => {
-                            return Err(ParseError::Expected {
+                            let kind = ParseErrorKind::Expected {
                                 want: "attribute value (string or {var})".into(),
                                 got: format!("{got:?}"),
-                            })
+                            };
+                            return Err(self.err_here(kind));
                         }
                     };
                     attrs.push((name, value));
                 }
                 Some(t) => {
-                    return Err(ParseError::Expected {
+                    let kind = ParseErrorKind::Expected {
                         want: "attribute name, @event, or )".into(),
                         got: format!("{t:?}"),
-                    })
+                    };
+                    return Err(self.err_here(kind));
                 }
             }
         }

@@ -192,8 +192,8 @@ fn collect(
     loader: &impl SourceLoader,
     ctx: &mut Ctx,
 ) -> Result<(), FlattenError> {
-    let tokens = lexer::lex(src).map_err(FlattenError::Lex)?;
-    let source = parse::parse(&tokens).map_err(FlattenError::Parse)?;
+    let lexed = lexer::lex(src).map_err(FlattenError::Lex)?;
+    let source = parse::parse(&lexed, src.len()).map_err(FlattenError::Parse)?;
 
     // want로 가져올 컴포넌트를 고른다. None이면 전부.
     let take = |name: &str| want.map_or(true, |ns| ns.iter().any(|n| n == name));
