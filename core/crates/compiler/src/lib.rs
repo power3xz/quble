@@ -8,6 +8,7 @@ mod dts;
 mod flatten;
 mod lexer;
 mod parse;
+mod src_range;
 
 pub use dts::handlers_dts_file;
 pub use flatten::{FlattenError, SourceLoader};
@@ -114,8 +115,8 @@ mod tests {
 
     #[test]
     fn lex_then_parse_hello() {
-        let toks = lexer::lex(HELLO).unwrap();
-        let source = parse::parse(&toks).unwrap();
+        let lexed = lexer::lex(HELLO).unwrap();
+        let source = parse::parse(&lexed, HELLO.len()).unwrap();
         assert!(source.uses.is_empty());
         assert_eq!(source.comps.len(), 1);
         let comp = &source.comps[0];
@@ -146,9 +147,9 @@ mod tests {
     fn lex_dot_between_idents() {
         use lexer::Token;
         // `.`은 식별자 사이에서 Dot 토큰. `assignee.name` -> Ident Dot Ident.
-        let toks = lexer::lex("assignee.name").unwrap();
+        let lexed = lexer::lex("assignee.name").unwrap();
         assert_eq!(
-            toks,
+            lexed.tokens,
             vec![
                 Token::Ident("assignee".to_string()),
                 Token::Dot,
@@ -161,8 +162,8 @@ mod tests {
     fn lex_number_dot_is_decimal_not_dot() {
         use lexer::Token;
         // 숫자 안의 `.`은 소수점으로 먹어 Dot 토큰이 생기지 않는다(숫자 분기가 먼저 소비).
-        let toks = lexer::lex("3.14").unwrap();
-        assert_eq!(toks, vec![Token::Num("3.14".to_string())]);
+        let lexed = lexer::lex("3.14").unwrap();
+        assert_eq!(lexed.tokens, vec![Token::Num("3.14".to_string())]);
     }
 
     /// 컴파일 산출물이 손으로 구성한 기대 바이트와 일치하는지.
@@ -2226,5 +2227,96 @@ mod tests {
                 codegen::CodegenError::UnknownSlotPlaceholder { .. }
             ))
         ));
+    }
+
+    // ── 에러 위치(SrcRange) ────────────────────────────────────────────
+    //
+    // 오프셋 숫자를 그대로 적으면 읽는 쪽이 검산을 못 하므로, 소스에서 그 구간을 잘라내
+    // "무엇을 가리키는지"를 문자열로 본다. 위치가 밀리면 잘린 문자열이 달라져 잡힌다.
+
+    /// 컴파일이 실패했다고 보고 그 에러가 가리키는 소스 조각을 돌려준다(테스트용).
+    fn error_snippet(src: &str) -> String {
+        let range = match compile(src) {
+            Err(CompileError::Flatten(FlattenError::Lex(e))) => e.range,
+            Err(CompileError::Flatten(FlattenError::Parse(e))) => e.range,
+            other => panic!("lex/parse 에러를 기대했다: {:?}", other.map(|_| ())),
+        };
+        src[range.start as usize..range.end as usize].to_string()
+    }
+
+    #[test]
+    fn lex_error_points_at_bad_char() {
+        // `#`은 어느 토큰도 시작하지 못한다 - 그 한 글자를 가리켜야 한다.
+        assert_eq!(error_snippet("component C { # }"), "#");
+    }
+
+    #[test]
+    fn lex_error_points_at_unknown_directive() {
+        // `@`부터 키워드 끝까지 통째로 - `@`만 가리키면 무엇이 안 알려진 건지 안 보인다.
+        assert_eq!(error_snippet("component C { template { @nope } }"), "@nope");
+    }
+
+    #[test]
+    fn lex_error_points_at_unterminated_string() {
+        // 닫는 따옴표가 없으면 여는 따옴표부터 소스 끝까지가 문자열로 먹힌다.
+        let src = r#"component C { template { div(class="x /) } }"#;
+        assert_eq!(error_snippet(src), r#""x /) } }"#);
+    }
+
+    /// next()로 읽은 뒤 그 토큰을 탓하는 자리 - just_read()가 한 칸 밀리지 않는지.
+    #[test]
+    fn parse_error_points_at_unexpected_token() {
+        // `template` 자리에 `oops`가 왔다.
+        assert_eq!(error_snippet("component C { oops { } }"), "oops");
+    }
+
+    /// peek만 하고 튕겨내는 자리 - here()가 아직 안 읽은 그 토큰을 가리키는지.
+    #[test]
+    fn parse_error_points_at_unexpected_node() {
+        // 자식 자리에 노드가 될 수 없는 `=`가 왔다.
+        assert_eq!(error_snippet("component C { template { div() { = } } }"), "=");
+    }
+
+    /// 토큰이 다 떨어져 난 에러는 소스 끝(빈 구간)을 가리킨다 - 패닉 없이 위치가 나와야 한다.
+    #[test]
+    fn parse_error_at_eof_points_past_end() {
+        let src = "component C { template {";
+        assert_eq!(error_snippet(src), "");
+        // 빈 구간이라도 자리는 소스 끝이어야 한다(0이 아니라).
+        match compile(src) {
+            Err(CompileError::Flatten(FlattenError::Parse(e))) => {
+                assert_eq!(e.range.start as usize, src.len());
+            }
+            other => panic!("parse 에러를 기대했다: {:?}", other.map(|_| ())),
+        }
+    }
+
+    /// 검사 시점이 태그에서 멀어도(여는 태그를 다 읽은 뒤) 탓할 대상인 태그를 가리켜야 한다.
+    #[test]
+    fn parse_error_points_at_void_tag_not_current_pos() {
+        assert_eq!(error_snippet("component C { template { input() { } } }"), "input");
+    }
+
+    /// 슬롯 중복도 마찬가지 - 콘텐츠까지 읽은 뒤 검사하지만 두 번째 슬롯 이름을 가리킨다.
+    #[test]
+    fn parse_error_points_at_duplicate_slot_name() {
+        let src = r#"
+            component Outer { template { Inner() { H << p( /) H << span( /) } } }
+            component Inner { template { div() { @slot(H) } } }
+        "#;
+        assert_eq!(error_snippet(src), "H");
+        // 두 번째 H여야 한다 - 첫 H를 가리키면 어느 쪽이 중복인지 안 보인다.
+        let range = match compile(src) {
+            Err(CompileError::Flatten(FlattenError::Parse(e))) => e.range,
+            other => panic!("parse 에러를 기대했다: {:?}", other.map(|_| ())),
+        };
+        assert_eq!(range.start as usize, src.rfind("H <<").unwrap());
+    }
+
+    /// 한글이 앞에 있어도 바이트 오프셋이 정확해야 한다(문자 수로 세면 밀린다).
+    #[test]
+    fn error_range_is_byte_offset_past_hangul() {
+        let src = r#"component C { template { div(class="가나다") { = } } }"#;
+        assert_eq!(error_snippet(src), "=");
     }
 }
