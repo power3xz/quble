@@ -1,0 +1,34 @@
+component SlotPlaceholder {
+  props { title: string, note: string }
+  events { PICK({ title }) }
+  template {
+    div() {
+      Panel(heading="panel") {
+        Header << h1(class="filled" @click:PICK) { {title} }
+      }
+      Plain() {
+        span(class="anon") { {note} }
+      }
+    }
+  }
+}
+
+component Panel {
+  props { heading: string }
+  events { OWN({ heading }) }
+  template {
+    section() {
+      div(class="head") { @slot(Header) }
+      div(class="body") { @slot(Body) }
+      p(class="own" @click:OWN) { {heading} }
+    }
+  }
+}
+
+component Plain {
+  template {
+    article() {
+      div(class="inner") { @slot() }
+    }
+  }
+}

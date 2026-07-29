@@ -241,7 +241,28 @@ fn walk_nodes(
                     seen,
                 );
             }
-            Node::Component { alias, name, .. } => {
+            Node::SlotPlaceholderDef { .. } => {}
+            Node::Component {
+                alias,
+                name,
+                contents,
+                ..
+            } => {
+                // 슬롯 콘텐츠는 쓰는 쪽 컨텍스트로 해석된다(SYNTAX §3.3) - 자식 prefix가 아니라
+                // 지금 이 경로(path_prefix)로 건다. 콘텐츠를 쓴 자리가 곧 그 노드의 트리 위치다.
+                for content in contents {
+                    walk_nodes(
+                        comps,
+                        comp,
+                        &content.nodes,
+                        path_prefix,
+                        context_stack,
+                        pending,
+                        depth_base,
+                        handlers,
+                        seen,
+                    );
+                }
                 // 컴포넌트 세그먼트가 pending 인덱스를 전부 접미(Mid[$0]). 자식으로 내려가면 pending은
                 // 비우되(이미 실림) depth_base는 유지 - Mid[$0] 안 @for는 Inner[$1]로 이어진다.
                 let segment = alias.as_deref().unwrap_or(name);

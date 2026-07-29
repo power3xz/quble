@@ -62,10 +62,15 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 ```
 0:div  1:span  2:p  3:h1  4:h2  5:h3  6:a  7:ul  8:li  9:button  10:article  11:img
-12:section  13:header  14:footer  15:nav  16:main  17:aside  18:label
+12:section  13:header  14:footer  15:nav  16:main  17:aside  18:label  19:input
+20:em  21:b  22:strong  23:i  24:small  25:code  26:pre  27:h4  28:h5  29:h6
+30:br  31:hr  32:ol  33:dl  34:dt  35:dd  36:table  37:thead  38:tbody  39:tr
+40:th  41:td  42:form  43:textarea  44:select  45:option  46:figure  47:figcaption
+48:time  49:blockquote  50:video  51:audio  52:canvas
 ```
 
 추가만, 재배치 금지(예약 ID 안정). 시맨틱 태그(section~label)는 알림 패널 데모에서 편입.
+SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 필요해 이 테이블로 안 다룬다.
 
 ### 전역 상수풀 - 속성명 (프로토타입 시작 집합)
 
@@ -74,6 +79,8 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 
 ```
 0:class  1:id  2:src  3:alt  4:href  5:type  6:name  7:value  8:title  9:style  10:placeholder
+11:for  12:disabled  13:checked  14:readonly  15:required  16:rel  17:target  18:width
+19:height  20:colspan  21:rowspan  22:role  23:tabindex  24:datetime  25:controls
 ```
 
 (프로토타입이라 ID 호환성은 신경 쓰지 않는다 - 필요하면 재배치.)
@@ -216,6 +223,9 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `PUSH_PATH_INDEX_SEGMENT` | 0x18 | depth: u16    | -                         | 합성 경로에 `@for` 회차 인덱스 세그먼트를 민다. `depth`는 loopIndexStack에서 읽을 위치. 직전 이름 세그먼트에 접미(`VideoItem[3]`)하거나, 직전 이름이 없으면 익명 세그먼트(`[3]`). |
 | `PUSH_FIELD`      | 0x19 | scope_index:u8, offset:u8 | scope                 | 부모 `scope[scope_index]`에서 필드로 내려가 `(kind, base+offset)`을 자식에 push(경로 참조 `{user.name}`). kind(출처)는 부모 슬롯 그대로 전파, 위치만 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다(leaf면 `store.get`, object면 base+offset, array면 `arrayPool[store.get()]`). |
 | `FOR_ARRAY_VAR`   | 0x1a | scope_index:u8, offset:u8 | scope                 | count가 배열 슬롯인 반복(`@for (item of arr)`). 그 칸의 `arrayInfoIndex`로 요소 수/위치를 얻어 요소 수만큼 반복하며, 회차마다 회차변수 슬롯을 그 요소 leaf에 바인딩. |
+| `PUSH_SLOT_PLACEHOLDER_CONTENT` | 0x1b | slot_placeholder_index: u16 | - | 슬롯 콘텐츠 구간 시작(**사용쪽**). `SLOT_PLACEHOLDER_CONTENT_END`까지가 콘텐츠 코드이고 뒤따르는 `RENDER`가 소비한다. 콘텐츠는 부모 def 안에 그대로 남아 **부모 scope/path**로 해석된다(SYNTAX §3.3). |
+| `SLOT_PLACEHOLDER_CONTENT_END` | 0x1c | -              | -                         | 콘텐츠 구간 끝 마커(`IF_END` 동형). 다음 op가 `PUSH_SLOT_PLACEHOLDER_CONTENT`가 아니면 콘텐츠 목록도 끝. |
+| `FILL_SLOT_PLACEHOLDER` | 0x1d | slot_placeholder_index: u16 | -          | `@slot(name)` 자리(**정의쪽**). 그 인덱스의 콘텐츠 구간을 **부모 컨텍스트**(argumentSourcePairs/compId/pathPrefix)로 해석해 이 자리에 끼운다. 안 채운 슬롯이면 아무것도 안 넣는다(미채움 허용). |
 
 설계 메모:
 
@@ -271,6 +281,18 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     같은 식이라 operand로 나를 필요가 없다.
   - **회차 인덱스**(fullname의 `[i]`)는 `PUSH_PATH_INDEX_SEGMENT depth:u16`로 별개 축. 런타임이
     loopIndexStack의 그 깊이 값을 직전 이름 세그먼트에 접미한다.
+- **슬롯 - 콘텐츠는 부모 코드에 남고 자식 자리에서 끼운다.** 사용쪽 `PUSH_SLOT_PLACEHOLDER_CONTENT
+  idx ... SLOT_PLACEHOLDER_CONTENT_END`를 `RENDER` **앞**에 깔면(다른 `PUSH_*`와 같은 자리) RENDER가
+  소비해 자식에 넘기고, 자식의 `FILL_SLOT_PLACEHOLDER idx`가 그 구간을 실행한다. 콘텐츠 코드를
+  자식 def로 옮기지 않는 것이 핵심 - 부모 def에 그대로 있어야 부모 scope/path로 해석된다.
+  - **세 축이 갈린다.** 해석 컨텍스트(argumentSourcePairs/compId/pathPrefix)는 **부모**(콘텐츠를 쓴 곳),
+    DOM 부착 위치(`nodeTop()`)와 수명(branch)은 **자식**(콘텐츠가 놓인 곳). `RENDER`가 이미 같은
+    분리를 반대 방향으로 한다 - 자식을 해석해 fragment를 받고 부모 자리에 붙인다.
+  - **인덱스는 컴포넌트-로컬**이고 정의쪽/사용쪽이 같은 공간을 쓴다(자식 def의 `@slot` 선언 순서).
+    props와 같은 방식이라 사용처가 어떤 순서로 채우든 codegen이 이 순서로 정규화한다 - 이름은
+    컴파일타임에 소진되고 런타임은 인덱스만 본다. 전역 인덱스가 아니라 def 안에서 닫힌다.
+  - **미채움 허용** - 자식이 정의한 슬롯을 부모가 안 채우면 그 `PUSH_*`를 아예 안 낸다. 런타임은
+    해당 인덱스가 비면 아무것도 안 넣는다(props는 전부 필수인 것과 다르다).
 - **외부 리소스 - `LOAD_RES res`.** 파일이 `use "./style.css"`로 CSS를 참조하면, 그 파일의
   **모든 컴포넌트** 정의 앞머리에 `LOAD_RES resId`를 하나씩 낸다. 런타임이 resId를 URL로 풀어
   로드(클라: `<link>` 삽입, 중복 URL 스킵).

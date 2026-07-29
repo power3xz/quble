@@ -102,8 +102,8 @@ events {
 
 이벤트명은 대문자 스네이크 관례. `@click:TOGGLE`이 이 `TOGGLE`을 참조한다.
 
-> 의미론 주의: events 페이로드 식은 **이벤트 발생(클라이언트) 시점에 평가**된다. template
-> 보간식(§4)과 실행 위치가 다르다. (process.md A-2 참조.)
+> 의미론 주의: events 페이로드 값은 **이벤트 발생(클라이언트) 시점에 읽는다**. template
+> 보간과 실행 위치가 다르다.
 
 ---
 
@@ -176,12 +176,17 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
 **정의**(컴포넌트 안) - `@slot`은 자식 콘텐츠가 들어갈 자리다.
 
 ```
-@slot            // 무기명
-@slot header     // 기명
+@slot()          // 무기명
+@slot(Header)    // 기명
 ```
+
+괄호는 **필수**다. 렉서가 개행을 토큰으로 내지 않아, 괄호가 없으면 `@slot` 다음 줄의 형제
+노드를 슬롯 이름으로 먹는지 아닌지 가릴 수 없다.
 
 한 컴포넌트는 **무기명 하나 또는 기명 여럿** 중 하나만 쓴다 - 섞으면 컴파일 에러.
 둘을 섞지 않으므로 "이름 없는 노드가 어디로 가는가"라는 암묵 규칙이 없다.
+같은 자리를 두 번 선언하는 것(`@slot()` 둘, 같은 이름 둘)도 에러다 - 콘텐츠는 한 덩이라
+어느 자리로 갈지 정할 수 없다.
 
 **사용**(합성처) - 정의 쪽이 무기명이냐 기명이냐에 따라 갈린다.
 
@@ -252,16 +257,13 @@ MyCard: Card(title="...") {
 `{i}`로 쓰거나 그냥 회차 번호로 참조한다. 배열을 중간에서 제거하면 뒤 회차의 인덱스가 당겨져
 `{i}` 표시가 자동 갱신된다(요소는 안 움직이고 인덱스만 재정렬 - "값 고정, 위치 이동"). 인덱스변수
 없이도(`@for (tag of tags)`) 이벤트 핸들러는 회차 인덱스를 `$0`(중첩이면 안쪽 `$1`)로 늘 받는다
-(§3.3, DESIGN) - 인덱스변수는 그 회차 번호에 몸체용 이름을 붙이는 것뿐이다.
-
-> 의미론 주의: `@if`/`@for`의 조건/이터러블과 `{EXPR}` 보간은 **서버/클라 양쪽에서
-> 평가**된다(SSR). 따라서 결정적/부수효과 없는 식이어야 한다 - 미확정 해석, process.md A-2.
+(§6) - 인덱스변수는 그 회차 번호에 몸체용 이름을 붙이는 것뿐이다.
 
 ---
 
-## 5. 표현식 슬롯 요약
+## 5. 값 자리 요약
 
-문법상 EXPR이 등장하는 위치:
+값(EXPR)이 등장하는 위치:
 
 1. `{EXPR}` - template 자식 보간
 2. `"... {EXPR} ..."` - 문자열 리터럴 내 보간
@@ -269,38 +271,34 @@ MyCard: Card(title="...") {
 4. `@if (EXPR)` / `@for (_ of EXPR)` - 디렉티브 조건/이터러블
 5. `key: EXPR` - contexts 값, events 페이로드 값
 
-관찰된 식 형태: prop 참조(`title`), 멤버 접근(`styles.variant`, `tags.length`),
-단항(`!completed`), 비교(`tags.length > 0`), 호출(`Date.now()`).
-**어디까지 허용할지(부분집합 정의)는 A-2 미결.**
+쓸 수 있는 형태는 **prop 참조(`title`)와 경로 접근(`assignee.name`)** 뿐이다. 연산자/호출 같은
+표현식은 지원하지 않는다. 값 자리에는 leaf(원시값)만 올 수 있다 - 객체/배열을 통째로 두면
+컴파일 에러다(합성 인자로 넘기는 것만 예외).
 
 ---
 
 ## 6. 핸들러 (별도 .ts)
 
 ```ts
-const handlers: TEventHandlers<
-  | "MyTodoCard.TodoItem.CompleteButton.TOGGLE"
-  | "MyTodoCard.TodoItem.TagBadge.TAG_CLICK",
-  TStore
-> = {
-  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { context, get, set }) => {
-    set((s) => ({ todos: toggle(s.todos, data.id) }));
+const handlers = {
+  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { get, set, context }) => {
+    set(leafIndex, value);
   },
+  // @for 안에서 발화하면 fullname에 회차 세그먼트가 붙고, 회차 번호는 $N으로 들어온다.
+  "Item[$0].PICK": (data, { $0 }) => { ... },
+  // 이름 세그먼트를 만드는 컴포넌트 없이 @for 직속 element면 익명 세그먼트.
+  "[$0].SELECT": (data, { $0 }) => { ... },
 };
 ```
 
 - 키는 **풀네임**(use-site에서 바깥->안쪽 경로 누적, 컨텍스트는 경로에 안 낌).
-- `(data, { context, get, set })` 시그니처. `context`는 `@with`로 주입된 컨텍스트(`context.Area.userId`).
-  배열 요소 식별 슬롯은 미결(DESIGN.md §5.1). 반환 `{ goTo, newPage? } | void | Promise`.
+  `@for` 안이면 `[$N]`이 접미되고, `N`은 중첩까지 누적된 깊이다(`Mid.Col[$0].Card[$1].PICK`).
+- 시그니처는 `(data, ctx)`. `data`는 events 선언대로 조립된 payload.
+- `ctx`가 담는 것:
+  - `get(leafIndex)` / `set(leafIndex, value)` - 상태 읽기/쓰기.
+  - `push(...)` / `removeAt(...)` - 배열 요소 추가/제거.
+  - `props` - 발화한 컴포넌트 기준 상대 props. `store` - 루트 기준 절대 상태 트리.
+  - `context` - `@with`로 주입된 컨텍스트(`context.Area.userId`).
+  - `event` - 발화시킨 DOM 이벤트 객체(`event.target.value`로 입력값).
+  - `$0`, `$1`, ... - `@for` 회차 인덱스(깊이별).
 - 핸들러 본문은 **클라이언트 전용** - 호스트 JS에 위임 가능.
-
----
-
-## 미정 (문법에 영향)
-
-- **타입 표기** - props는 타입 필수(§2.1). events 페이로드 타입 표기와 명명 타입(재사용
-  이름 붙은 타입)은 아직 없음 (A-3).
-- **표현식 부분집합** - 허용 식 범위 (A-2).
-- **`@for` key** - 안정적 key 문법 필요 여부 (DESIGN.md §5.1).
-- 그 외 `@with` 외 디렉티브, 주석 문법, 이벤트명/별칭 명명 규칙 등 미관찰.
-```

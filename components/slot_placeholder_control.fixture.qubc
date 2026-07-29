@@ -1,0 +1,39 @@
+component SlotPlaceholderControl {
+  props { tags: string[], open: bool, label: string }
+  events { HIT({ label }) }
+  template {
+    div() {
+      @for (tag of tags) {
+        Row() {
+          span(class="cell" @click:HIT) { {tag} }
+        }
+      }
+      @if (open) {
+        Lazy() {
+          em(class="late") { {label} }
+        }
+      }
+      @for (tag of tags) {
+        @if (open) {
+          Lazy() {
+            i(class="deferred" @click:HIT) { {tag} }
+          }
+        }
+      }
+    }
+  }
+}
+
+component Row {
+  template {
+    li() {
+      div(class="row") { @slot() }
+    }
+  }
+}
+
+component Lazy {
+  template {
+    p(class="wrap") { @slot() }
+  }
+}

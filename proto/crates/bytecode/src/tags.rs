@@ -23,6 +23,39 @@ const TAGS: &[&str] = &[
     "aside",   // 17
     "label",   // 18
     "input",   // 19
+    "em",      // 20
+    "b",       // 21
+    "strong",  // 22
+    "i",       // 23
+    "small",   // 24
+    "code",    // 25
+    "pre",     // 26
+    "h4",      // 27
+    "h5",      // 28
+    "h6",      // 29
+    "br",      // 30
+    "hr",      // 31
+    "ol",      // 32
+    "dl",      // 33
+    "dt",      // 34
+    "dd",      // 35
+    "table",   // 36
+    "thead",   // 37
+    "tbody",   // 38
+    "tr",      // 39
+    "th",      // 40
+    "td",      // 41
+    "form",    // 42
+    "textarea", // 43
+    "select",  // 44
+    "option",  // 45
+    "figure",  // 46
+    "figcaption", // 47
+    "time",    // 48
+    "blockquote", // 49
+    "video",   // 50
+    "audio",   // 51
+    "canvas",  // 52
 ];
 
 /// 태그 ID -> 태그명. 범위를 벗어나면 None.

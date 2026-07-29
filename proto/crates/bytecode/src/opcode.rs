@@ -68,6 +68,16 @@ pub enum Op {
     /// operand에 없다 - 런타임이 codegen과 같은 규칙(props 슬롯 수 + 현재 @for 깊이)으로 구한다.
     /// count가 숫자면 ForCountVar.
     ForArrayVar = 0x1a,
+    /// 슬롯 콘텐츠 구간 시작(사용쪽). operand: slot_placeholder_index u16(자식 def의 선언 순서).
+    /// SLOT_PLACEHOLDER_CONTENT_END까지가 콘텐츠 코드이고, 뒤따르는 RENDER가 소비한다.
+    /// 콘텐츠는 부모 def 안에 그대로 남아 부모 scope/path로 해석된다(SYNTAX §3.3).
+    PushSlotPlaceholderContent = 0x1b,
+    /// 슬롯 콘텐츠 구간 끝 마커(operand 없음, IF_END 동형).
+    SlotPlaceholderContentEnd = 0x1c,
+    /// `@slot(name)` 자리(정의쪽). operand: slot_placeholder_index u16.
+    /// 런타임이 그 인덱스의 콘텐츠 구간을 부모 컨텍스트로 해석해 이 자리에 끼운다.
+    /// 안 채운 슬롯이면 아무것도 안 넣는다(미채움 허용).
+    FillSlotPlaceholder = 0x1d,
 }
 
 impl Op {
@@ -101,6 +111,9 @@ impl Op {
             0x18 => Op::PushPathIndexSegment,
             0x19 => Op::PushField,
             0x1a => Op::ForArrayVar,
+            0x1b => Op::PushSlotPlaceholderContent,
+            0x1c => Op::SlotPlaceholderContentEnd,
+            0x1d => Op::FillSlotPlaceholder,
             _ => return None,
         })
     }

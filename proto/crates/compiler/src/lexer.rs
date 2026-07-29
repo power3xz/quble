@@ -21,6 +21,7 @@ pub enum Token {
     Colon,  // :
     Dot,    // . (객체 필드 접근 `assignee.name`)
     Lt,     // < (제네릭 타입 `Omit<Section, 'a'>`)
+    LtLt,   // << (슬롯 채움 `Header << 노드`)
     Gt,     // >
     Pipe,   // | (유니온 키 리스트 `'a' | 'b'`)
     /// `/` - self-close 표기(`tag(attrs /)`). bool = 직전에 공백이 있었나. 확정 문법이
@@ -38,6 +39,7 @@ pub enum Directive {
     Else,
     For,
     With,
+    Slot,
     Click,
     Input,
     Change,
@@ -57,7 +59,7 @@ impl Directive {
     /// DOM 이벤트 디렉티브면 그 이벤트명, 구조 디렉티브(`@if`/`@else`)면 None.
     pub fn dom_event_name(&self) -> Option<&'static str> {
         match self {
-            Directive::If | Directive::Else | Directive::For | Directive::With => None,
+            Directive::If | Directive::Else | Directive::For | Directive::With | Directive::Slot => None,
             Directive::Click => Some("click"),
             Directive::Input => Some("input"),
             Directive::Change => Some("change"),
@@ -145,7 +147,14 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             }
             '<' => {
                 chars.next();
-                toks.push(Token::Lt);
+                // `<<`(슬롯 채움)와 `<`(제네릭 타입)를 가른다 - template과 타입으로 문맥이 갈려 충돌하지 않는다.
+                match chars.peek() {
+                    Some('<') => {
+                        chars.next();
+                        toks.push(Token::LtLt);
+                    }
+                    _ => toks.push(Token::Lt),
+                }
             }
             '>' => {
                 chars.next();
@@ -171,6 +180,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     "else" => Directive::Else,
                     "for" => Directive::For,
                     "with" => Directive::With,
+                    "slot" => Directive::Slot,
                     "click" => Directive::Click,
                     "input" => Directive::Input,
                     "change" => Directive::Change,

@@ -16,6 +16,21 @@ const ATTRS: &[&str] = &[
     "title",       // 8
     "style",       // 9
     "placeholder", // 10
+    "for",         // 11
+    "disabled",    // 12
+    "checked",     // 13
+    "readonly",    // 14
+    "required",    // 15
+    "rel",         // 16
+    "target",      // 17
+    "width",       // 18
+    "height",      // 19
+    "colspan",     // 20
+    "rowspan",     // 21
+    "role",        // 22
+    "tabindex",    // 23
+    "datetime",    // 24
+    "controls",    // 25
 ];
 
 /// 전역 속성명 ID -> 이름. 범위를 벗어나면 None.

@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn unknown_tag_errors() {
-        let src = r#"component C { template { table( /) } }"#;
+        let src = r#"component C { template { svg( /) } }"#;
         assert!(matches!(
             compile(src),
             Err(CompileError::Codegen(codegen::CodegenError::UnknownTag(_)))
@@ -1877,6 +1877,353 @@ mod tests {
             compile(src),
             Err(CompileError::Codegen(
                 codegen::CodegenError::UnknownField { .. }
+            ))
+        ));
+    }
+
+    /// def 하나의 코드 구간(테스트용). 슬롯은 사용쪽(부모)/정의쪽(자식) 코드가 갈려 둘 다 봐야 한다.
+    fn def_code(module: &bytecode::Module, id: u16) -> &[u8] {
+        let def = module.def(id).unwrap();
+        &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize]
+    }
+
+    /// 코드 구간에서 opcode 하나가 나온 위치들(테스트용).
+    fn op_positions(code: &[u8], op: bytecode::Op) -> Vec<usize> {
+        code.iter()
+            .enumerate()
+            .filter(|(_, &b)| b == op as u8)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// `@slot()` 정의쪽은 FILL_SLOT_PLACEHOLDER, 사용쪽은 PUSH_SLOT_PLACEHOLDER_CONTENT..END로
+    /// 갈린다. 콘텐츠 코드는 자식 def가 아니라 부모 def 안에 남는다(BYTECODE.md 슬롯 메모).
+    #[test]
+    fn anonymous_slot_placeholder_splits_def_and_fill() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer { template { div() { Inner() { span( /) } } } }
+            component Inner { template { section() { @slot() } } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        // 사용쪽(Outer): 콘텐츠 구간이 열리고 그 안에 span이 있고 닫힌 뒤 RENDER.
+        let outer = def_code(&module, 0);
+        let push = op_positions(outer, Op::PushSlotPlaceholderContent);
+        assert_eq!(push.len(), 1, "슬롯 하나를 채웠으니 콘텐츠 구간 하나");
+        assert_eq!(
+            u16::from_le_bytes([outer[push[0] + 1], outer[push[0] + 2]]),
+            0,
+            "무기명 슬롯은 인덱스 0"
+        );
+        let end = op_positions(outer, Op::SlotPlaceholderContentEnd);
+        assert_eq!(end.len(), 1);
+        assert!(push[0] < end[0], "구간은 열고 닫는다");
+        assert!(
+            outer[push[0]..end[0]].contains(&(Op::ElemOpen as u8)),
+            "콘텐츠(span)는 부모 코드 안 구간에 있다"
+        );
+        assert_eq!(outer[end[0] + 1], Op::Render as u8, "구간 뒤 RENDER가 소비");
+
+        // 정의쪽(Inner): 자리표시자만. 콘텐츠 코드는 여기 없다.
+        let inner = def_code(&module, 1);
+        let fill = op_positions(inner, Op::FillSlotPlaceholder);
+        assert_eq!(fill.len(), 1);
+        assert_eq!(
+            u16::from_le_bytes([inner[fill[0] + 1], inner[fill[0] + 2]]),
+            0
+        );
+        assert!(op_positions(inner, Op::PushSlotPlaceholderContent).is_empty());
+    }
+
+    /// 기명 슬롯은 선언 순서가 인덱스다. 채우는 순서가 달라도 사용쪽은 자식 선언 순서로 정규화된다.
+    #[test]
+    fn named_slot_placeholder_fills_normalize_to_declaration_order() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer {
+              template {
+                div() {
+                  Inner() {
+                    Footer << p( /)
+                    Header << h1( /)
+                  }
+                }
+              }
+            }
+            component Inner {
+              template { section() { @slot(Header) @slot(Footer) } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        // 사용쪽은 Footer를 먼저 썼지만 방출은 선언 순서(Header=0, Footer=1).
+        let outer = def_code(&module, 0);
+        let indices: Vec<u16> = op_positions(outer, Op::PushSlotPlaceholderContent)
+            .iter()
+            .map(|&i| u16::from_le_bytes([outer[i + 1], outer[i + 2]]))
+            .collect();
+        assert_eq!(indices, vec![0, 1], "작성 순서와 무관하게 선언 순서로 정규화");
+
+        // 정의쪽도 같은 순서 - 두 축이 같은 인덱스 공간을 쓴다.
+        let inner = def_code(&module, 1);
+        let fills: Vec<u16> = op_positions(inner, Op::FillSlotPlaceholder)
+            .iter()
+            .map(|&i| u16::from_le_bytes([inner[i + 1], inner[i + 2]]))
+            .collect();
+        assert_eq!(fills, vec![0, 1]);
+    }
+
+    /// 슬롯 인덱스는 컴포넌트-로컬이다 - 다른 컴포넌트의 슬롯 수와 무관하게 각자 0부터.
+    #[test]
+    fn slot_placeholder_index_is_component_local() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer {
+              template { div() { A() { span( /) } B() { em( /) } } }
+            }
+            component A { template { section() { @slot() } } }
+            component B { template { article() { @slot() } } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        for id in [1u16, 2] {
+            let code = def_code(&module, id);
+            let fill = op_positions(code, Op::FillSlotPlaceholder);
+            assert_eq!(fill.len(), 1);
+            assert_eq!(
+                u16::from_le_bytes([code[fill[0] + 1], code[fill[0] + 2]]),
+                0,
+                "def {id}의 슬롯도 자기 안에서 0"
+            );
+        }
+    }
+
+    /// 안 채운 슬롯은 사용쪽이 콘텐츠 구간을 아예 안 낸다 - 정의쪽 자리표시자는 그대로 남는다.
+    #[test]
+    fn unfilled_slot_placeholder_emits_no_content() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer { template { div() { Inner() { Header << h1( /) } } } }
+            component Inner {
+              template { section() { @slot(Header) @slot(Footer) } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        let outer = def_code(&module, 0);
+        let indices: Vec<u16> = op_positions(outer, Op::PushSlotPlaceholderContent)
+            .iter()
+            .map(|&i| u16::from_le_bytes([outer[i + 1], outer[i + 2]]))
+            .collect();
+        assert_eq!(indices, vec![0], "Header만 채웠으니 구간 하나(인덱스 0)");
+
+        // Footer 자리표시자는 정의쪽에 남는다 - 런타임이 미채움으로 건너뛴다.
+        let inner = def_code(&module, 1);
+        assert_eq!(op_positions(inner, Op::FillSlotPlaceholder).len(), 2);
+    }
+
+    /// 콘텐츠는 부모 scope로 해석된다 - 부모 prop 보간이 부모 slot index로 나온다.
+    #[test]
+    fn slot_placeholder_content_reads_parent_scope() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer {
+              props { title: string }
+              template { div() { Inner() { {title} } } }
+            }
+            component Inner { template { section() { @slot() } } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        let outer = def_code(&module, 0);
+        let push = op_positions(outer, Op::PushSlotPlaceholderContent)[0];
+        let end = op_positions(outer, Op::SlotPlaceholderContentEnd)[0];
+        let text_var = op_positions(&outer[push..end], Op::TextVar);
+        assert_eq!(text_var.len(), 1, "콘텐츠 구간 안에 {{title}} 보간");
+        // operand = Outer의 scope index 0 (Inner의 것이 아니다).
+        assert_eq!(outer[push + text_var[0] + 1], 0);
+    }
+
+    /// `@slot`은 요소/`@if`/`@for` 안에 있어도 등장 순서대로 인덱스를 받는다.
+    #[test]
+    fn nested_slot_placeholder_defs_keep_source_order() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer {
+              props { on: bool }
+              template {
+                div() { Inner(on={on}) { Header << h1( /) Footer << p( /) } }
+              }
+            }
+            component Inner {
+              props { on: bool }
+              template {
+                section() {
+                  @if (on) { @slot(Header) }
+                  div() { @slot(Footer) }
+                }
+              }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        let inner = def_code(&module, 1);
+        let fills: Vec<u16> = op_positions(inner, Op::FillSlotPlaceholder)
+            .iter()
+            .map(|&i| u16::from_le_bytes([inner[i + 1], inner[i + 2]]))
+            .collect();
+        assert_eq!(fills, vec![0, 1], "@if 안이든 요소 안이든 등장 순서");
+    }
+
+    /// 정의에 없는 슬롯을 채우면 컴파일 에러 - 오타가 조용히 사라지지 않게.
+    #[test]
+    fn unknown_slot_placeholder_fill_errors() {
+        let src = r#"
+            component Outer { template { div() { Inner() { Sidebar << p( /) } } } }
+            component Inner { template { section() { @slot(Header) } } }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(
+                codegen::CodegenError::UnknownSlotPlaceholder { .. }
+            ))
+        ));
+    }
+
+    /// 무기명 슬롯만 있는 자식에 기명으로 채우면 UnknownSlotPlaceholder(무기명은 이름 None).
+    #[test]
+    fn named_fill_into_anonymous_slot_placeholder_errors() {
+        let src = r#"
+            component Outer { template { div() { Inner() { Header << p( /) } } } }
+            component Inner { template { section() { @slot() } } }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(
+                codegen::CodegenError::UnknownSlotPlaceholder { .. }
+            ))
+        ));
+    }
+
+    /// 한 사용처에서 기명/무기명을 섞으면 파싱 단계에서 막는다(SYNTAX §3.3).
+    #[test]
+    fn mixing_named_and_anonymous_fill_errors() {
+        let src = r#"
+            component Outer { template { div() { Inner() { Header << h1( /) p( /) } } } }
+            component Inner { template { section() { @slot(Header) } } }
+        "#;
+        assert!(compile(src).is_err());
+    }
+
+    /// 같은 슬롯을 두 번 채우면 에러 - 어느 쪽이 이기는지 정하지 않는다.
+    #[test]
+    fn duplicate_slot_placeholder_fill_errors() {
+        let src = r#"
+            component Outer {
+              template { div() { Inner() { Header << h1( /) Header << p( /) } } }
+            }
+            component Inner { template { section() { @slot(Header) } } }
+        "#;
+        assert!(compile(src).is_err());
+    }
+
+    /// `<<` 오른쪽은 블록도 된다 - 노드 여럿을 한 슬롯에 넣는다.
+    #[test]
+    fn slot_placeholder_fill_accepts_block() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component Outer {
+              template { div() { Inner() { Header << { h1( /) p( /) } } } }
+            }
+            component Inner { template { section() { @slot(Header) } } }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+
+        let outer = def_code(&module, 0);
+        let push = op_positions(outer, Op::PushSlotPlaceholderContent)[0];
+        let end = op_positions(outer, Op::SlotPlaceholderContentEnd)[0];
+        assert_eq!(
+            op_positions(&outer[push..end], Op::ElemOpen).len(),
+            2,
+            "블록 안 노드 둘 다 한 구간에"
+        );
+    }
+
+    /// 무기명 `@slot()`을 두 자리에 두면 에러 - 자식 블록 한 덩이가 어디로 갈지 정할 수 없다.
+    #[test]
+    fn duplicate_anonymous_slot_placeholder_def_errors() {
+        let src = r#"
+            component Outer { template { div() { Inner() { p( /) } } } }
+            component Inner { template { section() { @slot() @slot() } } }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(
+                codegen::CodegenError::DuplicateSlotPlaceholderDef {
+                    slot_placeholder: None,
+                    ..
+                }
+            ))
+        ));
+    }
+
+    /// 같은 이름 `@slot(Header)`을 두 자리에 두는 것도 같은 이유로 에러.
+    #[test]
+    fn duplicate_named_slot_placeholder_def_errors() {
+        let src = r#"
+            component Outer { template { div() { Inner() { Header << p( /) } } } }
+            component Inner {
+              template { section() { @slot(Header) div() { @slot(Header) } } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(
+                codegen::CodegenError::DuplicateSlotPlaceholderDef { .. }
+            ))
+        ));
+    }
+
+    /// 슬롯을 안 채우는 컴포넌트여도 중복 선언은 막는다 - 검사는 선언 자체에 붙는다.
+    #[test]
+    fn duplicate_slot_placeholder_def_errors_even_when_unfilled() {
+        let src = r#"
+            component Inner { template { section() { @slot() @slot() } } }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(
+                codegen::CodegenError::DuplicateSlotPlaceholderDef { .. }
+            ))
+        ));
+    }
+
+    /// `@slot` 없는 자식에 콘텐츠를 넣으면 에러 - 갈 곳 없는 콘텐츠를 조용히 버리지 않는다.
+    #[test]
+    fn fill_into_component_without_slot_placeholder_errors() {
+        let src = r#"
+            component Outer { template { div() { Inner() { p( /) } } } }
+            component Inner { template { section( /) } }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(
+                codegen::CodegenError::UnknownSlotPlaceholder { .. }
             ))
         ));
     }

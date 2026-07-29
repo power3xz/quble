@@ -37,12 +37,19 @@ pub enum CodegenError {
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
     ForCountNotIterable(String),
+    /// 자식이 정의하지 않은 슬롯을 채웠다(`Header << ...`인데 자식에 `@slot(Header)` 없음).
+    /// 무기명(None)이면 자식이 `@slot()`을 안 뒀는데 자식 블록을 준 경우.
+    UnknownSlotPlaceholder { comp: String, slot_placeholder: Option<String> },
+    /// 한 컴포넌트가 같은 슬롯 자리를 두 번 선언했다(`@slot()` 둘, 또는 같은 이름 `@slot(H)` 둘).
+    /// 콘텐츠는 한 덩이라 어느 자리로 갈지 정할 수 없다 - 복제하지 않고 막는다.
+    DuplicateSlotPlaceholderDef { comp: String, slot_placeholder: Option<String> },
 }
 
-/// 컴포넌트 이름 -> (ID, props 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에 박을 ID를
-/// 찾고, PUSH_ARG를 자식 props 순서로 정렬하려고 props 선언도 같이 돌려준다. 컴포넌트 ID = 정의 순서.
+/// 컴포넌트 이름 -> (ID, props 선언, 슬롯 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에
+/// 박을 ID를 찾고, PUSH_ARG를 자식 props 순서로, 슬롯 콘텐츠를 자식 슬롯 순서로 정렬하려고
+/// 선언도 같이 돌려준다. 컴포넌트 ID = 정의 순서.
 struct CompLookup<'a> {
-    by_name: std::collections::HashMap<&'a str, (u16, &'a [Prop])>,
+    by_name: std::collections::HashMap<&'a str, (u16, &'a [Prop], Vec<Option<&'a str>>)>,
 }
 
 impl<'a> CompLookup<'a> {
@@ -50,15 +57,65 @@ impl<'a> CompLookup<'a> {
         let by_name = comps
             .iter()
             .enumerate()
-            .map(|(i, fc)| (fc.comp.name.as_str(), (i as u16, fc.comp.props.as_slice())))
+            .map(|(i, fc)| {
+                let slot_placeholders = collect_slot_placeholders(&fc.comp.template);
+                (
+                    fc.comp.name.as_str(),
+                    (i as u16, fc.comp.props.as_slice(), slot_placeholders),
+                )
+            })
             .collect();
         CompLookup { by_name }
     }
 
-    /// 이름으로 (컴포넌트 ID, 자식 props 선언)을 찾는다.
-    fn get(&self, name: &str) -> Option<(u16, &'a [Prop])> {
-        self.by_name.get(name).copied()
+    /// 이름으로 (컴포넌트 ID, 자식 props 선언, 자식 슬롯 선언)을 찾는다.
+    fn get(&self, name: &str) -> Option<(u16, &'a [Prop], &[Option<&'a str>])> {
+        self.by_name
+            .get(name)
+            .map(|(id, props, slot_placeholders)| (*id, *props, slot_placeholders.as_slice()))
     }
+}
+
+/// template을 훑어 `@slot` 선언을 등장 순서로 모은다(무기명이면 None). 이 순서가 slot_placeholder_index다.
+/// 중첩 노드(요소 자식/@if/@for/@with) 안의 슬롯도 같은 순서 공간에 들어간다.
+fn collect_slot_placeholders(nodes: &[Node]) -> Vec<Option<&str>> {
+    let mut slot_placeholders = Vec::new();
+    walk_slot_placeholders(nodes, &mut slot_placeholders);
+    slot_placeholders
+}
+
+fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Option<&'a str>>) {
+    for node in nodes {
+        match node {
+            Node::SlotPlaceholderDef { name } => slot_placeholders.push(name.as_deref()),
+            Node::Element { children, .. } => walk_slot_placeholders(children, slot_placeholders),
+            Node::If { then, else_, .. } => {
+                walk_slot_placeholders(then, slot_placeholders);
+                walk_slot_placeholders(else_, slot_placeholders);
+            }
+            Node::For { body, .. } => walk_slot_placeholders(body, slot_placeholders),
+            Node::With { children, .. } => walk_slot_placeholders(children, slot_placeholders),
+            // 합성 경계 - 자식의 슬롯은 자식 def의 것이라 여기 안 센다.
+            Node::Component { .. } | Node::Text(_) | Node::Var(_) => {}
+        }
+    }
+}
+
+/// 한 컴포넌트의 슬롯 선언에 중복이 없는지 본다. 사용쪽 콘텐츠는 이름(무기명이면 None)으로
+/// 자리를 찾으므로 같은 이름이 둘이면 한 덩이를 두 자리에 복제하게 된다 - 선언 단계에서 막는다.
+fn check_slot_placeholder_defs(
+    comp: &str,
+    slot_placeholders: &[Option<&str>],
+) -> Result<(), CodegenError> {
+    for (i, slot_placeholder) in slot_placeholders.iter().enumerate() {
+        if slot_placeholders[..i].contains(slot_placeholder) {
+            return Err(CodegenError::DuplicateSlotPlaceholderDef {
+                comp: comp.to_string(),
+                slot_placeholder: slot_placeholder.map(str::to_string),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
@@ -76,6 +133,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
     for fc in comps {
         let comp = &fc.comp;
+        check_slot_placeholder_defs(&comp.name, &collect_slot_placeholders(&comp.template))?;
         let name_const_index = pool.intern_str(&comp.name);
         // props를 하나의 Object로 intern - 필드 순서 = scope 슬롯 순서. defs[0]이 진입점 풀필 구조,
         // 나머지는 핸들러 props 접근용(타입 워크 재료). props 없으면 빈 Object.
@@ -89,6 +147,8 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
             code.push(Op::LoadRes as u8);
             code.extend_from_slice(&res_id.to_le_bytes());
         }
+        // 슬롯 인덱스는 컴포넌트-로컬 - def마다 0부터 다시 센다.
+        let mut next_slot_placeholder_index = 0u16;
         for node in &comp.template {
             emit_node(
                 node,
@@ -99,6 +159,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 ForScope::ROOT,
                 &mut pool,
                 &mut code,
+                &mut next_slot_placeholder_index,
             )?;
         }
         code.push(Op::Halt as u8);
@@ -406,6 +467,9 @@ fn emit_node(
     for_scope: ForScope,
     pool: &mut ConstPool,
     code: &mut Vec<u8>,
+    // 지금까지 방출한 `@slot` 수 = 다음 것의 slot_placeholder_index.
+    // collect_slot_placeholders의 순회 순서와 같아야 정의쪽/사용쪽 인덱스가 맞는다.
+    next_slot_placeholder_index: &mut u16,
 ) -> Result<(), CodegenError> {
     match node {
         Node::Text(s) => {
@@ -489,15 +553,20 @@ fn emit_node(
             // element는 세그먼트를 안 만든다 - 자식으로 for_scope를 그대로 흘려보낸다
             // (같은 @for 안 중첩 element가 같은 인덱스를 이벤트에 실을 수 있게 pending 유지).
             for child in children {
-                emit_node(child, props, events, contexts, comp_lookup, for_scope, pool, code)?;
+                emit_node(child, props, events, contexts, comp_lookup, for_scope, pool, code, next_slot_placeholder_index)?;
             }
 
             // END는 operand 없음 - 가장 최근에 연 태그를 닫는다(중첩이 보장됨).
             code.push(Op::ElemEnd as u8);
         }
-        Node::Component { alias, name, args } => {
-            // 자식 ID와 props 선언을 찾는다.
-            let (child_id, child_props) = comp_lookup
+        Node::Component {
+            alias,
+            name,
+            args,
+            contents,
+        } => {
+            // 자식 ID와 props/슬롯 선언을 찾는다.
+            let (child_id, child_props, child_slot_placeholders) = comp_lookup
                 .get(name)
                 .ok_or_else(|| CodegenError::UnknownComponent(name.clone()))?;
 
@@ -558,9 +627,44 @@ fn emit_node(
                 code.extend_from_slice(&depth.to_le_bytes());
             }
 
+            // 슬롯 콘텐츠를 자식 선언 순서로 낸다 - 사용처 작성 순서와 무관하게 정규화된다.
+            // 콘텐츠 코드는 부모 def 안에 그대로 남아 부모 scope/path로 해석된다(SYNTAX §3.3).
+            // 안 채운 슬롯은 아예 안 낸다(미채움 허용).
+            for (slot_placeholder_index, slot_placeholder_name) in child_slot_placeholders.iter().enumerate() {
+                let content = contents
+                    .iter()
+                    .find(|c| c.name.as_deref() == *slot_placeholder_name);
+                let content = match content {
+                    Some(c) => c,
+                    None => continue,
+                };
+                code.push(Op::PushSlotPlaceholderContent as u8);
+                code.extend_from_slice(&(slot_placeholder_index as u16).to_le_bytes());
+                for node in &content.nodes {
+                    emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code, next_slot_placeholder_index)?;
+                }
+                code.push(Op::SlotPlaceholderContentEnd as u8);
+            }
+
+            // 정의에 없는 슬롯을 채웠으면 컴파일 에러 - 오타가 조용히 사라지지 않게.
+            for content in contents {
+                if !child_slot_placeholders.iter().any(|s| *s == content.name.as_deref()) {
+                    return Err(CodegenError::UnknownSlotPlaceholder {
+                        comp: name.clone(),
+                        slot_placeholder: content.name.clone(),
+                    });
+                }
+            }
+
             // RENDER는 자식 def(별도 코드)로 넘어간다 - for_scope는 안 흐른다(자식은 자기 ROOT부터).
             code.push(Op::Render as u8);
             code.extend_from_slice(&child_id.to_le_bytes());
+        }
+        Node::SlotPlaceholderDef { .. } => {
+            // 등장 순서가 곧 인덱스 - collect_slot_placeholders와 같은 순회라 사용쪽과 맞는다.
+            code.push(Op::FillSlotPlaceholder as u8);
+            code.extend_from_slice(&next_slot_placeholder_index.to_le_bytes());
+            *next_slot_placeholder_index += 1;
         }
         Node::If { cond, then, else_ } => {
             // cond는 불리언 prop 참조 - (scope_index, offset)으로. leaf여야 한다. (표현식은 이후 단계)
@@ -570,13 +674,13 @@ fn emit_node(
             code.push(offset);
 
             for node in then {
-                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code, next_slot_placeholder_index)?;
             }
 
             if !else_.is_empty() {
                 code.push(Op::Else as u8);
                 for node in else_ {
-                    emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
+                    emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code, next_slot_placeholder_index)?;
                 }
             }
 
@@ -643,7 +747,7 @@ fn emit_node(
                 for_vars: &nested_vars,
             };
             for node in body {
-                emit_node(node, props, events, contexts, comp_lookup, body_scope, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, body_scope, pool, code, next_slot_placeholder_index)?;
             }
 
             code.push(Op::ForEnd as u8);
@@ -660,7 +764,7 @@ fn emit_node(
             code.extend_from_slice(&context_index.to_le_bytes());
 
             for node in children {
-                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code)?;
+                emit_node(node, props, events, contexts, comp_lookup, for_scope, pool, code, next_slot_placeholder_index)?;
             }
 
             // ExitContext는 operand 없는 마커(IfEnd 동형).
