@@ -36,7 +36,9 @@ test("초기 활성 then의 회차 이벤트는 [$0].PICK으로 불린다", () =
   });
   const buttons = [...host.querySelectorAll("button")];
   assert.equal(buttons.length, 3, "3회차 button");
-  buttons.forEach((b) => b.click());
+  buttons.forEach((b) => {
+    b.click();
+  });
   assert.deepEqual(picks, [0, 1, 2], "각 회차 button의 $0 = 회차 인덱스");
 });
 
@@ -51,6 +53,8 @@ test("나중에 활성화(lazyBuild)된 @for 안 @if의 회차 이벤트도 $0�
   setFlag(true); // 각 회차 then 지연 build - 이 시점 loopIndexStack이 비어도 $0는 회차 인덱스여야
   const buttons = [...host.querySelectorAll("button")];
   assert.equal(buttons.length, 3, "flag=true 후 3회차 button");
-  buttons.forEach((b) => b.click());
+  buttons.forEach((b) => {
+    b.click();
+  });
   assert.deepEqual(picks, [0, 1, 2], "lazyBuild된 회차 button의 $0 = 회차 인덱스");
 });

@@ -61,11 +61,7 @@ test("슬롯 콘텐츠는 부모 scope로 해석된다", () => {
 test("부모 store 갱신이 슬롯 콘텐츠에 반영된다", () => {
   const { host, setTitle } = instantiate("제목", "메모");
   setTitle("바뀐제목");
-  assert.equal(
-    host.querySelector("h1.filled")?.textContent,
-    "바뀐제목",
-    "구독이 부모 가지에 쌓여 부모 갱신을 받는다",
-  );
+  assert.equal(host.querySelector("h1.filled")?.textContent, "바뀐제목", "구독이 부모 가지에 쌓여 부모 갱신을 받는다");
 });
 
 test("무기명 슬롯 콘텐츠도 부모 갱신에 반응한다", () => {
