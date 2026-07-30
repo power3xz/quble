@@ -1,5 +1,7 @@
 //! AST. 한 파일에 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간(텍스트/속성).
 
+use crate::src_range::NodeRange;
+
 /// 한 소스 파일(.qubc 하나)의 파싱 결과: 최상위 use 문들 + 컴포넌트 정의들.
 #[derive(Debug, PartialEq)]
 pub struct SourceFile {
@@ -164,6 +166,9 @@ pub enum AttrValue {
 pub struct VarRef {
     pub root: String,
     pub path: Vec<String>,
+    /// 이 참조가 쓰인 자리(`root`부터 경로 끝까지). codegen이 prop/필드를 못 찾았을 때
+    /// 탓할 대상이다. 비교에서 빠진다(NodeRange).
+    pub range: NodeRange,
 }
 
 /// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`, `prop=42`, `prop=true`).

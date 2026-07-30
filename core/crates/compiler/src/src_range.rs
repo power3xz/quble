@@ -31,3 +31,20 @@ impl SrcRange {
         SrcRange::new(src_len, src_len)
     }
 }
+
+/// AST 노드에 붙이는 구간. **비교에서 제외된다** - `eq`가 언제나 참이다.
+///
+/// 구간은 "이 노드가 소스 어디서 왔나"라는 출처 정보지 노드가 담은 값의 일부가 아니다.
+/// 서로 다른 줄에 있는 `{x}` 둘은 위치가 달라도 같은 prop 참조다. 그래서 노드가
+/// `derive(PartialEq)`를 그대로 유지한 채(필드를 더 늘려도 안전하다) 이 타입만 비교를
+/// 건너뛴다 - 노드마다 eq를 손으로 쓰면 새 필드를 빠뜨릴 수 있다.
+#[derive(Debug, Clone, Copy)]
+pub struct NodeRange(pub SrcRange);
+
+impl PartialEq for NodeRange {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for NodeRange {}

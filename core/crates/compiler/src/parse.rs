@@ -14,7 +14,7 @@ use crate::ast::{
     Prop, SourceFile, Type, Use, VarRef,
 };
 use crate::lexer::{Directive, Lexed, Token};
-use crate::src_range::SrcRange;
+use crate::src_range::{NodeRange, SrcRange};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseErrorKind {
@@ -193,13 +193,19 @@ impl<'a> Parser<'a> {
     // leaf 여부(경로 끝이 원시냐)는 여기서 안 본다 - 타입을 모르는 파서의 몫이 아니라 codegen이
     // props 타입과 대조해 판단한다.
     fn var_ref(&mut self) -> Result<VarRef, ParseError> {
+        // `assignee.name` 전체를 걸치게 - root 앞에서 시작해 경로 끝에서 닫는다.
+        let start = self.here();
         let root = self.ident()?;
         let mut path = Vec::new();
         while matches!(self.peek(), Some(Token::Dot)) {
             self.next()?;
             path.push(self.ident()?);
         }
-        Ok(VarRef { root, path })
+        let range = NodeRange(SrcRange {
+            start: start.start,
+            end: self.just_read().end,
+        });
+        Ok(VarRef { root, path, range })
     }
 
     /// 값 자리(payload/context/합성 인자)의 값 하나: Ident면 prop 참조(Var), 그 외 리터럴 토큰
@@ -494,9 +500,11 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
+                        // 단축형은 필드명이 곧 prop 참조라 그 이름 토큰이 구간이다.
                         ArgValue::Var(VarRef {
                             root: field.clone(),
                             path: Vec::new(),
+                            range: NodeRange(self.just_read()),
                         })
                     };
                     payload.push((field, value));
@@ -552,9 +560,11 @@ impl<'a> Parser<'a> {
                         self.next()?; // :
                         self.field_value()?
                     } else {
+                        // 단축형은 키가 곧 prop 참조라 그 이름 토큰이 구간이다.
                         ArgValue::Var(VarRef {
                             root: key.clone(),
                             path: Vec::new(),
+                            range: NodeRange(self.just_read()),
                         })
                     };
                     fields.push((key, value));

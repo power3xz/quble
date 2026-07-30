@@ -2,13 +2,14 @@
 
 use crate::ast::{ArgValue, AttrValue, Context, Event, ForCount, LitValue, Node, Prop, Type, VarRef};
 use crate::flatten::FlatComp;
+use crate::src_range::SrcRange;
 use bytecode::{
     encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
     TypeEntry,
 };
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum CodegenError {
+pub enum CodegenErrorKind {
     /// 내장 태그 테이블에 없는 태그.
     UnknownTag(String),
     /// props에 선언되지 않은 변수 참조.
@@ -43,6 +44,35 @@ pub enum CodegenError {
     /// 한 컴포넌트가 같은 슬롯 자리를 두 번 선언했다(`@slot()` 둘, 또는 같은 이름 `@slot(H)` 둘).
     /// 콘텐츠는 한 덩이라 어느 자리로 갈지 정할 수 없다 - 복제하지 않고 막는다.
     DuplicateSlotPlaceholderDef { comp: String, slot_placeholder: Option<String> },
+}
+
+/// codegen 실패 - 무엇이(kind) 어디서(range) 틀렸나.
+///
+/// range가 Option인 건 AST가 아직 구간을 다 들지 않아서다. prop 참조(VarRef)는 구간을
+/// 갖지만 태그명/컴포넌트명/이벤트명 등은 아직 없다 - "위치 없음"을 0..0 같은 가짜 값으로
+/// 꾸미지 않고 None으로 정직하게 둔다. 그 자리들이 구간을 갖게 되면 Some으로 채워진다.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CodegenError {
+    pub kind: CodegenErrorKind,
+    pub range: Option<SrcRange>,
+}
+
+impl CodegenErrorKind {
+    /// 위치를 아는 에러(AST 노드가 구간을 든 경우).
+    fn at(self, range: SrcRange) -> CodegenError {
+        CodegenError {
+            kind: self,
+            range: Some(range),
+        }
+    }
+
+    /// 위치를 모르는 에러 - 탓할 AST 노드가 아직 구간을 안 든다.
+    fn no_range(self) -> CodegenError {
+        CodegenError {
+            kind: self,
+            range: None,
+        }
+    }
 }
 
 /// 컴포넌트 이름 -> (ID, props 선언, 슬롯 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에
@@ -109,10 +139,11 @@ fn check_slot_placeholder_defs(
 ) -> Result<(), CodegenError> {
     for (i, slot_placeholder) in slot_placeholders.iter().enumerate() {
         if slot_placeholders[..i].contains(slot_placeholder) {
-            return Err(CodegenError::DuplicateSlotPlaceholderDef {
+            return Err(CodegenErrorKind::DuplicateSlotPlaceholderDef {
                 comp: comp.to_string(),
                 slot_placeholder: slot_placeholder.map(str::to_string),
-            });
+            }
+            .no_range());
         }
     }
     Ok(())
@@ -249,7 +280,9 @@ fn var_ref_to_slot<'a>(
     props: &'a [Prop],
     for_vars: &'a [ForVar],
 ) -> Result<(u8, u8, &'a Type), CodegenError> {
-    let overflow = || CodegenError::SlotOverflow(var_ref_display(var));
+    // 이 함수의 에러는 모두 이 prop 참조를 탓한다 - 구간도 하나로 같다.
+    let at = |kind: CodegenErrorKind| kind.at(var.range.0);
+    let overflow = || at(CodegenErrorKind::SlotOverflow(var_ref_display(var)));
 
     // root를 회차변수에서 먼저 찾는다. props와 이름이 겹칠 수 없어(@for 진입에서 충돌을 에러로
     // 건다) 조회 순서는 무관. for_var는 자기 슬롯 번호를 이미 갖고 있고, prop은 선언 순번이 슬롯.
@@ -265,7 +298,8 @@ fn var_ref_to_slot<'a>(
                     break;
                 }
             }
-            (scope_index, ty.ok_or_else(|| CodegenError::UnknownProp(var.root.clone()))?)
+            let unknown = || at(CodegenErrorKind::UnknownProp(var.root.clone()));
+            (scope_index, ty.ok_or_else(unknown)?)
         }
     };
 
@@ -276,10 +310,10 @@ fn var_ref_to_slot<'a>(
         let fields = match ty {
             Type::Object(fields) => fields,
             _ => {
-                return Err(CodegenError::UnknownField {
+                return Err(at(CodegenErrorKind::UnknownField {
                     root: var.root.clone(),
                     field: key.clone(),
-                })
+                }))
             }
         };
         let mut found = None;
@@ -291,9 +325,11 @@ fn var_ref_to_slot<'a>(
             let size = u8::try_from(store_size(field_ty)).map_err(|_| overflow())?;
             offset = offset.checked_add(size).ok_or_else(overflow)?;
         }
-        ty = found.ok_or_else(|| CodegenError::UnknownField {
-            root: var.root.clone(),
-            field: key.clone(),
+        ty = found.ok_or_else(|| {
+            at(CodegenErrorKind::UnknownField {
+                root: var.root.clone(),
+                field: key.clone(),
+            })
         })?;
     }
 
@@ -310,7 +346,7 @@ fn var_ref_to_leaf_slot(
     let (scope_index, offset, ty) = var_ref_to_slot(var, props, for_vars)?;
     match ty {
         Type::Bool | Type::Number | Type::String => Ok((scope_index, offset)),
-        _ => Err(CodegenError::NotLeaf(var_ref_display(var))),
+        _ => Err(CodegenErrorKind::NotLeaf(var_ref_display(var)).at(var.range.0)),
     }
 }
 
@@ -489,7 +525,8 @@ fn emit_node(
             event_bindings,
             children,
         } => {
-            let tag_id = tags::tag_id(tag).ok_or_else(|| CodegenError::UnknownTag(tag.clone()))?;
+            let tag_id = tags::tag_id(tag)
+                .ok_or_else(|| CodegenErrorKind::UnknownTag(tag.clone()).no_range())?;
 
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
@@ -513,7 +550,7 @@ fn emit_node(
                 let event_index = events
                     .iter()
                     .position(|e| &e.name == event_name)
-                    .ok_or_else(|| CodegenError::UnknownEvent(event_name.clone()))?
+                    .ok_or_else(|| CodegenErrorKind::UnknownEvent(event_name.clone()).no_range())?
                     as u16;
                 code.push(Op::BindEvent as u8);
                 code.extend_from_slice(&event_type.to_le_bytes());
@@ -568,7 +605,7 @@ fn emit_node(
             // 자식 ID와 props/슬롯 선언을 찾는다.
             let (child_id, child_props, child_slot_placeholders) = comp_lookup
                 .get(name)
-                .ok_or_else(|| CodegenError::UnknownComponent(name.clone()))?;
+                .ok_or_else(|| CodegenErrorKind::UnknownComponent(name.clone()).no_range())?;
 
             // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 scope index을 싣는
             // PUSH_ARG, 리터럴(`prop="lit"`)은 상수풀 인덱스를 싣는 PUSH_ARG_LIT.
@@ -578,9 +615,13 @@ fn emit_node(
                     .iter()
                     .find(|(p, _)| *p == child_prop.name)
                     .map(|(_, v)| v)
-                    .ok_or_else(|| CodegenError::UnknownArg {
-                        comp: name.clone(),
-                        prop: child_prop.name.clone(),
+                    // 안 넘긴 인자라 가리킬 자리가 없다(빠진 것의 위치는 소스에 없다).
+                    .ok_or_else(|| {
+                        CodegenErrorKind::UnknownArg {
+                            comp: name.clone(),
+                            prop: child_prop.name.clone(),
+                        }
+                        .no_range()
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {
@@ -588,10 +629,12 @@ fn emit_node(
                         let (scope_index, offset, reached_ty) =
                             var_ref_to_slot(parent_var, props, for_scope.for_vars)?;
                         if !types_match(reached_ty, &child_prop.type_) {
-                            return Err(CodegenError::PropTypeMismatch {
+                            // 타입이 안 맞는 건 넘긴 그 참조다 - 그 자리를 가리킨다.
+                            return Err(CodegenErrorKind::PropTypeMismatch {
                                 comp: name.clone(),
                                 prop: child_prop.name.clone(),
-                            });
+                            }
+                            .at(parent_var.range.0));
                         }
                         // 경로 없는 참조(`{a}`)는 슬롯 통째로 THROUGH, 필드 참조(`{user.name}`)는
                         // (슬롯, offset)으로 FIELD - kind는 슬롯이 갖고 자식이 타입을 안다.
@@ -649,10 +692,11 @@ fn emit_node(
             // 정의에 없는 슬롯을 채웠으면 컴파일 에러 - 오타가 조용히 사라지지 않게.
             for content in contents {
                 if !child_slot_placeholders.iter().any(|s| *s == content.name.as_deref()) {
-                    return Err(CodegenError::UnknownSlotPlaceholder {
+                    return Err(CodegenErrorKind::UnknownSlotPlaceholder {
                         comp: name.clone(),
                         slot_placeholder: content.name.clone(),
-                    });
+                    }
+                    .no_range());
                 }
             }
 
@@ -697,7 +741,7 @@ fn emit_node(
                 let dup = props.iter().any(|p| &&p.name == name)
                     || for_scope.for_vars.iter().any(|fv| fv.name.as_ref() == Some(*name));
                 if dup || (index.as_ref() == Some(item) && names.len() == 2) {
-                    return Err(CodegenError::DuplicateBinding((*name).clone()));
+                    return Err(CodegenErrorKind::DuplicateBinding((*name).clone()).no_range());
                 }
             }
 
@@ -727,7 +771,10 @@ fn emit_node(
                             code.push(offset);
                             (**inner).clone()
                         }
-                        _ => return Err(CodegenError::ForCountNotIterable(var_ref_display(var))),
+                        _ => {
+                            let kind = CodegenErrorKind::ForCountNotIterable(var_ref_display(var));
+                            return Err(kind.at(var.range.0));
+                        }
                     }
                 }
             };
@@ -758,7 +805,7 @@ fn emit_node(
             let context_index = contexts
                 .iter()
                 .position(|c| &c.name == context)
-                .ok_or_else(|| CodegenError::UnknownContext(context.clone()))?
+                .ok_or_else(|| CodegenErrorKind::UnknownContext(context.clone()).no_range())?
                 as u16;
             code.push(Op::EnterContext as u8);
             code.extend_from_slice(&context_index.to_le_bytes());
