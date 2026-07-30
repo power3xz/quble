@@ -712,9 +712,10 @@ fn emit_node(
             contents,
         } => {
             // 자식 ID와 props/슬롯 선언을 찾는다.
-            let (child_id, child_props, child_slot_placeholders) = comp_lookup
-                .get(name)
-                .ok_or_else(|| CodegenErrorKind::UnknownComponent(name.clone()).no_range())?;
+            let (child_id, child_props, child_slot_placeholders) =
+                comp_lookup.get(&name.name).ok_or_else(|| {
+                    CodegenErrorKind::UnknownComponent(name.name.clone()).at(name.range.0)
+                })?;
 
             // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 scope index을 싣는
             // PUSH_ARG, 리터럴(`prop="lit"`)은 상수풀 인덱스를 싣는 PUSH_ARG_LIT.
@@ -727,7 +728,7 @@ fn emit_node(
                     // 안 넘긴 인자라 가리킬 자리가 없다(빠진 것의 위치는 소스에 없다).
                     .ok_or_else(|| {
                         CodegenErrorKind::UnknownArg {
-                            comp: name.clone(),
+                            comp: name.name.clone(),
                             prop: child_prop.name.clone(),
                         }
                         .no_range()
@@ -740,7 +741,7 @@ fn emit_node(
                         if !types_match(reached_ty, &child_prop.type_) {
                             // 타입이 안 맞는 건 넘긴 그 참조다 - 그 자리를 가리킨다.
                             return Err(CodegenErrorKind::PropTypeMismatch {
-                                comp: name.clone(),
+                                comp: name.name.clone(),
                                 prop: child_prop.name.clone(),
                             }
                             .at(parent_var.range.0));
@@ -767,7 +768,7 @@ fn emit_node(
             // 합성 경로 세그먼트 = use-site alias가 있으면 alias, 없으면 자식 type-name.
             // 뒤따르는 RENDER가 소비해 자식 경로 prefix에 잇는다 - 이벤트 fullname의 path 축.
             // (alias 생략 = 동일 type-name 공유, alias 부여 = 분리. #1.3)
-            let segment = alias.as_deref().unwrap_or(name);
+            let segment = alias.as_deref().unwrap_or(&name.name);
             let segment_index = pool.intern_str(segment);
             code.push(Op::PushPathSegment as u8);
             code.extend_from_slice(&segment_index.to_le_bytes());
@@ -817,7 +818,7 @@ fn emit_node(
                     .any(|s| *s == slot_name(content))
                 {
                     let kind = CodegenErrorKind::UnknownSlotPlaceholder {
-                        comp: name.clone(),
+                        comp: name.name.clone(),
                         slot_placeholder: slot_name(content).map(str::to_string),
                     };
                     // 무기명은 탓할 이름이 없다 - 그때만 위치가 빈다.

@@ -265,14 +265,14 @@ fn walk_nodes(
                 }
                 // 컴포넌트 세그먼트가 pending 인덱스를 전부 접미(Mid[$0]). 자식으로 내려가면 pending은
                 // 비우되(이미 실림) depth_base는 유지 - Mid[$0] 안 @for는 Inner[$1]로 이어진다.
-                let segment = alias.as_deref().unwrap_or(name);
+                let segment = alias.as_deref().unwrap_or(&name.name);
                 let segment = format!("{segment}{}", seg_index_suffix(pending));
                 let child_prefix = if path_prefix.is_empty() {
                     segment
                 } else {
                     format!("{path_prefix}.{segment}")
                 };
-                if let Some(child_id) = comps.iter().position(|c| &c.comp.name == name) {
+                if let Some(child_id) = comps.iter().position(|c| c.comp.name == name.name) {
                     walk(
                         comps,
                         child_id,

@@ -108,7 +108,7 @@ pub enum Node {
     /// 없으면 type-name을 그대로 쓴다(#1.3 - alias 없는 동일 type-name은 의도적 공유).
     Component {
         alias: Option<String>,
-        name: String,
+        name: Ident,
         args: Vec<(String, ArgValue)>,
         /// 자식 블록으로 넘긴 슬롯 콘텐츠. 빈 벡터면 self-close(`Comp( /)`) - 슬롯 안 채움.
         /// 무기명은 `SlotPlaceholderContent { name: None }` 하나, 기명은 이름별로 여럿.

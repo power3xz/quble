@@ -807,7 +807,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let name = self.ident()?;
+        let name = self.ident_at()?;
         self.expect(&Token::LParen)?;
         let args = self.component_args()?;
         // 슬롯을 안 채우면 self-close(`Comp( ... /)`), 채우면 `)` 뒤 자식 블록.
@@ -828,7 +828,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 self.expect(&Token::RParen)?;
-                self.slot_placeholder_contents(&name)?
+                self.slot_placeholder_contents(&name.name)?
             }
         };
         Ok(Node::Component {

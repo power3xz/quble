@@ -2519,6 +2519,20 @@ mod tests {
         assert_eq!(out, "a.qubc: error: `C` has no prop `a`");
     }
 
+    /// 정의가 없는 컴포넌트는 호출한 그 이름을 가리킨다.
+    #[test]
+    fn diagnostic_points_at_unknown_component() {
+        assert_eq!(
+            diagnostic_of("component C {\n  template { Nope( /) }\n}"),
+            [
+                "a.qubc:2:14: error: cannot find component `Nope`",
+                " 2 |   template { Nope( /) }",
+                "   |              ^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
     /// 자식이 선언하지 않은 슬롯을 채우면 그 슬롯 이름을 가리킨다(`<<` 왼쪽).
     #[test]
     fn diagnostic_points_at_unknown_slot_placeholder_fill() {
