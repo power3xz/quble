@@ -49,7 +49,7 @@ pub fn compile_src(
 /// 컴파일 에러를 CLI에 그대로 찍을 진단 텍스트로 만든다(끝에 개행 없음).
 ///
 /// ```text
-/// card.qubc:6:14: error: prop 'user'에 필드 'nope'가 없다
+/// card.qubc:6:14: error: no field `nope` on prop `user`
 ///   6 |       p() { {user.nope} }
 ///     |              ^^^^^^^^^
 /// ```
@@ -2488,7 +2488,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:3:23: error: prop 'user'에 필드 'nope'가 없다",
+                "a.qubc:3:23: error: no field `nope` on prop `user`",
                 " 3 |   template { div() { {user.nope} } }",
                 "   |                       ^^^^^^^^^",
             ]
@@ -2509,7 +2509,87 @@ mod tests {
     #[test]
     fn diagnostic_without_range_has_no_snippet() {
         let out = diagnostic_of(r#"component C { template { svg( /) } }"#);
-        assert_eq!(out, "a.qubc: error: 내장 태그가 아니다: 'svg'");
+        assert_eq!(out, "a.qubc: error: unknown builtin tag `svg`");
+    }
+
+    // ── 토큰 표기 ──────────────────────────────────────────────────────
+    //
+    // Expected 에러가 무엇이 왔는지 보일 때 파서 내부 이름(LBrace)이 아니라 소스에 적힌
+    // 모양(`{`)으로 나와야 한다. 진단 첫 줄의 메시지만 떼어 본다.
+
+    /// 진단 첫 줄의 `error: ` 뒤 메시지(테스트용).
+    fn error_message(src: &str) -> String {
+        let out = diagnostic_of(src);
+        let first = out.lines().next().unwrap().to_string();
+        match first.split_once("error: ") {
+            Some((_, msg)) => msg.to_string(),
+            None => panic!("진단 첫 줄에 'error: '가 없다: {first}"),
+        }
+    }
+
+    /// 기호 토큰은 그 글자로 - `LBrace`가 아니라 `` `{` ``.
+    #[test]
+    fn message_shows_symbol_token_as_written() {
+        let msg = error_message(r#"component C { template { div(class="x" { p() { "h" } } } }"#);
+        assert_eq!(msg, "expected attribute name, @event, or ), found `{`");
+    }
+
+    /// 식별자는 그 이름을 담아 보인다 - 어느 이름이 틀렸는지 보이게.
+    #[test]
+    fn message_shows_identifier_with_its_name() {
+        assert_eq!(
+            error_message("oops { }"),
+            "expected use or component, found `oops`"
+        );
+    }
+
+    /// 디렉티브는 `@` 붙은 키워드로 - `At(If)`가 아니라 `@if`.
+    #[test]
+    fn message_shows_directive_with_at_keyword() {
+        // 속성 자리에 DOM 이벤트(`@click`)는 오지만 구조 디렉티브(`@if`)는 못 온다.
+        let msg = error_message(r#"component C { template { div(@if /) } }"#);
+        assert_eq!(
+            msg,
+            "expected DOM event directive (e.g. @click), found `@if`"
+        );
+    }
+
+    /// peek 자리에서 토큰이 떨어지면 `None`이 아니라 사람이 읽는 말로(shown).
+    /// next()로 읽다 떨어지는 건 다른 에러(UnexpectedEnd)라 여긴 peek 자리를 골라야 한다.
+    #[test]
+    fn message_shows_end_of_source_not_none() {
+        assert_eq!(
+            error_message("component C { template { div(class="),
+            "expected attribute value (string or {var}), found end of source"
+        );
+    }
+
+    /// 리터럴은 종류가 보이게 - 문자열은 따옴표째, 숫자는 값 그대로.
+    #[test]
+    fn message_shows_literal_kind() {
+        // 노드 자리에 숫자는 올 수 없다.
+        assert_eq!(
+            error_message("component C { template { div() { 42 } } }"),
+            "expected node (element, string, or {var}), found `42`"
+        );
+    }
+
+    /// expect()/keyword()/ident()가 내는 에러도 같은 표기를 쓴다 - 이 셋은 peek 계열과
+    /// 다른 경로라 따로 덮는다(한 곳만 고치고 나머지를 빠뜨리기 쉽다).
+    #[test]
+    fn message_from_expect_paths_uses_same_notation() {
+        // keyword(): props 블록 뒤에 template이 와야 한다.
+        assert_eq!(
+            error_message("component C { oops { } }"),
+            "expected `template`, found `oops`"
+        );
+        // ident(): 컴포넌트 이름 자리에 기호가 왔다.
+        assert_eq!(
+            error_message("component { }"),
+            "expected identifier, found `{`"
+        );
+        // expect(): 이름 뒤에 `{`가 와야 한다.
+        assert_eq!(error_message("component C ]"), "expected `{`, found `]`");
     }
 
     /// base_dir 아래 경로는 상대경로로 줄여 낸다. 아래가 아니면 원본 그대로.

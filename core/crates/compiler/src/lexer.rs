@@ -33,6 +33,41 @@ pub enum Token {
     At(Directive),
 }
 
+/// 에러 메시지에 쓰는 표기 - 소스에 적힌 모양 그대로 보인다(`LBrace`가 아니라 `` `{` ``).
+/// 값을 담는 토큰은 값까지 보여야 무엇이 왔는지 알 수 있다. rustc처럼 백틱으로 감싼다.
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Token::Ident(s) => write!(f, "`{s}`"),
+            // 문자열 리터럴은 따옴표째로 - 식별자와 구별된다.
+            Token::Str(s) => write!(f, "`\"{s}\"`"),
+            Token::TypeKey(s) => write!(f, "`'{s}'`"),
+            Token::Num(s) => write!(f, "`{s}`"),
+            Token::Bool(b) => write!(f, "`{b}`"),
+            Token::KwBool => write!(f, "`bool`"),
+            Token::KwNumber => write!(f, "`number`"),
+            Token::KwString => write!(f, "`string`"),
+            Token::LBrace => write!(f, "`{{`"),
+            Token::RBrace => write!(f, "`}}`"),
+            Token::LParen => write!(f, "`(`"),
+            Token::RParen => write!(f, "`)`"),
+            Token::LBracket => write!(f, "`[`"),
+            Token::RBracket => write!(f, "`]`"),
+            Token::Eq => write!(f, "`=`"),
+            Token::Comma => write!(f, "`,`"),
+            Token::Colon => write!(f, "`:`"),
+            Token::Dot => write!(f, "`.`"),
+            Token::Lt => write!(f, "`<`"),
+            Token::LtLt => write!(f, "`<<`"),
+            Token::Gt => write!(f, "`>`"),
+            Token::Pipe => write!(f, "`|`"),
+            // 앞 공백 여부(self-close 검증용)는 표기에 안 싣는다 - 보이는 건 `/` 하나다.
+            Token::Slash(_) => write!(f, "`/`"),
+            Token::At(d) => write!(f, "{d}"),
+        }
+    }
+}
+
 /// `@` 디렉티브. 분기(`@if`/`@else`)와 DOM 이벤트(`@click`).
 /// DOM 이벤트는 닫힌 집합이라 여기 박는다(필요할 때 추가).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +116,37 @@ impl Directive {
             Directive::Scroll => Some("scroll"),
         }
     }
+
+    /// `@` 뒤에 오는 키워드. lex의 키워드 표(문자열 -> Directive)의 역방향이다.
+    /// 팔을 다 적어 디렉티브를 늘리면 컴파일러가 여기를 잡게 한다.
+    fn keyword(&self) -> &'static str {
+        match self {
+            Directive::If => "if",
+            Directive::Else => "else",
+            Directive::For => "for",
+            Directive::With => "with",
+            Directive::Slot => "slot",
+            Directive::Click => "click",
+            Directive::Input => "input",
+            Directive::Change => "change",
+            Directive::Submit => "submit",
+            Directive::Focus => "focus",
+            Directive::Blur => "blur",
+            Directive::KeyDown => "keydown",
+            Directive::KeyUp => "keyup",
+            Directive::MouseDown => "mousedown",
+            Directive::MouseUp => "mouseup",
+            Directive::MouseEnter => "mouseenter",
+            Directive::MouseLeave => "mouseleave",
+            Directive::Scroll => "scroll",
+        }
+    }
+}
+
+impl std::fmt::Display for Directive {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "`@{}`", self.keyword())
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -94,11 +160,9 @@ pub enum LexErrorKind {
 impl std::fmt::Display for LexErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            LexErrorKind::UnterminatedString => write!(f, "문자열이 닫히지 않았다"),
-            LexErrorKind::UnexpectedChar(c) => {
-                write!(f, "여기서 시작할 수 있는 토큰이 없다: '{c}'")
-            }
-            LexErrorKind::UnknownDirective(s) => write!(f, "알 수 없는 디렉티브 '@{s}'"),
+            LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
+            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character `{c}`"),
+            LexErrorKind::UnknownDirective(s) => write!(f, "unknown directive `@{s}`"),
         }
     }
 }

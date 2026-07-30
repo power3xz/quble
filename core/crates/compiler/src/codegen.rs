@@ -57,50 +57,50 @@ pub enum CodegenErrorKind {
 impl std::fmt::Display for CodegenErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            CodegenErrorKind::UnknownTag(tag) => write!(f, "내장 태그가 아니다: '{tag}'"),
+            CodegenErrorKind::UnknownTag(tag) => write!(f, "unknown builtin tag `{tag}`"),
             CodegenErrorKind::UnknownProp(name) => {
-                write!(f, "props에 선언되지 않은 참조: '{name}'")
+                write!(f, "`{name}` is not declared in props")
             }
             CodegenErrorKind::UnknownComponent(name) => {
-                write!(f, "정의를 찾을 수 없는 컴포넌트: '{name}'")
+                write!(f, "cannot find component `{name}`")
             }
             CodegenErrorKind::UnknownArg { comp, prop } => {
-                write!(f, "'{comp}'의 props에 '{prop}'이 없다")
+                write!(f, "`{comp}` has no prop `{prop}`")
             }
             CodegenErrorKind::UnknownEvent(name) => {
-                write!(f, "events에 선언되지 않은 이벤트: '{name}'")
+                write!(f, "`{name}` is not declared in events")
             }
             CodegenErrorKind::UnknownContext(name) => {
-                write!(f, "contexts에 선언되지 않은 컨텍스트: '{name}'")
+                write!(f, "`{name}` is not declared in contexts")
             }
             CodegenErrorKind::UnknownField { root, field } => {
-                write!(f, "prop '{root}'에 필드 '{field}'가 없다")
+                write!(f, "no field `{field}` on prop `{root}`")
             }
             CodegenErrorKind::NotLeaf(path) => write!(
                 f,
-                "'{path}'는 객체/배열이다 - 값 자리에는 원시 값만 올 수 있다"
+                "`{path}` is an object or array: only primitive values go in value position"
             ),
             CodegenErrorKind::PropTypeMismatch { comp, prop } => write!(
                 f,
-                "'{comp}'의 prop '{prop}'과 넘긴 값의 구조가 다르다 - 필드 이름/순서/타입이 같아야 한다"
+                "value passed to prop `{prop}` of `{comp}` has a different shape: field names, order and types must match"
             ),
             CodegenErrorKind::SlotOverflow(name) => {
-                write!(f, "슬롯이 255개를 넘었다 - 넘친 참조: '{name}'")
+                write!(f, "more than 255 slots: `{name}` does not fit")
             }
             CodegenErrorKind::DuplicateBinding(name) => write!(
                 f,
-                "@for 회차변수 '{name}'이 prop 또는 바깥 회차변수와 겹친다 - 다른 이름을 쓴다"
+                "@for binding `{name}` shadows a prop or an outer binding: use another name"
             ),
             CodegenErrorKind::ForCountNotIterable(path) => write!(
                 f,
-                "'{path}'는 배열도 숫자도 아니다 - @for의 반복 횟수로 쓸 수 없다"
+                "`{path}` is neither an array nor a number: it cannot drive @for"
             ),
             CodegenErrorKind::UnknownSlotPlaceholder {
                 comp,
                 slot_placeholder,
             } => match slot_placeholder {
-                Some(slot) => write!(f, "'{comp}'에 슬롯 '{slot}' 선언(@slot({slot}))이 없다"),
-                None => write!(f, "'{comp}'에 무기명 슬롯 선언(@slot())이 없다"),
+                Some(slot) => write!(f, "`{comp}` declares no slot `{slot}` (`@slot({slot})`)"),
+                None => write!(f, "`{comp}` declares no unnamed slot (`@slot()`)"),
             },
             CodegenErrorKind::DuplicateSlotPlaceholderDef {
                 comp,
@@ -108,11 +108,11 @@ impl std::fmt::Display for CodegenErrorKind {
             } => match slot_placeholder {
                 Some(slot) => write!(
                     f,
-                    "'{comp}'이 슬롯 '{slot}'을 두 번 선언했다 - 콘텐츠가 어느 자리로 갈지 정할 수 없다"
+                    "`{comp}` declares slot `{slot}` twice: the content has no single place to go"
                 ),
                 None => write!(
                     f,
-                    "'{comp}'이 무기명 슬롯을 두 번 선언했다 - 콘텐츠가 어느 자리로 갈지 정할 수 없다"
+                    "`{comp}` declares the unnamed slot twice: the content has no single place to go"
                 ),
             },
         }

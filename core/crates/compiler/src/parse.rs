@@ -39,23 +39,25 @@ pub enum ParseErrorKind {
 impl std::fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            ParseErrorKind::UnexpectedEnd => write!(f, "소스가 끝났다 - 닫히지 않은 블록이 있다"),
-            // want/got은 파서 내부 표기(토큰 variant 이름)가 그대로 나온다 - 사람이 읽는
-            // 토큰 표기로 다듬는 건 별도 작업이다.
+            ParseErrorKind::UnexpectedEnd => {
+                write!(f, "unexpected end of source: a block is left unclosed")
+            }
+            // got은 Token의 Display라 소스에 적힌 모양대로 나온다(`` `{` ``). want는 문법
+            // 자리를 가리키는 표기다("attribute name, @event, or )").
             ParseErrorKind::Expected { want, got } => {
-                write!(f, "{want}가 와야 하는데 {got}가 왔다")
+                write!(f, "expected {want}, found {got}")
             }
             ParseErrorKind::DuplicateSlotPlaceholderFill { comp, slot } => write!(
                 f,
-                "'{comp}'의 슬롯 '{slot}'을 두 번 채웠다 - 콘텐츠는 한 덩이만 갈 수 있다"
+                "slot `{slot}` of `{comp}` is filled twice: a slot takes one content block"
             ),
             ParseErrorKind::MixedSlotPlaceholderFill { comp } => write!(
                 f,
-                "'{comp}' 합성 블록에 기명 채움과 무기명 노드가 섞였다 - 정의 쪽이 둘 중 하나다"
+                "`{comp}` mixes named fills with unnamed nodes: the definition declares one or the other"
             ),
             ParseErrorKind::EmptyBlock(tag) => write!(
                 f,
-                "'{tag}'의 자식 블록이 비었다 - 슬롯을 안 채우면 self-close(`{tag}( /)`)로 쓴다"
+                "empty child block on `{tag}`: use self-close (`{tag}( /)`) when filling no slot"
             ),
         }
     }
@@ -66,6 +68,15 @@ impl std::fmt::Display for ParseErrorKind {
 pub struct ParseError {
     pub kind: ParseErrorKind,
     pub range: SrcRange,
+}
+
+/// peek 결과를 에러 메시지에 쓸 표기로. None은 토큰이 다 떨어진 것이다 - `Option`의 Debug가
+/// `None`을 그대로 내보내지 않게 사람이 읽는 말로 바꾼다.
+fn shown(token: Option<&Token>) -> String {
+    match token {
+        Some(t) => t.to_string(),
+        None => "end of source".to_string(),
+    }
 }
 
 /// `use` 문 한 줄의 두 형태. 컴포넌트 import(`use A from "..."`)와 리소스(`use "..."`)는
@@ -99,7 +110,8 @@ pub fn parse(lexed: &Lexed, src_len: usize) -> Result<SourceFile, ParseError> {
             other => {
                 let kind = ParseErrorKind::Expected {
                     want: "use or component".into(),
-                    got: other.to_string(),
+                    // 식별자 내용만 손에 있어 Token 표기를 못 쓴다 - Ident와 같은 모양으로 맞춘다.
+                    got: format!("`{other}`"),
                 };
                 return Err(p.err_here(kind));
             }
@@ -109,7 +121,7 @@ pub fn parse(lexed: &Lexed, src_len: usize) -> Result<SourceFile, ParseError> {
     if let Some(t) = p.peek() {
         let kind = ParseErrorKind::Expected {
             want: "use or component".into(),
-            got: format!("{t:?}"),
+            got: format!("{t}"),
         };
         return Err(p.err_here(kind));
     }
@@ -202,8 +214,8 @@ impl<'a> Parser<'a> {
             Ok(())
         } else {
             let kind = ParseErrorKind::Expected {
-                want: format!("{want:?}"),
-                got: format!("{got:?}"),
+                want: format!("{want}"),
+                got: format!("{got}"),
             };
             Err(self.err_read(kind))
         }
@@ -215,7 +227,7 @@ impl<'a> Parser<'a> {
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "identifier".into(),
-                    got: format!("{got:?}"),
+                    got: format!("{got}"),
                 };
                 Err(self.err_read(kind))
             }
@@ -252,7 +264,7 @@ impl<'a> Parser<'a> {
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "value (prop, \"str\", 42, true)".into(),
-                    got: format!("{got:?}"),
+                    got: shown(got),
                 };
                 Err(self.err_here(kind))
             }
@@ -274,14 +286,14 @@ impl<'a> Parser<'a> {
                 .map_err(|_| ParseError {
                     kind: ParseErrorKind::Expected {
                         want: "number literal".into(),
-                        got: n.clone(),
+                        got: format!("`{n}`"),
                     },
                     range: lit_range,
                 }),
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "literal (\"str\", 42, true)".into(),
-                    got: format!("{got:?}"),
+                    got: format!("{got}"),
                 };
                 Err(ParseError {
                     kind,
@@ -297,9 +309,10 @@ impl<'a> Parser<'a> {
         if s == kw {
             Ok(())
         } else {
+            // ident()가 Token을 String으로 풀어버려 Token 표기를 못 쓴다 - 직접 맞춘다.
             let kind = ParseErrorKind::Expected {
-                want: kw.into(),
-                got: s,
+                want: format!("`{kw}`"),
+                got: format!("`{s}`"),
             };
             Err(self.err_read(kind))
         }
@@ -327,7 +340,7 @@ impl<'a> Parser<'a> {
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "string path".into(),
-                    got: format!("{got:?}"),
+                    got: format!("{got}"),
                 };
                 return Err(self.err_read(kind));
             }
@@ -433,8 +446,8 @@ impl<'a> Parser<'a> {
             }
             other => {
                 let kind = ParseErrorKind::Expected {
-                    want: "bool, number, string, {, or 컴포넌트명".into(),
-                    got: format!("{other:?}"),
+                    want: "bool, number, string, {, or component name".into(),
+                    got: shown(other),
                 };
                 return Err(self.err_here(kind));
             }
@@ -465,8 +478,8 @@ impl<'a> Parser<'a> {
             Token::TypeKey(s) => Ok(s.clone()),
             other => {
                 let kind = ParseErrorKind::Expected {
-                    want: "타입 키('...')".into(),
-                    got: format!("{other:?}"),
+                    want: "type key (`'...'`)".into(),
+                    got: format!("{other}"),
                 };
                 Err(self.err_read(kind))
             }
@@ -547,7 +560,7 @@ impl<'a> Parser<'a> {
                 Some(t) => {
                     let kind = ParseErrorKind::Expected {
                         want: "payload field or }".into(),
-                        got: format!("{t:?}"),
+                        got: format!("{t}"),
                     };
                     return Err(self.err_here(kind));
                 }
@@ -607,7 +620,7 @@ impl<'a> Parser<'a> {
                 Some(t) => {
                     let kind = ParseErrorKind::Expected {
                         want: "context field or }".into(),
-                        got: format!("{t:?}"),
+                        got: format!("{t}"),
                     };
                     return Err(self.err_here(kind));
                 }
@@ -637,7 +650,7 @@ impl<'a> Parser<'a> {
                 got => {
                     let kind = ParseErrorKind::Expected {
                         want: "string".into(),
-                        got: format!("{got:?}"),
+                        got: format!("{got}"),
                     };
                     Err(self.err_read(kind))
                 }
@@ -658,7 +671,7 @@ impl<'a> Parser<'a> {
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "node (element, string, or {var})".into(),
-                    got: format!("{got:?}"),
+                    got: shown(got),
                 };
                 Err(self.err_here(kind))
             }
@@ -722,7 +735,7 @@ impl<'a> Parser<'a> {
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "of".into(),
-                    got: format!("{got:?}"),
+                    got: format!("{got}"),
                 };
                 return Err(self.err_read(kind));
             }
@@ -732,8 +745,8 @@ impl<'a> Parser<'a> {
                 let range = self.here(); // 아직 소비 전이라 이 숫자 토큰이 pos에 있다
                 let count = n.parse::<u16>().map_err(|_| ParseError {
                     kind: ParseErrorKind::Expected {
-                        want: "0..=65535 정수 반복 횟수".into(),
-                        got: n.clone(),
+                        want: "integer repeat count 0..=65535".into(),
+                        got: format!("`{n}`"),
                     },
                     range,
                 })?;
@@ -793,8 +806,8 @@ impl<'a> Parser<'a> {
             Some(Token::Slash(spaced)) => {
                 if !spaced {
                     let kind = ParseErrorKind::Expected {
-                        want: "space before '/' (self-close)".into(),
-                        got: "'/' without preceding space".into(),
+                        want: "space before `/` (self-close)".into(),
+                        got: "`/` without preceding space".into(),
                     };
                     // 아직 `/`를 소비하지 않았다 - 공백이 빠진 그 `/`를 가리킨다.
                     return Err(self.err_here(kind));
@@ -915,7 +928,7 @@ impl<'a> Parser<'a> {
                         got => {
                             let kind = ParseErrorKind::Expected {
                                 want: "component arg value ({var}, \"str\", 42, true)".into(),
-                                got: format!("{got:?}"),
+                                got: shown(got),
                             };
                             return Err(self.err_here(kind));
                         }
@@ -925,7 +938,7 @@ impl<'a> Parser<'a> {
                 Some(t) => {
                     let kind = ParseErrorKind::Expected {
                         want: "component arg (prop={var} or prop=\"lit\") or )".into(),
-                        got: format!("{t:?}"),
+                        got: format!("{t}"),
                     };
                     return Err(self.err_here(kind));
                 }
@@ -949,8 +962,8 @@ impl<'a> Parser<'a> {
             Some(Token::Slash(spaced)) => {
                 if !spaced {
                     let kind = ParseErrorKind::Expected {
-                        want: "space before '/' (self-close)".into(),
-                        got: "'/' without preceding space".into(),
+                        want: "space before `/` (self-close)".into(),
+                        got: "`/` without preceding space".into(),
                     };
                     // 아직 `/`를 소비하지 않았다 - 공백이 빠진 그 `/`를 가리킨다.
                     return Err(self.err_here(kind));
@@ -966,7 +979,7 @@ impl<'a> Parser<'a> {
             return Err(ParseError {
                 kind: ParseErrorKind::Expected {
                     want: format!("self-close for void element ({tag}( ... /))"),
-                    got: format!("void element '{tag}' with child block"),
+                    got: format!("void element `{tag}` with a child block"),
                 },
                 range: tag_range,
             });
@@ -983,7 +996,7 @@ impl<'a> Parser<'a> {
                 return Err(ParseError {
                     kind: ParseErrorKind::Expected {
                         want: format!("self-close for childless element ({tag}( ... /))"),
-                        got: "empty child block {}".into(),
+                        got: "an empty child block".into(),
                     },
                     range: tag_range,
                 });
@@ -1019,7 +1032,7 @@ impl<'a> Parser<'a> {
                             None => {
                                 let kind = ParseErrorKind::Expected {
                                     want: "DOM event directive (e.g. @click)".into(),
-                                    got: format!("{directive:?}"),
+                                    got: format!("{directive}"),
                                 };
                                 return Err(ParseError {
                                     kind,
@@ -1030,7 +1043,7 @@ impl<'a> Parser<'a> {
                         got => {
                             let kind = ParseErrorKind::Expected {
                                 want: "DOM event directive (e.g. @click)".into(),
-                                got: format!("{got:?}"),
+                                got: format!("{got}"),
                             };
                             return Err(ParseError {
                                 kind,
@@ -1060,7 +1073,7 @@ impl<'a> Parser<'a> {
                         got => {
                             let kind = ParseErrorKind::Expected {
                                 want: "attribute value (string or {var})".into(),
-                                got: format!("{got:?}"),
+                                got: shown(got),
                             };
                             return Err(self.err_here(kind));
                         }
@@ -1070,7 +1083,7 @@ impl<'a> Parser<'a> {
                 Some(t) => {
                     let kind = ParseErrorKind::Expected {
                         want: "attribute name, @event, or )".into(),
-                        got: format!("{t:?}"),
+                        got: format!("{t}"),
                     };
                     return Err(self.err_here(kind));
                 }

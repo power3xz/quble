@@ -22,7 +22,7 @@ pub struct SrcLocation {
 /// 진단 하나를 CLI에 그대로 찍을 여러 줄 텍스트로 만든다(끝에 개행 없음).
 ///
 /// ```text
-/// card.qubc:6:14: error: prop 'user'에 필드 'nope'가 없다
+/// card.qubc:6:14: error: no field `nope` on prop `user`
 ///   6 |       p() { {user.nope} }
 ///     |              ^^^^^^^^^
 /// ```

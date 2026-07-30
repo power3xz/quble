@@ -90,24 +90,30 @@ impl std::fmt::Display for FlattenError {
             FlattenError::Lex(e) => write!(f, "{}", e.err.kind),
             FlattenError::Parse(e) => write!(f, "{}", e.err.kind),
             FlattenError::NotFound { base, target } => {
-                write!(f, "'{base}'에서 '{target}'을 찾을 수 없다")
+                write!(f, "cannot resolve `{target}` from `{base}`")
             }
             FlattenError::DuplicateComponent(name) => {
-                write!(f, "컴포넌트 '{name}'이 서로 다른 파일에 정의됐다")
+                write!(f, "component `{name}` is defined in more than one file")
             }
             FlattenError::MissingExport { path, name } => {
-                write!(f, "'{path}'에 '{name}' 정의가 없다")
+                write!(f, "`{path}` does not define `{name}`")
             }
-            FlattenError::Cycle(path) => write!(f, "use 그래프가 순환한다: '{path}'"),
+            FlattenError::Cycle(path) => write!(f, "cycle in the use graph at `{path}`"),
             FlattenError::UnknownType(name) => {
-                write!(f, "prop 타입이 가리키는 컴포넌트를 찾을 수 없다: '{name}'")
+                write!(
+                    f,
+                    "cannot find component `{name}` referenced by a prop type"
+                )
             }
-            FlattenError::TypeCycle(name) => write!(f, "prop 타입 참조가 순환한다: '{name}'"),
+            FlattenError::TypeCycle(name) => write!(f, "cycle in prop type references at `{name}`"),
             FlattenError::NonObjectUtil => {
-                write!(f, "Omit/Pick의 대상이 객체 타입이 아니다")
+                write!(f, "the target of Omit/Pick is not an object type")
             }
             FlattenError::UnknownKey(key) => {
-                write!(f, "Omit/Pick이 나열한 키 '{key}'가 대상 타입에 없다")
+                write!(
+                    f,
+                    "key `{key}` listed in Omit/Pick is not in the target type"
+                )
             }
         }
     }
