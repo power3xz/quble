@@ -102,7 +102,11 @@ fn load(path: &Path) -> std::io::Result<Loaded> {
 
 /// 단일 .qubc를 컴파일하고 use한 CSS를 내용 해시 경로로 적재한다.
 fn load_one(path: &Path, loaded: &mut Loaded) -> std::io::Result<()> {
-    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("out").to_string();
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("out")
+        .to_string();
     // compile_file이 엔트리를 읽고 use는 importer 기준 상대경로로 해소한다.
     let src_path = path.to_str().unwrap();
     let output = compiler::compile_file(src_path)
@@ -147,13 +151,23 @@ fn handle(mut stream: TcpStream, loaded: &Loaded) {
 
 /// 경로를 라우팅해 (상태줄, Content-Type, 본문)을 만든다.
 fn route(target: &str, loaded: &Loaded) -> (&'static str, &'static str, Vec<u8>) {
-    if let Some(name) = target.strip_prefix('/').and_then(|n| n.strip_suffix(".qubb")) {
+    if let Some(name) = target
+        .strip_prefix('/')
+        .and_then(|n| n.strip_suffix(".qubb"))
+    {
         if let Some(bytes) = loaded.components.get(name) {
             return ("200 OK", "application/octet-stream", bytes.clone());
         }
-    } else if let Some(name) = target.strip_prefix('/').and_then(|n| n.strip_suffix(".resmap.json")) {
+    } else if let Some(name) = target
+        .strip_prefix('/')
+        .and_then(|n| n.strip_suffix(".resmap.json"))
+    {
         if let Some(paths) = loaded.resmaps.get(name) {
-            return ("200 OK", "application/json; charset=utf-8", quble::json_array(paths).into_bytes());
+            return (
+                "200 OK",
+                "application/json; charset=utf-8",
+                quble::json_array(paths).into_bytes(),
+            );
         }
     } else if let Some(key) = target.strip_prefix('/') {
         // /res/<file> - assets 키는 선행 '/' 없는 `res/...`.
@@ -163,5 +177,9 @@ fn route(target: &str, loaded: &Loaded) -> (&'static str, &'static str, Vec<u8>)
             }
         }
     }
-    ("404 Not Found", "text/plain; charset=utf-8", b"not found".to_vec())
+    (
+        "404 Not Found",
+        "text/plain; charset=utf-8",
+        b"not found".to_vec(),
+    )
 }

@@ -105,7 +105,9 @@ pub enum Node {
     /// `@slot()` / `@slot(header)` - 자식 콘텐츠가 들어갈 자리(정의쪽). name이 None이면 무기명.
     /// 한 컴포넌트는 무기명 하나 또는 기명 여럿 중 하나만 - 섞으면 컴파일 에러(SYNTAX §3.3).
     /// 선언 순서가 slot_placeholder_index(컴포넌트-로컬)이고, 사용쪽 SlotPlaceholderContent가 같은 공간을 쓴다.
-    SlotPlaceholderDef { name: Option<String> },
+    SlotPlaceholderDef {
+        name: Option<String>,
+    },
     /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop 참조(경로 허용,
     /// `gen.open`)이고 leaf여야 한다(표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
     If {

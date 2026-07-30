@@ -202,15 +202,28 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
         let mut events = Vec::with_capacity(event_count as usize);
         for _ in 0..event_count {
             let name_const_index = r.u16()?;
-            events.push(EventDef { name_const_index, fields: read_fields(&mut r)? });
+            events.push(EventDef {
+                name_const_index,
+                fields: read_fields(&mut r)?,
+            });
         }
         let context_count = r.u16()?;
         let mut contexts = Vec::with_capacity(context_count as usize);
         for _ in 0..context_count {
             let name_const_index = r.u16()?;
-            contexts.push(ContextDef { name_const_index, fields: read_fields(&mut r)? });
+            contexts.push(ContextDef {
+                name_const_index,
+                fields: read_fields(&mut r)?,
+            });
         }
-        defs.push(CompDef { name_const_index, props_type_ref, code_off, code_len, events, contexts });
+        defs.push(CompDef {
+            name_const_index,
+            props_type_ref,
+            code_off,
+            code_len,
+            events,
+            contexts,
+        });
     }
 
     // 코드
@@ -248,7 +261,11 @@ fn read_fields(r: &mut Reader) -> Result<Vec<Field>, DecodeError> {
         let name_const_index = r.u16()?;
         let type_ref = r.u16()?;
         let value = read_ref(r)?;
-        fields.push(Field { name_const_index, type_ref, value });
+        fields.push(Field {
+            name_const_index,
+            type_ref,
+            value,
+        });
     }
     Ok(fields)
 }
@@ -272,7 +289,10 @@ struct Reader<'a> {
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         let end = self.pos.checked_add(n).ok_or(DecodeError::UnexpectedEof)?;
-        let slice = self.bytes.get(self.pos..end).ok_or(DecodeError::UnexpectedEof)?;
+        let slice = self
+            .bytes
+            .get(self.pos..end)
+            .ok_or(DecodeError::UnexpectedEof)?;
         self.pos = end;
         Ok(slice)
     }

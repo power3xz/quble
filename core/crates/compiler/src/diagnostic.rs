@@ -163,7 +163,10 @@ mod tests {
         // 소스 줄과 캐럿 줄에서 `|` 뒤 부분만 떼어 폭을 비교한다.
         let body = lines[1].split_once("| ").unwrap().1;
         let caret = lines[2].split_once("| ").unwrap().1;
-        assert_eq!(caret, format!("{}^", " ".repeat(display_width(&body[..at]))));
+        assert_eq!(
+            caret,
+            format!("{}^", " ".repeat(display_width(&body[..at])))
+        );
         // 문자 수로 셌다면 한글 두 자만큼(2칸) 왼쪽으로 밀렸을 것이다.
         assert_eq!(display_width(&body[..at]) - body[..at].chars().count(), 2);
     }
@@ -173,7 +176,12 @@ mod tests {
     fn multiline_range_underlines_to_line_end() {
         let src = "a\nb \"unterminated\nc\n";
         let start = src.find('"').unwrap();
-        let out = format("a.qubc", src, Some(SrcRange::new(start, src.len())), "안 닫혔다");
+        let out = format(
+            "a.qubc",
+            src,
+            Some(SrcRange::new(start, src.len())),
+            "안 닫혔다",
+        );
         let lines: Vec<&str> = out.lines().collect();
         // 진단은 세 줄(헤더/소스/캐럿)뿐 - 나머지 줄로 안 새어 나간다.
         assert_eq!(lines.len(), 3);

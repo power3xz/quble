@@ -83,7 +83,9 @@ pub fn format_error(
         CompileError::Flatten(e) => e.to_string(),
         CompileError::Codegen(e) => e.kind.to_string(),
     };
-    let shown = base_dir.and_then(|dir| relative_to(dir, path)).unwrap_or(path);
+    let shown = base_dir
+        .and_then(|dir| relative_to(dir, path))
+        .unwrap_or(path);
     diagnostic::format(shown, src, range, &message)
 }
 
@@ -2035,7 +2037,11 @@ mod tests {
             .iter()
             .map(|&i| u16::from_le_bytes([outer[i + 1], outer[i + 2]]))
             .collect();
-        assert_eq!(indices, vec![0, 1], "작성 순서와 무관하게 선언 순서로 정규화");
+        assert_eq!(
+            indices,
+            vec![0, 1],
+            "작성 순서와 무관하게 선언 순서로 정규화"
+        );
 
         // 정의쪽도 같은 순서 - 두 축이 같은 인덱스 공간을 쓴다.
         let inner = def_code(&module, 1);
@@ -2320,9 +2326,9 @@ mod tests {
     /// codegen 에러가 가리키는 소스 조각. 위치를 못 주는 에러(range None)면 None을 돌려준다.
     fn codegen_error_snippet(src: &str) -> Option<String> {
         match compile(src) {
-            Err(CompileError::Codegen(e)) => {
-                e.range.map(|r| src[r.start as usize..r.end as usize].to_string())
-            }
+            Err(CompileError::Codegen(e)) => e
+                .range
+                .map(|r| src[r.start as usize..r.end as usize].to_string()),
             other => panic!("codegen 에러를 기대했다: {:?}", other.map(|_| ())),
         }
     }
@@ -2357,7 +2363,10 @@ mod tests {
     #[test]
     fn parse_error_points_at_unexpected_node() {
         // 자식 자리에 노드가 될 수 없는 `=`가 왔다.
-        assert_eq!(error_snippet("component C { template { div() { = } } }"), "=");
+        assert_eq!(
+            error_snippet("component C { template { div() { = } } }"),
+            "="
+        );
     }
 
     /// 토큰이 다 떨어져 난 에러는 소스 끝(빈 구간)을 가리킨다 - 패닉 없이 위치가 나와야 한다.
@@ -2377,7 +2386,10 @@ mod tests {
     /// 검사 시점이 태그에서 멀어도(여는 태그를 다 읽은 뒤) 탓할 대상인 태그를 가리켜야 한다.
     #[test]
     fn parse_error_points_at_void_tag_not_current_pos() {
-        assert_eq!(error_snippet("component C { template { input() { } } }"), "input");
+        assert_eq!(
+            error_snippet("component C { template { input() { } } }"),
+            "input"
+        );
     }
 
     /// 슬롯 중복도 마찬가지 - 콘텐츠까지 읽은 뒤 검사하지만 두 번째 슬롯 이름을 가리킨다.

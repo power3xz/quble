@@ -10,8 +10,8 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, SlotPlaceholderContent,
-    Prop, SourceFile, Type, Use, VarRef,
+    ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, Prop,
+    SlotPlaceholderContent, SourceFile, Type, Use, VarRef,
 };
 use crate::lexer::{Directive, Lexed, Token};
 use crate::src_range::{NodeRange, SrcRange};
@@ -19,11 +19,19 @@ use crate::src_range::{NodeRange, SrcRange};
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseErrorKind {
     UnexpectedEnd,
-    Expected { want: String, got: String },
+    Expected {
+        want: String,
+        got: String,
+    },
     /// 같은 슬롯을 두 번 채웠다(`Header << ... Header << ...`).
-    DuplicateSlotPlaceholderFill { comp: String, slot: String },
+    DuplicateSlotPlaceholderFill {
+        comp: String,
+        slot: String,
+    },
     /// 한 합성 블록에 기명 채움과 무기명 노드가 섞였다. 정의 쪽이 둘 중 하나라 어느 쪽도 성립 못 한다.
-    MixedSlotPlaceholderFill { comp: String },
+    MixedSlotPlaceholderFill {
+        comp: String,
+    },
     /// 빈 자식 블록(`Comp() { }`) - 슬롯을 안 채우면 self-close로 쓴다(DESIGN §4.5).
     EmptyBlock(String),
 }
@@ -260,23 +268,25 @@ impl<'a> Parser<'a> {
         match self.next()? {
             Token::Str(s) => Ok(LitValue::Str(s.clone())),
             Token::Bool(b) => Ok(LitValue::Bool(*b)),
-            Token::Num(n) => {
-                n.parse::<f64>()
-                    .map(LitValue::Number)
-                    .map_err(|_| ParseError {
-                        kind: ParseErrorKind::Expected {
-                            want: "number literal".into(),
-                            got: n.clone(),
-                        },
-                        range: lit_range,
-                    })
-            }
+            Token::Num(n) => n
+                .parse::<f64>()
+                .map(LitValue::Number)
+                .map_err(|_| ParseError {
+                    kind: ParseErrorKind::Expected {
+                        want: "number literal".into(),
+                        got: n.clone(),
+                    },
+                    range: lit_range,
+                }),
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "literal (\"str\", 42, true)".into(),
                     got: format!("{got:?}"),
                 };
-                Err(ParseError { kind, range: lit_range })
+                Err(ParseError {
+                    kind,
+                    range: lit_range,
+                })
             }
         }
     }
@@ -736,7 +746,12 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LBrace)?;
         let body = self.nodes()?;
         self.expect(&Token::RBrace)?;
-        Ok(Node::For { item, index, count, body })
+        Ok(Node::For {
+            item,
+            index,
+            count,
+            body,
+        })
     }
 
     // @with CONTEXT { NODE* }   - context는 이 컴포넌트 contexts에 선언된 이름.
@@ -793,13 +808,21 @@ impl<'a> Parser<'a> {
                 self.slot_placeholder_contents(&name)?
             }
         };
-        Ok(Node::Component { alias, name, args, contents })
+        Ok(Node::Component {
+            alias,
+            name,
+            args,
+            contents,
+        })
     }
 
     // 합성의 자식 블록 `{ ... }`을 슬롯 콘텐츠로 읽는다. 두 형태가 갈리고 섞을 수 없다(SYNTAX §3.3):
     // - 기명: `Header << 노드` 들만. `<<` 오른쪽은 노드 하나 또는 블록(`Header << { ... }`).
     // - 무기명: 그 외 노드들. 블록 전체가 무기명 슬롯 콘텐츠 하나가 된다.
-    fn slot_placeholder_contents(&mut self, comp: &str) -> Result<Vec<SlotPlaceholderContent>, ParseError> {
+    fn slot_placeholder_contents(
+        &mut self,
+        comp: &str,
+    ) -> Result<Vec<SlotPlaceholderContent>, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut named: Vec<SlotPlaceholderContent> = Vec::new();
         let mut anonymous: Vec<Node> = Vec::new();
@@ -807,7 +830,9 @@ impl<'a> Parser<'a> {
             match self.peek() {
                 Some(Token::RBrace) | None => break,
                 // `Ident <<` = 기명 슬롯 채움. 한 칸 앞 `<<`로 갈려 일반 노드와 모호하지 않다.
-                Some(Token::Ident(_)) if matches!(self.tokens.get(self.pos + 1), Some(Token::LtLt)) => {
+                Some(Token::Ident(_))
+                    if matches!(self.tokens.get(self.pos + 1), Some(Token::LtLt)) =>
+                {
                     // 중복 검사는 콘텐츠까지 읽은 뒤라 그때 just_read()를 쓰면 콘텐츠 끝을
                     // 가리킨다 - 탓할 대상인 슬롯 이름 자리를 지금 잡아둔다.
                     let slot_range = self.here();
@@ -823,7 +848,10 @@ impl<'a> Parser<'a> {
                         }
                         _ => vec![self.node()?],
                     };
-                    if named.iter().any(|c| c.name.as_deref() == Some(slot.as_str())) {
+                    if named
+                        .iter()
+                        .any(|c| c.name.as_deref() == Some(slot.as_str()))
+                    {
                         return Err(ParseError {
                             kind: ParseErrorKind::DuplicateSlotPlaceholderFill {
                                 comp: comp.to_string(),
@@ -832,7 +860,10 @@ impl<'a> Parser<'a> {
                             range: slot_range,
                         });
                     }
-                    named.push(SlotPlaceholderContent { name: Some(slot), nodes });
+                    named.push(SlotPlaceholderContent {
+                        name: Some(slot),
+                        nodes,
+                    });
                 }
                 _ => anonymous.push(self.node()?),
             }
@@ -841,7 +872,9 @@ impl<'a> Parser<'a> {
         // 아래 둘은 블록 전체가 문제라 방금 읽은 닫는 `}`를 가리킨다.
         // 무기명/기명은 정의 쪽에서 이미 갈리므로 사용 쪽에서 섞이면 어느 쪽도 성립하지 않는다.
         if !named.is_empty() && !anonymous.is_empty() {
-            let kind = ParseErrorKind::MixedSlotPlaceholderFill { comp: comp.to_string() };
+            let kind = ParseErrorKind::MixedSlotPlaceholderFill {
+                comp: comp.to_string(),
+            };
             return Err(self.err_read(kind));
         }
         match named.is_empty() {
@@ -849,7 +882,10 @@ impl<'a> Parser<'a> {
             true if anonymous.is_empty() => {
                 Err(self.err_read(ParseErrorKind::EmptyBlock(comp.to_string())))
             }
-            true => Ok(vec![SlotPlaceholderContent { name: None, nodes: anonymous }]),
+            true => Ok(vec![SlotPlaceholderContent {
+                name: None,
+                nodes: anonymous,
+            }]),
             false => Ok(named),
         }
     }
@@ -985,7 +1021,10 @@ impl<'a> Parser<'a> {
                                     want: "DOM event directive (e.g. @click)".into(),
                                     got: format!("{directive:?}"),
                                 };
-                                return Err(ParseError { kind, range: directive_range });
+                                return Err(ParseError {
+                                    kind,
+                                    range: directive_range,
+                                });
                             }
                         },
                         got => {
@@ -993,7 +1032,10 @@ impl<'a> Parser<'a> {
                                 want: "DOM event directive (e.g. @click)".into(),
                                 got: format!("{got:?}"),
                             };
-                            return Err(ParseError { kind, range: directive_range });
+                            return Err(ParseError {
+                                kind,
+                                range: directive_range,
+                            });
                         }
                     };
                     self.expect(&Token::Colon)?;
@@ -1047,7 +1089,18 @@ fn starts_upper(s: &str) -> bool {
 fn is_void_tag(tag: &str) -> bool {
     matches!(
         tag,
-        "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta"
-            | "source" | "track" | "wbr"
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "source"
+            | "track"
+            | "wbr"
     )
 }

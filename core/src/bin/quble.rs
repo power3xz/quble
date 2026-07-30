@@ -21,7 +21,10 @@ fn main() -> ExitCode {
     let bytes = output.bytecode;
 
     // 산출물 이름은 입력 파일 stem. 현재 디렉토리의 dist/ 아래에 .qubb로.
-    let name = Path::new(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("out");
+    let name = Path::new(&path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("out");
     let out_dir = Path::new("dist");
     if let Err(e) = std::fs::create_dir_all(out_dir) {
         eprintln!("dist 생성 실패: {e}");
@@ -50,10 +53,7 @@ fn main() -> ExitCode {
         }
     };
     let manifest_path = out_dir.join(format!("{name}.manifest.json"));
-    if let Err(e) = std::fs::write(
-        &manifest_path,
-        quble::manifest_json(&emitted, None),
-    ) {
+    if let Err(e) = std::fs::write(&manifest_path, quble::manifest_json(&emitted, None)) {
         eprintln!("manifest 쓰기 실패 {}: {e}", manifest_path.display());
         return ExitCode::FAILURE;
     }

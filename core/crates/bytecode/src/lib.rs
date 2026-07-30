@@ -3,11 +3,11 @@
 
 pub mod attrs;
 pub mod dom_events;
-pub mod tags;
 mod module;
 mod opcode;
 mod pool;
 mod serialize;
+pub mod tags;
 
 pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
 pub use opcode::Op;
@@ -137,10 +137,10 @@ mod tests {
     #[test]
     fn roundtrip_types() {
         let types = vec![
-            TypeEntry::Array(1),                       // string[][]
-            TypeEntry::Array(2),                       // string[]
-            TypeEntry::Scalar,                         // string
-            TypeEntry::Object(vec![(0, 0), (1, 2)]),   // { field0: string[][], field1: string }
+            TypeEntry::Array(1),                     // string[][]
+            TypeEntry::Array(2),                     // string[]
+            TypeEntry::Scalar,                       // string
+            TypeEntry::Object(vec![(0, 0), (1, 2)]), // { field0: string[][], field1: string }
         ];
         let m = Module::new(ConstPool::new(), types.clone(), vec![], vec![]);
         let back = decode(&encode(&m)).unwrap();
@@ -204,7 +204,10 @@ mod tests {
     fn def_lookup_by_id() {
         let m = hello_module();
         let name_const_index = m.def(0).unwrap().name_const_index;
-        assert_eq!(m.pool.get(name_const_index), Some(&Const::Str("Hello".into())));
+        assert_eq!(
+            m.pool.get(name_const_index),
+            Some(&Const::Str("Hello".into()))
+        );
         assert!(m.def(1).is_none());
     }
 }

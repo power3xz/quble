@@ -89,13 +89,13 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn new(
-        pool: ConstPool,
-        types: Vec<TypeEntry>,
-        defs: Vec<CompDef>,
-        code: Vec<u8>,
-    ) -> Self {
-        Self { pool, types, defs, code }
+    pub fn new(pool: ConstPool, types: Vec<TypeEntry>, defs: Vec<CompDef>, code: Vec<u8>) -> Self {
+        Self {
+            pool,
+            types,
+            defs,
+            code,
+        }
     }
 
     /// 컴포넌트 ID로 정의를 직접 인덱싱.
@@ -103,4 +103,3 @@ impl Module {
         self.defs.get(comp_id as usize)
     }
 }
-

@@ -249,8 +249,7 @@ fn collect(
     ctx: &mut Ctx,
 ) -> Result<(), FlattenError> {
     // 에러에 이 파일(path/src)을 실어 보낸다 - range가 어느 파일 오프셋인지 소비처가 알아야 한다.
-    let lexed =
-        lexer::lex(src).map_err(|e| FlattenError::Lex(Sourced::new(path, src, e)))?;
+    let lexed = lexer::lex(src).map_err(|e| FlattenError::Lex(Sourced::new(path, src, e)))?;
     let source = parse::parse(&lexed, src.len())
         .map_err(|e| FlattenError::Parse(Sourced::new(path, src, e)))?;
 

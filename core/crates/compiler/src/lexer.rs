@@ -5,27 +5,27 @@ use crate::src_range::SrcRange;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Ident(String),
-    Str(String),          // 큰따옴표 값 리터럴
-    TypeKey(String),      // 작은따옴표 타입 키(유틸 타입 `Omit<T, 'a'>`)
-    Num(String),  // 숫자 리터럴 원문. 값 파싱(f64)은 parse 단계.
-    Bool(bool),   // true / false 값 리터럴.
-    KwBool,       // 타입 키워드 bool
-    KwNumber,     // 타입 키워드 number
-    KwString,     // 타입 키워드 string
-    LBrace,   // {
-    RBrace,   // }
-    LParen,   // (
-    RParen,   // )
-    LBracket, // [
-    RBracket, // ]
-    Eq,     // =
-    Comma,  // ,
-    Colon,  // :
-    Dot,    // . (객체 필드 접근 `assignee.name`)
-    Lt,     // < (제네릭 타입 `Omit<Section, 'a'>`)
-    LtLt,   // << (슬롯 채움 `Header << 노드`)
-    Gt,     // >
-    Pipe,   // | (유니온 키 리스트 `'a' | 'b'`)
+    Str(String),     // 큰따옴표 값 리터럴
+    TypeKey(String), // 작은따옴표 타입 키(유틸 타입 `Omit<T, 'a'>`)
+    Num(String),     // 숫자 리터럴 원문. 값 파싱(f64)은 parse 단계.
+    Bool(bool),      // true / false 값 리터럴.
+    KwBool,          // 타입 키워드 bool
+    KwNumber,        // 타입 키워드 number
+    KwString,        // 타입 키워드 string
+    LBrace,          // {
+    RBrace,          // }
+    LParen,          // (
+    RParen,          // )
+    LBracket,        // [
+    RBracket,        // ]
+    Eq,              // =
+    Comma,           // ,
+    Colon,           // :
+    Dot,             // . (객체 필드 접근 `assignee.name`)
+    Lt,              // < (제네릭 타입 `Omit<Section, 'a'>`)
+    LtLt,            // << (슬롯 채움 `Header << 노드`)
+    Gt,              // >
+    Pipe,            // | (유니온 키 리스트 `'a' | 'b'`)
     /// `/` - self-close 표기(`tag(attrs /)`). bool = 직전에 공백이 있었나. 확정 문법이
     /// `/` 앞 공백을 강제하므로(SYNTAX §3.1.1) 렉서가 공백 유무를 실어 파서가 검증한다.
     Slash(bool),
@@ -61,7 +61,11 @@ impl Directive {
     /// DOM 이벤트 디렉티브면 그 이벤트명, 구조 디렉티브(`@if`/`@else`)면 None.
     pub fn dom_event_name(&self) -> Option<&'static str> {
         match self {
-            Directive::If | Directive::Else | Directive::For | Directive::With | Directive::Slot => None,
+            Directive::If
+            | Directive::Else
+            | Directive::For
+            | Directive::With
+            | Directive::Slot => None,
             Directive::Click => Some("click"),
             Directive::Input => Some("input"),
             Directive::Change => Some("change"),
@@ -91,7 +95,9 @@ impl std::fmt::Display for LexErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             LexErrorKind::UnterminatedString => write!(f, "문자열이 닫히지 않았다"),
-            LexErrorKind::UnexpectedChar(c) => write!(f, "여기서 시작할 수 있는 토큰이 없다: '{c}'"),
+            LexErrorKind::UnexpectedChar(c) => {
+                write!(f, "여기서 시작할 수 있는 토큰이 없다: '{c}'")
+            }
             LexErrorKind::UnknownDirective(s) => write!(f, "알 수 없는 디렉티브 '@{s}'"),
         }
     }
