@@ -6,6 +6,8 @@
 //!   3. `qb_compile(entry)` -> 0=성공, 1=실패.
 //!   4. `qb_out_ptr()`/`qb_out_len()`으로 결과를 읽는다. 성공이면 qubb 바이트,
 //!      실패면 진단 텍스트(UTF-8). 다음 `qb_compile`까지 유효하다.
+//!   5. 성공이면 `qb_res_ptr()`/`qb_res_len()`으로 리소스 경로 목록(개행 구분, resId 순)을
+//!      읽는다. JS가 그 순서대로 Blob URL을 만들어 런타임 `compile(bytes, resources)`에 넘긴다.
 //!
 //! 경로 의미론은 컴파일러가 모른다(flatten.rs 머리주석) - loader가 정규화 책임을 진다.
 //! playground의 파일 이름 공간은 평탄해서(탭 목록) `./` 접두어만 벗기면 등록된 이름과 맞는다.
@@ -21,12 +23,17 @@ struct State {
     files: Vec<(String, String)>,
     /// 마지막 `qb_compile` 결과. 성공이면 qubb, 실패면 진단 텍스트의 UTF-8 바이트.
     out: Vec<u8>,
+    /// 마지막 성공 컴파일의 리소스 경로들을 개행으로 이은 것(resId 순). 실패면 빈다.
+    /// 런타임 `compile(bytes, resources)`의 resources는 resId -> URL 배열이라, JS가 이 순서대로
+    /// 각 경로의 내용을 Blob URL로 만들어 넘긴다. 경로에 개행은 안 들어간다.
+    res: Vec<u8>,
 }
 
 thread_local! {
     static STATE: RefCell<State> = const { RefCell::new(State {
         files: Vec::new(),
         out: Vec::new(),
+        res: Vec::new(),
     }) };
 }
 
@@ -105,7 +112,9 @@ pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u
         let entry_src = match files.iter().find(|(p, _)| *p == entry) {
             Some((_, src)) => src.clone(),
             None => {
-                s.borrow_mut().out = format!("no such file: {entry}").into_bytes();
+                let mut state = s.borrow_mut();
+                state.out = format!("no such file: {entry}").into_bytes();
+                state.res.clear();
                 return 1;
             }
         };
@@ -118,17 +127,24 @@ pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u
                 .find(|(p, _)| p == name)
                 .map(|(p, src)| (p.clone(), src.clone()))
         };
-        let (out, status) = match compiler::compile_src(&entry, &entry_src, &loader) {
-            Ok(output) => (output.bytecode.into_vec(), 0),
+        let (out, res, status) = match compiler::compile_src(&entry, &entry_src, &loader) {
+            Ok(output) => (
+                output.bytecode.into_vec(),
+                output.resources.join("\n").into_bytes(),
+                0,
+            ),
             Err(e) => {
                 // base_dir=None - 가상 경로라 줄일 기준이 없다(compiler::format_error 주석).
                 (
                     compiler::format_error(None, &entry, &entry_src, &e).into_bytes(),
+                    Vec::new(),
                     1,
                 )
             }
         };
-        s.borrow_mut().out = out;
+        let mut state = s.borrow_mut();
+        state.out = out;
+        state.res = res;
         status
     })
 }
@@ -145,9 +161,26 @@ pub extern "C" fn qb_out_len() -> usize {
     STATE.with(|s| s.borrow().out.len())
 }
 
-/// 결과 슬롯을 덮어쓴다.
+/// 마지막 성공 컴파일의 리소스 경로 목록(개행 구분, resId 순)의 시작 주소.
+/// 실패한 컴파일 뒤에는 길이 0이다.
+#[no_mangle]
+pub extern "C" fn qb_res_ptr() -> *const u8 {
+    STATE.with(|s| s.borrow().res.as_ptr())
+}
+
+/// 리소스 경로 목록의 바이트 길이. 0이면 리소스가 없거나 컴파일이 실패한 것이다.
+#[no_mangle]
+pub extern "C" fn qb_res_len() -> usize {
+    STATE.with(|s| s.borrow().res.len())
+}
+
+/// 결과 슬롯을 덮어쓴다(실패 경로) - 리소스 목록도 함께 비운다.
 fn set_out(bytes: Vec<u8>) {
-    STATE.with(|s| s.borrow_mut().out = bytes);
+    STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        state.out = bytes;
+        state.res.clear();
+    });
 }
 
 /// 포인터/길이를 &str로. UTF-8이 아니면 None.
@@ -175,6 +208,15 @@ mod tests {
         let status = unsafe { qb_compile(entry.as_ptr(), entry.len()) };
         let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) }.to_vec();
         (status, out)
+    }
+
+    /// 리소스 슬롯을 JS와 같은 방식으로 읽어 경로 목록으로 쪼갠다. 빈 슬롯은 빈 목록.
+    fn resources() -> Vec<String> {
+        let bytes = unsafe { std::slice::from_raw_parts(qb_res_ptr(), qb_res_len()) };
+        match std::str::from_utf8(bytes).unwrap() {
+            "" => Vec::new(),
+            text => text.split('\n').map(str::to_string).collect(),
+        }
     }
 
     /// 테스트는 한 프로세스에서 thread_local 상태를 공유한다 - cargo test가 스레드마다
@@ -320,6 +362,78 @@ mod tests {
         let (status, out) = compile("good.qubc");
         assert_eq!(status, 0);
         assert_eq!(&out[..4], QUBB_MAGIC, "이전 진단이 남으면 안 된다");
+    }
+
+    /// `use "./x.css"`가 있으면 리소스 슬롯에 그 경로가 resId 순으로 실린다 - JS가 이 순서대로
+    /// Blob URL을 만들어 런타임에 넘긴다. css도 loader를 거치므로 탭으로 등록돼 있어야 한다.
+    #[test]
+    fn resource_paths_exposed_in_order() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use "./a.css"
+            use "./b.css"
+            component Main { template { div( /) } }
+        "#,
+        );
+        add_file("a.css", "div { color: red }");
+        add_file("b.css", "div { color: blue }");
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 0, "성공이어야: {}", String::from_utf8_lossy(&out));
+        assert_eq!(
+            resources(),
+            vec!["a.css", "b.css"],
+            "선언 순서 = resId 순서",
+        );
+    }
+
+    /// 등록 안 된 css를 use하면 실패한다(css도 loader를 탄다) - 탭이 없으면 컴파일 자체가 안 된다.
+    #[test]
+    fn missing_css_errors() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use "./nope.css"
+            component Main { template { div( /) } }
+        "#,
+        );
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 1);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("nope.css"), "못 찾은 css가 나와야: {text}");
+    }
+
+    /// 리소스가 없으면 슬롯이 비어 있다(빈 목록).
+    #[test]
+    fn no_resources_leaves_slot_empty() {
+        reset();
+        add_file("main.qubc", HELLO);
+        assert_eq!(compile("main.qubc").0, 0);
+        assert_eq!(qb_res_len(), 0, "리소스 없으면 빈 슬롯");
+        assert!(resources().is_empty());
+    }
+
+    /// 실패한 컴파일은 이전 성공의 리소스 목록을 남기지 않는다 - JS가 낡은 목록으로
+    /// Blob URL을 만들면 엉뚱한 css가 붙는다.
+    #[test]
+    fn failed_compile_clears_resources() {
+        reset();
+        add_file(
+            "styled.qubc",
+            r#"
+            use "./a.css"
+            component Styled { template { div( /) } }
+        "#,
+        );
+        add_file("a.css", "div { color: red }");
+        assert_eq!(compile("styled.qubc").0, 0);
+        assert_eq!(resources(), vec!["a.css"]);
+
+        add_file("broken.qubc", "component C { template {");
+        assert_eq!(compile("broken.qubc").0, 1);
+        assert!(resources().is_empty(), "실패 뒤엔 리소스가 비어야");
     }
 
     /// alloc/free 왕복 - JS가 소스를 써넣는 경로. 받은 버퍼는 len만큼 쓰기 가능하고
