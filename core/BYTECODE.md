@@ -56,7 +56,7 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
   내장 태그 ID, `ATTR_G`의 name은 전역 상수풀 ID, `ATTR_L`의 name과 모든 value/`TEXT`는
   컴포넌트 상수풀 인덱스. (`ELEM_END`는 operand가 없다 - §5.)
 
-### 내장 태그 테이블 (쓰는 것부터, 추가 가능)
+### 내장 태그 테이블
 
 코드에 하드코딩. 워킹 확인 후 확장.
 
@@ -72,7 +72,7 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 추가만, 재배치 금지(예약 ID 안정). 시맨틱 태그(section~label)는 알림 패널 데모에서 편입.
 SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 필요해 이 테이블로 안 다룬다.
 
-### 전역 상수풀 - 속성명 (쓰는 것부터, 추가 가능)
+### 전역 상수풀 - 속성명
 
 코드에 하드코딩. 흔한 속성명만. 어떤 속성명을 전역에 넣을지는 나중에 **컴파일타임 usage 추적**으로
 데이터를 보고 정한다.
@@ -85,12 +85,13 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
 
 (아직 ID 호환성은 신경 쓰지 않는다 - 필요하면 재배치.)
 
-### 전역 DOM 이벤트 테이블 (쓰는 것부터, 추가 가능)
+### 전역 DOM 이벤트 테이블
 
 `번호: 이벤트종류` 표. `BIND_EVENT`의 `event_type`이 이 번호로 어떤 DOM 이벤트인지 가리킨다.
 
 ```
-0:click
+0:click  1:input  2:change  3:submit  4:focus  5:blur  6:keydown  7:keyup
+8:mousedown  9:mouseup  10:mouseenter  11:mouseleave  12:scroll
 ```
 
 ---
