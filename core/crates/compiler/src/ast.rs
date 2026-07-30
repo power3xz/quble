@@ -134,7 +134,7 @@ pub enum Node {
 }
 
 /// 합성처에서 슬롯에 넣는 콘텐츠 한 덩이. `Header << 노드`(기명) 또는 합성 블록 전체(무기명).
-/// nodes는 쓰는 쪽 컨텍스트로 해석된다 - 보간·이벤트 경로가 정의한 컴포넌트가 아니라
+/// nodes는 쓰는 쪽 컨텍스트로 해석된다 - 보간/이벤트 경로가 정의한 컴포넌트가 아니라
 /// 쓰는 쪽 기준(SYNTAX §3.3).
 #[derive(Debug, PartialEq)]
 pub struct SlotPlaceholderContent {

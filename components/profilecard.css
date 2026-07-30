@@ -1,4 +1,4 @@
-/* ProfileCard 루트는 article(class={theme}). theme 색은 자식들(Badge·Tag·LinkButton)과 같은 값. */
+/* ProfileCard 루트는 article(class={theme}). theme 색은 자식들(Badge/Tag/LinkButton)과 같은 값. */
 article.light,
 article.dark {
   max-width: 360px;

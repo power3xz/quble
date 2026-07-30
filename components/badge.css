@@ -1,4 +1,4 @@
-/* Badge 루트는 class={theme}. theme별 알약형 배지(Tag·LinkButton과 클래스를 공유해도 무방). */
+/* Badge 루트는 class={theme}. theme별 알약형 배지(Tag/LinkButton과 클래스를 공유해도 무방). */
 span.light,
 span.dark {
   display: inline-block;

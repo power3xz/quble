@@ -1,4 +1,4 @@
-/* Tag 루트는 class={theme}. Badge·LinkButton과 셀렉터를 공유하지만 같은 값이라 무해. */
+/* Tag 루트는 class={theme}. Badge/LinkButton과 셀렉터를 공유하지만 같은 값이라 무해. */
 span.light,
 span.dark {
   display: inline-block;

@@ -1,5 +1,5 @@
 // .qubc 컴포넌트의 핸들러 타입을 짝 `.qubc.d.ts`(Handlers)로 생성한다. handlers.ts가
-// `import type { Handlers } from './x.qubc'`로 받아 fullname·payload·props·context를 타입으로 강제한다.
+// `import type { Handlers } from './x.qubc'`로 받아 fullname/payload/props/context를 타입으로 강제한다.
 // 생성 시점(둘 다): handlers.ts를 열 때 + .qubc를 저장할 때(소스 변경 반영).
 // 짝 .qubc를 quble-dts가 AST에서 걸어 .d.ts 텍스트로 낸다(props 이름은 바이트코드에 없어 소스에서 뽑는다).
 

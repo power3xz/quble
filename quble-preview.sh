@@ -6,9 +6,9 @@
 # 초기 data가 필요한 컴포넌트는 짝 파일 <name>.data.json을 같은 폴더에 두는 게 관례다
 # (예: components/forstress.qubc <-> components/forstress.data.json). --data로 그 짝을 넘긴다.
 # 이벤트 핸들러도 짝 파일 <name>.qubc.handlers.ts를 같은 폴더에 두면 build.mjs가 자동으로 찾아
-# esbuild로 번들·주입한다(예: components/forlist.qubc <-> components/forlist.qubc.handlers.ts).
+# esbuild로 번들/주입한다(예: components/forlist.qubc <-> components/forlist.qubc.handlers.ts).
 # 없으면 렌더만 되고 클릭은 이벤트 발화까지만 - set/removeAt 같은 상태 변경은 핸들러가 있어야 한다.
-# 서빙되는 건 core/dist 하나뿐 - build.mjs가 여기에 <name>.qubb·data.json·index.html을 낸다.
+# 서빙되는 건 core/dist 하나뿐 - build.mjs가 여기에 <name>.qubb, data.json, index.html을 낸다.
 #
 # 사용: ./quble-preview.sh <component.qubc> [--data <data.json>]
 #   예: ./quble-preview.sh components/forstress.qubc --data components/forstress.data.json
@@ -42,7 +42,7 @@ echo "[preview] 2/4 컴포넌트 빌드: ${BUILD_ARGS[*]}"
 ( cd "$CORE" && node "$BUILD/build.mjs" "${BUILD_ARGS[@]}" )
 
 echo "[preview] 3/4 포트 $PORT 정리"
-# lsof는 매치가 없으면 exit 1 - pipefail·set -e에 걸리지 않게 실패를 삼킨다(빈 결과가 정상).
+# lsof는 매치가 없으면 exit 1 - pipefail/set -e에 걸리지 않게 실패를 삼킨다(빈 결과가 정상).
 EXISTING="$(lsof -ti "tcp:$PORT" 2>/dev/null | tr '\n' ' ' || true)"
 if [ -n "$EXISTING" ]; then
   echo "$EXISTING" | xargs kill
