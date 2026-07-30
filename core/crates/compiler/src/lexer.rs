@@ -87,6 +87,16 @@ pub enum LexErrorKind {
     UnknownDirective(String),
 }
 
+impl std::fmt::Display for LexErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            LexErrorKind::UnterminatedString => write!(f, "문자열이 닫히지 않았다"),
+            LexErrorKind::UnexpectedChar(c) => write!(f, "여기서 시작할 수 있는 토큰이 없다: '{c}'"),
+            LexErrorKind::UnknownDirective(s) => write!(f, "알 수 없는 디렉티브 '@{s}'"),
+        }
+    }
+}
+
 /// 렉스 실패 - 무엇이(kind) 어디서(range) 틀렸나. range는 문제가 시작된 문자/토큰 구간이다.
 #[derive(Debug, PartialEq, Eq)]
 pub struct LexError {

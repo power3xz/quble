@@ -4,6 +4,7 @@
 
 mod ast;
 mod codegen;
+mod diagnostic;
 mod dts;
 mod flatten;
 mod lexer;
@@ -43,6 +44,54 @@ pub fn compile_src(
         bytecode,
         resources,
     })
+}
+
+/// 컴파일 에러를 CLI에 그대로 찍을 진단 텍스트로 만든다(끝에 개행 없음).
+///
+/// ```text
+/// card.qubc:6:14: error: prop 'user'에 필드 'nope'가 없다
+///   6 |       p() { {user.nope} }
+///     |              ^^^^^^^^^
+/// ```
+///
+/// lex/parse 에러는 어느 파일에서 났는지를 자신이 들고 있어(Sourced) 인자와 무관하게 그
+/// 파일을 가리킨다. codegen 에러는 아직 파일을 모르므로 넘긴 엔트리를 기준으로 삼는다 -
+/// use한 파일에서 난 codegen 에러는 위치가 엔트리 기준이라 틀릴 수 있다(후속 작업).
+/// 탓할 자리를 모르는 에러(range None)는 파일명과 메시지만 낸다.
+///
+/// base_dir이 Some이면 파일 경로를 그 디렉터리 기준 상대경로로 줄여 낸다 - loader가 정규화한
+/// 절대경로는 길어 읽기 나쁘다. CLI가 현재 디렉터리를 넘긴다. None이면 경로를 그대로 두는데,
+/// wasm은 가상 경로를 써 줄일 기준이 없다.
+pub fn format_error(
+    base_dir: Option<&str>,
+    entry_path: &str,
+    entry_src: &str,
+    err: &CompileError,
+) -> String {
+    let (path, src, range) = match err {
+        CompileError::Flatten(FlattenError::Lex(e)) => {
+            (e.path.as_str(), e.src.as_str(), Some(e.err.range))
+        }
+        CompileError::Flatten(FlattenError::Parse(e)) => {
+            (e.path.as_str(), e.src.as_str(), Some(e.err.range))
+        }
+        // 나머지 flatten 에러는 소스 안 위치라는 개념이 없다(use 그래프/타입 참조 단위).
+        CompileError::Flatten(_) => (entry_path, entry_src, None),
+        CompileError::Codegen(e) => (entry_path, entry_src, e.range),
+    };
+    let message = match err {
+        CompileError::Flatten(e) => e.to_string(),
+        CompileError::Codegen(e) => e.kind.to_string(),
+    };
+    let shown = base_dir.and_then(|dir| relative_to(dir, path)).unwrap_or(path);
+    diagnostic::format(shown, src, range, &message)
+}
+
+/// dir 아래에 있는 path를 dir 기준 상대경로로. 아래가 아니면 None(줄일 수 없으니 원본을 쓴다).
+/// 문자열 접두어만 본다 - 두 경로 모두 loader가 정규화한 절대경로라 접두어 일치면 하위다.
+fn relative_to<'a>(dir: &str, path: &'a str) -> Option<&'a str> {
+    let dir = dir.strip_suffix('/').unwrap_or(dir);
+    path.strip_prefix(dir)?.strip_prefix('/')
 }
 
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
@@ -2407,5 +2456,58 @@ mod tests {
     fn codegen_error_without_range_is_none() {
         let src = r#"component C { template { svg( /) } }"#;
         assert_eq!(codegen_error_snippet(src), None);
+    }
+
+    // ── 진단 텍스트(format_error) ──────────────────────────────────────
+    //
+    // 위치 계산은 diagnostic 모듈이 자기 테스트로 덮는다. 여기서는 에러 종류마다 올바른
+    // 파일/구간/메시지가 진단에 흘러 들어가는지를 본다.
+
+    /// 컴파일 실패의 진단 텍스트(테스트용). 엔트리 경로는 고정 이름을 쓴다.
+    fn diagnostic_of(src: &str) -> String {
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        format_error(None, "a.qubc", src, &err)
+    }
+
+    /// codegen 에러는 참조 자리를 가리키고, 메시지에 variant 이름이 안 새어 나온다.
+    #[test]
+    fn diagnostic_shows_location_and_message() {
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "a.qubc:3:23: error: prop 'user'에 필드 'nope'가 없다",
+                " 3 |   template { div() { {user.nope} } }",
+                "   |                       ^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// lex/parse 에러는 자기가 든 파일(Sourced.path)을 가리킨다 - 인자로 준 엔트리 이름이 아니라.
+    #[test]
+    fn diagnostic_uses_file_the_error_carries() {
+        // compile()의 엔트리 경로는 "entry"다(테스트 헬퍼). format_error엔 "a.qubc"를
+        // 넘겼는데도 진단은 에러가 든 쪽을 쓴다.
+        let out = diagnostic_of("component C { oops { } }");
+        assert!(out.starts_with("entry:1:15: error: "), "{out}");
+    }
+
+    /// 위치를 모르는 에러(range None)는 첫 줄만 - 소스 줄과 캐럿이 안 붙는다.
+    #[test]
+    fn diagnostic_without_range_has_no_snippet() {
+        let out = diagnostic_of(r#"component C { template { svg( /) } }"#);
+        assert_eq!(out, "a.qubc: error: 내장 태그가 아니다: 'svg'");
+    }
+
+    /// base_dir 아래 경로는 상대경로로 줄여 낸다. 아래가 아니면 원본 그대로.
+    #[test]
+    fn diagnostic_shortens_path_under_base_dir() {
+        assert_eq!(relative_to("/a/b", "/a/b/c.qubc"), Some("c.qubc"));
+        // 끝 슬래시가 있어도 같게 동작해야 한다.
+        assert_eq!(relative_to("/a/b/", "/a/b/c.qubc"), Some("c.qubc"));
+        // 접두어가 겹쳐 보이지만 다른 디렉터리다(/a/bb) - 줄이면 안 된다.
+        assert_eq!(relative_to("/a/b", "/a/bb/c.qubc"), None);
+        assert_eq!(relative_to("/a/b", "/x/c.qubc"), None);
     }
 }

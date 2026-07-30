@@ -28,6 +28,31 @@ pub enum ParseErrorKind {
     EmptyBlock(String),
 }
 
+impl std::fmt::Display for ParseErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ParseErrorKind::UnexpectedEnd => write!(f, "소스가 끝났다 - 닫히지 않은 블록이 있다"),
+            // want/got은 파서 내부 표기(토큰 variant 이름)가 그대로 나온다 - 사람이 읽는
+            // 토큰 표기로 다듬는 건 별도 작업이다.
+            ParseErrorKind::Expected { want, got } => {
+                write!(f, "{want}가 와야 하는데 {got}가 왔다")
+            }
+            ParseErrorKind::DuplicateSlotPlaceholderFill { comp, slot } => write!(
+                f,
+                "'{comp}'의 슬롯 '{slot}'을 두 번 채웠다 - 콘텐츠는 한 덩이만 갈 수 있다"
+            ),
+            ParseErrorKind::MixedSlotPlaceholderFill { comp } => write!(
+                f,
+                "'{comp}' 합성 블록에 기명 채움과 무기명 노드가 섞였다 - 정의 쪽이 둘 중 하나다"
+            ),
+            ParseErrorKind::EmptyBlock(tag) => write!(
+                f,
+                "'{tag}'의 자식 블록이 비었다 - 슬롯을 안 채우면 self-close(`{tag}( /)`)로 쓴다"
+            ),
+        }
+    }
+}
+
 /// 파싱 실패 - 무엇이(kind) 어디서(range) 틀렸나.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ParseError {

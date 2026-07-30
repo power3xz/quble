@@ -46,6 +46,71 @@ pub enum CodegenErrorKind {
     DuplicateSlotPlaceholderDef { comp: String, slot_placeholder: Option<String> },
 }
 
+impl std::fmt::Display for CodegenErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            CodegenErrorKind::UnknownTag(tag) => write!(f, "내장 태그가 아니다: '{tag}'"),
+            CodegenErrorKind::UnknownProp(name) => {
+                write!(f, "props에 선언되지 않은 참조: '{name}'")
+            }
+            CodegenErrorKind::UnknownComponent(name) => {
+                write!(f, "정의를 찾을 수 없는 컴포넌트: '{name}'")
+            }
+            CodegenErrorKind::UnknownArg { comp, prop } => {
+                write!(f, "'{comp}'의 props에 '{prop}'이 없다")
+            }
+            CodegenErrorKind::UnknownEvent(name) => {
+                write!(f, "events에 선언되지 않은 이벤트: '{name}'")
+            }
+            CodegenErrorKind::UnknownContext(name) => {
+                write!(f, "contexts에 선언되지 않은 컨텍스트: '{name}'")
+            }
+            CodegenErrorKind::UnknownField { root, field } => {
+                write!(f, "prop '{root}'에 필드 '{field}'가 없다")
+            }
+            CodegenErrorKind::NotLeaf(path) => write!(
+                f,
+                "'{path}'는 객체/배열이다 - 값 자리에는 원시 값만 올 수 있다"
+            ),
+            CodegenErrorKind::PropTypeMismatch { comp, prop } => write!(
+                f,
+                "'{comp}'의 prop '{prop}'과 넘긴 값의 구조가 다르다 - 필드 이름/순서/타입이 같아야 한다"
+            ),
+            CodegenErrorKind::SlotOverflow(name) => {
+                write!(f, "슬롯이 255개를 넘었다 - 넘친 참조: '{name}'")
+            }
+            CodegenErrorKind::DuplicateBinding(name) => write!(
+                f,
+                "@for 회차변수 '{name}'이 prop 또는 바깥 회차변수와 겹친다 - 다른 이름을 쓴다"
+            ),
+            CodegenErrorKind::ForCountNotIterable(path) => write!(
+                f,
+                "'{path}'는 배열도 숫자도 아니다 - @for의 반복 횟수로 쓸 수 없다"
+            ),
+            CodegenErrorKind::UnknownSlotPlaceholder {
+                comp,
+                slot_placeholder,
+            } => match slot_placeholder {
+                Some(slot) => write!(f, "'{comp}'에 슬롯 '{slot}' 선언(@slot({slot}))이 없다"),
+                None => write!(f, "'{comp}'에 무기명 슬롯 선언(@slot())이 없다"),
+            },
+            CodegenErrorKind::DuplicateSlotPlaceholderDef {
+                comp,
+                slot_placeholder,
+            } => match slot_placeholder {
+                Some(slot) => write!(
+                    f,
+                    "'{comp}'이 슬롯 '{slot}'을 두 번 선언했다 - 콘텐츠가 어느 자리로 갈지 정할 수 없다"
+                ),
+                None => write!(
+                    f,
+                    "'{comp}'이 무기명 슬롯을 두 번 선언했다 - 콘텐츠가 어느 자리로 갈지 정할 수 없다"
+                ),
+            },
+        }
+    }
+}
+
 /// codegen 실패 - 무엇이(kind) 어디서(range) 틀렸나.
 ///
 /// range가 Option인 건 AST가 아직 구간을 다 들지 않아서다. prop 참조(VarRef)는 구간을

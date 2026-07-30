@@ -82,6 +82,37 @@ pub enum FlattenError {
     UnknownKey(String),
 }
 
+impl std::fmt::Display for FlattenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            // 이 둘은 소스 안 위치를 갖는다 - 위치와 밑줄까지 붙이는 건 diagnostic이 하고,
+            // 여기서는 안쪽 메시지만 낸다.
+            FlattenError::Lex(e) => write!(f, "{}", e.err.kind),
+            FlattenError::Parse(e) => write!(f, "{}", e.err.kind),
+            FlattenError::NotFound { base, target } => {
+                write!(f, "'{base}'에서 '{target}'을 찾을 수 없다")
+            }
+            FlattenError::DuplicateComponent(name) => {
+                write!(f, "컴포넌트 '{name}'이 서로 다른 파일에 정의됐다")
+            }
+            FlattenError::MissingExport { path, name } => {
+                write!(f, "'{path}'에 '{name}' 정의가 없다")
+            }
+            FlattenError::Cycle(path) => write!(f, "use 그래프가 순환한다: '{path}'"),
+            FlattenError::UnknownType(name) => {
+                write!(f, "prop 타입이 가리키는 컴포넌트를 찾을 수 없다: '{name}'")
+            }
+            FlattenError::TypeCycle(name) => write!(f, "prop 타입 참조가 순환한다: '{name}'"),
+            FlattenError::NonObjectUtil => {
+                write!(f, "Omit/Pick의 대상이 객체 타입이 아니다")
+            }
+            FlattenError::UnknownKey(key) => {
+                write!(f, "Omit/Pick이 나열한 키 '{key}'가 대상 타입에 없다")
+            }
+        }
+    }
+}
+
 /// 엔트리 소스를 파싱하고 use 그래프를 따라가 컴포넌트를 평탄화한다.
 /// 엔트리는 모든 컴포넌트를 가져가고(ID 0부터), use 대상 파일은 나열된 이름만 가져온다.
 /// 안 쓰는 컴포넌트는 병합에서 제외된다 - 쓰려면 codegen이 CompLookup에서 막는다.
