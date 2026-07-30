@@ -2261,8 +2261,8 @@ mod tests {
     /// 컴파일이 실패했다고 보고 그 에러가 가리키는 소스 조각을 돌려준다(테스트용).
     fn error_snippet(src: &str) -> String {
         let range = match compile(src) {
-            Err(CompileError::Flatten(FlattenError::Lex(e))) => e.range,
-            Err(CompileError::Flatten(FlattenError::Parse(e))) => e.range,
+            Err(CompileError::Flatten(FlattenError::Lex(e))) => e.err.range,
+            Err(CompileError::Flatten(FlattenError::Parse(e))) => e.err.range,
             other => panic!("lex/parse 에러를 기대했다: {:?}", other.map(|_| ())),
         };
         src[range.start as usize..range.end as usize].to_string()
@@ -2319,7 +2319,7 @@ mod tests {
         // 빈 구간이라도 자리는 소스 끝이어야 한다(0이 아니라).
         match compile(src) {
             Err(CompileError::Flatten(FlattenError::Parse(e))) => {
-                assert_eq!(e.range.start as usize, src.len());
+                assert_eq!(e.err.range.start as usize, src.len());
             }
             other => panic!("parse 에러를 기대했다: {:?}", other.map(|_| ())),
         }
@@ -2341,7 +2341,7 @@ mod tests {
         assert_eq!(error_snippet(src), "H");
         // 두 번째 H여야 한다 - 첫 H를 가리키면 어느 쪽이 중복인지 안 보인다.
         let range = match compile(src) {
-            Err(CompileError::Flatten(FlattenError::Parse(e))) => e.range,
+            Err(CompileError::Flatten(FlattenError::Parse(e))) => e.err.range,
             other => panic!("parse 에러를 기대했다: {:?}", other.map(|_| ())),
         };
         assert_eq!(range.start as usize, src.rfind("H <<").unwrap());

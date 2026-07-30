@@ -29,10 +29,35 @@ impl<F: Fn(&str, &str) -> Option<(String, String)>> SourceLoader for F {
     }
 }
 
+/// 에러와 그 에러가 난 소스를 함께 묶은 것. lex/parse 에러의 SrcRange는 파일 안 좌표라
+/// 어느 파일 것인지를 range만 보고는 모른다 - 그 파일을 에러에 실어 보내 관계를 타입으로 못박는다.
+/// 소비처(CLI/wasm)가 loader를 다시 붙들지 않아도 라인/컬럼과 스니펫을 낼 수 있다.
+///
+/// path/src는 파일 단위라 SrcRange(노드 단위)에 넣지 않는다 - 같은 파일 range 100개가
+/// 같은 답을 100번 들 이유가 없다.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Sourced<E> {
+    /// 에러가 난 파일의 정규화 경로.
+    pub path: String,
+    /// 그 파일의 소스 전문. err의 range가 이 문자열의 바이트 오프셋이다.
+    pub src: String,
+    pub err: E,
+}
+
+impl<E> Sourced<E> {
+    fn new(path: &str, src: &str, err: E) -> Self {
+        Sourced {
+            path: path.to_string(),
+            src: src.to_string(),
+            err,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum FlattenError {
-    Lex(lexer::LexError),
-    Parse(parse::ParseError),
+    Lex(Sourced<lexer::LexError>),
+    Parse(Sourced<parse::ParseError>),
     /// use가 가리키는 경로를 loader가 찾지 못함.
     NotFound {
         base: String,
@@ -192,8 +217,11 @@ fn collect(
     loader: &impl SourceLoader,
     ctx: &mut Ctx,
 ) -> Result<(), FlattenError> {
-    let lexed = lexer::lex(src).map_err(FlattenError::Lex)?;
-    let source = parse::parse(&lexed, src.len()).map_err(FlattenError::Parse)?;
+    // 에러에 이 파일(path/src)을 실어 보낸다 - range가 어느 파일 오프셋인지 소비처가 알아야 한다.
+    let lexed =
+        lexer::lex(src).map_err(|e| FlattenError::Lex(Sourced::new(path, src, e)))?;
+    let source = parse::parse(&lexed, src.len())
+        .map_err(|e| FlattenError::Parse(Sourced::new(path, src, e)))?;
 
     // want로 가져올 컴포넌트를 고른다. None이면 전부.
     let take = |name: &str| want.map_or(true, |ns| ns.iter().any(|n| n == name));
