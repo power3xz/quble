@@ -733,10 +733,10 @@ impl<'a> Parser<'a> {
     fn for_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::For))?;
         self.expect(&Token::LParen)?;
-        let item = self.ident()?;
+        let item = self.ident_at()?;
         let index = if matches!(self.peek(), Some(Token::Comma)) {
             self.next()?; // ,
-            Some(self.ident()?)
+            Some(self.ident_at()?)
         } else {
             None
         };

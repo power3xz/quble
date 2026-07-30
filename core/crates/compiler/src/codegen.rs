@@ -122,9 +122,9 @@ impl std::fmt::Display for CodegenErrorKind {
 
 /// codegen 실패 - 무엇이(kind) 어디서(range) 틀렸나.
 ///
-/// range가 Option인 건 탓할 자리가 아예 없는 에러가 있어서다. 안 넘긴 prop(UnknownArg)이
-/// 그렇다 - 없는 것은 소스에 자리가 없다. 그런 자리를 0..0 같은 가짜 값으로 꾸미지 않고
-/// None으로 정직하게 둔다. 아직 구간을 안 든 AST 자리(이벤트명, @for 회차변수)도 None이다.
+/// range가 Option인 건 탓할 자리가 아예 없는 에러가 있어서다 - 없는 것은 소스에 자리가 없다.
+/// 안 넘긴 prop(UnknownArg)과 무기명 슬롯(`@slot()`) 관련 둘이 그렇다. 그런 자리를 0..0 같은
+/// 가짜 값으로 꾸미지 않고 None으로 정직하게 둔다.
 #[derive(Debug, PartialEq, Eq)]
 pub struct CodegenError {
     pub kind: CodegenErrorKind,
@@ -907,18 +907,21 @@ fn emit_node(
         } => {
             // 이름 충돌 검사(섀도잉 금지 - 조회를 순서 무관하게 유지). item/index 둘 다 props/바깥 회차변수와
             // 안 겹쳐야 한다. item==index도 금지(같은 이름 두 슬롯).
-            let mut names: Vec<&String> = vec![item];
+            let mut names: Vec<&Ident> = vec![item];
             if let Some(idx) = index {
                 names.push(idx);
             }
+            let same = index.as_ref().map(|i| i.name == item.name).unwrap_or(false);
             for name in &names {
-                let dup = props.iter().any(|p| &&p.name == name)
+                let dup = props.iter().any(|p| p.name == name.name)
                     || for_scope
                         .for_vars
                         .iter()
-                        .any(|fv| fv.name.as_ref() == Some(*name));
-                if dup || (index.as_ref() == Some(item) && names.len() == 2) {
-                    return Err(CodegenErrorKind::DuplicateBinding((*name).clone()).no_range());
+                        .any(|fv| fv.name.as_deref() == Some(name.name.as_str()));
+                if dup || same {
+                    return Err(
+                        CodegenErrorKind::DuplicateBinding(name.name.clone()).at(name.range.0)
+                    );
                 }
             }
 
@@ -965,12 +968,12 @@ fn emit_node(
             // 2칸을 잇는다. index는 이름 없으면 None(슬롯만 점유, 몸체 참조 불가) - 그래도 슬롯은 항상 잡아 $n 정합.
             let mut nested_vars = for_scope.for_vars.to_vec();
             nested_vars.push(ForVar {
-                name: Some(item.clone()),
+                name: Some(item.name.clone()),
                 offset: base,
                 type_: item_type,
             });
             nested_vars.push(ForVar {
-                name: index.clone(),
+                name: index.as_ref().map(|i| i.name.clone()),
                 offset: base + 1,
                 type_: Type::Number,
             });

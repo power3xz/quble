@@ -2519,6 +2519,36 @@ mod tests {
         assert_eq!(out, "a.qubc: error: `C` has no prop `a`");
     }
 
+    /// prop을 가리는 @for 회차변수는 그 변수 이름을 가리킨다.
+    #[test]
+    fn diagnostic_points_at_duplicate_for_binding() {
+        let src = "component C {\n  props { row: string }\n  template { @for (row of 3) { p() { \"x\" } } }\n}";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "a.qubc:3:20: error: @for binding `row` shadows a prop or an outer binding: use another name",
+                " 3 |   template { @for (row of 3) { p() { \"x\" } } }",
+                "   |                    ^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// item과 index가 같은 이름이면 먼저 온 item을 가리킨다(같은 이름 두 슬롯).
+    #[test]
+    fn diagnostic_points_at_for_item_index_same_name() {
+        let src = "component C {\n  template { @for (i, i of 3) { p() { \"x\" } } }\n}";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "a.qubc:2:20: error: @for binding `i` shadows a prop or an outer binding: use another name",
+                " 2 |   template { @for (i, i of 3) { p() { \"x\" } } }",
+                "   |                    ^",
+            ]
+            .join("\n")
+        );
+    }
+
     /// events에 없는 이벤트명은 `@click:` 뒤 그 이름을 가리킨다(`@click`은 렉서가 이미 걸렀다).
     #[test]
     fn diagnostic_points_at_unknown_event() {

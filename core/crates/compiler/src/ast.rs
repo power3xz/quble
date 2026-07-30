@@ -135,8 +135,8 @@ pub enum Node {
     /// (`@for (row, i of rows)`의 i) - 몸체 `{i}`/이벤트 `$n`이 읽는다. 없으면 None(인덱스 슬롯은 잡되
     /// 몸체에서 이름 참조 불가). item과 index는 별개 슬롯이라 count-for든 array-for든 둘 다 쓸 수 있다.
     For {
-        item: String,
-        index: Option<String>,
+        item: Ident,
+        index: Option<Ident>,
         count: ForCount,
         body: Vec<Node>,
     },
