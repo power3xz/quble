@@ -274,7 +274,10 @@ mod tests {
         let src = r#"component C { template { svg( /) } }"#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::UnknownTag(_)))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownTag(_),
+                ..
+            }))
         ));
     }
 
@@ -593,9 +596,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::UnknownArg { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownArg { .. },
+                ..
+            }))
         ));
     }
 
@@ -614,9 +618,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::DuplicateBinding(_)
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::DuplicateBinding(_),
+                ..
+            }))
         ));
     }
 
@@ -667,9 +672,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::DuplicateBinding(_)
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::DuplicateBinding(_),
+                ..
+            }))
         ));
     }
 
@@ -1011,7 +1017,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::UnknownProp(_)))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownProp(_),
+                ..
+            }))
         ));
     }
 
@@ -1278,9 +1287,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::PropTypeMismatch { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::PropTypeMismatch { .. },
+                ..
+            }))
         ));
     }
 
@@ -1296,7 +1306,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::NotLeaf(_)))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::NotLeaf(_),
+                ..
+            }))
         ));
     }
 
@@ -1844,7 +1857,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError::NotLeaf(_)))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::NotLeaf(_),
+                ..
+            }))
         ));
     }
 
@@ -1859,9 +1875,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::UnknownField { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownField { .. },
+                ..
+            }))
         ));
     }
 
@@ -1876,9 +1893,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::UnknownField { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownField { .. },
+                ..
+            }))
         ));
     }
 
@@ -2098,9 +2116,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::UnknownSlotPlaceholder { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+                ..
+            }))
         ));
     }
 
@@ -2113,9 +2132,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::UnknownSlotPlaceholder { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+                ..
+            }))
         ));
     }
 
@@ -2174,12 +2194,13 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::DuplicateSlotPlaceholderDef {
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef {
                     slot_placeholder: None,
                     ..
-                }
-            ))
+                },
+                ..
+            }))
         ));
     }
 
@@ -2194,9 +2215,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::DuplicateSlotPlaceholderDef { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef { .. },
+                ..
+            }))
         ));
     }
 
@@ -2208,9 +2230,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::DuplicateSlotPlaceholderDef { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef { .. },
+                ..
+            }))
         ));
     }
 
@@ -2223,9 +2246,10 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(
-                codegen::CodegenError::UnknownSlotPlaceholder { .. }
-            ))
+            Err(CompileError::Codegen(codegen::CodegenError {
+                kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+                ..
+            }))
         ));
     }
 
@@ -2242,6 +2266,16 @@ mod tests {
             other => panic!("lex/parse 에러를 기대했다: {:?}", other.map(|_| ())),
         };
         src[range.start as usize..range.end as usize].to_string()
+    }
+
+    /// codegen 에러가 가리키는 소스 조각. 위치를 못 주는 에러(range None)면 None을 돌려준다.
+    fn codegen_error_snippet(src: &str) -> Option<String> {
+        match compile(src) {
+            Err(CompileError::Codegen(e)) => {
+                e.range.map(|r| src[r.start as usize..r.end as usize].to_string())
+            }
+            other => panic!("codegen 에러를 기대했다: {:?}", other.map(|_| ())),
+        }
     }
 
     #[test]
@@ -2318,5 +2352,60 @@ mod tests {
     fn error_range_is_byte_offset_past_hangul() {
         let src = r#"component C { template { div(class="가나다") { = } } }"#;
         assert_eq!(error_snippet(src), "=");
+    }
+
+    // ── codegen 에러 위치 ──────────────────────────────────────────────
+    //
+    // prop 참조(VarRef)가 구간을 들어, 그 참조를 탓하는 에러는 자리를 가리킨다.
+    // 아직 구간이 없는 자리(태그명/컴포넌트명 등)는 None으로 남는다.
+
+    #[test]
+    fn codegen_error_points_at_unknown_prop() {
+        // props에 없는 `nope`를 보간했다 - 그 참조를 가리켜야 한다.
+        let src = r#"component C { props { title: string } template { div() { {nope} } } }"#;
+        assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
+    }
+
+    /// 경로 참조는 root부터 끝까지 통째로 - `user`만 가리키면 어느 필드가 문제인지 안 보인다.
+    #[test]
+    fn codegen_error_points_at_whole_path() {
+        let src = r#"
+            component C {
+              props { user: { name: string } }
+              template { div() { {user.nope} } }
+            }
+        "#;
+        assert_eq!(codegen_error_snippet(src).as_deref(), Some("user.nope"));
+    }
+
+    /// 값 자리에 객체가 오면(NotLeaf) 그 참조를 가리킨다.
+    #[test]
+    fn codegen_error_points_at_non_leaf_ref() {
+        let src = r#"
+            component C {
+              props { user: { name: string } }
+              template { div() { {user} } }
+            }
+        "#;
+        assert_eq!(codegen_error_snippet(src).as_deref(), Some("user"));
+    }
+
+    /// 단축형 payload(`{ title }`)도 그 이름이 곧 참조라 자리를 가리킨다.
+    #[test]
+    fn codegen_error_points_at_shorthand_payload_field() {
+        let src = r#"
+            component C {
+              events { PICK({ nope }) }
+              template { div(@click:PICK /) }
+            }
+        "#;
+        assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
+    }
+
+    /// 아직 구간이 없는 자리는 None - 가짜 위치로 꾸미지 않는다.
+    #[test]
+    fn codegen_error_without_range_is_none() {
+        let src = r#"component C { template { svg( /) } }"#;
+        assert_eq!(codegen_error_snippet(src), None);
     }
 }
