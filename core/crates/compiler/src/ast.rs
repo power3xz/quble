@@ -96,7 +96,9 @@ pub enum Node {
         tag: Ident,
         attrs: Vec<(String, AttrValue)>,
         /// `@click:TOGGLE` - (DOM이벤트, 이벤트명). 이 요소가 무엇에 반응해 무슨 이벤트를 쏘나.
-        event_bindings: Vec<(String, String)>,
+        /// DOM 이벤트는 렉서가 닫힌 집합으로 걸러 틀릴 수 없어 위치가 없고, 이벤트명은
+        /// events 선언에 없을 수 있어 탓할 자리를 든다.
+        event_bindings: Vec<(String, Ident)>,
         children: Vec<Node>,
     },
     Text(String),

@@ -2519,6 +2519,21 @@ mod tests {
         assert_eq!(out, "a.qubc: error: `C` has no prop `a`");
     }
 
+    /// events에 없는 이벤트명은 `@click:` 뒤 그 이름을 가리킨다(`@click`은 렉서가 이미 걸렀다).
+    #[test]
+    fn diagnostic_points_at_unknown_event() {
+        let src = "component C {\n  events { PICK({}) }\n  template { div(@click:NOPE /) }\n}";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "a.qubc:3:25: error: `NOPE` is not declared in events",
+                " 3 |   template { div(@click:NOPE /) }",
+                "   |                         ^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
     /// 같은 슬롯을 두 번 선언하면 뒤에 온 선언을 가리킨다(먼저 온 것이 자리를 차지했다).
     #[test]
     fn diagnostic_points_at_duplicate_slot_placeholder_def() {

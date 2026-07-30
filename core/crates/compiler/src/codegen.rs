@@ -665,9 +665,11 @@ fn emit_node(
                     .expect("렉서가 거른 DOM 이벤트만 온다");
                 let event_index = events
                     .iter()
-                    .position(|e| &e.name == event_name)
-                    .ok_or_else(|| CodegenErrorKind::UnknownEvent(event_name.clone()).no_range())?
-                    as u16;
+                    .position(|e| e.name == event_name.name)
+                    .ok_or_else(|| {
+                        CodegenErrorKind::UnknownEvent(event_name.name.clone())
+                            .at(event_name.range.0)
+                    })? as u16;
                 code.push(Op::BindEvent as u8);
                 code.extend_from_slice(&event_type.to_le_bytes());
                 code.extend_from_slice(&event_index.to_le_bytes());

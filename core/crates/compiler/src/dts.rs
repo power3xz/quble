@@ -221,7 +221,7 @@ fn walk_nodes(
                 for (_dom, event_name) in event_bindings {
                     emit(
                         comp,
-                        event_name,
+                        &event_name.name,
                         &event_prefix,
                         context_stack,
                         depth_base,

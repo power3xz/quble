@@ -1022,7 +1022,7 @@ impl<'a> Parser<'a> {
     // RParen 전까지 ATTR과 이벤트 바인딩(`@click:EVENT`)을 모은다. 콤마는 선택적 구분자.
     // 둘이 같은 괄호 안에 섞여 와 한 번에 모으고 (attrs, event_bindings)로 가른다.
     #[allow(clippy::type_complexity)]
-    fn attrs(&mut self) -> Result<(Vec<(String, AttrValue)>, Vec<(String, String)>), ParseError> {
+    fn attrs(&mut self) -> Result<(Vec<(String, AttrValue)>, Vec<(String, Ident)>), ParseError> {
         let mut attrs = Vec::new();
         let mut event_bindings = Vec::new();
         loop {
@@ -1060,7 +1060,7 @@ impl<'a> Parser<'a> {
                         }
                     };
                     self.expect(&Token::Colon)?;
-                    let event_name = self.ident()?;
+                    let event_name = self.ident_at()?;
                     event_bindings.push((dom_event, event_name));
                 }
                 Some(Token::Ident(_)) => {
