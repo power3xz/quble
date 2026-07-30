@@ -104,8 +104,9 @@ fn load(path: &Path) -> std::io::Result<Loaded> {
 fn load_one(path: &Path, loaded: &mut Loaded) -> std::io::Result<()> {
     let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("out").to_string();
     // compile_file이 엔트리를 읽고 use는 importer 기준 상대경로로 해소한다.
-    let output = compiler::compile_file(path.to_str().unwrap())
-        .map_err(|e| std::io::Error::other(format!("컴파일 실패 {}: {e:?}", path.display())))?;
+    let src_path = path.to_str().unwrap();
+    let output = compiler::compile_file(src_path)
+        .map_err(|e| std::io::Error::other(quble::compile_error_text(src_path, &e)))?;
 
     let mut res_paths = Vec::with_capacity(output.resources.len());
     for origin in &output.resources {

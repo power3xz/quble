@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     let dts = match compiler::handlers_dts_file(&path) {
         Ok(dts) => dts,
         Err(e) => {
-            eprintln!("컴파일 실패: {e:?}");
+            eprintln!("{}", quble::compile_error_text(&path, &e));
             return ExitCode::FAILURE;
         }
     };

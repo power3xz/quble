@@ -67,6 +67,19 @@ pub fn manifest_json(resources: &[String], handlers: Option<&str>) -> String {
     out
 }
 
+/// 컴파일 실패를 진단 텍스트로. 소스를 파일에서 읽고 현재 디렉터리로 경로를 줄여
+/// `compiler::format_error`에 넘긴다 - 바이너리 넷이 같은 형식으로 내도록 여기 한 번만 둔다.
+/// 파일시스템과 cwd를 보므로 컴파일러(wasm에서도 도는)가 아니라 이 크레이트의 몫이다.
+///
+/// 소스를 못 읽으면(경로 자체가 틀린 경우) 빈 소스로 - 그 에러는 소스 안 위치가 없어
+/// 첫 줄만 난다.
+pub fn compile_error_text(path: &str, err: &compiler::CompileError) -> String {
+    let src = std::fs::read_to_string(path).unwrap_or_default();
+    let cwd = std::env::current_dir().ok();
+    let base = cwd.as_deref().map(|p| p.to_string_lossy());
+    compiler::format_error(base.as_deref(), path, &src, err)
+}
+
 // 렌더(SSR)는 보류 - renderer 크레이트가 타입화된 상수풀에 미대응이라 의존을 끊었다.
 // render_source/render_with와 그 통합 테스트는 SSR 재개 시 복구한다(ISSUES.md).
 

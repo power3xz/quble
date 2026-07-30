@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     let output = match compiler::compile_file(&path) {
         Ok(output) => output,
         Err(e) => {
-            eprintln!("컴파일 실패: {e:?}");
+            eprintln!("{}", quble::compile_error_text(&path, &e));
             return ExitCode::FAILURE;
         }
     };
