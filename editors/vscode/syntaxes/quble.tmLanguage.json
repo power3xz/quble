@@ -16,7 +16,7 @@
   ],
   "repository": {
     "use": {
-      "comment": "use X, Y from \"path\" — 다른 소스의 컴포넌트 import.",
+      "comment": "use X, Y from \"path\" - 다른 소스의 컴포넌트 import.",
       "begin": "\\b(use)\\b",
       "beginCaptures": {
         "1": { "name": "keyword.control.use.quble" }
@@ -44,7 +44,7 @@
       "name": "keyword.control.directive.quble"
     },
     "composition": {
-      "comment": "Alias: Comp(...) 또는 Comp(...) — 대문자 식별자. 별칭이 있으면 별칭이 경로 마디.",
+      "comment": "Alias: Comp(...) 또는 Comp(...) - 대문자 식별자. 별칭이 있으면 별칭이 경로 마디.",
       "patterns": [
         {
           "match": "\\b([A-Z][A-Za-z0-9_]*)\\s*(:)\\s*([A-Z][A-Za-z0-9_]*)",
@@ -61,7 +61,7 @@
       ]
     },
     "event-name": {
-      "comment": "대문자 스네이크 관례 — TOGGLE, CLICK_STAT. @click:EVENT 및 events 블록 선언.",
+      "comment": "대문자 스네이크 관례 - TOGGLE, CLICK_STAT. @click:EVENT 및 events 블록 선언.",
       "match": "\\b([A-Z][A-Z0-9_]*)\\b",
       "name": "constant.other.event.quble"
     },

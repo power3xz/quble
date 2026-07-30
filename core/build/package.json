@@ -2,7 +2,7 @@
   "name": "quble-build",
   "private": true,
   "type": "module",
-  "description": "Quble 빌드 파이프라인 — quble 컴파일 후 짝 핸들러(.qubc.handlers.ts)를 esbuild로 번들해 리소스화하고 manifest에 등록.",
+  "description": "Quble 빌드 파이프라인 - quble 컴파일 후 짝 핸들러(.qubc.handlers.ts)를 esbuild로 번들해 리소스화하고 manifest에 등록.",
   "bin": {
     "quble-build": "./build.mjs"
   },
