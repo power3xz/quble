@@ -2519,6 +2519,21 @@ mod tests {
         assert_eq!(out, "a.qubc: error: `C` has no prop `a`");
     }
 
+    /// 같은 슬롯을 두 번 선언하면 뒤에 온 선언을 가리킨다(먼저 온 것이 자리를 차지했다).
+    #[test]
+    fn diagnostic_points_at_duplicate_slot_placeholder_def() {
+        let src = "component C {\n  template { div() { @slot(H) @slot(H) } }\n}";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "a.qubc:2:37: error: `C` declares slot `H` twice: the content has no single place to go",
+                " 2 |   template { div() { @slot(H) @slot(H) } }",
+                "   |                                     ^",
+            ]
+            .join("\n")
+        );
+    }
+
     /// 정의가 없는 컴포넌트는 호출한 그 이름을 가리킨다.
     #[test]
     fn diagnostic_points_at_unknown_component() {

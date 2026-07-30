@@ -1,8 +1,8 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    ArgValue, AttrValue, Context, Event, ForCount, LitValue, Node, Prop, SlotPlaceholderContent,
-    Type, VarRef,
+    ArgValue, AttrValue, Context, Event, ForCount, Ident, LitValue, Node, Prop,
+    SlotPlaceholderContent, Type, VarRef,
 };
 use crate::flatten::FlatComp;
 use crate::src_range::SrcRange;
@@ -162,7 +162,8 @@ impl<'a> CompLookup<'a> {
             .iter()
             .enumerate()
             .map(|(i, fc)| {
-                let slot_placeholders = collect_slot_placeholders(&fc.comp.template);
+                let slot_placeholders =
+                    slot_def_names(&collect_slot_placeholders(&fc.comp.template));
                 (
                     fc.comp.name.as_str(),
                     (i as u16, fc.comp.props.as_slice(), slot_placeholders),
@@ -187,16 +188,27 @@ fn slot_name(content: &SlotPlaceholderContent) -> Option<&str> {
 
 /// template을 훑어 `@slot` 선언을 등장 순서로 모은다(무기명이면 None). 이 순서가 slot_placeholder_index다.
 /// 중첩 노드(요소 자식/@if/@for/@with) 안의 슬롯도 같은 순서 공간에 들어간다.
-fn collect_slot_placeholders(nodes: &[Node]) -> Vec<Option<&str>> {
+///
+/// 이름만이 아니라 Ident째로 모은다 - 중복 선언 에러가 그 이름 자리를 가리켜야 한다.
+fn collect_slot_placeholders(nodes: &[Node]) -> Vec<Option<&Ident>> {
     let mut slot_placeholders = Vec::new();
     walk_slot_placeholders(nodes, &mut slot_placeholders);
     slot_placeholders
 }
 
-fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Option<&'a str>>) {
+/// 슬롯 선언 목록에서 이름만 뽑는다(무기명이면 None). 자리 찾기는 이름으로만 하므로
+/// 위치를 안 쓰는 소비처(CompLookup, 사용쪽 매칭)는 이 형태를 쓴다.
+fn slot_def_names<'a>(slot_placeholders: &[Option<&'a Ident>]) -> Vec<Option<&'a str>> {
+    slot_placeholders
+        .iter()
+        .map(|s| s.map(|i| i.name.as_str()))
+        .collect()
+}
+
+fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Option<&'a Ident>>) {
     for node in nodes {
         match node {
-            Node::SlotPlaceholderDef { name } => slot_placeholders.push(name.as_deref()),
+            Node::SlotPlaceholderDef { name } => slot_placeholders.push(name.as_ref()),
             Node::Element { children, .. } => walk_slot_placeholders(children, slot_placeholders),
             Node::If { then, else_, .. } => {
                 walk_slot_placeholders(then, slot_placeholders);
@@ -214,15 +226,21 @@ fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Opt
 /// 자리를 찾으므로 같은 이름이 둘이면 한 덩이를 두 자리에 복제하게 된다 - 선언 단계에서 막는다.
 fn check_slot_placeholder_defs(
     comp: &str,
-    slot_placeholders: &[Option<&str>],
+    slot_placeholders: &[Option<&Ident>],
 ) -> Result<(), CodegenError> {
+    let names = slot_def_names(slot_placeholders);
     for (i, slot_placeholder) in slot_placeholders.iter().enumerate() {
-        if slot_placeholders[..i].contains(slot_placeholder) {
-            return Err(CodegenErrorKind::DuplicateSlotPlaceholderDef {
+        let name = slot_placeholder.map(|s| s.name.as_str());
+        if names[..i].contains(&name) {
+            let kind = CodegenErrorKind::DuplicateSlotPlaceholderDef {
                 comp: comp.to_string(),
-                slot_placeholder: slot_placeholder.map(str::to_string),
-            }
-            .no_range());
+                slot_placeholder: name.map(str::to_string),
+            };
+            // 뒤에 온 중복 선언을 가리킨다(먼저 온 것이 자리를 차지했다). 무기명은 탓할 이름이 없다.
+            return Err(match slot_placeholder {
+                Some(slot) => kind.at(slot.range.0),
+                None => kind.no_range(),
+            });
         }
     }
     Ok(())

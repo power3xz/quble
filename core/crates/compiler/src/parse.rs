@@ -695,7 +695,7 @@ impl<'a> Parser<'a> {
         self.expect(&Token::At(Directive::Slot))?;
         self.expect(&Token::LParen)?;
         let name = match self.peek() {
-            Some(Token::Ident(_)) => Some(self.ident()?),
+            Some(Token::Ident(_)) => Some(self.ident_at()?),
             _ => None,
         };
         self.expect(&Token::RParen)?;
