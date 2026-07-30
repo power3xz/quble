@@ -1,4 +1,4 @@
-//! 컴파일 산출물 전체. 상수풀 + 컴포넌트 테이블 + 코드(BYTECODE.md §4).
+//! 컴파일 산출물 전체. 상수풀 + 컴포넌트 테이블 + 코드(BYTECODE.md #4).
 
 use crate::pool::ConstPool;
 

@@ -52,9 +52,9 @@ scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은
 - **컴포넌트 상수풀 엔트리는 타입을 갖는다**(Str/Num/Bool). quble이 타입을 소유하므로 리터럴은
   소스의 타입대로 실리고(`42`->Num, `true`->Bool), 런타임이 인덱스로 꺼내면 이미 올바른 값이다 -
   `@if` 등 소비 지점이 문자열을 다시 해석하지 않는다. 이름/텍스트/속성값은 Str.
-- 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(§4). `ELEM_OPEN`의 operand는
+- 풀의 구분은 **인덱스 비트가 아니라 opcode로** 한다(#4). `ELEM_OPEN`의 operand는
   내장 태그 ID, `ATTR_G`의 name은 전역 상수풀 ID, `ATTR_L`의 name과 모든 value/`TEXT`는
-  컴포넌트 상수풀 인덱스. (`ELEM_END`는 operand가 없다 - §5.)
+  컴포넌트 상수풀 인덱스. (`ELEM_END`는 operand가 없다 - #5.)
 
 ### 내장 태그 테이블
 
@@ -224,7 +224,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `PUSH_PATH_INDEX_SEGMENT` | 0x18 | depth: u16    | -                         | 합성 경로에 `@for` 회차 인덱스 세그먼트를 민다. `depth`는 loopIndexStack에서 읽을 위치. 직전 이름 세그먼트에 접미(`VideoItem[3]`)하거나, 직전 이름이 없으면 익명 세그먼트(`[3]`). |
 | `PUSH_FIELD`      | 0x19 | scope_index:u8, offset:u8 | scope                 | 부모 `scope[scope_index]`에서 필드로 내려가 `(kind, base+offset)`을 자식에 push(경로 참조 `{user.name}`). kind(출처)는 부모 슬롯 그대로 전파, 위치만 넘긴다 - 결과 타입은 자식이 자기 선언으로 안다(leaf면 `store.get`, object면 base+offset, array면 `arrayPool[store.get()]`). |
 | `FOR_ARRAY_VAR`   | 0x1a | scope_index:u8, offset:u8 | scope                 | count가 배열 슬롯인 반복(`@for (item of arr)`). 그 칸의 `arrayInfoIndex`로 요소 수/위치를 얻어 요소 수만큼 반복하며, 회차마다 회차변수 슬롯을 그 요소 leaf에 바인딩. |
-| `PUSH_SLOT_PLACEHOLDER_CONTENT` | 0x1b | slot_placeholder_index: u16 | - | 슬롯 콘텐츠 구간 시작(**사용쪽**). `SLOT_PLACEHOLDER_CONTENT_END`까지가 콘텐츠 코드이고 뒤따르는 `RENDER`가 소비한다. 콘텐츠는 부모 def 안에 그대로 남아 **부모 scope/path**로 해석된다(SYNTAX §3.3). |
+| `PUSH_SLOT_PLACEHOLDER_CONTENT` | 0x1b | slot_placeholder_index: u16 | - | 슬롯 콘텐츠 구간 시작(**사용쪽**). `SLOT_PLACEHOLDER_CONTENT_END`까지가 콘텐츠 코드이고 뒤따르는 `RENDER`가 소비한다. 콘텐츠는 부모 def 안에 그대로 남아 **부모 scope/path**로 해석된다(SYNTAX #3.3). |
 | `SLOT_PLACEHOLDER_CONTENT_END` | 0x1c | -              | -                         | 콘텐츠 구간 끝 마커(`IF_END` 동형). 다음 op가 `PUSH_SLOT_PLACEHOLDER_CONTENT`가 아니면 콘텐츠 목록도 끝. |
 | `FILL_SLOT_PLACEHOLDER` | 0x1d | slot_placeholder_index: u16 | -          | `@slot(name)` 자리(**정의쪽**). 그 인덱스의 콘텐츠 구간을 **부모 컨텍스트**(argumentSourcePairs/compId/pathPrefix)로 해석해 이 자리에 끼운다. 안 채운 슬롯이면 아무것도 안 넣는다(미채움 허용). |
 
@@ -248,7 +248,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
       넘기고 결과 타입은 자식이 자기 선언으로 안다(array면 자식이 `arrayPool[store.get()]`).
     - `Comp(x="lit")`(리터럴) -> `PUSH_ARG_LIT const_index`: 부모 슬롯과 분리된 독립 const.
   - **싣는 건 값이 아니라 부모 scope의 (kind, index)**다. 같은 컴포넌트가 use-site마다 다른
-    값을 받을 수 있어(§ 정의 vs 사용) 전역 leafIndex가 아니라 부모 슬롯을 한 단계 풀어 준다.
+    값을 받을 수 있어(# 정의 vs 사용) 전역 leafIndex가 아니라 부모 슬롯을 한 단계 풀어 준다.
   - 인자는 **자식 scope index 0,1,2... 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부**
     바인딩한다고 보고 순서만으로 매핑한다. 일부 생략 허용은 미정(빈 자리용 opcode 등).
   - 진입점(최상위)은 외부에서 `render(qubb, comp_id, scope)`로 scope를 직접 준다. 인자 버퍼는
@@ -264,7 +264,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   네 조합이 `ATTR_G`/`ATTR_L`/`ATTR_G_VAR`/`ATTR_L_VAR`. 변수 속성값의 `(scope_index, offset)`은
   **`TEXT_VAR`와 같은 slot 공간**을 쓴다 (값이 텍스트로 가든 속성으로 가든 같은 주입 슬롯 배열).
 - **분기 - `IF`/`ELSE`/`IF_END` (마커).** `@if`/`@else`를 세 마커로 감싼다. 형태와 "왜 점프가
-  없어야 하는가"는 §5.1에서 따로 설명한다.
+  없어야 하는가"는 #5.1에서 따로 설명한다.
 - **반복 - `FOR_* ... FOR_END` (마커 경계).** `@for`는 점프가 아니라 **해석단이 본문 구간을 N회
   반복 해석**한다(pc 되감기가 아니라 호스트 루프). 본문 경계는 `FOR_END` 마커(IF_END와 동형,
   중첩은 깊이로 짝짓기). 여는 opcode는 **count의 컴파일타임 타입**으로 갈린다 - 런타임이 값을 보고
@@ -312,12 +312,12 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   - **qubb 안에 리소스 테이블은 두지 않는다.** 빌드가 이미 resId->경로를 알아 qubb에 또 담는 건
     잉여. 나중에 필요하면 추가는 쉽고 제거는 어려우므로 지금은 안 넣는다(IDEAS.md 보류).
 - **이벤트 - `BIND_EVENT` + 컴포넌트 이벤트 테이블.** 정의와 발생이 나뉜다.
-  - **정의**는 컴포넌트 테이블(§4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
+  - **정의**는 컴포넌트 테이블(#4)에 둔다. 컴포넌트가 `events { TOGGLE({ title }) }`로 선언하면,
     이벤트명/fields(필드명 + type_ref + ref)가 그 컴포넌트의 이벤트 배열에 들어간다.
     `event_index`는 이 배열의 인덱스(0,1,2...). 각 field는 `type_ref`(타입 테이블)로 조립 구조를,
     **ref**로 그 구조를 채울 값 하나를 가리킨다(슬롯을 안 펼쳐 객체도 ref 하나). ref는 태그로
     Scope(부모 슬롯의 scope_index+offset) / Const(리터럴) / Raw(@for)를 가른다. 컨텍스트와 같은
-    인코딩(<FIELDS>, §4).
+    인코딩(<FIELDS>, #4).
   - **발생 배선**은 코드의 `BIND_EVENT`다. `button(@click:TOGGLE)`은 그 요소에
     `BIND_EVENT click, 0`(click이 일어나면 0번 이벤트)을 낸다. 속성처럼 `ELEM_OPEN`과
     `ELEM_CLOSE_OPEN` 사이에 온다.
@@ -327,10 +327,10 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     조립된다(조립 절차는 런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다.
     같은 fullname = 같은 핸들러.
   - 핸들러 본문/`set`은 바이트코드에 없다 - 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
-    낸다. 본문은 호스트 JS에 위임(DESIGN §5.4 방향).
+    낸다. 본문은 호스트 JS에 위임(DESIGN #5.4 방향).
 - **컨텍스트 - `ENTER_CONTEXT`/`EXIT_CONTEXT` + 컴포넌트 컨텍스트 테이블.** `@with`로 주입하는
   메타데이터. 이벤트와 같은 결로 정의와 활성화가 나뉜다.
-  - **정의**는 컴포넌트 테이블(§4)에 둔다. `contexts { Area { userId: assignee } }`가 컨텍스트명/
+  - **정의**는 컴포넌트 테이블(#4)에 둔다. `contexts { Area { userId: assignee } }`가 컨텍스트명/
     fields(이벤트와 같은 인코딩)로 컨텍스트 배열에 들어간다. `context_index`는 이 배열의 인덱스.
   - **활성화**는 코드의 `ENTER_CONTEXT context_index` ... `EXIT_CONTEXT`다. `@with Area { ... }`가
     이 짝으로 감싼다(IF/IF_END와 동형 - 점프 없는 마커, 중첩 보장).

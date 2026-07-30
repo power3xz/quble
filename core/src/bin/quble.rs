@@ -38,7 +38,7 @@ fn main() -> ExitCode {
 
     // 리소스를 dist/res/로 복사(해시 파일명)하고, 루트 실행 명세(manifest)를 낸다. resources는
     // resId -> 산출 상대경로. 산출물이 자립적이도록 CSS 파일도 함께 둔다. URL prefix(CDN 등)는
-    // 이후 빌드/배포가 붙인다(BYTECODE.md §5 LOAD_RES 메모). 핸들러(짝 .qubc.handlers.ts) 트랜스파일은
+    // 이후 빌드/배포가 붙인다(BYTECODE.md #5 LOAD_RES 메모). 핸들러(짝 .qubc.handlers.ts) 트랜스파일은
     // esbuild 위임 빌드 스크립트의 몫 - 그 스크립트가 이 manifest를 읽어 handlers 필드를 덧쓴다.
     // 리소스가 없어도 manifest는 항상 낸다({"resources":[]}) - 스크립트가 늘 읽을 파일이 있도록.
     let emitted = if output.resources.is_empty() {

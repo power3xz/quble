@@ -1,4 +1,4 @@
-//! 모듈 <-> 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md §4).
+//! 모듈 <-> 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md #4).
 
 use crate::module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
 use crate::pool::{Const, ConstPool};
@@ -6,17 +6,17 @@ use crate::pool::{Const, ConstPool};
 const MAGIC: &[u8; 4] = b"QBL\0";
 const VERSION: u16 = 0;
 
-// 상수풀 엔트리 타입 태그(BYTECODE.md §4). 엔트리마다 앞에 1바이트.
+// 상수풀 엔트리 타입 태그(BYTECODE.md #4). 엔트리마다 앞에 1바이트.
 const TAG_STR: u8 = 0;
 const TAG_NUM: u8 = 1;
 const TAG_BOOL: u8 = 2;
 
-// 타입 테이블 엔트리 태그(BYTECODE.md §4). 엔트리마다 앞에 1바이트.
+// 타입 테이블 엔트리 태그(BYTECODE.md #4). 엔트리마다 앞에 1바이트.
 const TAG_SCALAR: u8 = 0;
 const TAG_OBJECT: u8 = 1;
 const TAG_ARRAY: u8 = 2;
 
-// field ref 출처 태그(BYTECODE.md §4 <REF>). ref마다 앞에 1바이트.
+// field ref 출처 태그(BYTECODE.md #4 <REF>). ref마다 앞에 1바이트.
 const TAG_SCOPE: u8 = 0;
 const TAG_CONST: u8 = 1;
 const TAG_RAW: u8 = 2;
@@ -58,7 +58,7 @@ pub fn encode(m: &Module) -> Vec<u8> {
         put_u16(&mut out, d.props_type_ref);
         put_u32(&mut out, d.code_off);
         put_u32(&mut out, d.code_len);
-        // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(name_const_index, fields)]
+        // 이벤트 테이블 (BYTECODE.md #4) - event_count, [(name_const_index, fields)]
         put_u16(&mut out, d.events.len() as u16);
         for e in &d.events {
             put_u16(&mut out, e.name_const_index);
@@ -113,7 +113,7 @@ fn put_const(out: &mut Vec<u8>, c: &Const) {
 
 /// 타입 테이블 엔트리: 태그 1바이트 + payload. Scalar는 payload 없음, Object는 field_count +
 /// [(name_const_index, type_ref)], Array는 elem_type_ref. type_ref로 자식을 가리켜 중첩/공유를
-/// 표현(BYTECODE.md §4).
+/// 표현(BYTECODE.md #4).
 fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
     match t {
         TypeEntry::Scalar => out.push(TAG_SCALAR),

@@ -27,19 +27,19 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 ## 템플릿 / 렌더링
 
 - [x] `@for` - 반복. 횟수/스칼라 배열/객체 배열, 중첩, 회차변수/회차 인덱스, 항목 추가/제거.
-- [x] `@if` / `@else` - 조건 분기. 클라 region/branch swap + 비활성 가지 lazy build(REACTIVITY.md §8).
+- [x] `@if` / `@else` - 조건 분기. 클라 region/branch swap + 비활성 가지 lazy build(REACTIVITY.md #8).
   중첩/형제/else 없는 if, 합성 경계를 넘는 if(RENDER 인라인 재진입으로 자식 if가 부모 region 트리에 합류)까지. (SSR은 분기 평가 후 활성 가지만 렌더.)
 - [ ] `{expr}` - 표현식 (JS 위임 여부 포함). 지금은 단순 변수 참조만.
 - [ ] 컴포넌트 스타일링 - 외부 CSS를 어떻게 표현/격리할지(DESIGN.md 부록 B가 `import styles
   from "...module.css"` + `class=[...]`를 예시).
   - [x] 외부 CSS 로드 - `use "./x.css"`로 참조한 리소스를 컴파일러가 산출하고 컴포넌트가 그려질 때
-    로드(`LOAD_RES`, BYTECODE.md §5).
+    로드(`LOAD_RES`, BYTECODE.md #5).
   - [x] 런타임 로드 - 주입받은 URL(resmap)로 실제 적용. SSR은 `<link>` 인라인, 클라는 `LOAD_RES`에서 `<link>` 삽입.
   - [ ] 격리, 동적 class 배열. 방법 미정.
 
 ## 데이터
 
-- [ ] 데이터 흐름 - provided/props, 반응성. 다른 피처의 전제. 모델: [REACTIVITY.md](REACTIVITY.md) (leafIndex/fullname으로 §5.1/§5.2/events를 꿴 결론).
+- [ ] 데이터 흐름 - provided/props, 반응성. 다른 피처의 전제. 모델: [REACTIVITY.md](REACTIVITY.md) (leafIndex/fullname으로 #5.1/#5.2/events를 꿴 결론).
   - [x] props 변수 보간 - 텍스트(`{name}` -> `TEXT_VAR`)/속성(`class={x}` -> `ATTR_*_VAR`). 같은 scope offset 공간.
   - [x] 반응성 (값 변경 시 DOM 갱신) - pub/sub, `set(leafIndex, v)`, 구독자=함수, Proxy 없음. 텍스트/속성/공유 검증.
   - [ ] 타입 표기 - props/payload가 스칼라를 넘어 객체/배열을 담으려면 그 형태를 적을
@@ -56,8 +56,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] 별칭 - `Alias: Comp(...)`로 경로 마디를 별칭으로(분리), 생략 시 타입명 공유.
 - [x] 슬롯 - 자식 콘텐츠 주입(무기명 `@slot()` / 기명 `@slot(Name)`, 사용쪽 `Name << 노드`).
   콘텐츠는 부모 def에 남고 자식 자리에서 끼운다 - 해석은 쓴 곳(부모) 기준, 부착은 자식 자리.
-  미채움 허용, 채우는 순서는 선언 순서로 정규화. 문법은 SYNTAX §3.3.
-- [x] contexts / events - 핸들러(fullname에 묶임), 이벤트 위임 (`@click:EVENT`), `@with` 컨텍스트 주입(`provided`/`context`). 모델: [REACTIVITY.md](REACTIVITY.md) §6/§7.
+  미채움 허용, 채우는 순서는 선언 순서로 정규화. 문법은 SYNTAX #3.3.
+- [x] contexts / events - 핸들러(fullname에 묶임), 이벤트 위임 (`@click:EVENT`), `@with` 컨텍스트 주입(`provided`/`context`). 모델: [REACTIVITY.md](REACTIVITY.md) #6/#7.
 
 ## 전송 / 보안
 

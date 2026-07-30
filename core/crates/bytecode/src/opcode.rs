@@ -1,4 +1,4 @@
-//! Opcode 정의. 값은 BYTECODE.md §5와 일치해야 한다.
+//! Opcode 정의. 값은 BYTECODE.md #5와 일치해야 한다.
 
 /// 1바이트 opcode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +70,7 @@ pub enum Op {
     ForArrayVar = 0x1a,
     /// 슬롯 콘텐츠 구간 시작(사용쪽). operand: slot_placeholder_index u16(자식 def의 선언 순서).
     /// SLOT_PLACEHOLDER_CONTENT_END까지가 콘텐츠 코드이고, 뒤따르는 RENDER가 소비한다.
-    /// 콘텐츠는 부모 def 안에 그대로 남아 부모 scope/path로 해석된다(SYNTAX §3.3).
+    /// 콘텐츠는 부모 def 안에 그대로 남아 부모 scope/path로 해석된다(SYNTAX #3.3).
     PushSlotPlaceholderContent = 0x1b,
     /// 슬롯 콘텐츠 구간 끝 마커(operand 없음, IF_END 동형).
     SlotPlaceholderContentEnd = 0x1c,

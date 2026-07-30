@@ -3,7 +3,7 @@
 //! 이름을 버리므로(scope 인덱스만) 이름이 살아 있는 AST에서 뽑는 게 유일한 길이다.
 //!
 //! props는 값이 아니라 leafIndex(주소기)라 `LeafIndex<T>`로 낸다 - `get(k)`가 T를 내주고
-//! `set(k, v)`가 T를 받는다(REACTIVITY.md §7.1). store/get의 대상 트리는 아직 미정이라 store는
+//! `set(k, v)`가 T를 받는다(REACTIVITY.md #7.1). store/get의 대상 트리는 아직 미정이라 store는
 //! 뺀다. props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 
 use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
@@ -248,7 +248,7 @@ fn walk_nodes(
                 contents,
                 ..
             } => {
-                // 슬롯 콘텐츠는 쓰는 쪽 컨텍스트로 해석된다(SYNTAX §3.3) - 자식 prefix가 아니라
+                // 슬롯 콘텐츠는 쓰는 쪽 컨텍스트로 해석된다(SYNTAX #3.3) - 자식 prefix가 아니라
                 // 지금 이 경로(path_prefix)로 건다. 콘텐츠를 쓴 자리가 곧 그 노드의 트리 위치다.
                 for content in contents {
                     walk_nodes(
@@ -461,7 +461,7 @@ mod tests {
         assert!(out.contains("'Done.TOGGLE':"), "실제 출력:\n{out}");
     }
 
-    /// alias 없는 type-name은 그대로 세그먼트(§1.3 의도적 공유). 같은 fullname은 한 번만.
+    /// alias 없는 type-name은 그대로 세그먼트(#1.3 의도적 공유). 같은 fullname은 한 번만.
     #[test]
     fn unaliased_type_name_shared_once() {
         let out = dts(r#"

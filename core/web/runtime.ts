@@ -11,7 +11,7 @@
 // 가지는 구독 0이다(region 구조/동작은 region.ts). RENDER는 자식 def를 같은 interpret으로 인라인
 // 재진입해, 자식 if가 부모와 같은 regionPool/가지에 합류한다(별도 인스턴스 없음).
 //
-// 값 소비 경로 (REACTIVITY.md §1~§3):
+// 값 소비 경로 (REACTIVITY.md #1~#3):
 //   offset(컴포넌트 로컬) -> argumentSourcePairs 슬롯 [kind, ref] -> kind가 STORE면 ref가 leafIndex라
 //   store.get, CONST면 module.constpool[ref] 직접.
 
@@ -124,7 +124,7 @@ const ATTRS = [
   "datetime",
   "controls",
 ] as const;
-// 전역 DOM 이벤트 테이블(BYTECODE.md §2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
+// 전역 DOM 이벤트 테이블(BYTECODE.md #2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
 const DOM_EVENTS = [
   "click",
   "input",
@@ -411,7 +411,7 @@ type TWalkStacks = {
 
 // 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
 // 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
-// 보간/이벤트 경로는 콘텐츠를 쓴 곳(부모) 기준이다(SYNTAX §3.3).
+// 보간/이벤트 경로는 콘텐츠를 쓴 곳(부모) 기준이다(SYNTAX #3.3).
 // argumentSourcePairs/walkStacks는 카피 - 이 구조체가 담는 건 "이 자리에서 본 부모 컨텍스트"라
 // 값이어야 한다. 가변 배열을 참조로 들면 부모가 이후 push/pop한 상태가 비쳐 들어와, 담은 것이
 // 그 시점의 컨텍스트가 아니게 된다. 지금은 실행이 pop 전(즉시)이거나 이미 카피본 위(@if
@@ -440,7 +440,7 @@ const FV_SCOPE = 0;
 const FV_CONST = 1;
 const FV_RAW = 2;
 
-// 타입 테이블 엔트리 태그(BYTECODE.md §4). Rust read_type 대칭.
+// 타입 테이블 엔트리 태그(BYTECODE.md #4). Rust read_type 대칭.
 const TYPE_SCALAR = 0;
 const TYPE_OBJECT = 1;
 const TYPE_ARRAY = 2;
@@ -819,7 +819,7 @@ const decode = (bytes: Uint8Array) => {
     const propsTypeRef = r.u16();
     const codeOff = r.u32();
     const codeLen = r.u32();
-    // 이벤트 테이블 (BYTECODE.md §4) - event_count, [(nameConstIndex, fields)]
+    // 이벤트 테이블 (BYTECODE.md #4) - event_count, [(nameConstIndex, fields)]
     const eventCount = r.u16();
     const events = [];
     for (let e = 0; e < eventCount; e++) {

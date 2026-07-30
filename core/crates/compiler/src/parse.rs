@@ -32,7 +32,7 @@ pub enum ParseErrorKind {
     MixedSlotPlaceholderFill {
         comp: String,
     },
-    /// 빈 자식 블록(`Comp() { }`) - 슬롯을 안 채우면 self-close로 쓴다(DESIGN §4.5).
+    /// 빈 자식 블록(`Comp() { }`) - 슬롯을 안 채우면 self-close로 쓴다(DESIGN #4.5).
     EmptyBlock(String),
 }
 
@@ -348,7 +348,7 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
-        // contexts 블록도 선택적이며 props 다음, events 앞에 온다(SYNTAX.md §1).
+        // contexts 블록도 선택적이며 props 다음, events 앞에 온다(SYNTAX.md #1).
         let contexts = if matches!(self.peek(), Some(Token::Ident(s)) if s == "contexts") {
             self.contexts()?
         } else {
@@ -788,7 +788,7 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LParen)?;
         let args = self.component_args()?;
         // 슬롯을 안 채우면 self-close(`Comp( ... /)`), 채우면 `)` 뒤 자식 블록.
-        // `/` 앞 공백 강제(SYNTAX §3.1.1, DESIGN §4.5).
+        // `/` 앞 공백 강제(SYNTAX #3.1.1, DESIGN #4.5).
         let contents = match self.peek() {
             Some(Token::Slash(spaced)) => {
                 if !spaced {
@@ -816,7 +816,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // 합성의 자식 블록 `{ ... }`을 슬롯 콘텐츠로 읽는다. 두 형태가 갈리고 섞을 수 없다(SYNTAX §3.3):
+    // 합성의 자식 블록 `{ ... }`을 슬롯 콘텐츠로 읽는다. 두 형태가 갈리고 섞을 수 없다(SYNTAX #3.3):
     // - 기명: `Header << 노드` 들만. `<<` 오른쪽은 노드 하나 또는 블록(`Header << { ... }`).
     // - 무기명: 그 외 노드들. 블록 전체가 무기명 슬롯 콘텐츠 하나가 된다.
     fn slot_placeholder_contents(
@@ -878,7 +878,7 @@ impl<'a> Parser<'a> {
             return Err(self.err_read(kind));
         }
         match named.is_empty() {
-            // 빈 블록(`Comp() { }`)은 self-close로 쓴다 - 빈 블록 금지(DESIGN §4.5).
+            // 빈 블록(`Comp() { }`)은 self-close로 쓴다 - 빈 블록 금지(DESIGN #4.5).
             true if anonymous.is_empty() => {
                 Err(self.err_read(ParseErrorKind::EmptyBlock(comp.to_string())))
             }
@@ -936,7 +936,7 @@ impl<'a> Parser<'a> {
 
     // IDENT ( (ATTR | @click:EVENT)* [/] ) [{ NODE* }]
     // self-close(`tag(attrs /)`)면 자식 블록을 안 읽는다. void 요소(input/img 등)는
-    // self-close가 필수 - 아니면 에러(SYNTAX §3.1.1, DESIGN §4.5).
+    // self-close가 필수 - 아니면 에러(SYNTAX #3.1.1, DESIGN #4.5).
     fn element(&mut self) -> Result<Node, ParseError> {
         // 아래 void/빈블록 검사는 여는 태그를 다 읽은 뒤라 그때는 태그 이름이 pos에서 멀다 -
         // 두 에러가 탓할 대상인 태그 자리를 지금 잡아둔다.
@@ -978,7 +978,7 @@ impl<'a> Parser<'a> {
             self.expect(&Token::LBrace)?;
             let children = self.nodes()?;
             self.expect(&Token::RBrace)?;
-            // 자식 없으면 self-close 필수 - 빈 블록 금지(SYNTAX §3.1.1, DESIGN §4.5).
+            // 자식 없으면 self-close 필수 - 빈 블록 금지(SYNTAX #3.1.1, DESIGN #4.5).
             if children.is_empty() {
                 return Err(ParseError {
                     kind: ParseErrorKind::Expected {
@@ -1085,7 +1085,7 @@ fn starts_upper(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_uppercase())
 }
 
-/// HTML void 요소(자식을 못 갖는 태그). self-close가 필수다(SYNTAX §3.1.1).
+/// HTML void 요소(자식을 못 갖는 태그). self-close가 필수다(SYNTAX #3.1.1).
 fn is_void_tag(tag: &str) -> bool {
     matches!(
         tag,

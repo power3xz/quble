@@ -27,7 +27,7 @@ pub enum Token {
     Gt,              // >
     Pipe,            // | (유니온 키 리스트 `'a' | 'b'`)
     /// `/` - self-close 표기(`tag(attrs /)`). bool = 직전에 공백이 있었나. 확정 문법이
-    /// `/` 앞 공백을 강제하므로(SYNTAX §3.1.1) 렉서가 공백 유무를 실어 파서가 검증한다.
+    /// `/` 앞 공백을 강제하므로(SYNTAX #3.1.1) 렉서가 공백 유무를 실어 파서가 검증한다.
     Slash(bool),
     /// `@` 뒤에 오는 디렉티브. `@if` -> `At(Directive::If)`.
     At(Directive),

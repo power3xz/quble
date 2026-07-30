@@ -92,7 +92,7 @@ pub enum Node {
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
     /// alias = use-site 별칭(`Alias: Comp(...)`). 있으면 이게 fullname path 세그먼트가 되고,
-    /// 없으면 type-name을 그대로 쓴다(§1.3 - alias 없는 동일 type-name은 의도적 공유).
+    /// 없으면 type-name을 그대로 쓴다(#1.3 - alias 없는 동일 type-name은 의도적 공유).
     Component {
         alias: Option<String>,
         name: String,
@@ -103,7 +103,7 @@ pub enum Node {
         contents: Vec<SlotPlaceholderContent>,
     },
     /// `@slot()` / `@slot(header)` - 자식 콘텐츠가 들어갈 자리(정의쪽). name이 None이면 무기명.
-    /// 한 컴포넌트는 무기명 하나 또는 기명 여럿 중 하나만 - 섞으면 컴파일 에러(SYNTAX §3.3).
+    /// 한 컴포넌트는 무기명 하나 또는 기명 여럿 중 하나만 - 섞으면 컴파일 에러(SYNTAX #3.3).
     /// 선언 순서가 slot_placeholder_index(컴포넌트-로컬)이고, 사용쪽 SlotPlaceholderContent가 같은 공간을 쓴다.
     SlotPlaceholderDef {
         name: Option<String>,
@@ -135,7 +135,7 @@ pub enum Node {
 
 /// 합성처에서 슬롯에 넣는 콘텐츠 한 덩이. `Header << 노드`(기명) 또는 합성 블록 전체(무기명).
 /// nodes는 쓰는 쪽 컨텍스트로 해석된다 - 보간/이벤트 경로가 정의한 컴포넌트가 아니라
-/// 쓰는 쪽 기준(SYNTAX §3.3).
+/// 쓰는 쪽 기준(SYNTAX #3.3).
 #[derive(Debug, PartialEq)]
 pub struct SlotPlaceholderContent {
     /// 기명이면 슬롯 이름, 무기명이면 None.

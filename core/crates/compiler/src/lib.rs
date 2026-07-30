@@ -23,7 +23,7 @@ pub enum CompileError {
 }
 
 /// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 - 빌드 파이프라인이 사이드맵으로
-/// 내용 해시/복사/URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
+/// 내용 해시/복사/URL화를 한다(BYTECODE.md #5 LOAD_RES 메모).
 pub struct CompileOutput {
     pub bytecode: Box<[u8]>,
     /// 인덱스 = 모듈 전역 resId, 값 = 리소스 정규화 경로.
@@ -366,7 +366,7 @@ mod tests {
         ));
     }
 
-    /// `/` 앞 공백 강제 - 붙여 쓰면(`img(.../)`) 파스 에러(SYNTAX §3.1.1).
+    /// `/` 앞 공백 강제 - 붙여 쓰면(`img(.../)`) 파스 에러(SYNTAX #3.1.1).
     #[test]
     fn self_close_requires_space_before_slash() {
         let src = r#"component C { template { img(src="a.png"/) } }"#;
@@ -1734,7 +1734,7 @@ mod tests {
     }
 
     /// 같은 자식을 두 번 합성하면 PUSH_PATH_SEGMENT가 같은 세그먼트로 두 번 나온다 -
-    /// alias 없는 동일 type-name은 같은 fullname을 의도적으로 공유한다(§1.3).
+    /// alias 없는 동일 type-name은 같은 fullname을 의도적으로 공유한다(#1.3).
     #[test]
     fn duplicate_composition_repeats_same_segment() {
         use bytecode::{decode, Op};
@@ -1787,7 +1787,7 @@ mod tests {
         assert_eq!(str_at(&module, seg_index).unwrap(), "Done");
     }
 
-    /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 - alias 부여는 분리의 명시적 행위(§1.3).
+    /// 같은 type-name이라도 alias가 다르면 세그먼트가 갈린다 - alias 부여는 분리의 명시적 행위(#1.3).
     #[test]
     fn distinct_aliases_split_shared_type_name() {
         use bytecode::{decode, Op};
@@ -2194,7 +2194,7 @@ mod tests {
         ));
     }
 
-    /// 한 사용처에서 기명/무기명을 섞으면 파싱 단계에서 막는다(SYNTAX §3.3).
+    /// 한 사용처에서 기명/무기명을 섞으면 파싱 단계에서 막는다(SYNTAX #3.3).
     #[test]
     fn mixing_named_and_anonymous_fill_errors() {
         let src = r#"

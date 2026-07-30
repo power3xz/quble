@@ -196,7 +196,7 @@ fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, RenderError> {
 }
 
 /// 불리언 scope 값의 truthy 판정. 빈 문자열/"false"/"0"은 falsy, 그 외 truthy.
-/// (cond는 불리언 scope index 하나 - BYTECODE.md §5.1)
+/// (cond는 불리언 scope index 하나 - BYTECODE.md #5.1)
 fn truthy(val: &str) -> bool {
     !(val.is_empty() || val == "false" || val == "0")
 }
@@ -367,7 +367,7 @@ mod tests {
         bytecode::tags::tag_id(name).unwrap()
     }
 
-    /// BYTECODE.md §6 hello 예시. encode로 바이트화한 뒤 render에 넘긴다.
+    /// BYTECODE.md #6 hello 예시. encode로 바이트화한 뒤 render에 넘긴다.
     #[test]
     fn renders_hello() {
         let mut pool = ConstPool::new();

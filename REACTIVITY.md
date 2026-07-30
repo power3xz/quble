@@ -1,7 +1,7 @@
 # REACTIVITY
 
-Quble의 반응성/핸들러 모델. **leafIndex**와 **fullname**으로 꿴 결론이며, DESIGN.md §5.2
-(reactivity)는 이 문서로 결정됐다. 남은 미결은 §5.1(배열 요소 식별)에 종속된 세부(동적 인덱스
+Quble의 반응성/핸들러 모델. **leafIndex**와 **fullname**으로 꿴 결론이며, DESIGN.md #5.2
+(reactivity)는 이 문서로 결정됐다. 남은 미결은 #5.1(배열 요소 식별)에 종속된 세부(동적 인덱스
 swap 등)뿐이다.
 
 **전제: 모든 것은 런타임에 결정된다.** `@for`(동적 리스트)는 항상 있다고 본다 - "정적 트리"를
@@ -39,7 +39,7 @@ Svelte 5는 Proxy로 **런타임에** "무엇을 구독할지" 알아낸다 - �
 알기** 때문이다 - 읽기를 런타임에 가로챌 필요가 없다. 렌더 시 `TEXT_VAR`를 만나면 그 노드를
 해당 리프의 구독자로 등록한다.
 
-주의 - 이건 **"연결이 정적"이라는 뜻이 아니다.** leafIndex 수치는 렌더 시 정해진다(§3). 정적인
+주의 - 이건 **"연결이 정적"이라는 뜻이 아니다.** leafIndex 수치는 렌더 시 정해진다(#3). 정적인
 것은 **무엇을 구독하는가(리프 식별/상대 offset/바인딩)**이고, **인덱스 수치는 렌더 시점**이다.
 즉 _무엇을 구독할지는 컴파일타임, 등록/인덱스는 렌더 시점_.
 
@@ -164,7 +164,7 @@ leaves:  [ title  tags색인  title  tags색인 │ tags[0]원소...  tags[1]원
 | `store.list.length` | **`@for` 블록 핸들러** | 항목 노드 추가/제거 + 파생 리프 인덱스 동적 할당/해제 |
 
 push/pop = length 변경 -> `@for` 재구성. length가 **항목 인스턴스의 생애주기를 관장**한다 -
-항목 생성 시 할당기에서 base를 받아 리프들을 구독 등록, 제거 시 그 구간을 회수(§3). "구조 변경은
+항목 생성 시 할당기에서 base를 받아 리프들을 구독 등록, 제거 시 그 구간을 회수(#3). "구조 변경은
 반응성이 아니라 `@for` 영역"의 구체 메커니즘이 곧 length 토픽이다.
 
 ## 5. 객체 변경 = 리프 일괄 set
@@ -175,7 +175,7 @@ push/pop = length 변경 -> `@for` 재구성. length가 **항목 인스턴스의
 
 > [STOP] 미결: 동적 인덱스(`list[i]=list[j]`, i/j 런타임)에서 바뀐 leafIndex 판단.
 > 분해 방향만 - **어느 리프가 바뀌나(상대 offset 집합)는 타입으로 컴파일타임 확정**,
-> **어느 인스턴스인가(base)는 렌더 시 할당기가 부여**(§3). `leafIndex = base + offset`.
+> **어느 인스턴스인가(base)는 렌더 시 할당기가 부여**(#3). `leafIndex = base + offset`.
 > 노드 이동(key 기반 reconciliation)은 채택 안 함이 기본 - 위치 기반으로 내용만 교체.
 
 **검사 책임 경계 - 컴파일러가 처리할 수 있는 건 JS로 끌어올리지 않는다.** 런타임
@@ -197,7 +197,7 @@ store가 가벼워지고(set은 대입+통지뿐) 책임이 한 곳에 모인다
 | 배열 요소 식별 | leafIndex로 인스턴스 식별 (같은 fullname의 두 인스턴스는 leafIndex가 다름) |
 | 이벤트         | 발생 인스턴스의 leafIndex를 페이로드에 실음                                |
 
-DESIGN §5.1의 배열 요소 식별 슬롯(이름 미정)이 식별해야 할 "인스턴스 구분"이
+DESIGN #5.1의 배열 요소 식별 슬롯(이름 미정)이 식별해야 할 "인스턴스 구분"이
 **leafIndex(인스턴스 베이스)**로 풀린다. 컨텍스트 메타데이터는 별개(`context`, leafIndex와 무관).
 
 ## 7. 핸들러 = fullname에 묶인다
@@ -226,7 +226,7 @@ handler { "PrivateData.TOGGLE": (data) => privateData.visible = !data.isOn }
 핸들러가 실제로 실행되려면 몸통에서 상태를 읽고 써야 한다. 상태 접근은 **store 경로**로 한다:
 핸들러가 받는 `store`는 값을 담은 객체가 아니라 **경로를 leafIndex로 해석하는 주소기**다.
 `store.a.b`를 언급하면 그 경로에 대응하는 leafIndex가 정해지고, `get`/`set`이 그 index로
-반응성(§2 `set(leafIndex, v)`)에 닿는다.
+반응성(#2 `set(leafIndex, v)`)에 닿는다.
 
 ```
 handler(data, { props, store, get, set }) {
@@ -245,7 +245,7 @@ handler(data, { props, store, get, set }) {
 
 **구현 순서: props가 먼저.** `props`/payload/context는 소스(AST)에 이름이 그대로 있어 d.ts로
 바로 나온다. `store`는 루트 전체 상태 트리인데 소스에 그 선언 개념이 아직 없다 - 타입 표기(ROADMAP)와
-상태 트리 구조(DESIGN §5.1)가 정해진 뒤라야 소스에서 뽑을 수 있다. 그래서 지금은 `props`까지 내고,
+상태 트리 구조(DESIGN #5.1)가 정해진 뒤라야 소스에서 뽑을 수 있다. 그래서 지금은 `props`까지 내고,
 `store`/`get`/`set` 타입은 그 뒤에 얹는다.
 
 **두 스텝으로 나눈다.**
@@ -276,13 +276,13 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 **미결.**
 
 - **경로 -> leafIndex 결정론.** SSR이 그린 것을 클라가 이어받으려면 같은 경로가 SSR/클라에서
-  같은 index여야 한다. §3의 렌더 시 할당 규칙을 핸들러가 지목하는 경로에도 일관되게 적용해야 한다.
+  같은 index여야 한다. #3의 렌더 시 할당 규칙을 핸들러가 지목하는 경로에도 일관되게 적용해야 한다.
 - **정적 / 동적 leafIndex 구분.** 보간/props에 나오는 상태는 컴파일타임에 index가 정해진다(정적,
   지금 방식). 핸들러가 화면에 안 뿌리고 처음 건드리는 경로나 `@for` 항목은 런타임 발급이 필요할
   수 있다(동적). 이 구분은 leafIndex 할당기(ROADMAP - `@for`에서 회수)와 한 몸이다. **지금은
   정적만, 동적은 필요해질 때.** 런타임이 어느 index가 어느 종류인지 구분해야 할 수 있다.
 - **props 로컬 이름 -> 부모 leafIndex 연결.** `props.isOn`이 use-site에서 부모의 어느 상태로
-  이어지는지 - 그 바인딩을 렌더 시 어떻게 거는지. §5.1(provided 구조)과 닿는 지점이다.
+  이어지는지 - 그 바인딩을 렌더 시 어떻게 거는지. #5.1(provided 구조)과 닿는 지점이다.
 
 ## 8. `@if` = Region + 재진입 `interpret` + lazy build
 
@@ -302,7 +302,7 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
   안 바꾸고 자식 region을 재귀에 넘긴 뒤 `pc`를 IF_END 다음으로 점프할 뿐. 그래서 **중첩 if의
   컨텍스트 추적을 수동 스택이 아니라 JS 호출 스택(재귀)이 대신**한다.
 - 코드 범위는 마커로 이미 표시돼 있다 - then = IF다음~ELSE, else = ELSE다음~IF_END. 추가 마커
-  불필요(점프/길이 operand는 §거부). IF 진입 시점엔 ELSE/IF_END 위치를 모르므로 `skipBranch`
+  불필요(점프/길이 operand는 #거부). IF 진입 시점엔 ELSE/IF_END 위치를 모르므로 `skipBranch`
   (depth 카운팅, SSR `skip_branch`와 동일 패턴)로 경계를 찾아 lazyBuild 클로저에 묶는다.
 
 ### lazy build - 비활성 가지는 첫 swap 때 build
@@ -334,16 +334,16 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 
 - [x] props 변수 보간 - 텍스트(`TEXT_VAR`)/속성(`ATTR_*_VAR`). 같은 scope offset 공간.
 - [x] 스칼라 반응성 - `subscribers[leafIndex]`(구독자=함수) + `set(leafIndex, v)`. 렌더 시 구독 등록.
-- [x] 슬롯 (kind, ref) / 공유(§3.1) - `argumentSourcePairs`에 STORE/CONST. 부모/자식이 같은 store
+- [x] 슬롯 (kind, ref) / 공유(#3.1) - `argumentSourcePairs`에 STORE/CONST. 부모/자식이 같은 store
       리프(같은 base+offset)를 가리키면 공유. CONST는 구독 스킵.
 - [x] 합성 시 자식 슬롯 주입 - `PUSH_THROUGH`(슬롯 통째)/`PUSH_FIELD`(base+offset)/`PUSH_ARG_LIT`
       (const) + `RENDER`. kind는 전파, 위치만 넘기고 타입은 자식이 안다.
-- [x] 배열 = arrayPool 앵커 + plant(§3.2) - store에 색인 1칸, 원소는 arrayPool로. 진입 때 다 채움.
+- [x] 배열 = arrayPool 앵커 + plant(#3.2) - store에 색인 1칸, 원소는 arrayPool로. 진입 때 다 채움.
 - [x] `@for` - `FOR_RAW`/`FOR_COUNT_VAR`(숫자)/`FOR_ARRAY_VAR`(배열). 회차변수 `{item}`/`{item.f}`
       보간, 회차변수 객체 필드 자식 전달, fullname `[$n]` 인덱스.
-- [x] `@if` Region + 재진입 `interpret` + lazy build(§8) - 활성 가지만 build/구독, 비활성은 첫 swap
+- [x] `@if` Region + 재진입 `interpret` + lazy build(#8) - 활성 가지만 build/구독, 비활성은 첫 swap
       때 build. 단일/중첩/형제 if, 합성 경계 넘는 if. (`core/web/runtime.ts`, `region.ts`)
 - [x] free list - `@for` 회차 제거 시 branch/region/arrayPool 칸을 freelist로 회수/재사용
       (`freeBranches`/`freeRegions`/`freeArrays`, `truncateFor`).
-- [ ] 배열 length 토픽/push/pop 반응 - 지금 배열은 정적(초기 요소만). §4는 목표.
-- [ ] 객체 일괄 set(§5 동적 인덱스), 핸들러가 set할 수 있는 범위(ISSUES.md).
+- [ ] 배열 length 토픽/push/pop 반응 - 지금 배열은 정적(초기 요소만). #4는 목표.
+- [ ] 객체 일괄 set(#5 동적 인덱스), 핸들러가 set할 수 있는 범위(ISSUES.md).

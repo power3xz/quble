@@ -17,7 +17,7 @@
   "activities": [
     { "icon": "🚀", "text": "self-close 문법 확정", "time": "2일 전" },
     { "icon": "🔧", "text": "@for 배열 변형 데모", "time": "5일 전" },
-    { "icon": "📝", "text": "DESIGN.md §4.5 정리", "time": "1주 전" }
+    { "icon": "📝", "text": "DESIGN.md #4.5 정리", "time": "1주 전" }
   ],
   "tags": ["rust", "bytecode", "ui", "compiler"],
   "links": ["https://example.com", "https://github.com", "https://twitter.com"]

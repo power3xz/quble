@@ -10,10 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The docs below are authoritative and out-rank any conversation summary - when a summary and
 a doc disagree, the doc wins. After a compact, re-check the relevant doc before acting on a
-remembered claim (a past summary once mislabeled DESIGN §5.1 - verify, don't inherit).
+remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inherit).
 
 - **DESIGN.md** (Korean) - the agreed design: decisions, rejected alternatives, and their
-  rationale (§4). Top authority. §5 is the live list of unresolved areas - read it there,
+  rationale (#4). Top authority. #5 is the live list of unresolved areas - read it there,
   don't rely on a summary. Read before contradicting any recorded decision - surface the
   tradeoff first.
 - **SYNTAX.md** - surface-syntax reference. The single source for grammar/directives; do not
@@ -43,7 +43,7 @@ tree. Its concrete identity is fixed at the point of use. The compiler walks the
 composition tree and produces a **fullname** event id by accumulating alias/type-name path
 segments from the outside (use-site) inward. A handler catches that fullname. The
 motivation (vs. TypeScript types) is eliminating the manual path-accumulation boilerplate
-that explodes as the tree deepens (§1.4).
+that explodes as the tree deepens (#1.4).
 
 ## Architecture Concepts (from DESIGN.md)
 
@@ -52,16 +52,16 @@ Load-bearing invariants any implementation must preserve:
 - **Two orthogonal axes - never mix them.** *Path* (who fired the event) accumulates
   aliases/type-names into the fullname identifier. *Context* (`@with` blocks) injects
   metadata delivered to handlers keyed by context name - it is **never** part of the path
-  (§1.2, §4.2). (Context delivery to handlers is implemented; see the `context` handler arg.)
+  (#1.2, #4.2). (Context delivery to handlers is implemented; see the `context` handler arg.)
 - **Fullnames only, no tail-matching.** Event ids always reflect the complete tree
   position. Short-name matching was rejected because it makes the same handler name valid
-  in one tree state and invalid in another, breaking compile-time predictability (§4.1). DX
+  in one tree state and invalid in another, breaking compile-time predictability (#4.1). DX
   of long names is solved by tooling, not by language rules.
 - **Same fullname = intentional sharing.** Reusing the same un-aliased type as siblings
   produces the same fullname on purpose. Adding an alias is the explicit act of separating;
-  omitting it is the explicit act of grouping (§1.3, §3.2).
+  omitting it is the explicit act of grouping (#1.3, #3.2).
 - **Handlers are a single entry point** for state change (`get`/`set`) and navigation
-  (`goTo`) - not plain callbacks (§2.5). What a handler may `set` is still being settled
+  (`goTo`) - not plain callbacks (#2.5). What a handler may `set` is still being settled
   (ISSUES.md, tied to the reactivity model).
 
 ## Anticipated Change Points (quble)

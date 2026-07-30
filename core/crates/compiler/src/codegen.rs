@@ -224,7 +224,7 @@ fn check_slot_placeholder_defs(
 
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
 /// 두 번째 반환값은 리소스 사이드맵 - 인덱스가 모듈 전역 resId, 값이 정규화 경로.
-/// 빌드 단계가 이걸 받아 내용 해시/복사/URL화를 한다(BYTECODE.md §5 LOAD_RES 메모).
+/// 빌드 단계가 이걸 받아 내용 해시/복사/URL화를 한다(BYTECODE.md #5 LOAD_RES 메모).
 pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenError> {
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
@@ -760,7 +760,7 @@ fn emit_node(
 
             // 합성 경로 세그먼트 = use-site alias가 있으면 alias, 없으면 자식 type-name.
             // 뒤따르는 RENDER가 소비해 자식 경로 prefix에 잇는다 - 이벤트 fullname의 path 축.
-            // (alias 생략 = 동일 type-name 공유, alias 부여 = 분리. §1.3)
+            // (alias 생략 = 동일 type-name 공유, alias 부여 = 분리. #1.3)
             let segment = alias.as_deref().unwrap_or(name);
             let segment_index = pool.intern_str(segment);
             code.push(Op::PushPathSegment as u8);
@@ -774,7 +774,7 @@ fn emit_node(
             }
 
             // 슬롯 콘텐츠를 자식 선언 순서로 낸다 - 사용처 작성 순서와 무관하게 정규화된다.
-            // 콘텐츠 코드는 부모 def 안에 그대로 남아 부모 scope/path로 해석된다(SYNTAX §3.3).
+            // 콘텐츠 코드는 부모 def 안에 그대로 남아 부모 scope/path로 해석된다(SYNTAX #3.3).
             // 안 채운 슬롯은 아예 안 낸다(미채움 허용).
             for (slot_placeholder_index, slot_placeholder_name) in
                 child_slot_placeholders.iter().enumerate()

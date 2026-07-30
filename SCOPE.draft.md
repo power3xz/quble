@@ -1,7 +1,7 @@
 # 슬롯/배열 미결 (draft)
 
 > 상태: `array-type` 브랜치. 확정된 부분(슬롯 (kind,ref), 배열 arrayPool 앵커, plant, 배열의
-> 배열 색인 연쇄)은 REACTIVITY.md §3.1/§3.2 / BYTECODE.md에 흡수됐다. 여기엔 **아직 구현 안 된
+> 배열 색인 연쇄)은 REACTIVITY.md #3.1/#3.2 / BYTECODE.md에 흡수됐다. 여기엔 **아직 구현 안 된
 > 계획**만 남긴다.
 
 ## 배열 push/pop 반응 - 길이 토픽

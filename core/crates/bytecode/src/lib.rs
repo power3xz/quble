@@ -18,7 +18,7 @@ pub use serialize::{decode, encode, DecodeError};
 mod tests {
     use super::*;
 
-    /// BYTECODE.md §6의 hello 예시를 손으로 만들어 라운드트립.
+    /// BYTECODE.md #6의 hello 예시를 손으로 만들어 라운드트립.
     fn hello_module() -> Module {
         let mut pool = ConstPool::new();
         let class = pool.intern_str("class");

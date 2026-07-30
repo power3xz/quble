@@ -100,7 +100,7 @@ const runtimeBundle = await build({
 writeFileSync(join(distDir, "quble-runtime.js"), runtimeBundle.outputFiles[0].text);
 
 // 4. 진입 페이지 - quble-runtime.js를 로드해 <stem>.qubb를 #quble-app에 마운트한다.
-//    초기 data는 --data 파일 내용을 인라인(없으면 {}). store/provided 구조가 정해지면 교체(DESIGN §5.1).
+//    초기 data는 --data 파일 내용을 인라인(없으면 {}). store/provided 구조가 정해지면 교체(DESIGN #5.1).
 //    구동 크리티컬 체인(runtime -> manifest -> qubb -> handlers)은 순차 발견이라 폭포수가 된다.
 //    빌드가 그 경로들을 알므로 preload로 심어 HTML 파싱 시점에 병렬로 받게 한다(CSS는 렌더 중
 //    LOAD_RES가 삽입하니 크리티컬 패스 아님 - 제외).
