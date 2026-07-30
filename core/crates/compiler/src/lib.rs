@@ -180,7 +180,7 @@ mod tests {
                 children,
                 ..
             } => {
-                assert_eq!(tag, "div");
+                assert_eq!(tag.name, "div");
                 assert_eq!(
                     attrs,
                     &[(
@@ -2463,10 +2463,14 @@ mod tests {
         assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
     }
 
-    /// 아직 구간이 없는 자리는 None - 가짜 위치로 꾸미지 않는다.
+    /// 구간이 없는 자리는 None - 가짜 위치로 꾸미지 않는다. 안 넘긴 prop이 그렇다
+    /// (없는 것은 소스에 자리가 없다).
     #[test]
     fn codegen_error_without_range_is_none() {
-        let src = r#"component C { template { svg( /) } }"#;
+        let src = r#"
+            component C { props { a: string } template { div() { "x" } } }
+            component D { template { C( /) } }
+        "#;
         assert_eq!(codegen_error_snippet(src), None);
     }
 
@@ -2508,8 +2512,55 @@ mod tests {
     /// 위치를 모르는 에러(range None)는 첫 줄만 - 소스 줄과 캐럿이 안 붙는다.
     #[test]
     fn diagnostic_without_range_has_no_snippet() {
-        let out = diagnostic_of(r#"component C { template { svg( /) } }"#);
-        assert_eq!(out, "a.qubc: error: unknown builtin tag `svg`");
+        // 안 넘긴 prop은 소스에 자리가 없다 - 없는 것의 위치는 가리킬 수 없어 첫 줄만 난다.
+        let out = diagnostic_of(
+            "component C { props { a: string } template { div() { \"x\" } } }\ncomponent D { template { C( /) } }",
+        );
+        assert_eq!(out, "a.qubc: error: `C` has no prop `a`");
+    }
+
+    /// 자식이 선언하지 않은 슬롯을 채우면 그 슬롯 이름을 가리킨다(`<<` 왼쪽).
+    #[test]
+    fn diagnostic_points_at_unknown_slot_placeholder_fill() {
+        let src = "component Outer {\n  template { Inner() { Sidebar << p( /) } }\n}\ncomponent Inner { template { section() { @slot(Header) } } }";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "a.qubc:2:24: error: `Inner` declares no slot `Sidebar` (`@slot(Sidebar)`)",
+                " 2 |   template { Inner() { Sidebar << p( /) } }",
+                "   |                        ^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 선언하지 않은 컨텍스트는 `@with` 뒤 이름을 가리킨다.
+    #[test]
+    fn diagnostic_points_at_unknown_context() {
+        let src = "component C {\n  template { @with Nope { p() { \"x\" } } }\n}";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "a.qubc:2:20: error: `Nope` is not declared in contexts",
+                " 2 |   template { @with Nope { p() { \"x\" } } }",
+                "   |                    ^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 모르는 태그는 그 태그 이름을 가리킨다.
+    #[test]
+    fn diagnostic_points_at_unknown_tag() {
+        assert_eq!(
+            diagnostic_of("component C {\n  template { svg( /) }\n}"),
+            [
+                "a.qubc:2:14: error: unknown builtin tag `svg`",
+                " 2 |   template { svg( /) }",
+                "   |              ^^^",
+            ]
+            .join("\n")
+        );
     }
 
     // ── 토큰 표기 ──────────────────────────────────────────────────────

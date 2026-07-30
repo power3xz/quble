@@ -287,7 +287,7 @@ fn walk_nodes(
             }
             Node::With { context, children } => {
                 let mut stack = context_stack.to_vec();
-                if let Some(def) = comp.contexts.iter().find(|c| &c.name == context) {
+                if let Some(def) = comp.contexts.iter().find(|c| c.name == context.name) {
                     stack.push((def.name.clone(), def.fields.clone()));
                 }
                 walk_nodes(

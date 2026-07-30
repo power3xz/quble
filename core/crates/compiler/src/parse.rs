@@ -10,7 +10,7 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, ForCount, LitValue, Node, Prop,
+    ArgValue, AttrValue, Component, Context, Event, ForCount, Ident, LitValue, Node, Prop,
     SlotPlaceholderContent, SourceFile, Type, Use, VarRef,
 };
 use crate::lexer::{Directive, Lexed, Token};
@@ -232,6 +232,16 @@ impl<'a> Parser<'a> {
                 Err(self.err_read(kind))
             }
         }
+    }
+
+    /// 이름과 그 이름이 적힌 자리를 함께. ident()가 토큰 하나를 소비하니 직후 just_read()가
+    /// 곧 그 이름의 구간이다 - 미리 here()를 잡아둘 필요가 없다.
+    fn ident_at(&mut self) -> Result<Ident, ParseError> {
+        let name = self.ident()?;
+        Ok(Ident {
+            name,
+            range: NodeRange(self.just_read()),
+        })
     }
 
     // prop 참조 하나: `root` 또는 `root.field.field...`. root는 prop 이름, 뒤는 객체 필드 경로.
@@ -770,7 +780,7 @@ impl<'a> Parser<'a> {
     // @with CONTEXT { NODE* }   - context는 이 컴포넌트 contexts에 선언된 이름.
     fn with_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::With))?;
-        let context = self.ident()?;
+        let context = self.ident_at()?;
         self.expect(&Token::LBrace)?;
         let children = self.nodes()?;
         self.expect(&Token::RBrace)?;
@@ -847,9 +857,8 @@ impl<'a> Parser<'a> {
                     if matches!(self.tokens.get(self.pos + 1), Some(Token::LtLt)) =>
                 {
                     // 중복 검사는 콘텐츠까지 읽은 뒤라 그때 just_read()를 쓰면 콘텐츠 끝을
-                    // 가리킨다 - 탓할 대상인 슬롯 이름 자리를 지금 잡아둔다.
-                    let slot_range = self.here();
-                    let slot = self.ident()?;
+                    // 가리킨다 - slot이 든 구간이 탓할 대상인 이름 자리다.
+                    let slot = self.ident_at()?;
                     self.expect(&Token::LtLt)?;
                     // 오른쪽은 블록(여러 노드) 또는 노드 하나.
                     let nodes = match self.peek() {
@@ -863,14 +872,14 @@ impl<'a> Parser<'a> {
                     };
                     if named
                         .iter()
-                        .any(|c| c.name.as_deref() == Some(slot.as_str()))
+                        .any(|c| c.name.as_ref().map(|n| n.name.as_str()) == Some(&slot.name))
                     {
                         return Err(ParseError {
                             kind: ParseErrorKind::DuplicateSlotPlaceholderFill {
                                 comp: comp.to_string(),
-                                slot,
+                                slot: slot.name,
                             },
-                            range: slot_range,
+                            range: slot.range.0,
                         });
                     }
                     named.push(SlotPlaceholderContent {
@@ -952,9 +961,8 @@ impl<'a> Parser<'a> {
     // self-close가 필수 - 아니면 에러(SYNTAX #3.1.1, DESIGN #4.5).
     fn element(&mut self) -> Result<Node, ParseError> {
         // 아래 void/빈블록 검사는 여는 태그를 다 읽은 뒤라 그때는 태그 이름이 pos에서 멀다 -
-        // 두 에러가 탓할 대상인 태그 자리를 지금 잡아둔다.
-        let tag_range = self.here();
-        let tag = self.ident()?;
+        // 두 에러는 tag가 든 구간을 쓴다(codegen의 UnknownTag도 같은 자리를 쓴다).
+        let tag = self.ident_at()?;
         self.expect(&Token::LParen)?;
         let (attrs, event_bindings) = self.attrs()?;
         // attrs 뒤가 `/`면 self-close. 확정 문법상 `/` 앞 공백 필수.
@@ -975,13 +983,13 @@ impl<'a> Parser<'a> {
         };
         self.expect(&Token::RParen)?;
 
-        if is_void_tag(&tag) && !self_close {
+        if is_void_tag(&tag.name) && !self_close {
             return Err(ParseError {
                 kind: ParseErrorKind::Expected {
-                    want: format!("self-close for void element ({tag}( ... /))"),
-                    got: format!("void element `{tag}` with a child block"),
+                    want: format!("self-close for void element ({}( ... /))", tag.name),
+                    got: format!("void element `{}` with a child block", tag.name),
                 },
-                range: tag_range,
+                range: tag.range.0,
             });
         }
 
@@ -995,10 +1003,10 @@ impl<'a> Parser<'a> {
             if children.is_empty() {
                 return Err(ParseError {
                     kind: ParseErrorKind::Expected {
-                        want: format!("self-close for childless element ({tag}( ... /))"),
+                        want: format!("self-close for childless element ({}( ... /))", tag.name),
                         got: "an empty child block".into(),
                     },
-                    range: tag_range,
+                    range: tag.range.0,
                 });
             }
             children

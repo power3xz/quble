@@ -12,6 +12,19 @@ pub struct SourceFile {
     pub comps: Vec<Component>,
 }
 
+/// 이름 하나와 그 이름이 소스에 적힌 자리. codegen이 "그런 태그/컴포넌트/컨텍스트 없다"를
+/// 낼 때 탓할 대상이다. VarRef가 참조 자리를 range로 들고 다니는 것과 같은 축 - 이름을 담는
+/// 필드가 자기 위치를 함께 든다.
+///
+/// 모든 이름 필드가 이걸 쓰는 건 아니다. codegen이 그 이름으로 무언가를 찾고 못 찾으면
+/// 에러를 내는 자리에만 붙인다(못 찾은 이름이 곧 탓할 대상이다).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ident {
+    pub name: String,
+    /// 비교에서 빠진다(NodeRange) - 다른 줄의 같은 이름은 같은 이름이다.
+    pub range: NodeRange,
+}
+
 /// `use A, B from "path"` - path 소스에서 이름 A/B를 현재 스코프로 가져온다.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Use {
@@ -80,7 +93,7 @@ pub struct Event {
 #[derive(Debug, PartialEq)]
 pub enum Node {
     Element {
-        tag: String,
+        tag: Ident,
         attrs: Vec<(String, AttrValue)>,
         /// `@click:TOGGLE` - (DOM이벤트, 이벤트명). 이 요소가 무엇에 반응해 무슨 이벤트를 쏘나.
         event_bindings: Vec<(String, String)>,
@@ -128,7 +141,7 @@ pub enum Node {
     /// `@with Context { children }` - 자식들을 그 컨텍스트 범위로 감싼다. context는 이 컴포넌트
     /// contexts에 선언된 이름(codegen이 context_index로 해석). codegen이 EnterContext/ExitContext로 감싼다.
     With {
-        context: String,
+        context: Ident,
         children: Vec<Node>,
     },
 }
@@ -138,8 +151,8 @@ pub enum Node {
 /// 쓰는 쪽 기준(SYNTAX #3.3).
 #[derive(Debug, PartialEq)]
 pub struct SlotPlaceholderContent {
-    /// 기명이면 슬롯 이름, 무기명이면 None.
-    pub name: Option<String>,
+    /// 기명이면 슬롯 이름, 무기명이면 None(무기명은 탓할 이름이 없어 합성 호출 자리로 떨어진다).
+    pub name: Option<Ident>,
     pub nodes: Vec<Node>,
 }
 

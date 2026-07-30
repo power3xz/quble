@@ -1,7 +1,8 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    ArgValue, AttrValue, Context, Event, ForCount, LitValue, Node, Prop, Type, VarRef,
+    ArgValue, AttrValue, Context, Event, ForCount, LitValue, Node, Prop, SlotPlaceholderContent,
+    Type, VarRef,
 };
 use crate::flatten::FlatComp;
 use crate::src_range::SrcRange;
@@ -121,9 +122,9 @@ impl std::fmt::Display for CodegenErrorKind {
 
 /// codegen 실패 - 무엇이(kind) 어디서(range) 틀렸나.
 ///
-/// range가 Option인 건 AST가 아직 구간을 다 들지 않아서다. prop 참조(VarRef)는 구간을
-/// 갖지만 태그명/컴포넌트명/이벤트명 등은 아직 없다 - "위치 없음"을 0..0 같은 가짜 값으로
-/// 꾸미지 않고 None으로 정직하게 둔다. 그 자리들이 구간을 갖게 되면 Some으로 채워진다.
+/// range가 Option인 건 탓할 자리가 아예 없는 에러가 있어서다. 안 넘긴 prop(UnknownArg)이
+/// 그렇다 - 없는 것은 소스에 자리가 없다. 그런 자리를 0..0 같은 가짜 값으로 꾸미지 않고
+/// None으로 정직하게 둔다. 아직 구간을 안 든 AST 자리(이벤트명, @for 회차변수)도 None이다.
 #[derive(Debug, PartialEq, Eq)]
 pub struct CodegenError {
     pub kind: CodegenErrorKind,
@@ -177,6 +178,11 @@ impl<'a> CompLookup<'a> {
             .get(name)
             .map(|(id, props, slot_placeholders)| (*id, *props, slot_placeholders.as_slice()))
     }
+}
+
+/// 슬롯 콘텐츠의 이름(무기명이면 None). 선언쪽 `Vec<Option<&str>>`과 짝지어 비교하는 형태로 맞춘다.
+fn slot_name(content: &SlotPlaceholderContent) -> Option<&str> {
+    content.name.as_ref().map(|n| n.name.as_str())
 }
 
 /// template을 훑어 `@slot` 선언을 등장 순서로 모은다(무기명이면 None). 이 순서가 slot_placeholder_index다.
@@ -617,8 +623,8 @@ fn emit_node(
             event_bindings,
             children,
         } => {
-            let tag_id = tags::tag_id(tag)
-                .ok_or_else(|| CodegenErrorKind::UnknownTag(tag.clone()).no_range())?;
+            let tag_id = tags::tag_id(&tag.name)
+                .ok_or_else(|| CodegenErrorKind::UnknownTag(tag.name.clone()).at(tag.range.0))?;
 
             code.push(Op::ElemOpen as u8);
             code.extend_from_slice(&tag_id.to_le_bytes());
@@ -781,7 +787,7 @@ fn emit_node(
             {
                 let content = contents
                     .iter()
-                    .find(|c| c.name.as_deref() == *slot_placeholder_name);
+                    .find(|c| slot_name(c) == *slot_placeholder_name);
                 let content = match content {
                     Some(c) => c,
                     None => continue,
@@ -808,13 +814,17 @@ fn emit_node(
             for content in contents {
                 if !child_slot_placeholders
                     .iter()
-                    .any(|s| *s == content.name.as_deref())
+                    .any(|s| *s == slot_name(content))
                 {
-                    return Err(CodegenErrorKind::UnknownSlotPlaceholder {
+                    let kind = CodegenErrorKind::UnknownSlotPlaceholder {
                         comp: name.clone(),
-                        slot_placeholder: content.name.clone(),
-                    }
-                    .no_range());
+                        slot_placeholder: slot_name(content).map(str::to_string),
+                    };
+                    // 무기명은 탓할 이름이 없다 - 그때만 위치가 빈다.
+                    return Err(match &content.name {
+                        Some(slot) => kind.at(slot.range.0),
+                        None => kind.no_range(),
+                    });
                 }
             }
 
@@ -969,9 +979,10 @@ fn emit_node(
             // event_index 찾기와 동형). 미선언 컨텍스트는 에러.
             let context_index = contexts
                 .iter()
-                .position(|c| &c.name == context)
-                .ok_or_else(|| CodegenErrorKind::UnknownContext(context.clone()).no_range())?
-                as u16;
+                .position(|c| c.name == context.name)
+                .ok_or_else(|| {
+                    CodegenErrorKind::UnknownContext(context.name.clone()).at(context.range.0)
+                })? as u16;
             code.push(Op::EnterContext as u8);
             code.extend_from_slice(&context_index.to_le_bytes());
 
