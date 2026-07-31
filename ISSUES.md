@@ -48,6 +48,13 @@
 
 ## 미해결
 
+- **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
+  소스에 설명을 달 수 없다(비ASCII를 쓰면 `unexpected character`로 터진다).
+
+- **루트 store에서 배열 요소 경로로 못 내려감** - `store.items[2].title` 같은 접근이 안 된다
+  (`leafTree`가 배열을 칸 leafIndex 하나로 두고 멈춘다). `@for`로 요소를 자식에 넘기는 경로는
+  된다(`core/web/for-item-props-set.test.ts`).
+
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
   실패한다(`get_const`가 `&str` 대신 `&Const` 반환). renderer는 바이트코드로 렌더 가능한지 보는
   POC였고 그 역할은 끝났다 - 언어가 어느 정도 완성된 뒤 다시 본다. 당분간 처리하지 않는다.
