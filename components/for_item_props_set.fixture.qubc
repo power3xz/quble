@@ -1,0 +1,21 @@
+component List {
+  props { items: { tag: string, detail: { label: string, value: string } }[] }
+  template {
+    div(class="list") {
+      @for (item of items) {
+        Card(info={item.detail} /)
+      }
+    }
+  }
+}
+
+component Card {
+  props { info: { label: string, value: string } }
+  events { BUMP({ }) }
+  template {
+    div(class="card" @click:BUMP) {
+      span(class="label") { {info.label} }
+      span(class="value") { {info.value} }
+    }
+  }
+}
