@@ -6,7 +6,7 @@ component Playground {
   props {
     files: { name: string, isEntry: bool }[],
     editingName: string,
-    editing: string,
+    lines: { tokens: { text: string, cls: string }[] }[],
     lineNumbers: string,
     lineCount: number,
     caretLine: string,
@@ -36,7 +36,15 @@ component Playground {
           pre(class="pg__gutter") { {lineNumbers} }
           div(class="pg__sheet") {
             div(class="pg__caretline" style={caretLine} /)
-            pre(class="pg__view") { {editing} }
+            pre(class="pg__view") {
+            @for (line of lines) {
+              div(class="pg__line") {
+                @for (t of line.tokens) {
+                  span(class={t.cls}) { {t.text} }
+                }
+              }
+            }
+          }
             textarea(class="pg__area" spellcheck="false" rows={lineCount}
               @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE /)
           }

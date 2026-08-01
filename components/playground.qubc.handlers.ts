@@ -10,13 +10,16 @@
 //   1. 컴파일은 모든 파일의 내용이 필요한데 핸들러가 받는 props는 자기 회차 요소뿐이고,
 //      루트 store에서 배열 요소로 내려가는 경로가 없다(ISSUES).
 //   2. 타이핑마다 set하면 TEXT_VAR 구독이 값 비교 없이 textContent를 덮어써 커서가 튄다.
-// 그래서 편집 중에는 캐시만 갱신하고, 파일을 바꿀 때만 editing을 set한다(그때는 갱신이 맞다).
+// 그래서 편집 중에는 캐시만 갱신하고, 파일을 바꿀 때만 lines를 set한다(그때는 갱신이 맞다).
 
 import { compile as decodeQubb, type THandlers } from "../core/web/runtime.ts";
 import { loadCompiler } from "../core/web/wasm-compiler.ts";
+import { tokenize } from "./tokenize.ts";
+
+export { tokenize };
 
 type TStore = {
-  editing: number;
+  lines: number;
   editingName: number;
   lineNumbers: number;
   lineCount: number;
@@ -32,6 +35,7 @@ type TCtx = {
   set: (leafIndex: number, value: unknown) => void;
   push: (arrayLeafIndex: number, element: unknown) => void;
   removeAt: (arrayLeafIndex: number, index: number) => void;
+  replace: (arrayLeafIndex: number, elems: unknown[]) => void;
   event: Event;
   $0: number;
 };
@@ -52,12 +56,6 @@ export const lineCountOf = (text: string) => text.split("\n").length;
 /** 거터에 넣을 줄 번호 - 1부터 줄 수까지. */
 export const lineNumbersFor = (text: string) =>
   Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
-
-/** .pg__view(<pre>)에 넣을 문자열. 마지막 줄이 비어 있으면 공백 한 칸을 채운다 - <pre>는 빈
- * 줄에 높이를 주지 않아 화면만 짧아지고, 그만큼 커서가 거터/줄 번호보다 위로 올라간다.
- * (끝이 개행인 경우와 파일 전체가 빈 경우가 모두 여기 걸린다.) */
-export const viewTextOf = (text: string) =>
-  text.endsWith("\n") || text === "" ? `${text} ` : text;
 
 /** 초기 data를 캐시에 심는다. 부트스트랩이 mount 전에 부른다. 첫 파일이 편집기에 실린 채로
  * 시작하므로 그 파일을 지금 편집 중인 것으로 둔다. */
@@ -147,8 +145,8 @@ installConsoleCapture();
 
 // 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, textarea의 value만
 // 여기서 직접 쓴다 - textarea는 uncontrolled라 quble이 값을 바인딩할 수 없다(playground.css).
-const showText = (text: string, { store, set }: Pick<TCtx, "store" | "set">) => {
-  set(store.editing, viewTextOf(text));
+const showText = (text: string, { store, set, replace }: Pick<TCtx, "store" | "set" | "replace">) => {
+  replace(store.lines, tokenize(text, currentName ?? ""));
 
   const count = lineCountOf(text);
   if (count !== shownLines) {

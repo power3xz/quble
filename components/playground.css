@@ -182,6 +182,51 @@
   color: #e6e9ef;
 }
 
+/* 한 줄 = 정확히 한 줄 높이. 토크나이저가 빈 줄에도 공백 한 칸을 넣지만, 줄 높이를 여기서
+ * 못 박아 두어야 textarea의 줄과 어긋나지 않는다. */
+.pg__line {
+  height: 1.5em;
+}
+
+/* 토큰 색. 배경(#10141b)과 대비를 두되 서로도 구분돼야 한다. */
+
+.tok--keyword {
+  color: #c792ea;
+}
+
+.tok--type {
+  color: #7fd1e0;
+}
+
+.tok--event {
+  color: #f0a45d;
+}
+
+.tok--string {
+  color: #a5d6a7;
+}
+
+.tok--number {
+  color: #f5a97f;
+}
+
+.tok--comment {
+  color: #5f6b7d;
+  font-style: italic;
+}
+
+.tok--property {
+  color: #8ab4f8;
+}
+
+.tok--selector {
+  color: #e6c07b;
+}
+
+.tok--punctuation {
+  color: #8b95a5;
+}
+
 .pg__area {
   position: absolute;
   top: 0;
