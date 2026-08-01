@@ -1165,44 +1165,80 @@ class Interpreter {
     }
   };
 
-  // 배열 내용을 통째로 새 값들로 바꾼다 - 기존 요소를 전부 회수하고 elems를 새로 심는다. push/removeAt이
-  // "무엇이 어떻게 바뀌었나"를 아는 부분 갱신인 반면 이것은 전량 교체라, @for 회차 DOM도 전부 다시 짓는다
-  // (서버 응답으로 목록을 갈아끼우는 등 이전 요소와 대응이 없는 경우가 대상이다).
+  // 배열 내용을 통째로 새 값들로 바꾼다 - 겹치는 앞자리는 값만 덮어쓰고(overwriteArrayElement) 꼬리만
+  // 늘리거나 줄인다. 요소를 전부 회수하고 다시 심으면 회차 DOM도 전부 다시 지어야 하는데, 목록 대부분이
+  // 그대로인 교체(편집기 한 줄 수정 등)에서는 그 재구축이 통째로 낭비다. 자리를 유지하면 회차 DOM은
+  // 그대로 두고 바뀐 텍스트/속성만 구독 발화로 움직인다.
   //
-  // 순서가 중요하다: 회차 DOM(truncateFor)을 먼저 떼고 요소 leaf를 회수해야 한다 - 반대로 하면 떼는 도중
-  // 회차가 이미 반납된 leaf를 읽는다. 마지막에 길이 칸을 set해 0에서 새 개수로 grow시킨다(onSize).
+  // 자리를 유지한다는 건 i번째 요소 leaf가 다른 값을 갖게 된다는 뜻이다 - push/removeAt의 "값 고정,
+  // 위치 이동"과 반대 방향이지만, 전량 교체는 이전 요소와의 대응 자체가 없으므로 이쪽이 맞다.
   replaceArrayElements = (arrayLeafIndex: number, elems: unknown[]): void => {
-    const info = this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
-    if (info.forRegionIndex !== null) {
-      truncateFor(this.store, this.regionPool, this.branchPool, info.forRegionIndex, 0);
-      for (const indexLeafIndex of info.indexLeafIndices) {
-        this.store.free(indexLeafIndex, 1);
-      }
-      info.indexLeafIndices.length = 0;
-    }
-    for (const elemStart of info.elemStartLeafIndices) {
-      this.freeArrayElement(elemStart, info.elemTypeRef);
-    }
-    info.elemStartLeafIndices.length = 0;
-    // 길이 칸을 0으로 먼저 낮춘다 - store.set은 값이 같으면 발화를 건너뛰므로, 개수가 그대로인 교체
-    // (3개 -> 다른 3개)에서는 마지막 set이 no-op이 되어 방금 떼어낸 DOM이 되살아나지 않는다.
-    if (info.sizeLeafIndex !== null) {
-      this.store.set(info.sizeLeafIndex, 0);
+    this.replaceInto(this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))], elems);
+  };
+
+  // replace의 본체 - arrayInfo를 직접 받는다(요소 안 중첩 배열은 칸 값이 arrayInfoIndex라
+  // arrayLeafIndex가 없어 여기로 재귀한다).
+  replaceInto = (info: TArrayInfo, elems: unknown[]): void => {
+    const kept = Math.min(info.elemStartLeafIndices.length, elems.length);
+    for (let i = 0; i < kept; i++) {
+      this.overwriteArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef, elems[i]);
     }
 
-    for (const elem of elems) {
-      this.plantArrayElement(elem, info);
+    // 꼬리 제거 - 회차 DOM(truncateFor)을 먼저 떼고 요소 leaf를 회수해야 한다. 반대로 하면 떼는 도중
+    // 회차가 이미 반납된 leaf를 읽는다.
+    if (elems.length < info.elemStartLeafIndices.length) {
+      if (info.forRegionIndex !== null) {
+        truncateFor(this.store, this.regionPool, this.branchPool, info.forRegionIndex, kept);
+        for (const indexLeafIndex of info.indexLeafIndices.splice(kept)) {
+          this.store.free(indexLeafIndex, 1);
+        }
+      }
+      for (const elemStart of info.elemStartLeafIndices.splice(kept)) {
+        this.freeArrayElement(elemStart, info.elemTypeRef);
+      }
     }
-    // 인덱스 leaf는 순회 중일 때만 채운다(push와 같은 forRegionIndex 기준) - 순회 전이면
-    // reactiveArrayFor의 lazy 채움에 맡긴다.
-    if (info.forRegionIndex !== null) {
-      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+
+    // 꼬리 추가 - push와 같은 순서(요소를 심고 인덱스 leaf를 잇는다). 인덱스 leaf는 순회 중일 때만
+    // 채운다(forRegionIndex 기준) - 순회 전이면 reactiveArrayFor의 lazy 채움에 맡긴다.
+    for (let i = kept; i < elems.length; i++) {
+      this.plantArrayElement(elems[i], info);
+      if (info.forRegionIndex !== null) {
         info.indexLeafIndices[i] = this.store.alloc([i]);
       }
     }
+
+    // 길이 칸을 진실과 맞춘다. 개수가 그대로면 no-op인데, 그래도 맞다 - 회차 DOM을 손대지 않았고
+    // 값은 덮어쓰기가 이미 발화시켰다.
     if (info.sizeLeafIndex !== null) {
-      this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for 재구축 발화
+      this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
     }
+  };
+
+  // 요소 하나를 기존 자리(start)에 덮어쓴다 - 고정 칸은 store.set으로 값만 바꾸고, 배열 칸을 만나면
+  // 그 칸 값(arrayInfoIndex)은 그대로 둔 채 그 자식 배열에 대해 replaceInto로 재귀한다. 배열 칸에
+  // set을 하면 arrayInfo 포인터가 깨져 그 배열의 모든 요소 leaf를 잃는다.
+  //
+  // 커서 진행 순서는 freeArrayElement의 walk와 같아야 한다(객체는 필드 선언 순, 스칼라/배열은 한 칸) -
+  // 둘 다 같은 고정부 레이아웃(plantFixed)을 걷는다.
+  overwriteArrayElement = (start: number, typeRef: number, value: unknown): void => {
+    let cursor = start;
+    const walk = (ref: number, v: unknown): void => {
+      const t = this.module.types[ref];
+      if (t.tag === "object") {
+        for (const [nameConstIndex, childTypeRef] of t.fields) {
+          const key = this.module.constpool[nameConstIndex] as string;
+          walk(childTypeRef, (v as Record<string, unknown> | undefined)?.[key]);
+        }
+        return;
+      }
+      if (t.tag === "array") {
+        this.replaceInto(this.arrayPool.entries[Number(this.store.get(cursor))], Array.isArray(v) ? v : []);
+      } else {
+        this.store.set(cursor, v);
+      }
+      cursor += 1; // 스칼라/배열 칸 하나 소비
+    };
+    walk(typeRef, value);
   };
 
   // domEvent 타입의 위임 리스너를 document에 (인터프리터당 한 번만) 단다. target -> 조상 순회로
