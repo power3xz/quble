@@ -2,7 +2,7 @@
 // Quble 빌드 파이프라인. quble로 .qubc를 컴파일하고, 짝 핸들러(.qubc.handlers.ts)가 있으면
 // esbuild로 번들해 manifest에 등록한 뒤, 런타임 번들(quble-runtime.js)과 진입 페이지(index.html)를
 // 함께 낸다. 결과 dist/는 자기완결 - 정적 서버에 올리면 index.html이 바로 구동된다.
-// 사용: node build.mjs <path/to/component.qubc> [--data <data.json>]
+// 사용: node build-preview.mjs <path/to/component.qubc> [--data <data.json>]
 // --data: 컴포넌트가 초기 props(예: @for count)를 요구하면 그 초기값 JSON을 준다. 안 주면 {}로
 //   mount돼 그 값에 걸린 렌더가 비어 나온다. 관례상 짝 파일 <component>.data.json에 둔다
 //   (예: forstress.qubc <-> forstress.data.json). entry 빌드 전 짝 data.json 유무를 확인할 것.
