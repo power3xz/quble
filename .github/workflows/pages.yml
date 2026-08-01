@@ -1,0 +1,63 @@
+# playground를 GitHub Pages에 배포한다.
+# dist/는 gitignore라 산출물이 레포에 없다 - CI가 매번 빌드한다(quble-playground.sh의 1~3단계와 동일).
+# 산출 경로는 core/dist/playground 하나뿐이고, 그 안의 자산 참조는 전부 상대경로라
+# https://<user>.github.io/quble/ 같은 하위 경로에서도 그대로 뜬다.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 배포는 하나만 - 연달아 push하면 앞선 실행을 취소하지 않고 끝내게 둔다(반쯤 배포된 상태 방지).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: wasm 타겟 추가
+        run: rustup target add wasm32-unknown-unknown
+
+      # npm install이 둘이다 - 루트 워크스페이스(core/web)와 core/build(esbuild를 자기 것으로 가진다).
+      - name: 의존성 설치
+        run: |
+          npm ci
+          npm ci --prefix core/build
+
+      - name: wasm 컴파일러 빌드
+        run: cargo build --manifest-path core/Cargo.toml -p compiler-wasm --target wasm32-unknown-unknown --release
+
+      - name: quble 바이너리 빌드
+        run: cargo build --manifest-path core/Cargo.toml --bin quble
+
+      - name: playground 빌드
+        run: node build/build-playground.mjs
+        working-directory: core
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: core/dist/playground
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
