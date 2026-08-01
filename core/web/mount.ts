@@ -3,6 +3,11 @@
 
 import { compile, type THandlers } from "./runtime.ts";
 
+// 이 번들이 런타임을 통째로 담으므로 compile도 함께 내보낸다 - 바이트코드를 이미 손에 든 쪽은
+// mount의 fetch 단계 없이 이것만 있으면 된다.
+export { compile } from "./runtime.ts";
+export type { THandlers } from "./runtime.ts";
+
 type TManifest = {
   resources: string[];
   handlers?: string;
