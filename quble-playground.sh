@@ -15,7 +15,7 @@ set -euo pipefail
 PORT=8141
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CORE="$ROOT/core"
-DIST="$CORE/dist"
+DIST="$CORE/dist/playground"
 
 echo "[playground] 1/4 wasm 컴파일러 빌드"
 cargo build --manifest-path "$CORE/Cargo.toml" -p compiler-wasm --target wasm32-unknown-unknown --release -q

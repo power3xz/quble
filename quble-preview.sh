@@ -8,7 +8,7 @@
 # 이벤트 핸들러도 짝 파일 <name>.qubc.handlers.ts를 같은 폴더에 두면 build-preview.mjs가 자동으로 찾아
 # esbuild로 번들/주입한다(예: components/forlist.qubc <-> components/forlist.qubc.handlers.ts).
 # 없으면 렌더만 되고 클릭은 이벤트 발화까지만 - set/removeAt 같은 상태 변경은 핸들러가 있어야 한다.
-# 서빙되는 건 core/dist 하나뿐 - build-preview.mjs가 여기에 <name>.qubb, data.json, index.html을 낸다.
+# 서빙되는 건 core/dist/preview 하나뿐 - build-preview.mjs가 여기에 <name>.qubb, data.json, index.html을 낸다.
 #
 # 사용: ./quble-preview.sh <component.qubc> [--data <data.json>]
 #   예: ./quble-preview.sh components/forstress.qubc --data components/forstress.data.json
@@ -18,14 +18,14 @@ PORT=8140
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CORE="$ROOT/core"
 BUILD="$CORE/build"
-DIST="$CORE/dist"
+DIST="$CORE/dist/preview"
 
 if [ $# -lt 1 ]; then
   echo "usage: ./quble-preview.sh <component.qubc> [--data <data.json>]" >&2
   exit 1
 fi
 
-# build-preview.mjs는 core/ cwd에서 돌아 dist를 core/dist에 낸다 - 인자 경로를 절대경로로 바꿔
+# build-preview.mjs는 core/ cwd에서 돌아 산출물을 core/dist/preview에 낸다 - 인자 경로를 절대경로로 바꿔
 # cwd와 무관하게 해소되게 한다(entry, --data 파일 모두).
 BUILD_ARGS=()
 for arg in "$@"; do

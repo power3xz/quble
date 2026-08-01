@@ -41,15 +41,15 @@ if (!existsSync(quble)) {
   process.exit(1);
 }
 
-const distDir = join("dist");
+const distDir = join("dist", "preview");
 const stem = basename(entry).replace(/\.qubc$/, "");
 
 // dist를 비우고 시작한다 - 프리뷰는 한 컴포넌트만 담는다(이전 빌드가 누적돼 남지 않게).
 rmSync(distDir, { recursive: true, force: true });
 mkdirSync(distDir, { recursive: true });
 
-// 1. quble 컴파일 - .qubb + res/*.css + dist/<stem>.manifest.json({"resources":[...],"props":[...]})
-const compiled = spawnSync(quble, [entry], { stdio: "inherit" });
+// 1. quble 컴파일 - .qubb + res/*.css + <distDir>/<stem>.manifest.json({"resources":[...],"props":[...]})
+const compiled = spawnSync(quble, [entry, "--out-dir", distDir], { stdio: "inherit" });
 if (compiled.status !== 0) {
   process.exit(compiled.status ?? 1);
 }

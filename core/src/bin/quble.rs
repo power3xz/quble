@@ -1,14 +1,21 @@
-//! Quble 컴파일러 바이너리: .qubc 소스 파일 -> 컴파일 -> 현재 디렉토리의 dist/<name>.qubb.
-//! 사용: quble <path/to/component.qubc>
+//! Quble 컴파일러 바이너리: .qubc 소스 파일 -> 컴파일 -> <out-dir>/<name>.qubb.
+//! 사용: quble <path/to/component.qubc> [--out-dir <경로>]
+//!
+//! out-dir 기본값은 현재 디렉토리의 `dist`. 산출물을 용도별로 가르는 쪽(playground/preview
+//! 빌드)이 각자 하위 경로를 지정한다 - 한 디렉토리를 공유하면 서로의 산출물을 지운다.
 
 use std::path::Path;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let Some(path) = std::env::args().nth(1) else {
-        eprintln!("usage: quble <component.qubc>");
-        return ExitCode::FAILURE;
+    let (path, out_dir) = match parse_args() {
+        Some(parsed) => parsed,
+        None => {
+            eprintln!("usage: quble <component.qubc> [--out-dir <경로>]");
+            return ExitCode::FAILURE;
+        }
     };
+    let out_dir = Path::new(&out_dir);
 
     // compile_file이 엔트리 파일을 읽고, use는 importer 기준 상대경로로 해소한다.
     let output = match compiler::compile_file(&path) {
@@ -20,14 +27,13 @@ fn main() -> ExitCode {
     };
     let bytes = output.bytecode;
 
-    // 산출물 이름은 입력 파일 stem. 현재 디렉토리의 dist/ 아래에 .qubb로.
+    // 산출물 이름은 입력 파일 stem. out-dir 아래에 .qubb로.
     let name = Path::new(&path)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("out");
-    let out_dir = Path::new("dist");
     if let Err(e) = std::fs::create_dir_all(out_dir) {
-        eprintln!("dist 생성 실패: {e}");
+        eprintln!("{} 생성 실패: {e}", out_dir.display());
         return ExitCode::FAILURE;
     }
     let out_path = out_dir.join(format!("{name}.qubb"));
@@ -63,7 +69,27 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// 리소스 정규화 경로들을 dist/res/로 복사한다. 파일명은 `<basename>.<내용해시>.css` -
+/// 인자를 (입력 경로, 출력 디렉토리)로 읽는다. 형태가 어긋나면 None(호출부가 usage를 낸다).
+/// 플래그가 하나뿐이라 파서 크레이트를 안 쓴다 - 워크스페이스의 의존성 0개를 유지한다.
+fn parse_args() -> Option<(String, String)> {
+    let mut path = None;
+    let mut out_dir = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out-dir" => match args.next() {
+                Some(dir) => out_dir = Some(dir),
+                None => return None, // 값이 안 따라왔다
+            },
+            // 입력은 하나만 받는다 - 둘째가 오면 어느 것을 컴파일할지 모른다.
+            _ if path.is_none() => path = Some(arg),
+            _ => return None,
+        }
+    }
+    Some((path?, out_dir.unwrap_or_else(|| "dist".to_string())))
+}
+
+/// 리소스 정규화 경로들을 out_dir/res/로 복사한다. 파일명은 `<basename>.<내용해시>.css` -
 /// 평탄화 시 동명 충돌을 막고 캐시 버스팅도 겸한다. resId 순서대로 산출 상대경로(`res/...`)를 반환.
 fn emit_resources(out_dir: &Path, resources: &[String]) -> std::io::Result<Vec<String>> {
     let res_dir = out_dir.join("res");

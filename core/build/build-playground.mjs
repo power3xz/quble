@@ -42,13 +42,13 @@ for (const [path, hint] of [
 }
 
 const entry = join(rootDir, "components", "playground.qubc");
-const distDir = join("dist");
+const distDir = join("dist", "playground");
 
 rmSync(distDir, { recursive: true, force: true });
 mkdirSync(join(distDir, "styles"), { recursive: true });
 
 // 1. 셸 컴파일 - playground.qubb + manifest. use한 css는 res/로 복사된다.
-const compiled = spawnSync(quble, [entry], { stdio: "inherit" });
+const compiled = spawnSync(quble, [entry, "--out-dir", distDir], { stdio: "inherit" });
 if (compiled.status !== 0) {
   process.exit(compiled.status ?? 1);
 }
