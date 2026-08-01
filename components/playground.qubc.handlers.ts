@@ -13,7 +13,7 @@
 // 그래서 편집 중에는 캐시만 갱신하고, 파일을 바꿀 때만 lines를 set한다(그때는 갱신이 맞다).
 
 import { compile as decodeQubb, type THandlers } from "../core/web/runtime.ts";
-import { loadCompiler } from "../core/web/wasm-compiler.ts";
+import { lazyCompiler } from "../core/web/wasm-compiler.ts";
 import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
 import { markError, tokenize } from "./tokenize.ts";
 
@@ -43,7 +43,8 @@ type TCtx = {
   $0: number;
 };
 
-const compilerReady = loadCompiler("./compiler_wasm.wasm");
+// 미리보기를 눌러야 쓰이므로 첫 화면에서는 받지 않는다 - 처음 컴파일할 때 받는다.
+const getCompiler = lazyCompiler("./compiler_wasm.wasm");
 
 // 파일 이름 순서(트리와 같은 순서)와 그 내용. 부트스트랩이 초기 data로 채운다.
 const fileNames: string[] = [];
@@ -345,7 +346,7 @@ const runPreview = async (_data: unknown, ctx: TCtx) => {
     }
   }
 
-  const { compile } = await compilerReady;
+  const { compile } = await getCompiler();
   const result = compile(files, entry);
   if (!result.ok) {
     fail(result.diagnostic);
