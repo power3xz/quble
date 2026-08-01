@@ -100,12 +100,19 @@ export const seed = (files: { name: string; source: string }[]) => {
 };
 
 // 지금 미리보기 중인 인스턴스와 그때 만든 Blob URL들 - 다시 컴파일할 때 정리한다.
+// 그중 스타일시트는 LOAD_RES가 document.head에 <link>로 달아 둔 것이라, URL만 revoke하면
+// 죽은 href를 가진 link가 head에 쌓인다. 그래서 떼어낼 대상을 따로 들고 있는다.
 let preview: { destroy: () => void; nodes: Node[] } | null = null;
 let previewUrls: string[] = [];
+let previewLinkedUrls: string[] = [];
 
 const clearPreview = () => {
   preview?.destroy();
   preview = null;
+  for (const url of previewLinkedUrls) {
+    document.head.querySelector(`link[href="${url}"]`)?.remove();
+  }
+  previewLinkedUrls = [];
   for (const url of previewUrls) {
     URL.revokeObjectURL(url);
   }
@@ -382,6 +389,7 @@ const runPreview = async (_data: unknown, ctx: TCtx) => {
       new Blob([sources.get(path) ?? ""], { type: "text/css" }),
     );
     previewUrls.push(url);
+    previewLinkedUrls.push(url);
     return url;
   });
 
