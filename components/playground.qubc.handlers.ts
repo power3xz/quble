@@ -20,6 +20,7 @@ import { markError, tokenize } from "./tokenize.ts";
 export { tokenize };
 
 type TStore = {
+  files: number;
   lines: number;
   editingName: number;
   lineNumbers: number;
@@ -51,29 +52,33 @@ const sources = new Map<string, string>();
 // 지금 편집 중인 파일과 화면에 반영된 줄 수. 줄 수가 그대로면 갱신을 건너뛴다.
 let currentName: string | null = null;
 
-// 편집/미리보기 표시가 켜져 있는 행의 leafIndex. 표시는 한 행에만 있어야 해서 새로 켜기 전에
-// 이전 행을 끈다 - 배열 요소를 이름으로 못 짚으므로(store는 배열 안으로 못 들어간다) 켤 때
-// 받은 props의 leafIndex를 들고 있다가 그걸로 되돌린다.
-let editingFlagLeaf: number | null = null;
-let previewingFlagLeaf: number | null = null;
-
-// 한 행의 표시를 켜고 이전 행의 것을 끈다. 돌려준 leafIndex를 호출부가 보관한다.
-const moveFlag = (
-  previous: number | null,
-  next: number,
-  set: (leafIndex: number, value: unknown) => void,
-) => {
-  if (previous !== null && previous !== next) {
-    set(previous, false);
-  }
-  set(next, true);
-  return next;
-};
 let shownLines = 0;
 
 // 마지막 컴파일 에러의 위치. 편집기가 그 파일을 싣고 있을 때만 줄 표시가 뜬다 - 다른 파일에서
 // 난 에러는 표시할 자리가 없어 패널에만 남고, 그 패널을 누르면 그 파일로 이동한다.
+// 파일 목록의 에러 표시는 이 값과 파일 이름을 맞춰 켠다(에러가 난 파일이 편집 중이 아니어도 보인다).
 let failure: TDiagnostic | null = null;
+
+// 파일 목록을 다시 그린다 - 에러 표시(hasError)만 바뀌므로 개수는 늘 그대로다. replace가 개수가
+// 같으면 요소 자리를 지키므로, 행들이 들고 있는 leafIndex(moveFlag가 보관한 것)가 그대로 유효하다.
+//
+// 행 하나만 켜면 되는데 목록 전체를 넘기는 이유: 에러가 난 파일은 클릭된 적이 없을 수 있어
+// 그 행의 leafIndex를 모른다(배열 요소를 이름으로 못 짚는다 - ISSUES).
+const refreshFiles = ({ store, replace }: Pick<TCtx, "store" | "replace">) => {
+  replace(
+    store.files,
+    fileNames.map((name) => ({
+      name,
+      isEntry: name.endsWith(".qubc"),
+      isEditing: name === currentName,
+      isPreviewing: name === previewingName,
+      hasError: failure?.path === name,
+    })),
+  );
+};
+
+// 지금 미리보기 중인 파일 - 목록을 다시 그릴 때 표시를 되살리려면 이름으로 들고 있어야 한다.
+let previewingName: string | null = null;
 
 /** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
 export const lineCountOf = (text: string) => text.split("\n").length;
@@ -188,48 +193,38 @@ const showText = (text: string, { store, set, replace }: Pick<TCtx, "store" | "s
   }
 };
 
-// 파일 선택 - 그 파일의 내용으로 편집기를 채운다.
-const selectFile = (_data: unknown, ctx: TCtx) => {
-  currentName = fileNames[ctx.$0];
-  const text = sources.get(currentName) ?? "";
-  ctx.set(ctx.store.editingName, currentName);
-  editingFlagLeaf = moveFlag(editingFlagLeaf, ctx.props.isEditing, ctx.set);
+// 편집기에 파일 하나를 싣는다. caretLine은 커서를 둘 줄(1부터), 0이면 맨 앞.
+const openFile = (name: string, ctx: TCtx, caretLine = 0) => {
+  currentName = name;
+  const text = sources.get(name) ?? "";
+  ctx.set(ctx.store.editingName, name);
+  refreshFiles(ctx);
   showText(text, ctx);
 
   const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
-  if (area) {
-    area.value = text;
-    area.selectionStart = area.selectionEnd = 0;
-    trackCaret(area, ctx);
+  if (!area) {
+    return;
   }
+  area.value = text;
+  // 줄머리 오프셋 - 앞 줄들의 길이 합에 그 사이 개행 수를 더한다.
+  const before = text.split("\n").slice(0, Math.max(0, caretLine - 1));
+  area.selectionStart = area.selectionEnd = before.length
+    ? before.join("").length + before.length
+    : 0;
+  trackCaret(area, ctx);
 };
+
+// 파일 선택 - 그 행이 쏜 이벤트라 $0가 몇 번째 파일인지 준다.
+const selectFile = (_data: unknown, ctx: TCtx) => openFile(fileNames[ctx.$0], ctx);
 
 // 진단을 눌러 에러가 난 파일의 그 줄로 간다. 다른 파일에서 난 에러(use로 딸려온 파일)는
 // 편집기에 표시할 자리가 없어 이게 유일한 이동 수단이다.
-//
-// 파일 전환을 그 행의 클릭으로 돌리는 이유: selectFile은 강조를 켤 leafIndex를 ctx.props로
-// 받는데, 그건 그 행이 쏜 이벤트에만 실려 온다(배열 요소를 이름으로 못 짚는다 - ISSUES).
 const jumpToError = (_data: unknown, ctx: TCtx) => {
-  if (!failure) {
+  if (!failure || !fileNames.includes(failure.path)) {
     return;
   }
-  const target = failure.line;
-  if (failure.path !== currentName) {
-    const index = fileNames.indexOf(failure.path);
-    if (index === -1) {
-      return;
-    }
-    const rows = document.querySelectorAll<HTMLButtonElement>(".row__name");
-    rows[index]?.click();
-  }
-  // 파일 전환이 끝난 뒤(위 click이 동기로 편집기를 채운다) 그 줄로 커서를 옮긴다.
-  const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
-  if (area) {
-    const offset = area.value.split("\n").slice(0, target - 1).join("\n").length;
-    area.selectionStart = area.selectionEnd = target === 1 ? 0 : offset + 1;
-    area.focus();
-    trackCaret(area, ctx);
-  }
+  openFile(failure.path, ctx, failure.line);
+  document.querySelector<HTMLTextAreaElement>(".pg__area")?.focus();
 };
 
 // 편집 - textarea의 값이 원본이다. 화면과 캐시를 거기에 맞춘다(value는 이미 사용자가 쳤다).
@@ -326,12 +321,14 @@ const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
 // 것인지 알 수 없다.
 const runPreview = async (_data: unknown, ctx: TCtx) => {
   const { $0, store, set } = ctx;
-  // 진단을 기억해 두고 편집기를 다시 그린다 - 에러가 이 파일에 있으면 그 줄이 강조된다.
+  // 진단을 기억해 두고 편집기와 파일 목록을 다시 그린다 - 에러가 이 파일에 있으면 그 줄이
+  // 강조되고, 어느 파일이든 목록의 그 행에 표시가 붙는다.
   const fail = (message: string) => {
     set(store.diagnostic, message);
     set(store.hasError, true);
     failure = parseDiagnostic(message);
     showText(sources.get(currentName ?? "") ?? "", ctx);
+    refreshFiles(ctx);
   };
 
   failure = null;
@@ -392,7 +389,8 @@ const runPreview = async (_data: unknown, ctx: TCtx) => {
     document.getElementById("preview")?.replaceChildren(...preview.nodes);
     set(store.previewName, entry);
     set(store.previewSelected, true);
-    previewingFlagLeaf = moveFlag(previewingFlagLeaf, ctx.props.isPreviewing, set);
+    previewingName = entry;
+    refreshFiles(ctx);
   } catch (e) {
     fail(`mount: ${(e as Error).message}`);
   }
