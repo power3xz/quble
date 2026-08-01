@@ -83,6 +83,7 @@
       lineNumbers: handlers.lineNumbersFor(sources[0].source),
       lineCount: handlers.lineCountOf(sources[0].source),
       caretLine: "transform: translateY(1rem)", // 첫 줄 - .pg__view의 padding-top과 같다
+      // 줄의 hasError/error는 tokenize가 꺼진 채로 채운다 - 컴파일 에러가 나면 그때 얹힌다.
       previewName: "",
       previewSelected: false,
       logs: [],

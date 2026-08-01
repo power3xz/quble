@@ -14,7 +14,8 @@
 
 import { compile as decodeQubb, type THandlers } from "../core/web/runtime.ts";
 import { loadCompiler } from "../core/web/wasm-compiler.ts";
-import { tokenize } from "./tokenize.ts";
+import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
+import { markError, tokenize } from "./tokenize.ts";
 
 export { tokenize };
 
@@ -69,6 +70,10 @@ const moveFlag = (
   return next;
 };
 let shownLines = 0;
+
+// 마지막 컴파일 에러의 위치. 편집기가 그 파일을 싣고 있을 때만 줄 표시가 뜬다 - 다른 파일에서
+// 난 에러는 표시할 자리가 없어 패널에만 남고, 그 패널을 누르면 그 파일로 이동한다.
+let failure: TDiagnostic | null = null;
 
 /** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
 export const lineCountOf = (text: string) => text.split("\n").length;
@@ -166,7 +171,14 @@ installConsoleCapture();
 // 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, textarea의 value만
 // 여기서 직접 쓴다 - textarea는 uncontrolled라 quble이 값을 바인딩할 수 없다(playground.css).
 const showText = (text: string, { store, set, replace }: Pick<TCtx, "store" | "set" | "replace">) => {
-  replace(store.lines, tokenize(text, currentName ?? ""));
+  const lines = tokenize(text, currentName ?? "");
+  // 에러 줄 표시는 그 에러가 난 파일을 싣고 있을 때만.
+  replace(
+    store.lines,
+    failure && failure.path === currentName
+      ? markError(lines, failure.line, failure.message)
+      : lines,
+  );
 
   const count = lineCountOf(text);
   if (count !== shownLines) {
@@ -188,6 +200,34 @@ const selectFile = (_data: unknown, ctx: TCtx) => {
   if (area) {
     area.value = text;
     area.selectionStart = area.selectionEnd = 0;
+    trackCaret(area, ctx);
+  }
+};
+
+// 진단을 눌러 에러가 난 파일의 그 줄로 간다. 다른 파일에서 난 에러(use로 딸려온 파일)는
+// 편집기에 표시할 자리가 없어 이게 유일한 이동 수단이다.
+//
+// 파일 전환을 그 행의 클릭으로 돌리는 이유: selectFile은 강조를 켤 leafIndex를 ctx.props로
+// 받는데, 그건 그 행이 쏜 이벤트에만 실려 온다(배열 요소를 이름으로 못 짚는다 - ISSUES).
+const jumpToError = (_data: unknown, ctx: TCtx) => {
+  if (!failure) {
+    return;
+  }
+  const target = failure.line;
+  if (failure.path !== currentName) {
+    const index = fileNames.indexOf(failure.path);
+    if (index === -1) {
+      return;
+    }
+    const rows = document.querySelectorAll<HTMLButtonElement>(".row__name");
+    rows[index]?.click();
+  }
+  // 파일 전환이 끝난 뒤(위 click이 동기로 편집기를 채운다) 그 줄로 커서를 옮긴다.
+  const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
+  if (area) {
+    const offset = area.value.split("\n").slice(0, target - 1).join("\n").length;
+    area.selectionStart = area.selectionEnd = target === 1 ? 0 : offset + 1;
+    area.focus();
     trackCaret(area, ctx);
   }
 };
@@ -286,11 +326,15 @@ const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
 // 것인지 알 수 없다.
 const runPreview = async (_data: unknown, ctx: TCtx) => {
   const { $0, store, set } = ctx;
+  // 진단을 기억해 두고 편집기를 다시 그린다 - 에러가 이 파일에 있으면 그 줄이 강조된다.
   const fail = (message: string) => {
     set(store.diagnostic, message);
     set(store.hasError, true);
+    failure = parseDiagnostic(message);
+    showText(sources.get(currentName ?? "") ?? "", ctx);
   };
 
+  failure = null;
   selectFile(_data, ctx);
 
   const entry = fileNames[$0];
@@ -381,4 +425,5 @@ export default {
   KEYDOWN_SOURCE: withSink(followCaret),
   CLICK_SOURCE: withSink(followCaret),
   CLICK_CLEAR_LOGS: withSink(clearLogs),
+  CLICK_DIAGNOSTIC: withSink(jumpToError),
 };

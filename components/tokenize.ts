@@ -8,7 +8,9 @@
 // 어떤 입력에도 원문이 그대로 복원돼야 한다(토큰 text를 이으면 원본).
 
 export type TToken = { text: string; cls: string };
-export type TLine = { tokens: TToken[] };
+// hasError/error는 토크나이저가 아니라 진단이 채운다(markError) - 문법 오류는 렉서가 아는 것이
+// 아니라 컴파일러가 말해 주는 것이다. 여기 두는 건 줄 하나의 화면 표현이 이 타입이기 때문이다.
+export type TLine = { tokens: TToken[]; hasError: boolean; error: string };
 
 // qubc 예약어는 SYNTAX.md 전체를 따른다 - 선언 블록(#1), 디렉티브(#4), 타입(#2.1).
 // 다른 언어는 화면에서 눈에 띄어야 하는 것만 고른다(완전한 목록이 목적이 아니다).
@@ -58,14 +60,32 @@ const splitLines = (tokens: TToken[]): TLine[] => {
     const pieces = token.text.split("\n");
     pieces.forEach((piece, i) => {
       if (i > 0) {
-        lines.push({ tokens: current.length ? current : [{ text: " ", cls: cls() }] });
+        lines.push(lineOf(current));
         current = [];
       }
       if (piece) current.push({ text: piece, cls: token.cls });
     });
   }
-  lines.push({ tokens: current.length ? current : [{ text: " ", cls: cls() }] });
+  lines.push(lineOf(current));
   return lines;
+};
+
+// 줄 하나를 만든다. 빈 줄이면 공백 한 칸을 넣는다. 에러는 아직 없다(markError가 나중에 얹는다).
+const lineOf = (tokens: TToken[]): TLine => ({
+  tokens: tokens.length ? tokens : [{ text: " ", cls: cls() }],
+  hasError: false,
+  error: "",
+});
+
+/** 진단이 가리키는 줄(1부터)에 메시지를 얹은 새 목록을 만든다. 범위 밖이면 그대로 돌려준다. */
+export const markError = (lines: TLine[], line: number, message: string): TLine[] => {
+  const i = line - 1;
+  if (i < 0 || i >= lines.length) {
+    return lines;
+  }
+  const marked = lines.slice();
+  marked[i] = { ...marked[i], hasError: true, error: message };
+  return marked;
 };
 
 // 렉서는 커서를 들고 원문을 훑으며 토큰을 밀어 넣는다. 어느 분기도 커서를 반드시 전진시켜야

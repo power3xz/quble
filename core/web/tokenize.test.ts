@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type TLine, tokenize } from "../../components/tokenize.ts";
+import { markError, type TLine, tokenize } from "../../components/tokenize.ts";
 
 // 줄을 다시 이어 원문을 만든다. 빈 줄에 넣은 공백 한 칸은 되돌린다.
 const rejoin = (lines: TLine[]) =>
@@ -266,6 +266,39 @@ test("빈 문자열도 한 줄을 낸다", () => {
 
   assert.equal(lines.length, 1);
   assert.deepEqual(lines[0].tokens, [{ text: " ", cls: "tok" }]);
+});
+
+// 에러 표시 - 토크나이저가 아니라 진단이 얹는다. 줄 요소의 화면 표현이라 여기 있다.
+
+test("에러가 그 줄에만 붙는다", () => {
+  const lines = markError(tokenize("a\nb\nc", "a.qubc"), 2, "무언가 잘못됐다");
+
+  assert.deepEqual(
+    lines.map((l) => l.hasError),
+    [false, true, false],
+  );
+  assert.equal(lines[1].error, "무언가 잘못됐다");
+});
+
+test("에러를 얹어도 원문은 그대로다", () => {
+  // 표시가 토큰을 건드리면 화면이 textarea와 어긋난다.
+  const source = "use x\ncomponent A {\n}";
+
+  assert.equal(rejoin(markError(tokenize(source, "a.qubc"), 2, "err")), source);
+});
+
+test("범위 밖 줄 번호는 무시한다", () => {
+  const lines = tokenize("a\nb", "a.qubc");
+
+  assert.deepEqual(markError(lines, 9, "err"), lines, "너무 큼");
+  assert.deepEqual(markError(lines, 0, "err"), lines, "0은 1부터 세는 규칙 밖");
+});
+
+test("표시 없는 줄은 hasError가 꺼져 있다", () => {
+  for (const line of tokenize("a\nb", "a.qubc")) {
+    assert.equal(line.hasError, false);
+    assert.equal(line.error, "");
+  }
 });
 
 test("끝이 개행이면 마지막 빈 줄이 남는다", () => {

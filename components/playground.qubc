@@ -6,7 +6,7 @@ component Playground {
   props {
     files: { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool }[],
     editingName: string,
-    lines: { tokens: { text: string, cls: string }[] }[],
+    lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string }[],
     lineNumbers: string,
     lineCount: number,
     caretLine: string,
@@ -21,6 +21,7 @@ component Playground {
     KEYDOWN_SOURCE({ })
     CLICK_SOURCE({ })
     CLICK_CLEAR_LOGS({ })
+    CLICK_DIAGNOSTIC({ })
   }
   template {
     div(class="pg") {
@@ -44,9 +45,12 @@ component Playground {
             div(class="pg__caretline" style={caretLine} /)
             pre(class="pg__view") {
             @for (line of lines) {
-              div(class="pg__line") {
+              div(class="pg__line" data-error={line.hasError}) {
                 @for (t of line.tokens) {
                   span(class={t.cls}) { {t.text} }
+                }
+                @if (line.hasError) {
+                  span(class="pg__line-error") { {line.error} }
                 }
               }
             }
@@ -57,7 +61,7 @@ component Playground {
         }
 
         @if (hasError) {
-          pre(class="pg__diag") { {diagnostic} }
+          button(class="pg__diag" @click:CLICK_DIAGNOSTIC) { {diagnostic} }
         }
       }
 

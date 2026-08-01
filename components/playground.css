@@ -215,6 +215,27 @@
   height: 1.5em;
 }
 
+/* 컴파일 에러가 난 줄. 배경으로 줄 전체를 표시하고 왼쪽에 막대를 세운다 - 거터가 sticky로
+ * 왼쪽을 덮으므로 막대는 글자 쪽(box-shadow inset)에 둔다. */
+.pg__line[data-error="true"] {
+  background: #3a1f24;
+  box-shadow: inset 0.3rem 0 0 #e06c75;
+}
+
+/* 에러 메시지 - 코드 오른쪽에 잇는다. 줄 안에 있지만 높이를 차지하면 안 된다(아래 줄들이
+ * 밀려 textarea와 어긋난다). 그래서 inline 흐름에 두되 폭만 쓰고, 긴 메시지는 자르지 않고
+ * 그대로 흘린다 - .pg__sheet가 콘텐츠 폭을 갖고 가로 스크롤이 있다. */
+.pg__line-error {
+  margin-left: 2ch;
+  color: #e06c75;
+  pointer-events: none;
+  user-select: none;
+}
+
+.pg__line-error::before {
+  content: "<- ";
+}
+
 /* 토큰 색. 배경(#10141b)과 대비를 두되 서로도 구분돼야 한다. */
 
 .tok--keyword {
@@ -278,16 +299,27 @@
   background: rgba(70, 120, 180, 0.4);
 }
 
+/* 눌러서 에러가 난 파일의 그 줄로 간다 - button이라 브라우저 기본 정렬/테두리를 되돌린다.
+ * (다른 파일에서 난 에러는 편집기에 표시할 자리가 없어 이 이동이 유일한 수단이다.) */
 .pg__diag {
   flex-shrink: 0;
   max-height: 14rem;
   overflow: auto;
+  width: 100%;
   padding: 1rem 1.2rem;
+  border: 0;
   border-top: 1px solid #5c2b2b;
   background: #2b1416;
   color: #ff9b9b;
+  font: inherit;
   font-size: 1.4rem;
+  text-align: left;
   white-space: pre;
+  cursor: pointer;
+}
+
+.pg__diag:hover {
+  background: #3a1a1d;
 }
 
 /* 미리보기 헤더 - 오른쪽 위 칸의 맨 위에 얹는다. 그 아래로 호스트의 #preview가 비친다. */
