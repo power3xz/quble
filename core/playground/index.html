@@ -63,7 +63,15 @@
     import { mount } from "./quble-runtime.js";
 
     // 초기 파일들. 셸이 렌더할 mount 데이터도 여기서 유도한다(한 곳에서만 정의).
-    const sources = await fetch("./sources.json").then((r) => r.json());
+    // sources.json은 이름만 담고 내용은 demo/에 실제 파일로 있다 - 데모를 고칠 때 JSON 안의
+    // 이스케이프된 문자열이 아니라 그 파일을 편집한다. 목록 순서가 곧 파일 트리 순서다.
+    const names = await fetch("./sources.json").then((r) => r.json());
+    const sources = await Promise.all(
+      names.map(async (name) => ({
+        name,
+        source: await fetch(`./demo/${name}`).then((r) => r.text()),
+      })),
+    );
 
     // 핸들러가 컴파일에 쓸 소스 캐시를 채운다 - 편집 전에도 run이 동작해야 한다.
     // manifest의 handlers는 내용 해시가 붙은 경로라 읽어서 그대로 import한다.

@@ -1,0 +1,9 @@
+{
+  "name": "진행 중",
+  "accent": "background: #deebff",
+  "position": 1,
+  "cards": [
+    { "title": "결제 실패 재시도 로직", "assignee": "도윤", "points": "8", "urgent": true },
+    { "title": "이미지 업로드 압축", "assignee": "지현", "points": "5", "urgent": false }
+  ]
+}

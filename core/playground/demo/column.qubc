@@ -1,0 +1,45 @@
+use "./column.css"
+use Card from "./card.qubc"
+
+component Column {
+  props {
+    name: string,
+    accent: string,
+    position: number,
+    cards: Omit<Card, 'seat'>[]
+  }
+  contexts {
+    LaneArea { lane: name, position: position }
+  }
+  events {
+    CLICK_ADD_CARD({ lane: name })
+    CLICK_HEADING({ lane: name, position })
+    CLICK_REMOVE_CARD({ lane: name })
+  }
+  template {
+    div(class="col") {
+      header(class="col__head" style={accent}) {
+        h2(class="col__name" @click:CLICK_HEADING) { {name} }
+      }
+
+      @with LaneArea {
+        div(class="col__cards") {
+          @for (card, seat of cards) {
+            div(class="col__slot") {
+              Ticket: Card(
+                title={card.title}
+                assignee={card.assignee}
+                points={card.points}
+                urgent={card.urgent}
+                seat={seat}
+              /)
+              button(class="col__remove" @click:CLICK_REMOVE_CARD) { "x" }
+            }
+          }
+        }
+      }
+
+      button(class="col__add" @click:CLICK_ADD_CARD) { "+ 카드" }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+use "./card.css"
+use Badge from "./badge.qubc"
+
+component Card {
+  props {
+    title: string,
+    assignee: string,
+    points: string,
+    urgent: bool,
+    seat: number
+  }
+  events {
+    CLICK_CARD({ title, seat })
+    CLICK_OWNER({ title, assignee })
+  }
+  template {
+    article(class="ticket" @click:CLICK_CARD) {
+      @if (urgent) {
+        Flag: Badge(text="긴급" tone="hot" /)
+      }
+
+      h3(class="ticket__title") { {title} }
+
+      footer(class="ticket__foot") {
+        button(class="ticket__who" @click:CLICK_OWNER) { {assignee} }
+        Points: Badge(text={points} tone="calm" /)
+      }
+    }
+  }
+}

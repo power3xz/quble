@@ -9,7 +9,7 @@
 // 사용: node build-playground.mjs
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { build } from "esbuild";
 
@@ -105,6 +105,9 @@ for (const name of ["index.html", "sources.json"]) {
 for (const css of ["reset.css", "global.css"]) {
   copyFileSync(join(coreDir, "web", "styles", css), join(distDir, "styles", css));
 }
+
+// 데모 소스는 브라우저가 sources.json의 이름으로 하나씩 받는다 - 통째로 복사한다.
+cpSync(join(coreDir, "playground", "demo"), join(distDir, "demo"), { recursive: true });
 
 console.log(`${join(distDir, "index.html")} (playground)`);
 console.log(`${join(distDir, "compiler_wasm.wasm")} (wasm compiler)`);

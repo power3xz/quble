@@ -1,0 +1,9 @@
+use "./badge.css"
+
+component Badge {
+  props { text: string, tone: string }
+  events { CLICK_BADGE({ text, tone }) }
+  template {
+    span(class="badge" data-tone={tone} @click:CLICK_BADGE) { {text} }
+  }
+}
