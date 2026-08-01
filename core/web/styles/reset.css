@@ -1,0 +1,71 @@
+/* Eric Meyer's Reset CSS v2.0 (public domain) - http://meyerweb.com/eric/tools/css/reset/
+ *
+ * 브라우저 기본 스타일을 지워 어느 브라우저에서든 같은 출발점을 만든다. 제목 크기, 목록 불릿,
+ * 강조 표시 같은 시각적 위계도 함께 사라지므로 컴포넌트가 필요한 모양을 직접 선언해야 한다
+ * (선언하지 않은 것은 일어나지 않는다).
+ *
+ * 원본 뒤에 두 가지를 더했다 - 2011년 리셋이라 빠져 있지만 지금은 "브라우저 차이 제거"에 필요하다:
+ *   - box-sizing: border-box  (당시엔 관행이 아니었다)
+ *   - 폼 요소 font: inherit   (input/button/textarea/select만 폰트를 상속받지 않아 OS UI 폰트로
+ *     떨어진다 - 플랫폼마다 크기가 달라지는 원인)
+ */
+
+html, body, div, span, applet, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+a, abbr, acronym, address, big, cite, code,
+del, dfn, em, img, ins, kbd, q, s, samp,
+small, strike, strong, sub, sup, tt, var,
+b, u, i, center,
+dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed,
+figure, figcaption, footer, header, hgroup,
+menu, nav, output, ruby, section, summary,
+time, mark, audio, video {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 100%;
+  font: inherit;
+  vertical-align: baseline;
+}
+
+/* HTML5 display-role reset for older browsers */
+article, aside, details, figcaption, figure,
+footer, header, hgroup, menu, nav, section {
+  display: block;
+}
+
+body {
+  line-height: 1;
+}
+
+ol, ul {
+  list-style: none;
+}
+
+blockquote, q {
+  quotes: none;
+}
+
+blockquote:before, blockquote:after,
+q:before, q:after {
+  content: '';
+  content: none;
+}
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+/* 원본에 없는 보완 - 위 주석 참고. */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+input, button, textarea, select {
+  font: inherit;
+}

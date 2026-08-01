@@ -1,0 +1,73 @@
+/* 전역 스타일 - reset.css가 브라우저 차이를 지운 뒤, 그 위에 우리 해석을 얹는다.
+ * reset은 "어느 브라우저든 같은 출발점", 여기는 "우리가 정한 기본값"이다.
+ *
+ * rem 기준: html을 62.5%(=10px)로 두어 1.6rem = 16px처럼 rem이 눈에 보이는 값이 되게 한다.
+ * body에서 1.6rem으로 본문 크기를 되돌린다 - 안 하면 본문이 10px이 된다.
+ *
+ * 목록(ul/ol)은 reset이 지운 불릿/들여쓰기를 되살리지 않는다 - UI에서 목록 마크업을
+ * 네비게이션 등으로 쓰는 일이 많아 매번 지우는 편이 더 번거롭다. 필요한 곳에서 선언한다.
+ */
+
+html {
+  font-size: 62.5%;
+}
+
+body {
+  font-size: 1.6rem;
+  line-height: 1.5;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
+    sans-serif;
+}
+
+/* reset이 지운 제목 위계를 되살린다. 비율은 브라우저 기본과 거의 같게 둔다(익숙한 값).
+ * 본문의 1.5는 큰 글자에서 너무 벌어져 제목만 1.25로 좁힌다. */
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+h1 {
+  font-size: 3.2rem;
+}
+
+h2 {
+  font-size: 2.4rem;
+}
+
+h3 {
+  font-size: 2rem;
+}
+
+h4 {
+  font-size: 1.8rem;
+}
+
+h5 {
+  font-size: 1.6rem;
+}
+
+h6 {
+  font-size: 1.4rem;
+}
+
+/* reset이 font: inherit으로 민 강조 요소를 되살린다 - 의미 태그가 시각적으로 구별돼야 한다. */
+
+strong, b {
+  font-weight: 700;
+}
+
+em, i {
+  font-style: italic;
+}
+
+code, pre, kbd, samp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
