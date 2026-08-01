@@ -34,7 +34,6 @@ component Panel {
   contexts { Area { section: "actions", userId: label } }
   events { PICK({ label }) }
   template {
-    // 주석
     @with Area {
       button(class="card" @click:PICK) { "담당자: " {label} }
       @if (on) { span() { {count} } } @else { hr( /) }
@@ -180,10 +179,13 @@ test("qubc - 작은따옴표는 유틸 타입 키다", () => {
   assert.ok(textsOf(lines, "string").includes("'id'"));
 });
 
-test("qubc - 주석", () => {
-  const lines = tokenize(QUBC, "a.qubc");
+test("qubc - 주석 문법이 없다", () => {
+  // `/`는 self-close(`img( /)`)로만 쓰인다. `//`를 주석으로 칠하면 없는 문법을 있는 것처럼
+  // 보여 준다.
+  const lines = tokenize("// not a comment\nuse x", "a.qubc");
 
-  assert.deepEqual(textsOf(lines, "comment"), ["// 주석"]);
+  assert.deepEqual(textsOf(lines, "comment"), []);
+  assert.deepEqual(textsOf(lines, "keyword"), ["use"]);
 });
 
 test("qubc - 보간이 여럿이어도 원문을 지킨다", () => {
@@ -201,13 +203,6 @@ test("qubc - 닫히지 않은 보간은 보간이 아니다", () => {
   const lines = tokenize(source, "a.qubc");
   assert.equal(rejoin(lines), source);
   assert.deepEqual(textsOf(lines, "interpolation"), []);
-});
-
-test("qubc - 여러 줄 주석이 없어 줄 주석은 그 줄에서 끝난다", () => {
-  const lines = tokenize("// 주석\nuse x", "a.qubc");
-
-  assert.deepEqual(textsOf(lines, "comment"), ["// 주석"]);
-  assert.deepEqual(textsOf(lines, "keyword"), ["use"]);
 });
 
 test("js - 키워드/문자열/주석을 가른다", () => {
