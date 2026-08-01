@@ -4,13 +4,14 @@ use LogRow from "./logrow.qubc"
 
 component Playground {
   props {
-    files: { name: string, isEntry: bool }[],
+    files: { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool }[],
     editingName: string,
     lines: { tokens: { text: string, cls: string }[] }[],
     lineNumbers: string,
     lineCount: number,
     caretLine: string,
     previewName: string,
+    previewSelected: bool,
     logs: { text: string, level: string }[],
     diagnostic: string,
     hasError: bool
@@ -25,7 +26,12 @@ component Playground {
     div(class="pg") {
       aside(class="pg__files") {
         @for (f of files) {
-          Row: FileRow(name={f.name} isEntry={f.isEntry} /)
+          Row: FileRow(
+            name={f.name}
+            isEntry={f.isEntry}
+            isEditing={f.isEditing}
+            isPreviewing={f.isPreviewing}
+          /)
         }
       }
 
@@ -55,7 +61,19 @@ component Playground {
         }
       }
 
-      header(class="pg__preview-head") { "preview: " {previewName} }
+      @if (previewSelected) {
+        header(class="pg__preview-head") { "preview: " {previewName} }
+      }
+      @else {
+        div(class="pg__guide") {
+          p(class="pg__guide-title") { "미리보기가 여기 나옵니다" }
+          p(class="pg__guide-hint") {
+            "왼쪽 파일 목록에서 .qubc 옆 "
+            span(class="pg__guide-run") { "run" }
+            " 을 누르세요"
+          }
+        }
+      }
 
       section(class="pg__console") {
         header(class="pg__console-head") {

@@ -1,11 +1,17 @@
 component FileRow {
-  props { name: string, isEntry: bool }
+  props { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool }
   events {
     CLICK_FILE({ })
     CLICK_PREVIEW({ })
   }
   template {
-    div(class="row") {
+    div(class="row" data-editing={isEditing}) {
+      @if (isPreviewing) {
+        span(class="row__live" title="미리보기 중") { "*" }
+      }
+      @else {
+        span(class="row__live" /)
+      }
       button(class="row__name" @click:CLICK_FILE) { {name} }
       @if (isEntry) {
         button(class="row__preview" title="preview" @click:CLICK_PREVIEW) { "run" }

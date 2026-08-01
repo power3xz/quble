@@ -29,11 +29,22 @@
   background: #12161d;
 }
 
+/* 강조는 행 전체를 덮는다 - 좌우 여백 없이 목록 폭을 다 쓴다. */
 .row {
   display: flex;
   align-items: center;
   gap: 0.8rem;
   padding: 0 0.8rem;
+}
+
+.row[data-editing="true"] {
+  background: #232c3d;
+  box-shadow: inset 0.3rem 0 0 #3d8a63;
+}
+
+.row[data-editing="true"] .row__name {
+  color: #e6e9ef;
+  font-weight: 600;
 }
 
 .row__name {
@@ -55,6 +66,22 @@
 .row__name:hover {
   background: #1b2029;
   color: #e6e9ef;
+}
+
+/* 강조된 행에서는 버튼 hover 배경을 끈다 - 행 배경 위에 다른 색이 덮여 얼룩진다. */
+.row[data-editing="true"] .row__name:hover {
+  background: none;
+}
+
+/* 미리보기 중인 파일 - 이름 앞에 표시를 둔다. run 버튼과 같은 색이라 무엇이 도는지 이어진다. */
+.row__live {
+  flex-shrink: 0;
+  width: 1.2rem;
+  color: #3d8a63;
+  font-size: 1.6rem;
+  line-height: 1;
+  text-align: center;
+  user-select: none;
 }
 
 .row__preview {
@@ -276,6 +303,45 @@
   background: #1b2029;
   color: #9aa4b2;
   font-size: 1.4rem;
+}
+
+/* 미리보기를 아직 안 고른 상태 - 헤더 대신 칸 전체를 채워 안내한다. 헤더와 달리 align-self를
+ * 두지 않아 오른쪽 위 칸을 다 덮는다(그 아래 #preview는 비어 있다). */
+
+.pg__guide {
+  grid-area: preview;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  margin: 2.4rem;
+  border: 2px dashed #3a4353;
+  border-radius: 0.8rem;
+  background: #161b24;
+  text-align: center;
+}
+
+.pg__guide-title {
+  color: #e6e9ef;
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+.pg__guide-hint {
+  color: #9aa4b2;
+  font-size: 1.4rem;
+  line-height: 1.6;
+}
+
+/* run 버튼과 같은 색 - 안내가 가리키는 대상이 무엇인지 눈으로 잇는다. */
+.pg__guide-run {
+  display: inline-block;
+  padding: 0.2rem 0.8rem;
+  border-radius: 0.4rem;
+  background: #2f6f4f;
+  color: #fff;
+  font-size: 1.3rem;
 }
 
 /* 콘솔 - 오른쪽 아래 칸을 채운다(미리보기 바로 아래). */

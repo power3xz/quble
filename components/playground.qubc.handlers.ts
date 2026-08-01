@@ -25,6 +25,7 @@ type TStore = {
   lineCount: number;
   caretLine: number;
   previewName: number;
+  previewSelected: number;
   logs: number;
   diagnostic: number;
   hasError: number;
@@ -48,6 +49,25 @@ const sources = new Map<string, string>();
 
 // 지금 편집 중인 파일과 화면에 반영된 줄 수. 줄 수가 그대로면 갱신을 건너뛴다.
 let currentName: string | null = null;
+
+// 편집/미리보기 표시가 켜져 있는 행의 leafIndex. 표시는 한 행에만 있어야 해서 새로 켜기 전에
+// 이전 행을 끈다 - 배열 요소를 이름으로 못 짚으므로(store는 배열 안으로 못 들어간다) 켤 때
+// 받은 props의 leafIndex를 들고 있다가 그걸로 되돌린다.
+let editingFlagLeaf: number | null = null;
+let previewingFlagLeaf: number | null = null;
+
+// 한 행의 표시를 켜고 이전 행의 것을 끈다. 돌려준 leafIndex를 호출부가 보관한다.
+const moveFlag = (
+  previous: number | null,
+  next: number,
+  set: (leafIndex: number, value: unknown) => void,
+) => {
+  if (previous !== null && previous !== next) {
+    set(previous, false);
+  }
+  set(next, true);
+  return next;
+};
 let shownLines = 0;
 
 /** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
@@ -161,6 +181,7 @@ const selectFile = (_data: unknown, ctx: TCtx) => {
   currentName = fileNames[ctx.$0];
   const text = sources.get(currentName) ?? "";
   ctx.set(ctx.store.editingName, currentName);
+  editingFlagLeaf = moveFlag(editingFlagLeaf, ctx.props.isEditing, ctx.set);
   showText(text, ctx);
 
   const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
@@ -260,11 +281,17 @@ const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
 
 // 미리보기 - 모든 파일을 등록하고 이 .qubc를 엔트리로 컴파일한다. 핸들러/data는 엔트리와
 // 짝인 것만 쓴다(합성 맥락마다 로직이 달라 합치지 않는다).
-const runPreview = async (_data: unknown, { $0, store, set }: TCtx) => {
+//
+// 편집기에도 그 파일을 싣는다 - 미리보기와 편집 대상이 다르면 어느 소스가 화면에 그려진
+// 것인지 알 수 없다.
+const runPreview = async (_data: unknown, ctx: TCtx) => {
+  const { $0, store, set } = ctx;
   const fail = (message: string) => {
     set(store.diagnostic, message);
     set(store.hasError, true);
   };
+
+  selectFile(_data, ctx);
 
   const entry = fileNames[$0];
   const stem = entry.replace(/\.qubc$/, "");
@@ -320,6 +347,8 @@ const runPreview = async (_data: unknown, { $0, store, set }: TCtx) => {
     preview = decodeQubb(result.bytecode, resourceUrls)(0)(initialData, handlers);
     document.getElementById("preview")?.replaceChildren(...preview.nodes);
     set(store.previewName, entry);
+    set(store.previewSelected, true);
+    previewingFlagLeaf = moveFlag(previewingFlagLeaf, ctx.props.isPreviewing, set);
   } catch (e) {
     fail(`mount: ${(e as Error).message}`);
   }
