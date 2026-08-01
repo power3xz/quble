@@ -25,12 +25,25 @@
       grid-template-rows: 4.8rem 1fr 20rem;
       pointer-events: none;
     }
-    .stack__preview > #preview {
+    /* 칸을 차지하고 스크롤을 갖는 자리. 마운트 대상(#preview)과 역할을 나눈다 - 한 요소가
+     * 둘을 겸하면 컴포넌트에 줄 높이 기준과 그 컴포넌트의 스크롤이 서로를 막는다. */
+    .preview-cell {
       grid-area: 2 / 3;
+      /* grid stretch만으로는 height가 auto라 자식의 %가 안 풀린다 - 트랙 높이를 명시로 받는다. */
+      height: 100%;
       overflow: auto;
       background: #fff;
       color: #111;
       pointer-events: auto;
+    }
+    /* 마운트 대상 - 칸 높이를 그대로 물려준다. 자식에게 레이아웃을 강제하지 않는다:
+     * 높이를 채울지 말지는 그 컴포넌트의 CSS가 정한다(height: 100%를 쓰면 이 높이가 기준). */
+    #preview {
+      height: 100%;
+    }
+    /* 아직 마운트 전이면 배경을 칠하지 않는다 - 흰 칸이 셸의 안내(.pg__guide)를 덮는다. */
+    .preview-cell:has(#preview:empty) {
+      background: none;
     }
   </style>
 </head>
@@ -42,7 +55,9 @@
   -->
   <div class="stack">
     <div id="editor"></div>
-    <div class="stack__preview"><div id="preview"></div></div>
+    <div class="stack__preview">
+      <div class="preview-cell"><div id="preview"></div></div>
+    </div>
   </div>
   <script type="module">
     import { mount } from "./quble-runtime.js";
@@ -57,13 +72,19 @@
     handlers.seed(sources);
 
     const data = {
-      files: sources.map((f) => ({ name: f.name, isEntry: f.name.endsWith(".qubc") })),
+      files: sources.map((f, i) => ({
+        name: f.name,
+        isEntry: f.name.endsWith(".qubc"),
+        isEditing: false,
+        isPreviewing: false,
+      })),
       editingName: sources[0].name,
       lines: handlers.tokenize(sources[0].source, sources[0].name),
       lineNumbers: handlers.lineNumbersFor(sources[0].source),
       lineCount: handlers.lineCountOf(sources[0].source),
       caretLine: "transform: translateY(1rem)", // 첫 줄 - .pg__view의 padding-top과 같다
-      previewName: "(none)",
+      previewName: "",
+      previewSelected: false,
       logs: [],
       diagnostic: "",
       hasError: false,
@@ -74,6 +95,10 @@
     // textarea는 값을 quble이 바인딩하지 않는다(uncontrolled - components/playground.css 참고).
     // 화면은 .pg__view가 그리므로 여기서는 입력용 textarea의 초기 value만 맞춰 준다.
     document.querySelector(".pg__area").value = sources[0].source;
+
+    // 첫 파일을 고른 상태로 시작한다 - 클릭으로 돌려야 핸들러가 그 행의 leafIndex를 받아
+    // 강조를 켜고, 다음에 다른 파일을 고를 때 되돌릴 수 있다(부트스트랩은 leafIndex를 모른다).
+    document.querySelector(".row__name").click();
   </script>
 </body>
 </html>
