@@ -1,0 +1,55 @@
+/* 자동완성 팝업. 캐럿 자리에 뜬다 - 위치는 핸들러가 style로 주고 기준은 .pg__sheet다
+ * (.pg__caretline과 같은 좌표계라 가로 스크롤을 해도 캐럿을 따라간다).
+ *
+ * 포커스는 받지 않는다 - textarea가 계속 쥐고 있어야 캐럿이 살아 있고 키 입력이 이어진다.
+ * 목록 탐색은 셸의 KEYDOWN_SOURCE가 받고 여기서는 클릭만 처리한다. */
+
+.completion {
+  position: absolute;
+  z-index: 2;
+  max-height: 18rem;
+  min-width: 24rem;
+  max-width: 48rem;
+  overflow-y: auto;
+  padding: 0.4rem 0;
+  border: 1px solid #3a4353;
+  border-radius: 0.6rem;
+  background: #1b2029;
+  box-shadow: 0 0.4rem 1.6rem rgba(0, 0, 0, 0.5);
+}
+
+/* style이 주는 top은 캐럿 줄의 위쪽이라 한 줄 내려 캐럿 아래에 붙인다. */
+.completion:not([data-above="true"]) {
+  transform: translateY(1.5em);
+}
+
+/* 편집 영역(.pg__code)이 overflow: auto라 아래로는 잘린다 - 캐럿이 아래쪽이면 위로 띄운다.
+ * 높이가 목록 길이에 따라 달라지므로 자기 높이만큼(-100%) 올린다. */
+.completion[data-above="true"] {
+  transform: translateY(-100%);
+}
+
+.completion__item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 1.2rem;
+  border: 0;
+  background: none;
+  color: #c8cdd6;
+  font: inherit;
+  font-size: 1.4rem;
+  text-align: left;
+  white-space: pre;
+  cursor: pointer;
+}
+
+.completion__item:hover {
+  background: #232c3d;
+}
+
+/* 키보드로 고른 항목 - hover와 구분되게 왼쪽 막대를 세운다. */
+.completion__item[data-selected="true"] {
+  background: #232c3d;
+  box-shadow: inset 0.3rem 0 0 #3d8a63;
+  color: #e6e9ef;
+}
