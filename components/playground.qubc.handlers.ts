@@ -14,6 +14,7 @@
 
 import { compile as decodeQubb, type THandlers } from "../core/web/runtime.ts";
 import { lazyCompiler } from "../core/web/wasm-compiler.ts";
+import { entryOf, isKeySlot } from "./completion.ts";
 import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
 import { markError, tokenize } from "./tokenize.ts";
 
@@ -31,6 +32,12 @@ type TStore = {
   logs: number;
   diagnostic: number;
   hasError: number;
+  completion: {
+    isOpen: number;
+    style: number;
+    isAbove: number;
+    items: number;
+  };
 };
 type TCtx = {
   props: Record<string, number>;
@@ -203,6 +210,7 @@ const showText = (text: string, { store, set, replace }: Pick<TCtx, "store" | "s
 
 // 편집기에 파일 하나를 싣는다. caretLine은 커서를 둘 줄(1부터), 0이면 맨 앞.
 const openFile = (name: string, ctx: TCtx, caretLine = 0) => {
+  closeCompletion(ctx);
   currentName = name;
   const text = sources.get(name) ?? "";
   ctx.set(ctx.store.editingName, name);
@@ -242,14 +250,31 @@ const editSource = (_data: unknown, ctx: TCtx) => {
   }
   const area = ctx.event.target as HTMLTextAreaElement;
   sources.set(currentName, area.value);
+  // 이 파일이 바뀌면 그 엔트리로 뽑아 둔 후보가 낡는다.
+  if (currentName.endsWith(".qubc")) {
+    namesCache.delete(currentName);
+  }
   showText(area.value, ctx);
   trackCaret(area, ctx);
+
+  // 여는 따옴표가 자동완성을 연다. 그 외 입력은 이미 떠 있는 목록을 거른다.
+  if ((ctx.event as InputEvent).data === '"') {
+    openCompletion(area, ctx).catch(report);
+  } else {
+    filterCompletion(area, ctx);
+  }
 };
 
 // 커서만 움직인 경우(화살표/클릭) - 내용은 그대로고 강조와 스크롤만 따라간다.
 // 다음 프레임에 읽는다: keydown/click 시점에는 브라우저가 아직 커서를 옮기기 전이다.
+//
+// 팝업이 떠 있으면 목록 탐색이 먼저다 - 위/아래/Enter는 편집기가 아니라 팝업의 키다.
 const followCaret = (_data: unknown, ctx: TCtx) => {
   const area = ctx.event.target as HTMLTextAreaElement;
+  if (ctx.event.type === "keydown" && completionKey(ctx.event as KeyboardEvent, ctx)) {
+    ctx.event.preventDefault();
+    return;
+  }
   requestAnimationFrame(() => trackCaret(area, ctx));
 };
 
@@ -313,6 +338,179 @@ const charWidth = (font: string) => {
 };
 
 const CHAR_SAMPLE = 100;
+
+// 자동완성 - .qubc.handlers.js의 키 자리에 그 엔트리의 핸들러 fullname을 띄운다.
+//
+// 트리거는 여는 큰따옴표다. 키를 새로 쓰기 시작하는 순간이 곧 후보가 필요한 순간이라, 매 입력마다
+// 자리를 따지지 않고 그 한 글자만 본다. 열린 뒤로는 타이핑이 후보를 거른다.
+//
+// 후보는 wasm이 낸다(handlerNames) - 컴파일러가 합성 트리를 걸어 낸 이름이라 손으로 맞출 필요가
+// 없다. 짝이 되는 .qubc는 파일명으로 안다: card.qubc.handlers.js -> card.qubc.
+
+// 열려 있는 팝업. slotStart는 따옴표 안쪽 시작 오프셋 - 삽입할 때 여기부터 캐럿까지를 갈아끼운다.
+let completion: { slotStart: number; names: string[]; shown: string[]; selected: number } | null =
+  null;
+
+// 엔트리별 후보 캐시. .qubc가 바뀌지 않는 한 그대로다 - 핸들러 파일을 타이핑하는 동안은
+// 다시 뽑을 이유가 없다.
+const namesCache = new Map<string, string[]>();
+
+/** 엔트리의 핸들러 fullname 후보. 처음 한 번만 wasm을 태우고 그 뒤로는 캐시를 쓴다. */
+const namesFor = async (entry: string) => {
+  const cached = namesCache.get(entry);
+  if (cached) {
+    return cached;
+  }
+  const files: Record<string, string> = {};
+  for (const name of fileNames) {
+    if (name.endsWith(".qubc") || name.endsWith(".css")) {
+      files[name] = sources.get(name) ?? "";
+    }
+  }
+  const { handlerNames } = await getCompiler();
+  const names = handlerNames(files, entry);
+  namesCache.set(entry, names);
+  return names;
+};
+
+// 팝업을 캐럿 자리에 놓는다. 좌표는 trackCaret과 같은 규칙(줄 높이 x 줄, 글자 폭 x 열)이고
+// 기준도 같다(.pg__sheet). 아래로 열 자리가 모자라면 위로 뒤집는다.
+const placeCompletion = (area: HTMLTextAreaElement, { store, set }: Pick<TCtx, "store" | "set">) => {
+  const style = getComputedStyle(area);
+  const lineH = parseFloat(style.lineHeight);
+
+  const before = area.value.slice(0, area.selectionStart);
+  const lastBreak = before.lastIndexOf("\n");
+  const line = lastBreak === -1 ? 0 : before.slice(0, lastBreak).split("\n").length;
+  const column = before.length - (lastBreak + 1);
+
+  const top = parseFloat(style.paddingTop) + line * lineH;
+  const left = column * charWidth(style.font);
+
+  // 아래 남은 높이가 팝업 최대치에 못 미치면 위로 - 뒤집는 기준은 CSS의 max-height와 맞춘다.
+  const code = area.closest<HTMLElement>(".pg__code");
+  const below = code ? code.scrollTop + code.clientHeight - (top + lineH) : Number.POSITIVE_INFINITY;
+  set(store.completion.isAbove, below < POPUP_MAX_H);
+  set(store.completion.style, `top: ${top}px; left: ${left}px`);
+};
+
+// completion.css의 .completion max-height와 같은 값(18rem, 1rem = 10px).
+const POPUP_MAX_H = 180;
+
+// 후보 목록을 화면에 싣는다. 선택 이동도 이걸 다시 부른다 - 배열 요소의 leafIndex를 개별로
+// 짚을 수 없어(ISSUES) 목록째 갈아끼운다. 후보가 열 개 남짓이라 실측상 문제가 없다.
+const renderCompletion = ({ store, replace }: Pick<TCtx, "store" | "replace">) => {
+  replace(
+    store.completion.items,
+    (completion?.shown ?? []).map((name, i) => ({
+      name,
+      isSelected: i === completion?.selected,
+    })),
+  );
+};
+
+const closeCompletion = ({ store, set, replace }: Pick<TCtx, "store" | "set" | "replace">) => {
+  if (!completion) {
+    return;
+  }
+  completion = null;
+  replace(store.completion.items, []);
+  set(store.completion.isOpen, false);
+};
+
+// 캐럿 앞 접두사로 후보를 거른다. 남는 게 없으면 닫는다 - 오타를 계속 붙들고 있을 이유가 없다.
+const filterCompletion = (area: HTMLTextAreaElement, ctx: TCtx) => {
+  if (!completion) {
+    return;
+  }
+  const prefix = area.value.slice(completion.slotStart, area.selectionStart);
+  // 따옴표를 닫았거나 슬롯 밖으로 나갔다.
+  if (area.selectionStart < completion.slotStart || prefix.includes('"')) {
+    closeCompletion(ctx);
+    return;
+  }
+  completion.shown = completion.names.filter((n) => n.startsWith(prefix));
+  completion.selected = 0;
+  if (!completion.shown.length) {
+    closeCompletion(ctx);
+    return;
+  }
+  renderCompletion(ctx);
+};
+
+// 여는 따옴표를 쳤다 - 키 자리면 후보를 뽑아 연다.
+const openCompletion = async (area: HTMLTextAreaElement, ctx: TCtx) => {
+  const entry = entryOf(currentName);
+  if (!entry || !isKeySlot(area.value, area.selectionStart - 1)) {
+    return;
+  }
+  const names = await namesFor(entry);
+  if (!names.length) {
+    return;
+  }
+  // await 사이에 커서가 움직였을 수 있다 - 그 자리가 아직 방금 연 따옴표 뒤인지 다시 본다.
+  if (area.value[area.selectionStart - 1] !== '"') {
+    return;
+  }
+  completion = { slotStart: area.selectionStart, names, shown: names, selected: 0 };
+  placeCompletion(area, ctx);
+  renderCompletion(ctx);
+  ctx.set(ctx.store.completion.isOpen, true);
+};
+
+// 고른 후보를 슬롯에 써넣고 닫는다. 닫는 따옴표는 이미 있으므로(에디터가 아니라 사용자가 쳤든
+// 아니든) 이름만 넣고 그 뒤로 커서를 옮긴다.
+const applyCompletion = (name: string, ctx: TCtx) => {
+  const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
+  if (!area || !completion) {
+    return;
+  }
+  const { slotStart } = completion;
+  area.value = area.value.slice(0, slotStart) + name + area.value.slice(area.selectionStart);
+  area.selectionStart = area.selectionEnd = slotStart + name.length;
+
+  closeCompletion(ctx);
+  if (currentName) {
+    sources.set(currentName, area.value);
+  }
+  showText(area.value, ctx);
+  trackCaret(area, ctx);
+  area.focus();
+};
+
+// 팝업이 떠 있을 때의 키 처리. 삼킨 키는 true - 부르는 쪽이 기본 동작을 막는다.
+const completionKey = (event: KeyboardEvent, ctx: TCtx) => {
+  if (!completion) {
+    return false;
+  }
+  const last = completion.shown.length - 1;
+  switch (event.key) {
+    case "ArrowDown":
+      completion.selected = completion.selected >= last ? 0 : completion.selected + 1;
+      renderCompletion(ctx);
+      return true;
+    case "ArrowUp":
+      completion.selected = completion.selected <= 0 ? last : completion.selected - 1;
+      renderCompletion(ctx);
+      return true;
+    case "Enter":
+    case "Tab":
+      applyCompletion(completion.shown[completion.selected], ctx);
+      return true;
+    case "Escape":
+      closeCompletion(ctx);
+      return true;
+    default:
+      return false;
+  }
+};
+
+// 항목 클릭 - $0가 몇 번째 후보인지 준다.
+const clickCompletionItem = (_data: unknown, ctx: TCtx) => {
+  if (completion) {
+    applyCompletion(completion.shown[ctx.$0], ctx);
+  }
+};
 
 // 로그 비우기 - 뒤에서부터 지운다(앞에서 지우면 인덱스가 당겨져 어긋난다).
 const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
@@ -433,4 +631,5 @@ export default {
   CLICK_SOURCE: withSink(followCaret),
   CLICK_CLEAR_LOGS: withSink(clearLogs),
   CLICK_DIAGNOSTIC: withSink(jumpToError),
+  "Completion[$0].CLICK_ITEM": withSink(clickCompletionItem),
 };

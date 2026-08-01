@@ -95,6 +95,8 @@
       // 줄의 hasError/error는 tokenize가 꺼진 채로 채운다 - 컴파일 에러가 나면 그때 얹힌다.
       previewName: "",
       previewSelected: false,
+      // 자동완성 팝업 - 핸들러 파일의 키 자리에서 큰따옴표를 치면 열린다.
+      completion: { isOpen: false, style: "", isAbove: false, items: [] },
       logs: [],
       diagnostic: "",
       hasError: false,
