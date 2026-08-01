@@ -29,6 +29,13 @@ const JS_KEYWORDS = new Set([
   "undefined", "true", "false", "this",
 ]);
 const JSON_KEYWORDS = new Set(["true", "false", "null"]);
+// 값처럼 읽히는 리터럴/전역 - 키워드(문법)와 색을 갈라 둔다.
+const JS_VALUES = new Set(["null", "undefined", "true", "false", "this"]);
+// 핸들러에서 자주 보이는 전역. 완전한 목록이 목적이 아니라 눈에 띄어야 하는 것만.
+const JS_GLOBALS = new Set([
+  "console", "document", "window", "Object", "Array", "JSON", "Math",
+  "Number", "String", "Boolean", "Promise", "Date", "Error",
+]);
 
 const cls = (name?: string) => (name ? `tok tok--${name}` : "tok");
 
@@ -277,14 +284,15 @@ const scanJs: TScanner = (text) => {
 
     if (c === '"' || c === "'" || c === "`") {
       const string = readString(text, i);
-      tokens.push({ text: string, cls: cls("string") });
+      // 템플릿 문자열은 `${}` 안이 코드다 - 통째로 한 색이면 화면에서 큰 회색 덩어리가 된다.
+      tokens.push(...(c === "`" ? splitTemplate(string) : [{ text: string, cls: cls("string") }]));
       i += string.length;
       continue;
     }
 
     if (IDENT_START.test(c)) {
       const ident = readIdent(text, i);
-      tokens.push({ text: ident, cls: cls(JS_KEYWORDS.has(ident) ? "keyword" : undefined) });
+      tokens.push({ text: ident, cls: cls(jsIdentClass(ident, text, i)) });
       i += ident.length;
       continue;
     }
@@ -300,6 +308,63 @@ const scanJs: TScanner = (text) => {
     i += 1;
   }
   return tokens;
+};
+
+// 템플릿 문자열을 문자열 조각과 `${...}` 보간으로 가른다. 조각을 이으면 원문이 그대로여야
+// 한다(원문 복원). 닫히지 않은 `${`는 끝까지 보간으로 본다 - 편집 중간 상태.
+const splitTemplate = (text: string): TToken[] => {
+  const tokens: TToken[] = [];
+  let i = 0;
+  let start = 0;
+  while (i < text.length) {
+    if (text[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (text[i] === "$" && text[i + 1] === "{") {
+      const end = text.indexOf("}", i + 2);
+      const stop = end === -1 ? text.length : end + 1;
+      if (i > start) tokens.push({ text: text.slice(start, i), cls: cls("string") });
+      tokens.push({ text: text.slice(i, stop), cls: cls("interpolation") });
+      i = stop;
+      start = stop;
+      continue;
+    }
+    i += 1;
+  }
+  if (start < text.length) tokens.push({ text: text.slice(start), cls: cls("string") });
+  return tokens;
+};
+
+// 식별자 하나를 무엇으로 칠할지. 이름만으로는 못 가르는 것들(호출/키/속성)은 뒤에 오는
+// 글자를 봐서 정한다 - 정확한 파서가 아니라 화면용이라 이 정도로 충분하다.
+const jsIdentClass = (ident: string, text: string, at: number): string | undefined => {
+  if (JS_VALUES.has(ident)) return "value";
+  if (JS_KEYWORDS.has(ident)) return "keyword";
+  if (JS_GLOBALS.has(ident)) return "type";
+
+  const next = nextNonSpace(text, at + ident.length);
+  // `이름(` 은 호출/선언. 화면에서 무엇이 실행되는지가 가장 먼저 보여야 한다.
+  if (next === "(") return "function";
+  // `이름:` 은 객체 키. `?:`(삼항)와 겹치지만 핸들러 소스에서는 키가 압도적이다.
+  if (next === ":") return "property";
+  // `.이름` 은 속성 접근. 앞 글자로 가른다(`?.`도 같이 잡힌다).
+  if (previousNonSpace(text, at) === ".") return "property";
+  return undefined;
+};
+
+// at부터 처음 나오는 공백 아닌 글자(없으면 빈 문자열). 줄바꿈도 공백으로 본다.
+const nextNonSpace = (text: string, at: number): string => {
+  let i = at;
+  while (i < text.length && SPACE.test(text[i])) i += 1;
+  return text[i] ?? "";
+};
+
+// at 바로 앞의 공백 아닌 글자(없으면 빈 문자열).
+const previousNonSpace = (text: string, at: number): string => {
+  let i = at - 1;
+  while (i >= 0 && SPACE.test(text[i])) i -= 1;
+  return text[i] ?? "";
 };
 
 // CSS는 `{}` 안팎으로 의미가 갈린다. 밖은 선택자, 안은 `속성: 값`이고 콜론이 그 경계다.

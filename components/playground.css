@@ -293,6 +293,17 @@
   color: #8ab4f8;
 }
 
+/* 호출/선언되는 이름 - 무엇이 실행되는지가 코드에서 가장 먼저 읽혀야 한다. */
+.tok--function {
+  color: #82d2ce;
+}
+
+/* null/true/this 같은 값 리터럴 - 숫자와 같은 계열로 두어 값이라는 게 드러나게. */
+.tok--value {
+  color: #f5a97f;
+  font-style: italic;
+}
+
 .tok--selector {
   color: #e6c07b;
 }

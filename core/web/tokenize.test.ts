@@ -214,6 +214,55 @@ test("js - 키워드/문자열/주석을 가른다", () => {
   assert.deepEqual(textsOf(lines, "comment"), ["/* 블록", "   주석 */"]);
 });
 
+test("js - 호출되는 이름을 가른다", () => {
+  // 무엇이 실행되는지가 화면에서 가장 먼저 읽혀야 한다. `이름(` 형태로 잡는다.
+  const lines = tokenize("push(props.columns, x);\nconsole.log(1);", "a.js");
+
+  assert.deepEqual(textsOf(lines, "function"), ["push", "log"]);
+});
+
+test("js - 객체 키와 속성 접근을 가른다", () => {
+  const lines = tokenize("const o = { name: 1 };\no.title;\na?.b;", "a.js");
+
+  assert.deepEqual(textsOf(lines, "property"), ["name", "title", "b"]);
+});
+
+test("js - 값 리터럴과 전역을 키워드와 갈라 놓는다", () => {
+  const lines = tokenize("const a = null;\nJSON.stringify(this, undefined);", "a.js");
+
+  assert.deepEqual(textsOf(lines, "value"), ["null", "this", "undefined"]);
+  assert.deepEqual(textsOf(lines, "type"), ["JSON"]);
+  // const만 키워드다 - null/this가 여기 섞이면 값과 문법이 같은 색이 된다.
+  assert.deepEqual(textsOf(lines, "keyword"), ["const"]);
+});
+
+// `${`를 소스 문자열에 직접 쓰면 린터가 템플릿 오타로 본다 - 조각을 이어 만든다.
+const DOLLAR = "$";
+
+test("js - 템플릿 문자열의 보간을 가른다", () => {
+  const source = `const s = \`새 ${DOLLAR}{n} 개, ${DOLLAR}{a.b}\`;`;
+
+  const lines = tokenize(source, "a.js");
+  assert.equal(rejoin(lines), source, "원문 복원");
+  assert.deepEqual(textsOf(lines, "interpolation"), [`${DOLLAR}{n}`, `${DOLLAR}{a.b}`]);
+  assert.deepEqual(textsOf(lines, "string"), ["`새 ", " 개, ", "`"]);
+});
+
+test("js - 닫히지 않은 보간도 원문을 지킨다", () => {
+  // 편집 중간 상태 - 보간을 열기만 하고 멈춘 순간.
+  const source = `const s = \`열기만 ${DOLLAR}{n`;
+
+  const lines = tokenize(source, "a.js");
+  assert.equal(rejoin(lines), source);
+});
+
+test("js - 보간 없는 템플릿 문자열은 한 덩어리다", () => {
+  const lines = tokenize("const s = `그냥 문자열`;", "a.js");
+
+  assert.deepEqual(textsOf(lines, "string"), ["`그냥 문자열`"]);
+  assert.deepEqual(textsOf(lines, "interpolation"), []);
+});
+
 test("js - 확장자가 겹쳐도 마지막 조각으로 고른다", () => {
   // main.qubc.handlers.js는 js다(qubc가 아니다).
   const lines = tokenize("export default {}", "main.qubc.handlers.js");
