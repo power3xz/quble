@@ -11,6 +11,7 @@ import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
 
 const { compile } = await import("./runtime.ts");
+type THandlers = import("./runtime.ts").THandlers;
 
 let qubb: Uint8Array;
 before(() => {
@@ -47,7 +48,8 @@ const handlers = {
 };
 
 test("자식 핸들러의 props가 자기 회차 요소를 가리킨다(set이 그 회차만 바꾼다)", () => {
-  const inst = compile(qubb)(0)(seed(), handlers);
+  // 구체 ctx 타입이라 runtime의 헐거운 THandlers와 반공변 충돌 - 경계에서 한 번 캐스트.
+  const inst = compile(qubb)(0)(seed(), handlers as unknown as THandlers);
   const host = mount(inst);
 
   // 가운데 카드를 누르면 그 회차의 value만 바뀌어야 한다.
@@ -60,7 +62,8 @@ test("자식 핸들러의 props가 자기 회차 요소를 가리킨다(set이 �
 });
 
 test("회차마다 자기 요소에 쓴다(교차 오염 없음)", () => {
-  const inst = compile(qubb)(0)(seed(), handlers);
+  // 구체 ctx 타입이라 runtime의 헐거운 THandlers와 반공변 충돌 - 경계에서 한 번 캐스트.
+  const inst = compile(qubb)(0)(seed(), handlers as unknown as THandlers);
   const host = mount(inst);
 
   const els = host.querySelectorAll<HTMLElement>(".card");
