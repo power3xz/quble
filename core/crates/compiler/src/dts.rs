@@ -21,6 +21,17 @@ pub fn handlers_dts_src(
     Ok(render(&comps))
 }
 
+/// 엔트리 소스에서 핸들러 fullname 목록만 낸다(트리 순서). d.ts와 같은 순회를 쓰되 타입을
+/// 렌더하지 않는다 - 에디터 자동완성처럼 이름만 필요한 쪽이 텍스트를 되파싱하지 않게 한다.
+pub fn handler_names_src(
+    entry_path: &str,
+    src: &str,
+    loader: &impl SourceLoader,
+) -> Result<Vec<String>, CompileError> {
+    let comps = flatten(entry_path, src, loader).map_err(CompileError::Flatten)?;
+    Ok(collect(&comps).into_iter().map(|h| h.fullname).collect())
+}
+
 /// 파일 경로로 d.ts를 낸다(compile_file과 대칭). 엔트리를 읽고 fs loader로 use를 해소한다.
 pub fn handlers_dts_file(path: &str) -> Result<String, CompileError> {
     let not_found = || {
@@ -59,11 +70,17 @@ type Handler<Data, Props, Ctx, Loop> = (
 ) => void;
 ";
 
-/// 평탄화된 컴포넌트들에서 루트(0)의 합성 트리를 걸어 d.ts 텍스트를 만든다.
-fn render(comps: &[FlatComp]) -> String {
+/// 평탄화된 컴포넌트들에서 루트(0)의 합성 트리를 걸어 핸들러들을 모은다(트리 순서).
+fn collect(comps: &[FlatComp]) -> Vec<Handler> {
     let mut handlers = Vec::new();
     let mut seen = Vec::new();
     walk(comps, 0, "", &[], &[], 0, &mut handlers, &mut seen);
+    handlers
+}
+
+/// 평탄화된 컴포넌트들에서 루트(0)의 합성 트리를 걸어 d.ts 텍스트를 만든다.
+fn render(comps: &[FlatComp]) -> String {
+    let handlers = collect(comps);
 
     let mut out = String::new();
     out.push_str(PRELUDE);
@@ -401,6 +418,11 @@ mod tests {
         handlers_dts_src("entry", src, &(|_: &str, _: &str| None)).unwrap()
     }
 
+    /// use 없는 단일 소스로 fullname 목록을 낸다(loader 미호출).
+    fn names(src: &str) -> Vec<String> {
+        handler_names_src("entry", src, &(|_: &str, _: &str| None)).unwrap()
+    }
+
     /// 서두 공통 타입(LeafIndex, Handler)이 나온다.
     #[test]
     fn prelude_defines_common_types() {
@@ -688,5 +710,61 @@ mod tests {
         "#);
         assert!(out.contains("'Row.PICK':"), "실제 출력:\n{out}");
         assert!(!out.contains("[$"), "@for 밖은 인덱스 없음\n{out}");
+    }
+
+    /// fullname만 뽑는 경로 - d.ts와 같은 순회라 같은 이름이, 트리 순서대로 나온다.
+    #[test]
+    fn names_follow_tree_order() {
+        let out = names(
+            r#"
+            component List {
+              events { ADD({ x }) }
+              template {
+                button(@click:ADD /)
+                @for (item of 3) { Row: Inner( /) }
+              }
+            }
+            component Inner {
+              events { PICK({ id }) }
+              template { button(@click:PICK /) }
+            }
+        "#,
+        );
+        assert_eq!(out, vec!["ADD", "Row[$0].PICK"], "실제 출력:\n{out:?}");
+    }
+
+    /// 이름 목록과 d.ts가 같은 집합을 낸다 - 한쪽만 고치면 어긋나는 회귀를 잡는다.
+    #[test]
+    fn names_match_dts_keys() {
+        let src = r#"
+            component Outer {
+              props { flag: bool }
+              contexts { Area { section: "actions" } }
+              template {
+                @with Area {
+                  @for (row of 3) {
+                    @if (flag) { A: Inner( /) } @else { B: Inner( /) }
+                  }
+                }
+              }
+            }
+            component Inner {
+              events { TOGGLE({ on }) }
+              template { button(@click:TOGGLE /) }
+            }
+        "#;
+        let text = dts(src);
+        for name in names(src) {
+            assert!(
+                text.contains(&format!("'{name}':")),
+                "d.ts에 없다: {name}\n{text}"
+            );
+        }
+    }
+
+    /// 이벤트가 없으면 빈 목록(에러 아님) - 자동완성이 후보 없음으로 다룰 수 있어야 한다.
+    #[test]
+    fn no_events_gives_empty_list() {
+        assert!(names(r#"component C { template { div( /) } }"#).is_empty());
     }
 }
