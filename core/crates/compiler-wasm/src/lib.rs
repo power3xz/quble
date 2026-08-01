@@ -1,0 +1,466 @@
+//! 브라우저에서 도는 컴파일러(playground). wasm-bindgen 없이 extern "C"만으로 ABI를 낸다.
+//!
+//! 호출 순서:
+//!   1. `qb_alloc(len)`으로 버퍼를 받아 JS가 UTF-8 바이트를 써넣는다.
+//!   2. `qb_reset()` 후 파일마다 `qb_add_file(path, src)` - 탭 하나가 파일 하나.
+//!   3. `qb_compile(entry)` -> 0=성공, 1=실패.
+//!   4. `qb_out_ptr()`/`qb_out_len()`으로 결과를 읽는다. 성공이면 qubb 바이트,
+//!      실패면 진단 텍스트(UTF-8). 다음 `qb_compile`까지 유효하다.
+//!   5. 성공이면 `qb_res_ptr()`/`qb_res_len()`으로 리소스 경로 목록(개행 구분, resId 순)을
+//!      읽는다. JS가 그 순서대로 Blob URL을 만들어 런타임 `compile(bytes, resources)`에 넘긴다.
+//!
+//! 경로 의미론은 컴파일러가 모른다(flatten.rs 머리주석) - loader가 정규화 책임을 진다.
+//! playground의 파일 이름 공간은 평탄해서(탭 목록) `./` 접두어만 벗기면 등록된 이름과 맞는다.
+//!
+//! wasm은 단일 스레드라 thread_local 하나가 사실상 전역이다. 상태를 여기 모아 두면
+//! export 함수들이 unsafe 없이(포인터를 받는 자리만 예외) 돌아간다.
+
+use std::cell::RefCell;
+
+/// 등록된 파일과 마지막 컴파일 결과. wasm 인스턴스 하나가 곧 세션 하나다.
+struct State {
+    /// (정규화 경로, 소스). playground 탭 이름을 그대로 경로로 쓴다.
+    files: Vec<(String, String)>,
+    /// 마지막 `qb_compile` 결과. 성공이면 qubb, 실패면 진단 텍스트의 UTF-8 바이트.
+    out: Vec<u8>,
+    /// 마지막 성공 컴파일의 리소스 경로들을 개행으로 이은 것(resId 순). 실패면 빈다.
+    /// 런타임 `compile(bytes, resources)`의 resources는 resId -> URL 배열이라, JS가 이 순서대로
+    /// 각 경로의 내용을 Blob URL로 만들어 넘긴다. 경로에 개행은 안 들어간다.
+    res: Vec<u8>,
+}
+
+thread_local! {
+    static STATE: RefCell<State> = const { RefCell::new(State {
+        files: Vec::new(),
+        out: Vec::new(),
+        res: Vec::new(),
+    }) };
+}
+
+/// JS가 소스를 써넣을 버퍼를 wasm 메모리에 확보한다. 반환 포인터는 `qb_free`로 돌려주거나
+/// `qb_add_file`/`qb_compile`에 넘긴다(그 함수들은 읽기만 하고 해제하지 않는다).
+#[no_mangle]
+pub extern "C" fn qb_alloc(len: usize) -> *mut u8 {
+    // Vec의 버퍼를 그대로 빌려준다 - 길이를 len으로 맞춰 두면 qb_free가 같은 레이아웃으로 되돌린다.
+    let mut buf = vec![0u8; len];
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+/// `qb_alloc`으로 받은 버퍼를 해제한다. len은 alloc에 넘긴 값과 같아야 한다.
+///
+/// # Safety
+/// ptr/len은 `qb_alloc`이 돌려준 그 쌍이어야 하고, 한 번만 넘겨야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn qb_free(ptr: *mut u8, len: usize) {
+    drop(Vec::from_raw_parts(ptr, len, len));
+}
+
+/// 등록된 파일을 모두 비운다. 컴파일 전 탭 목록을 다시 심을 때 호출한다.
+#[no_mangle]
+pub extern "C" fn qb_reset() {
+    STATE.with(|s| s.borrow_mut().files.clear());
+}
+
+/// 파일 하나를 등록한다. 같은 경로를 다시 등록하면 소스를 덮어쓴다(탭 편집).
+/// 경로/소스가 UTF-8이 아니면 조용히 무시한다 - JS가 문자열을 인코딩해 넘기므로 일어나지 않는다.
+///
+/// # Safety
+/// 두 포인터는 각자 len 바이트만큼 읽을 수 있어야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn qb_add_file(
+    path_ptr: *const u8,
+    path_len: usize,
+    src_ptr: *const u8,
+    src_len: usize,
+) {
+    let path = match str_from(path_ptr, path_len) {
+        Some(p) => p.to_string(),
+        None => return,
+    };
+    let src = match str_from(src_ptr, src_len) {
+        Some(s) => s.to_string(),
+        None => return,
+    };
+    STATE.with(|s| {
+        let files = &mut s.borrow_mut().files;
+        match files.iter_mut().find(|(p, _)| *p == path) {
+            Some(slot) => slot.1 = src,
+            None => files.push((path, src)),
+        }
+    });
+}
+
+/// 등록된 파일 중 entry를 엔트리로 컴파일한다. 0=성공(out=qubb), 1=실패(out=진단 텍스트).
+/// entry가 등록돼 있지 않아도 1을 내며 그 사실을 진단으로 낸다.
+///
+/// # Safety
+/// entry_ptr은 entry_len 바이트만큼 읽을 수 있어야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u32 {
+    let entry = match str_from(entry_ptr, entry_len) {
+        Some(e) => e.to_string(),
+        None => {
+            set_out(b"entry path is not valid UTF-8".to_vec());
+            return 1;
+        }
+    };
+    STATE.with(|s| {
+        // 컴파일 중에도 loader가 files를 읽어야 해 borrow를 겹치지 않게 소스를 먼저 복사한다.
+        let files = s.borrow().files.clone();
+        let entry_src = match files.iter().find(|(p, _)| *p == entry) {
+            Some((_, src)) => src.clone(),
+            None => {
+                let mut state = s.borrow_mut();
+                state.out = format!("no such file: {entry}").into_bytes();
+                state.res.clear();
+                return 1;
+            }
+        };
+        // loader: `./x.qubc`의 `./`만 벗겨 등록된 이름과 맞춘다. 탭 이름 공간이 평탄해
+        // base(어느 파일이 use했는지)는 볼 것이 없다.
+        let loader = |_base: &str, target: &str| {
+            let name = target.strip_prefix("./").unwrap_or(target);
+            files
+                .iter()
+                .find(|(p, _)| p == name)
+                .map(|(p, src)| (p.clone(), src.clone()))
+        };
+        let (out, res, status) = match compiler::compile_src(&entry, &entry_src, &loader) {
+            Ok(output) => (
+                output.bytecode.into_vec(),
+                output.resources.join("\n").into_bytes(),
+                0,
+            ),
+            Err(e) => {
+                // base_dir=None - 가상 경로라 줄일 기준이 없다(compiler::format_error 주석).
+                (
+                    compiler::format_error(None, &entry, &entry_src, &e).into_bytes(),
+                    Vec::new(),
+                    1,
+                )
+            }
+        };
+        let mut state = s.borrow_mut();
+        state.out = out;
+        state.res = res;
+        status
+    })
+}
+
+/// 마지막 컴파일 결과의 시작 주소. 다음 `qb_compile`까지 유효하다.
+#[no_mangle]
+pub extern "C" fn qb_out_ptr() -> *const u8 {
+    STATE.with(|s| s.borrow().out.as_ptr())
+}
+
+/// 마지막 컴파일 결과의 바이트 길이.
+#[no_mangle]
+pub extern "C" fn qb_out_len() -> usize {
+    STATE.with(|s| s.borrow().out.len())
+}
+
+/// 마지막 성공 컴파일의 리소스 경로 목록(개행 구분, resId 순)의 시작 주소.
+/// 실패한 컴파일 뒤에는 길이 0이다.
+#[no_mangle]
+pub extern "C" fn qb_res_ptr() -> *const u8 {
+    STATE.with(|s| s.borrow().res.as_ptr())
+}
+
+/// 리소스 경로 목록의 바이트 길이. 0이면 리소스가 없거나 컴파일이 실패한 것이다.
+#[no_mangle]
+pub extern "C" fn qb_res_len() -> usize {
+    STATE.with(|s| s.borrow().res.len())
+}
+
+/// 결과 슬롯을 덮어쓴다(실패 경로) - 리소스 목록도 함께 비운다.
+fn set_out(bytes: Vec<u8>) {
+    STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        state.out = bytes;
+        state.res.clear();
+    });
+}
+
+/// 포인터/길이를 &str로. UTF-8이 아니면 None.
+///
+/// # Safety
+/// ptr은 len 바이트만큼 읽을 수 있어야 한다.
+unsafe fn str_from<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
+    std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 파일 등록을 JS가 하는 것과 같은 경로(포인터+길이)로 태운다.
+    fn add_file(path: &str, src: &str) {
+        unsafe {
+            qb_add_file(path.as_ptr(), path.len(), src.as_ptr(), src.len());
+        }
+    }
+
+    /// 컴파일하고 (상태, 결과 바이트)를 돌려준다. 결과는 out 슬롯을 ptr/len으로 읽어
+    /// JS가 보는 것과 같은 바이트를 확인한다.
+    fn compile(entry: &str) -> (u32, Vec<u8>) {
+        let status = unsafe { qb_compile(entry.as_ptr(), entry.len()) };
+        let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) }.to_vec();
+        (status, out)
+    }
+
+    /// 리소스 슬롯을 JS와 같은 방식으로 읽어 경로 목록으로 쪼갠다. 빈 슬롯은 빈 목록.
+    fn resources() -> Vec<String> {
+        let bytes = unsafe { std::slice::from_raw_parts(qb_res_ptr(), qb_res_len()) };
+        match std::str::from_utf8(bytes).unwrap() {
+            "" => Vec::new(),
+            text => text.split('\n').map(str::to_string).collect(),
+        }
+    }
+
+    /// 테스트는 한 프로세스에서 thread_local 상태를 공유한다 - cargo test가 스레드마다
+    /// 따로 돌려 서로 안 섞이지만, 같은 스레드에서 이어 도는 경우를 위해 매번 비운다.
+    fn reset() {
+        qb_reset();
+    }
+
+    /// qubb 매직(bytecode::serialize의 MAGIC) - 성공 산출물이 바이트코드인지 보는 표식.
+    const QUBB_MAGIC: &[u8] = b"QBL\0";
+
+    const HELLO: &str = r#"
+        component Hello {
+          template { h1() { "hi" } }
+        }
+    "#;
+
+    /// 단일 파일이 컴파일돼 qubb 바이트가 나온다. 앞 4바이트는 매직.
+    #[test]
+    fn compiles_single_file() {
+        reset();
+        add_file("main.qubc", HELLO);
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 0, "성공이어야: {}", String::from_utf8_lossy(&out));
+        assert_eq!(&out[..4], QUBB_MAGIC, "qubb 매직으로 시작해야");
+    }
+
+    /// `use`로 엮인 두 파일이 한 모듈로 평탄화된다 - loader가 `./` 접두어를 벗겨
+    /// 등록된 탭 이름과 맞추는 경로.
+    #[test]
+    fn compiles_use_graph() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use Card from "./card.qubc"
+            component Main { template { Card( /) } }
+        "#,
+        );
+        add_file(
+            "card.qubc",
+            r#"component Card { template { p() { "card" } } }"#,
+        );
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 0, "성공이어야: {}", String::from_utf8_lossy(&out));
+        assert_eq!(&out[..4], QUBB_MAGIC);
+    }
+
+    /// `./` 없이 쓴 use도 같은 탭을 가리킨다(loader가 접두어만 벗기므로 양쪽 다 맞는다).
+    #[test]
+    fn use_without_dot_prefix_resolves() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use Card from "card.qubc"
+            component Main { template { Card( /) } }
+        "#,
+        );
+        add_file(
+            "card.qubc",
+            r#"component Card { template { p() { "card" } } }"#,
+        );
+        let (status, _) = compile("main.qubc");
+        assert_eq!(status, 0);
+    }
+
+    /// 문법 오류는 status=1 + 진단 텍스트. 위치(라인)와 밑줄이 실려야 에디터가 쓸 수 있다.
+    #[test]
+    fn syntax_error_returns_diagnostic() {
+        reset();
+        add_file("main.qubc", "component C { template { div() { } ");
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 1, "실패여야");
+        let text = String::from_utf8(out).expect("진단은 UTF-8이어야");
+        assert!(text.contains("main.qubc"), "파일명이 있어야: {text}");
+        assert!(text.contains("error:"), "error: 가 있어야: {text}");
+    }
+
+    /// use가 등록 안 된 파일을 가리키면 실패하고 그 사실이 진단에 나온다.
+    #[test]
+    fn missing_use_target_errors() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use Card from "./nope.qubc"
+            component Main { template { Card( /) } }
+        "#,
+        );
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 1);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("nope.qubc"), "못 찾은 대상이 나와야: {text}");
+    }
+
+    /// 등록 안 된 엔트리는 컴파일 자체가 안 된다(진단에 이름이 나온다).
+    #[test]
+    fn unknown_entry_errors() {
+        reset();
+        add_file("main.qubc", HELLO);
+        let (status, out) = compile("other.qubc");
+        assert_eq!(status, 1);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("other.qubc"), "엔트리 이름이 나와야: {text}");
+    }
+
+    /// 같은 경로를 다시 등록하면 소스를 덮어쓴다(탭 편집) - 파일이 늘지 않고 새 내용이 쓰인다.
+    #[test]
+    fn re_adding_path_overwrites_source() {
+        reset();
+        add_file("main.qubc", "component C { template { BROKEN");
+        assert_eq!(compile("main.qubc").0, 1, "처음엔 깨진 소스라 실패");
+        add_file("main.qubc", HELLO);
+        let (status, out) = compile("main.qubc");
+        assert_eq!(
+            status,
+            0,
+            "덮어쓴 뒤엔 성공: {}",
+            String::from_utf8_lossy(&out)
+        );
+        STATE.with(|s| assert_eq!(s.borrow().files.len(), 1, "파일이 늘지 않아야"));
+    }
+
+    /// reset은 등록을 비운다 - 이전 탭이 다음 컴파일에 남지 않는다.
+    #[test]
+    fn reset_clears_files() {
+        reset();
+        add_file("main.qubc", HELLO);
+        assert_eq!(compile("main.qubc").0, 0);
+        reset();
+        assert_eq!(compile("main.qubc").0, 1, "reset 뒤엔 엔트리가 없어야");
+    }
+
+    /// 실패 뒤 성공하면 out 슬롯이 진단 텍스트가 아니라 qubb로 바뀐다(슬롯 재사용 회귀).
+    #[test]
+    fn out_slot_replaced_between_compiles() {
+        reset();
+        add_file("bad.qubc", "component C { template {");
+        let (_, err_out) = compile("bad.qubc");
+        assert!(!err_out.starts_with(QUBB_MAGIC));
+        add_file("good.qubc", HELLO);
+        let (status, out) = compile("good.qubc");
+        assert_eq!(status, 0);
+        assert_eq!(&out[..4], QUBB_MAGIC, "이전 진단이 남으면 안 된다");
+    }
+
+    /// `use "./x.css"`가 있으면 리소스 슬롯에 그 경로가 resId 순으로 실린다 - JS가 이 순서대로
+    /// Blob URL을 만들어 런타임에 넘긴다. css도 loader를 거치므로 탭으로 등록돼 있어야 한다.
+    #[test]
+    fn resource_paths_exposed_in_order() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use "./a.css"
+            use "./b.css"
+            component Main { template { div( /) } }
+        "#,
+        );
+        add_file("a.css", "div { color: red }");
+        add_file("b.css", "div { color: blue }");
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 0, "성공이어야: {}", String::from_utf8_lossy(&out));
+        assert_eq!(
+            resources(),
+            vec!["a.css", "b.css"],
+            "선언 순서 = resId 순서",
+        );
+    }
+
+    /// 등록 안 된 css를 use하면 실패한다(css도 loader를 탄다) - 탭이 없으면 컴파일 자체가 안 된다.
+    #[test]
+    fn missing_css_errors() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use "./nope.css"
+            component Main { template { div( /) } }
+        "#,
+        );
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 1);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("nope.css"), "못 찾은 css가 나와야: {text}");
+    }
+
+    /// 리소스가 없으면 슬롯이 비어 있다(빈 목록).
+    #[test]
+    fn no_resources_leaves_slot_empty() {
+        reset();
+        add_file("main.qubc", HELLO);
+        assert_eq!(compile("main.qubc").0, 0);
+        assert_eq!(qb_res_len(), 0, "리소스 없으면 빈 슬롯");
+        assert!(resources().is_empty());
+    }
+
+    /// 실패한 컴파일은 이전 성공의 리소스 목록을 남기지 않는다 - JS가 낡은 목록으로
+    /// Blob URL을 만들면 엉뚱한 css가 붙는다.
+    #[test]
+    fn failed_compile_clears_resources() {
+        reset();
+        add_file(
+            "styled.qubc",
+            r#"
+            use "./a.css"
+            component Styled { template { div( /) } }
+        "#,
+        );
+        add_file("a.css", "div { color: red }");
+        assert_eq!(compile("styled.qubc").0, 0);
+        assert_eq!(resources(), vec!["a.css"]);
+
+        add_file("broken.qubc", "component C { template {");
+        assert_eq!(compile("broken.qubc").0, 1);
+        assert!(resources().is_empty(), "실패 뒤엔 리소스가 비어야");
+    }
+
+    /// alloc/free 왕복 - JS가 소스를 써넣는 경로. 받은 버퍼는 len만큼 쓰기 가능하고
+    /// 0으로 초기화돼 있다.
+    #[test]
+    fn alloc_gives_writable_zeroed_buffer() {
+        let len = 32;
+        let ptr = qb_alloc(len);
+        assert!(!ptr.is_null());
+        unsafe {
+            let buf = std::slice::from_raw_parts_mut(ptr, len);
+            assert!(buf.iter().all(|&b| b == 0), "0으로 초기화돼야");
+            buf.copy_from_slice(&[7u8; 32]);
+            assert_eq!(buf[31], 7);
+            qb_free(ptr, len);
+        }
+    }
+
+    /// UTF-8이 아닌 경로/소스는 등록을 무시한다(파일이 늘지 않는다).
+    #[test]
+    fn invalid_utf8_add_is_ignored() {
+        reset();
+        let bad = [0xffu8, 0xfe];
+        let src = "x";
+        unsafe {
+            qb_add_file(bad.as_ptr(), bad.len(), src.as_ptr(), src.len());
+        }
+        STATE.with(|s| assert_eq!(s.borrow().files.len(), 0, "등록되면 안 된다"));
+    }
+}

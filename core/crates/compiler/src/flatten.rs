@@ -15,6 +15,17 @@ use crate::parse;
 pub struct FlatComp {
     pub comp: Component,
     pub resources: Vec<String>,
+    /// 이 컴포넌트가 정의된 파일. 이 컴포넌트를 codegen하다 난 에러의 range는 이 파일의
+    /// 바이트 오프셋이라, 진단이 엔트리가 아니라 여기를 가리켜야 한다.
+    pub origin: Origin,
+}
+
+/// 컴포넌트가 정의된 파일. 한 파일에 컴포넌트가 여럿일 수 있어 소스를 Rc로 공유한다
+/// (파일 하나가 컴포넌트 수만큼 복제되지 않게).
+#[derive(Clone)]
+pub struct Origin {
+    pub path: std::rc::Rc<str>,
+    pub src: std::rc::Rc<str>,
 }
 
 /// use 경로 해소기. base(use를 적은 소스의 정규화 경로)와 target(`./Foo.qubc`)을 받아
@@ -49,6 +60,16 @@ impl<E> Sourced<E> {
         Sourced {
             path: path.to_string(),
             src: src.to_string(),
+            err,
+        }
+    }
+
+    /// 평탄화가 기억해 둔 출처로 감싼다 - codegen 에러의 range가 어느 파일의 오프셋인지
+    /// 이걸로 정해진다.
+    pub fn from_origin(origin: &Origin, err: E) -> Self {
+        Sourced {
+            path: origin.path.to_string(),
+            src: origin.src.to_string(),
             err,
         }
     }
@@ -289,6 +310,12 @@ fn collect(
         resources.push(canonical);
     }
 
+    // 이 파일에서 나온 컴포넌트들이 공유할 출처 - codegen 에러가 이걸로 파일을 짚는다.
+    let from_file = Origin {
+        path: std::rc::Rc::from(path),
+        src: std::rc::Rc::from(src),
+    };
+
     // 가져올 컴포넌트를 acc에 넣는다. 같은 이름이 다른 파일에서 왔으면 충돌, 같은 파일이면 다이아몬드(skip).
     // 리소스는 파일 단위 선언이라 이 파일의 모든 컴포넌트가 같은 목록을 복제해 가진다(A안).
     for comp in source.comps {
@@ -305,6 +332,7 @@ fn collect(
         ctx.acc.push(FlatComp {
             comp,
             resources: resources.clone(),
+            origin: from_file.clone(),
         });
     }
 

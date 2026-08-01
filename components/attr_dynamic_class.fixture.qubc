@@ -1,0 +1,14 @@
+component Tokens {
+  props { lines: { tokens: { text: string, cls: string }[] }[] }
+  template {
+    pre(class="view") {
+      @for (line of lines) {
+        div(class="line") {
+          @for (t of line.tokens) {
+            span(class={t.cls}) { {t.text} }
+          }
+        }
+      }
+    }
+  }
+}

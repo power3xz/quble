@@ -1,0 +1,96 @@
+use "./playground.css"
+use FileRow from "./filerow.qubc"
+use LogRow from "./logrow.qubc"
+
+component Playground {
+  props {
+    files: { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool, hasError: bool }[],
+    editingName: string,
+    lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string }[],
+    lineNumbers: string,
+    lineCount: number,
+    caretLine: string,
+    previewName: string,
+    previewSelected: bool,
+    logs: { text: string, level: string }[],
+    diagnostic: string,
+    hasError: bool
+  }
+  events {
+    INPUT_SOURCE({ })
+    KEYDOWN_SOURCE({ })
+    CLICK_SOURCE({ })
+    CLICK_CLEAR_LOGS({ })
+    CLICK_DIAGNOSTIC({ })
+  }
+  template {
+    div(class="pg") {
+      aside(class="pg__files") {
+        @for (f of files) {
+          Row: FileRow(
+            name={f.name}
+            isEntry={f.isEntry}
+            isEditing={f.isEditing}
+            isPreviewing={f.isPreviewing}
+            hasError={f.hasError}
+          /)
+        }
+      }
+
+      main(class="pg__main") {
+        header(class="pg__editing") { {editingName} }
+
+        div(class="pg__code") {
+          pre(class="pg__gutter") { {lineNumbers} }
+          div(class="pg__sheet") {
+            div(class="pg__caretline" style={caretLine} /)
+            pre(class="pg__view") {
+            @for (line of lines) {
+              div(class="pg__line" data-error={line.hasError}) {
+                @for (t of line.tokens) {
+                  span(class={t.cls}) { {t.text} }
+                }
+                @if (line.hasError) {
+                  span(class="pg__line-error") { {line.error} }
+                }
+              }
+            }
+          }
+            textarea(class="pg__area" spellcheck="false" rows={lineCount}
+              @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE /)
+          }
+        }
+
+        @if (hasError) {
+          button(class="pg__diag" @click:CLICK_DIAGNOSTIC) { {diagnostic} }
+        }
+      }
+
+      @if (previewSelected) {
+        header(class="pg__preview-head") { "preview: " {previewName} }
+      }
+      @else {
+        div(class="pg__guide") {
+          p(class="pg__guide-title") { "미리보기가 여기 나옵니다" }
+          p(class="pg__guide-hint") {
+            "왼쪽 파일 목록에서 .qubc 옆 "
+            span(class="pg__guide-run") { "run" }
+            " 을 누르세요"
+          }
+        }
+      }
+
+      section(class="pg__console") {
+        header(class="pg__console-head") {
+          h2(class="pg__console-title") { "console" }
+          button(class="pg__console-clear" @click:CLICK_CLEAR_LOGS) { "clear" }
+        }
+        div(class="pg__console-body") {
+          @for (l of logs) {
+            Line: LogRow(text={l.text} level={l.level} /)
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+use Row from "./if_sibling_click_row.fixture.qubc"
+
+component Panel {
+  props { rows: { name: string }[], note: string, shown: bool }
+  template {
+    div(class="panel") {
+      aside(class="list") {
+        @for (r of rows) {
+          Item: Row(name={r.name} /)
+        }
+      }
+      @if (shown) {
+        pre(class="note") { {note} }
+      }
+    }
+  }
+}

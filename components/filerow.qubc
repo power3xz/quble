@@ -1,0 +1,24 @@
+component FileRow {
+  props { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool, hasError: bool }
+  events {
+    CLICK_FILE({ })
+    CLICK_PREVIEW({ })
+  }
+  template {
+    div(class="row" data-editing={isEditing} data-error={hasError}) {
+      @if (isPreviewing) {
+        span(class="row__live" title="미리보기 중") { "*" }
+      }
+      @else {
+        span(class="row__live" /)
+      }
+      button(class="row__name" @click:CLICK_FILE) { {name} }
+      @if (hasError) {
+        span(class="row__error" title="컴파일 에러") { "!" }
+      }
+      @if (isEntry) {
+        button(class="row__preview" title="preview" @click:CLICK_PREVIEW) { "run" }
+      }
+    }
+  }
+}

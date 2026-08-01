@@ -1,0 +1,14 @@
+component Panel {
+  props { text: string, lines: string, count: number, note: string, shown: bool }
+  template {
+    div(class="panel") {
+      div(class="code") {
+        pre(class="gutter") { {lines} }
+        textarea(class="area" rows={count}) { {text} }
+      }
+      @if (shown) {
+        pre(class="note") { {note} }
+      }
+    }
+  }
+}

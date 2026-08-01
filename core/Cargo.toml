@@ -2,7 +2,7 @@
 resolver = "2"
 # renderer(SSR)는 보류 - 타입화된 상수풀 미대응이라 워크스페이스에서 제외했다(ISSUES.md).
 # 크레이트 파일은 SSR 재개 때 복구용으로 남겨둔다. exclude로 두면 `cargo build`가 안 건드린다.
-members = ["crates/bytecode", "crates/compiler"]
+members = ["crates/bytecode", "crates/compiler", "crates/compiler-wasm"]
 exclude = ["crates/renderer"]
 
 [package]

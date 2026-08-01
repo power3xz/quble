@@ -14,6 +14,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "compiler-wasm"
+version = "0.0.0"
+dependencies = [
+ "compiler",
+]
+
+[[package]]
 name = "quble"
 version = "0.0.0"
 dependencies = [

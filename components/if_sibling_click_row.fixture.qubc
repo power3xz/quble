@@ -1,0 +1,7 @@
+component Row {
+  props { name: string }
+  events { CLICK_ROW({ }) }
+  template {
+    button(class="row" @click:CLICK_ROW) { {name} }
+  }
+}

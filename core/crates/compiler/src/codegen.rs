@@ -4,7 +4,7 @@ use crate::ast::{
     ArgValue, AttrValue, Context, Event, ForCount, Ident, LitValue, Node, Prop,
     SlotPlaceholderContent, Type, VarRef,
 };
-use crate::flatten::FlatComp;
+use crate::flatten::{FlatComp, Sourced};
 use crate::src_range::SrcRange;
 use bytecode::{
     encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
@@ -249,7 +249,10 @@ fn check_slot_placeholder_defs(
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
 /// 두 번째 반환값은 리소스 사이드맵 - 인덱스가 모듈 전역 resId, 값이 정규화 경로.
 /// 빌드 단계가 이걸 받아 내용 해시/복사/URL화를 한다(BYTECODE.md #5 LOAD_RES 메모).
-pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenError> {
+///
+/// 에러의 range는 그 컴포넌트가 정의된 파일의 오프셋이라, 어느 파일인지를 함께 실어 보낸다
+/// (Sourced) - 엔트리 소스에 대고 세면 use한 파일의 에러가 엉뚱한 줄을 짚는다.
+pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), Sourced<CodegenError>> {
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
     let mut types = TypeTable::new();
@@ -258,8 +261,37 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
     // 정규화 경로 -> resId. 등장 순서로 0,1,2.... 같은 경로는 같은 resId(모듈 전역 dedup).
     let mut res_ids: Vec<String> = Vec::new();
 
-    // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다.
+    // 각 컴포넌트 코드를 이어붙이고 off/len으로 구획한다. 한 컴포넌트를 처리하다 난 에러는
+    // 모두 그 컴포넌트가 정의된 파일을 탓하므로, 여기 한 자리에서 출처를 붙인다
+    // (안쪽 emit들은 위치(range)만 알고 파일은 모른다).
     for fc in comps {
+        let def = generate_comp(
+            fc,
+            &comp_lookup,
+            &mut pool,
+            &mut types,
+            &mut code,
+            &mut res_ids,
+        )
+        .map_err(|e| Sourced::from_origin(&fc.origin, e))?;
+        defs.push(def);
+    }
+
+    let module = Module::new(pool, types.into_entries(), defs, code);
+    Ok((encode(&module).into_boxed_slice(), res_ids))
+}
+
+/// 컴포넌트 하나의 코드를 code에 이어붙이고 그 CompDef를 만든다. 에러는 위치(range)만 알고
+/// 어느 파일인지는 모른다 - 호출부(generate)가 그 컴포넌트가 정의된 파일로 감싼다.
+fn generate_comp(
+    fc: &FlatComp,
+    comp_lookup: &CompLookup,
+    pool: &mut ConstPool,
+    types: &mut TypeTable,
+    code: &mut Vec<u8>,
+    res_ids: &mut Vec<String>,
+) -> Result<CompDef, CodegenError> {
+    {
         let comp = &fc.comp;
         check_slot_placeholder_defs(&comp.name, &collect_slot_placeholders(&comp.template))?;
         let name_const_index = pool.intern_str(&comp.name);
@@ -271,12 +303,12 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 .map(|p| (p.name.clone(), p.type_.clone()))
                 .collect(),
         );
-        let props_type_ref = types.intern(&props_ty, &mut pool);
+        let props_type_ref = types.intern(&props_ty, pool);
         let code_off = code.len() as u32;
         // 리소스 로드를 정의 앞머리에 깐다. lazy build에서 이 컴포넌트가 실제로 그려질 때만
         // 실행돼 리소스가 로드된다(같은 파일 컴포넌트가 같은 LOAD_RES를 내도 런타임이 URL dedup).
         for res_path in &fc.resources {
-            let res_id = res_id_for(&mut res_ids, res_path);
+            let res_id = res_id_for(res_ids, res_path);
             code.push(Op::LoadRes as u8);
             code.extend_from_slice(&res_id.to_le_bytes());
         }
@@ -288,10 +320,10 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 &comp.props,
                 &comp.events,
                 &comp.contexts,
-                &comp_lookup,
+                comp_lookup,
                 ForScope::ROOT,
-                &mut pool,
-                &mut code,
+                pool,
+                code,
                 &mut next_slot_placeholder_index,
             )?;
         }
@@ -306,7 +338,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                     .payload
                     .iter()
                     .map(|(field, value)| {
-                        arg_to_field(field, value, &comp.props, &mut pool, &mut types)
+                        arg_to_field(field, value, &comp.props, pool, types)
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
@@ -324,7 +356,7 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                     .fields
                     .iter()
                     .map(|(field, value)| {
-                        arg_to_field(field, value, &comp.props, &mut pool, &mut types)
+                        arg_to_field(field, value, &comp.props, pool, types)
                     })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(ContextDef {
@@ -333,18 +365,15 @@ pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), CodegenE
                 })
             })
             .collect::<Result<Vec<_>, CodegenError>>()?;
-        defs.push(CompDef {
+        Ok(CompDef {
             name_const_index,
             props_type_ref,
             code_off,
             code_len: code.len() as u32 - code_off,
             events,
             contexts,
-        });
+        })
     }
-
-    let module = Module::new(pool, types.into_entries(), defs, code);
-    Ok((encode(&module).into_boxed_slice(), res_ids))
 }
 
 /// 정규화 경로의 모듈 전역 resId. 이미 본 경로면 그 인덱스, 처음이면 끝에 추가하고 새 인덱스.

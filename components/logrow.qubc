@@ -1,0 +1,9 @@
+component LogRow {
+  props { text: string, level: string }
+  template {
+    div(class="log") {
+      span(class="log__level" data-level={level}) { {level} }
+      span(class="log__text") { {text} }
+    }
+  }
+}

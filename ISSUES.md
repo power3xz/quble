@@ -46,7 +46,20 @@
   주인, store는 되먹인 값만 가짐). payload는 여전히 store 값이라 타이핑 값과 다르고, 그 구분까지
   테스트가 못박는다(`core/web/event-dom-types.test.ts`).
 
+- **codegen 진단이 엔트리 파일 기준으로 위치를 셈** - `use`한 파일에서 난 codegen 에러가 엔트리
+  파일의 엉뚱한 줄을 짚었다(`board.qubc`를 컴파일하면 `column.qubc`의 에러가 `board.qubc`에 있는
+  것처럼). `CodegenError`가 `range`(바이트 오프셋)만 들고 출처 파일을 몰라, 그 오프셋을 엔트리
+  소스에 대고 셌다. codegen 단계 에러 전부가 해당. **해결:** lex/parse가 쓰던 `Sourced<E>`를
+  codegen에도 적용 - `FlatComp`가 출처를 들고 `generate`의 컴포넌트 루프에서 에러에 붙인다.
+
 ## 미해결
+
+- **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
+  소스에 설명을 달 수 없다(비ASCII를 쓰면 `unexpected character`로 터진다).
+
+- **루트 store에서 배열 요소 경로로 못 내려감** - `store.items[2].title` 같은 접근이 안 된다
+  (`leafTree`가 배열을 칸 leafIndex 하나로 두고 멈춘다). `@for`로 요소를 자식에 넘기는 경로는
+  된다(`core/web/for-item-props-set.test.ts`).
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
   실패한다(`get_const`가 `&str` 대신 `&Const` 반환). renderer는 바이트코드로 렌더 가능한지 보는

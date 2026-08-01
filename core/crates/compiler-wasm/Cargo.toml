@@ -1,0 +1,12 @@
+[package]
+name = "compiler-wasm"
+version = "0.0.0"
+edition = "2021"
+
+# cdylib으로 내야 wasm 모듈이 나온다. wasm-bindgen 없이 extern "C" 함수를 직접 export하므로
+# 외부 의존성이 없다(워크스페이스의 의존성 0개 유지). ABI는 src/lib.rs 머리주석.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+compiler = { path = "../compiler" }
