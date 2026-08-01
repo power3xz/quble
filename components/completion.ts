@@ -77,3 +77,22 @@ export const usedKeys = (source: string, skipAt: number) => {
   }
   return used;
 };
+
+/**
+ * 고른 키 뒤에 이어 넣을 함수 뼈대. `": (data) => {\n<들여쓰기>\n<들여쓰기>},"` 꼴이고,
+ * 커서 자리는 `caret`(넣은 텍스트 안에서의 오프셋)이 가리킨다.
+ *
+ * 두 번째 인자는 회차 인덱스가 있을 때만 낸다 - `props`/`set`/`push`는 무엇을 쓸지 모르니
+ * 비워 두고(안 쓰는 걸 넣으면 지우는 게 일이다), `$0`은 fullname의 `[$n]`이 있다는 것만으로
+ * 확실하다. 중첩 @for면 `$0, $1`처럼 개수만큼 낸다.
+ *
+ * @param fullname  고른 핸들러 이름
+ * @param indent    키가 놓인 줄의 들여쓰기(그 줄 앞 공백 그대로)
+ */
+export const handlerBody = (fullname: string, indent: string) => {
+  const depth = (fullname.match(/\[\$\d+\]/g) ?? []).length;
+  const loops = Array.from({ length: depth }, (_, i) => `$${i}`).join(", ");
+  const params = depth ? `(data, { ${loops} })` : "(data)";
+  const head = `: ${params} => {\n${indent}  `;
+  return { text: `${head}\n${indent}},`, caret: head.length };
+};

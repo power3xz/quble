@@ -14,7 +14,7 @@
 
 import { compile as decodeQubb, type THandlers } from "../core/web/runtime.ts";
 import { lazyCompiler } from "../core/web/wasm-compiler.ts";
-import { entryOf, isKeySlot, usedKeys } from "./completion.ts";
+import { entryOf, handlerBody, isKeySlot, usedKeys } from "./completion.ts";
 import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
 import { markError, tokenize } from "./tokenize.ts";
 
@@ -483,7 +483,10 @@ const openCompletion = async (area: HTMLTextAreaElement, ctx: TCtx) => {
 };
 
 // 고른 후보를 슬롯에 써넣고 닫는다. 닫는 따옴표까지 이쪽이 맞춘다 - 캐럿 뒤에 이미 있으면
-// 그것을 쓰고(따옴표가 겹치지 않게), 없으면 넣는다. 커서는 어느 쪽이든 따옴표 바깥에 둔다.
+// 그것을 쓰고(따옴표가 겹치지 않게), 없으면 넣는다.
+//
+// 값이 아직 없으면(뒤에 `:`가 안 보이면) 함수 뼈대까지 이어 넣고 커서를 그 몸통에 둔다.
+// 기존 키를 고쳐 쓰는 중이면 이름만 갈아끼운다 - 이미 쓴 몸통을 밀어낼 수 없다.
 const applyCompletion = (name: string, ctx: TCtx) => {
   const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
   if (!area || !completion) {
@@ -494,8 +497,17 @@ const applyCompletion = (name: string, ctx: TCtx) => {
   const closed = rest.startsWith('"');
   const tail = closed ? rest.slice(1) : rest;
 
-  area.value = `${area.value.slice(0, slotStart) + name}"${tail}`;
-  area.selectionStart = area.selectionEnd = slotStart + name.length + 1;
+  const head = `${area.value.slice(0, slotStart) + name}"`;
+  if (/^\s*:/.test(tail)) {
+    area.value = head + tail;
+    area.selectionStart = area.selectionEnd = head.length;
+  } else {
+    const line = area.value.slice(0, slotStart);
+    const indent = line.slice(line.lastIndexOf("\n") + 1).match(/^\s*/)?.[0] ?? "";
+    const body = handlerBody(name, indent);
+    area.value = head + body.text + tail;
+    area.selectionStart = area.selectionEnd = head.length + body.caret;
+  }
 
   closeCompletion(ctx);
   if (currentName) {
