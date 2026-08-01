@@ -19,7 +19,9 @@ use std::path::Path;
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
     Flatten(flatten::FlattenError),
-    Codegen(codegen::CodegenError),
+    /// codegen 에러도 어느 파일에서 났는지를 들고 온다(Sourced) - range는 에러가 난 그 파일의
+    /// 바이트 오프셋이라, 엔트리 소스에 대고 세면 use한 파일의 에러가 엉뚱한 줄을 짚는다.
+    Codegen(flatten::Sourced<codegen::CodegenError>),
 }
 
 /// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 - 빌드 파이프라인이 사이드맵으로
@@ -54,10 +56,9 @@ pub fn compile_src(
 ///     |              ^^^^^^^^^
 /// ```
 ///
-/// lex/parse 에러는 어느 파일에서 났는지를 자신이 들고 있어(Sourced) 인자와 무관하게 그
-/// 파일을 가리킨다. codegen 에러는 아직 파일을 모르므로 넘긴 엔트리를 기준으로 삼는다 -
-/// use한 파일에서 난 codegen 에러는 위치가 엔트리 기준이라 틀릴 수 있다(후속 작업).
-/// 탓할 자리를 모르는 에러(range None)는 파일명과 메시지만 낸다.
+/// lex/parse/codegen 에러는 어느 파일에서 났는지를 자신이 들고 있어(Sourced) 인자와 무관하게
+/// 그 파일을 가리킨다. 엔트리는 위치 개념이 없는 나머지 flatten 에러(use 그래프/타입 참조)에만
+/// 쓰인다. 탓할 자리를 모르는 에러(range None)는 파일명과 메시지만 낸다.
 ///
 /// base_dir이 Some이면 파일 경로를 그 디렉터리 기준 상대경로로 줄여 낸다 - loader가 정규화한
 /// 절대경로는 길어 읽기 나쁘다. CLI가 현재 디렉터리를 넘긴다. None이면 경로를 그대로 두는데,
@@ -77,11 +78,11 @@ pub fn format_error(
         }
         // 나머지 flatten 에러는 소스 안 위치라는 개념이 없다(use 그래프/타입 참조 단위).
         CompileError::Flatten(_) => (entry_path, entry_src, None),
-        CompileError::Codegen(e) => (entry_path, entry_src, e.range),
+        CompileError::Codegen(e) => (e.path.as_str(), e.src.as_str(), e.err.range),
     };
     let message = match err {
         CompileError::Flatten(e) => e.to_string(),
-        CompileError::Codegen(e) => e.kind.to_string(),
+        CompileError::Codegen(e) => e.err.kind.to_string(),
     };
     let shown = base_dir
         .and_then(|dir| relative_to(dir, path))
@@ -325,8 +326,11 @@ mod tests {
         let src = r#"component C { template { svg( /) } }"#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownTag(_),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownTag(_),
+                    ..
+                },
                 ..
             }))
         ));
@@ -647,8 +651,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownArg { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownArg { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -669,8 +676,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::DuplicateBinding(_),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::DuplicateBinding(_),
+                    ..
+                },
                 ..
             }))
         ));
@@ -723,8 +733,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::DuplicateBinding(_),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::DuplicateBinding(_),
+                    ..
+                },
                 ..
             }))
         ));
@@ -1068,8 +1081,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownProp(_),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownProp(_),
+                    ..
+                },
                 ..
             }))
         ));
@@ -1338,8 +1354,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::PropTypeMismatch { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::PropTypeMismatch { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -1357,8 +1376,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::NotLeaf(_),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::NotLeaf(_),
+                    ..
+                },
                 ..
             }))
         ));
@@ -1908,8 +1930,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::NotLeaf(_),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::NotLeaf(_),
+                    ..
+                },
                 ..
             }))
         ));
@@ -1926,8 +1951,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownField { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownField { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -1944,8 +1972,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownField { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownField { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -2171,8 +2202,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -2187,8 +2221,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -2249,9 +2286,12 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef {
-                    slot_placeholder: None,
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef {
+                        slot_placeholder: None,
+                        ..
+                    },
                     ..
                 },
                 ..
@@ -2270,8 +2310,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -2285,8 +2328,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::DuplicateSlotPlaceholderDef { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -2301,8 +2347,11 @@ mod tests {
         "#;
         assert!(matches!(
             compile(src),
-            Err(CompileError::Codegen(codegen::CodegenError {
-                kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnknownSlotPlaceholder { .. },
+                    ..
+                },
                 ..
             }))
         ));
@@ -2327,6 +2376,7 @@ mod tests {
     fn codegen_error_snippet(src: &str) -> Option<String> {
         match compile(src) {
             Err(CompileError::Codegen(e)) => e
+                .err
                 .range
                 .map(|r| src[r.start as usize..r.end as usize].to_string()),
             other => panic!("codegen 에러를 기대했다: {:?}", other.map(|_| ())),
@@ -2479,10 +2529,12 @@ mod tests {
     // 위치 계산은 diagnostic 모듈이 자기 테스트로 덮는다. 여기서는 에러 종류마다 올바른
     // 파일/구간/메시지가 진단에 흘러 들어가는지를 본다.
 
-    /// 컴파일 실패의 진단 텍스트(테스트용). 엔트리 경로는 고정 이름을 쓴다.
+    /// 컴파일 실패의 진단 텍스트(테스트용). 엔트리 경로는 compile()이 쓰는 이름과 같아야
+    /// 한다 - 위치를 아는 에러는 자기가 든 파일을 쓰므로, 다른 이름을 넘기면 그 이름은
+    /// 위치 없는 에러에만 나타나 무엇을 보는 테스트인지 흐려진다.
     fn diagnostic_of(src: &str) -> String {
         let err = compile(src).expect_err("컴파일이 실패해야 한다");
-        format_error(None, "a.qubc", src, &err)
+        format_error(None, "entry", src, &err)
     }
 
     /// codegen 에러는 참조 자리를 가리키고, 메시지에 variant 이름이 안 새어 나온다.
@@ -2492,7 +2544,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:3:23: error: no field `nope` on prop `user`",
+                "entry:3:23: error: no field `nope` on prop `user`",
                 " 3 |   template { div() { {user.nope} } }",
                 "   |                       ^^^^^^^^^",
             ]
@@ -2503,10 +2555,49 @@ mod tests {
     /// lex/parse 에러는 자기가 든 파일(Sourced.path)을 가리킨다 - 인자로 준 엔트리 이름이 아니라.
     #[test]
     fn diagnostic_uses_file_the_error_carries() {
-        // compile()의 엔트리 경로는 "entry"다(테스트 헬퍼). format_error엔 "a.qubc"를
-        // 넘겼는데도 진단은 에러가 든 쪽을 쓴다.
         let out = diagnostic_of("component C { oops { } }");
         assert!(out.starts_with("entry:1:15: error: "), "{out}");
+    }
+
+    /// use한 파일에서 난 codegen 에러는 엔트리가 아니라 그 파일을 가리킨다.
+    ///
+    /// 회귀: 예전엔 codegen 에러가 자기 출처를 몰라, 진단이 엔트리 소스에 대고 줄/칸을 셌다.
+    /// range는 에러가 난 파일의 바이트 오프셋이므로 엔트리에 대고 세면 파일명도 줄도 밑줄도
+    /// 전부 엉뚱한 곳을 짚었다(board.qubc를 컴파일하면 column.qubc의 에러가 board.qubc에
+    /// 있는 것처럼 나왔다).
+    #[test]
+    fn diagnostic_points_at_the_used_file_not_the_entry() {
+        let entry = "use Column from \"./column.qubc\"\ncomponent Board {\n  props { t: { label: string } }\n  template { Lane: Column(name={t} /) }\n}";
+        let used = "component Column {\n  props { name: { label: string } }\n  template { p() { {name.nope} } }\n}";
+
+        let err = compile_map(entry, &[("./column.qubc", used)]).expect_err("실패해야 한다");
+        let out = format_error(None, "entry", entry, &err);
+
+        assert_eq!(
+            out,
+            [
+                "./column.qubc:3:21: error: no field `nope` on prop `name`",
+                " 3 |   template { p() { {name.nope} } }",
+                "   |                     ^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 엔트리보다 긴 파일에서 난 에러도 안전하다 - 그 오프셋을 엔트리 소스에 대고 세면
+    /// 범위를 넘어 잘린 줄이나 엉뚱한 캐럿이 나온다.
+    #[test]
+    fn diagnostic_handles_offset_past_entry_length() {
+        let entry = "use C from \"./c.qubc\"\ncomponent E {\n  props { v: { k: string } }\n  template { X: C(a={v} /) }\n}";
+        let used = format!(
+            "component C {{\n{}  props {{ a: {{ k: string }} }}\n  template {{ p() {{ {{a.nope}} }} }}\n}}",
+            "  \n".repeat(40),
+        );
+
+        let err = compile_map(entry, &[("./c.qubc", &used)]).expect_err("실패해야 한다");
+        let out = format_error(None, "entry", entry, &err);
+
+        assert!(out.starts_with("./c.qubc:43:"), "{out}");
     }
 
     /// 위치를 모르는 에러(range None)는 첫 줄만 - 소스 줄과 캐럿이 안 붙는다.
@@ -2516,7 +2607,7 @@ mod tests {
         let out = diagnostic_of(
             "component C { props { a: string } template { div() { \"x\" } } }\ncomponent D { template { C( /) } }",
         );
-        assert_eq!(out, "a.qubc: error: `C` has no prop `a`");
+        assert_eq!(out, "entry: error: `C` has no prop `a`");
     }
 
     /// prop을 가리는 @for 회차변수는 그 변수 이름을 가리킨다.
@@ -2526,7 +2617,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:3:20: error: @for binding `row` shadows a prop or an outer binding: use another name",
+                "entry:3:20: error: @for binding `row` shadows a prop or an outer binding: use another name",
                 " 3 |   template { @for (row of 3) { p() { \"x\" } } }",
                 "   |                    ^^^",
             ]
@@ -2541,7 +2632,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:2:20: error: @for binding `i` shadows a prop or an outer binding: use another name",
+                "entry:2:20: error: @for binding `i` shadows a prop or an outer binding: use another name",
                 " 2 |   template { @for (i, i of 3) { p() { \"x\" } } }",
                 "   |                    ^",
             ]
@@ -2556,7 +2647,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:3:25: error: `NOPE` is not declared in events",
+                "entry:3:25: error: `NOPE` is not declared in events",
                 " 3 |   template { div(@click:NOPE /) }",
                 "   |                         ^^^^",
             ]
@@ -2571,7 +2662,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:2:37: error: `C` declares slot `H` twice: the content has no single place to go",
+                "entry:2:37: error: `C` declares slot `H` twice: the content has no single place to go",
                 " 2 |   template { div() { @slot(H) @slot(H) } }",
                 "   |                                     ^",
             ]
@@ -2585,7 +2676,7 @@ mod tests {
         assert_eq!(
             diagnostic_of("component C {\n  template { Nope( /) }\n}"),
             [
-                "a.qubc:2:14: error: cannot find component `Nope`",
+                "entry:2:14: error: cannot find component `Nope`",
                 " 2 |   template { Nope( /) }",
                 "   |              ^^^^",
             ]
@@ -2600,7 +2691,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:2:24: error: `Inner` declares no slot `Sidebar` (`@slot(Sidebar)`)",
+                "entry:2:24: error: `Inner` declares no slot `Sidebar` (`@slot(Sidebar)`)",
                 " 2 |   template { Inner() { Sidebar << p( /) } }",
                 "   |                        ^^^^^^^",
             ]
@@ -2615,7 +2706,7 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "a.qubc:2:20: error: `Nope` is not declared in contexts",
+                "entry:2:20: error: `Nope` is not declared in contexts",
                 " 2 |   template { @with Nope { p() { \"x\" } } }",
                 "   |                    ^^^^",
             ]
@@ -2629,7 +2720,7 @@ mod tests {
         assert_eq!(
             diagnostic_of("component C {\n  template { svg( /) }\n}"),
             [
-                "a.qubc:2:14: error: unknown builtin tag `svg`",
+                "entry:2:14: error: unknown builtin tag `svg`",
                 " 2 |   template { svg( /) }",
                 "   |              ^^^",
             ]
