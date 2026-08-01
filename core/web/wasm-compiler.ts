@@ -11,6 +11,7 @@ type TWasmExports = {
   qb_reset: () => void;
   qb_add_file: (pathPtr: number, pathLen: number, srcPtr: number, srcLen: number) => void;
   qb_compile: (entryPtr: number, entryLen: number) => number;
+  qb_handler_names: (entryPtr: number, entryLen: number) => number;
   qb_out_ptr: () => number;
   qb_out_len: () => number;
   qb_res_ptr: () => number;
@@ -49,12 +50,13 @@ export const loadCompiler = async (wasmUrl: string) => {
   const readSlot = (ptrFn: () => number, lenFn: () => number): Uint8Array =>
     new Uint8Array(wasm.memory.buffer, ptrFn(), lenFn()).slice();
 
-  /**
-   * 파일을 등록하고 entry를 엔트리로 컴파일한다. `use`는 등록된 이름으로 해소된다.
-   * @param files  경로 -> 소스 (.qubc/.css)
-   * @param entry  엔트리 경로(files의 키)
-   */
-  const compile = (files: TSourceFiles, entry: string): TCompileResult => {
+  // 파일을 등록하고 entry를 받는 wasm 함수(qb_compile/qb_handler_names)를 태운다. 둘 다 결과를
+  // out 슬롯에 놓으므로 상태와 함께 읽어 돌려준다 - 슬롯은 다음 호출이 덮어쓴다.
+  const run = (
+    fn: (entryPtr: number, entryLen: number) => number,
+    files: TSourceFiles,
+    entry: string,
+  ): { status: number; out: Uint8Array } => {
     wasm.qb_reset();
     for (const [path, source] of Object.entries(files)) {
       const [pathPtr, pathLen] = put(path);
@@ -67,12 +69,20 @@ export const loadCompiler = async (wasmUrl: string) => {
     const [entryPtr, entryLen] = put(entry);
     let status: number;
     try {
-      status = wasm.qb_compile(entryPtr, entryLen);
+      status = fn(entryPtr, entryLen);
     } finally {
       wasm.qb_free(entryPtr, entryLen);
     }
+    return { status, out: readSlot(wasm.qb_out_ptr, wasm.qb_out_len) };
+  };
 
-    const out = readSlot(wasm.qb_out_ptr, wasm.qb_out_len);
+  /**
+   * 파일을 등록하고 entry를 엔트리로 컴파일한다. `use`는 등록된 이름으로 해소된다.
+   * @param files  경로 -> 소스 (.qubc/.css)
+   * @param entry  엔트리 경로(files의 키)
+   */
+  const compile = (files: TSourceFiles, entry: string): TCompileResult => {
+    const { status, out } = run(wasm.qb_compile, files, entry);
     if (status !== 0) {
       return { ok: false, diagnostic: decoder.decode(out) };
     }
@@ -85,7 +95,22 @@ export const loadCompiler = async (wasmUrl: string) => {
     };
   };
 
-  return { compile };
+  /**
+   * entry를 마운트 진입점으로 봤을 때 핸들러가 가질 수 있는 fullname 목록(트리 순서).
+   * 컴파일(codegen)까지 가지 않고 합성 트리만 걸으므로 편집 중에 반복해 불러도 된다.
+   * 소스가 깨져 이름을 못 내면 빈 배열 - 진단은 컴파일 쪽이 낸다.
+   * @param files  경로 -> 소스 (.qubc/.css)
+   * @param entry  엔트리 경로(files의 키). 핸들러 파일의 짝이 되는 `.qubc`다.
+   */
+  const handlerNames = (files: TSourceFiles, entry: string): string[] => {
+    const { status, out } = run(wasm.qb_handler_names, files, entry);
+    if (status !== 0 || out.length === 0) {
+      return [];
+    }
+    return decoder.decode(out).split("\n");
+  };
+
+  return { compile, handlerNames };
 };
 
 /**
