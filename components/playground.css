@@ -148,6 +148,20 @@
   width: max-content;
 }
 
+/* 커서가 있는 줄. 위치는 핸들러가 style로 준다(줄 번호 x 줄 높이) - quble에 동적 class가 없어
+ * 줄마다 요소를 두는 대신 막대 하나를 옮긴다. .pg__sheet가 콘텐츠 폭을 가지므로 긴 줄에서도
+ * 끝까지 이어진다. 흐름 밖이라 스크롤 높이에는 영향을 주지 않는다. */
+
+.pg__caretline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 1.5em;
+  background: #232c3d;
+  pointer-events: none;
+}
+
 .pg__view,
 .pg__area {
   display: block;
@@ -159,8 +173,10 @@
   tab-size: 2;
 }
 
-/* 폭을 주지 않는다 - 이 요소가 콘텐츠만큼 넓어져 .pg__sheet의 폭을 정한다. */
+/* 폭을 주지 않는다 - 이 요소가 콘텐츠만큼 넓어져 .pg__sheet의 폭을 정한다.
+ * position은 강조 막대(absolute)보다 위에 오기 위한 것 - 없으면 막대가 글자를 덮는다. */
 .pg__view {
+  position: relative;
   min-width: 100%;
   min-height: 100%;
   color: #e6e9ef;
@@ -180,8 +196,9 @@
   overflow: hidden;
 }
 
+/* 선택 배경은 반투명이어야 한다 - 글자는 아래 .pg__view에 있어서, 불투명하면 덮여 안 보인다. */
 .pg__area::selection {
-  background: #2f4a6b;
+  background: rgba(70, 120, 180, 0.4);
 }
 
 .pg__diag {

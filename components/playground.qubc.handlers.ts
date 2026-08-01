@@ -20,6 +20,7 @@ type TStore = {
   editingName: number;
   lineNumbers: number;
   lineCount: number;
+  caretLine: number;
   previewName: number;
   logs: number;
   diagnostic: number;
@@ -167,6 +168,8 @@ const selectFile = (_data: unknown, ctx: TCtx) => {
   const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
   if (area) {
     area.value = text;
+    area.selectionStart = area.selectionEnd = 0;
+    trackCaret(area, ctx);
   }
 };
 
@@ -178,20 +181,22 @@ const editSource = (_data: unknown, ctx: TCtx) => {
   const area = ctx.event.target as HTMLTextAreaElement;
   sources.set(currentName, area.value);
   showText(area.value, ctx);
-  scrollCaretIntoView(area);
+  trackCaret(area, ctx);
 };
 
-// 커서만 움직인 경우(화살표/클릭) - 내용은 그대로고 스크롤만 따라간다.
+// 커서만 움직인 경우(화살표/클릭) - 내용은 그대로고 강조와 스크롤만 따라간다.
+// 다음 프레임에 읽는다: keydown/click 시점에는 브라우저가 아직 커서를 옮기기 전이다.
 const followCaret = (_data: unknown, ctx: TCtx) => {
-  scrollCaretIntoView(ctx.event.target as HTMLTextAreaElement);
+  const area = ctx.event.target as HTMLTextAreaElement;
+  requestAnimationFrame(() => trackCaret(area, ctx));
 };
 
-// 커서가 화면 밖이면 보이도록 최소한만 스크롤한다.
+// 커서가 있는 줄로 강조 막대를 옮기고, 커서가 화면 밖이면 보이도록 최소한만 스크롤한다.
 //
-// 직접 하는 이유: 실제 스크롤은 .pg__code가 갖고 textarea는 overflow:hidden이라(거터와 어긋나지
-// 않으려고) 커서를 보이게 유지하는 브라우저 기본 동작이 발동하지 않는다. 부모는 커서 위치를
-// 모르므로 여기서 계산해 넣는다. 위치는 폰트가 monospace라 줄 높이 x 줄, 글자 폭 x 열로 얻는다.
-const scrollCaretIntoView = (area: HTMLTextAreaElement) => {
+// 스크롤을 직접 하는 이유: 실제 스크롤은 .pg__code가 갖고 textarea는 overflow:hidden이라(거터와
+// 어긋나지 않으려고) 커서를 보이게 유지하는 브라우저 기본 동작이 발동하지 않는다. 부모는 커서
+// 위치를 모르므로 여기서 계산해 넣는다. 위치는 폰트가 monospace라 줄 높이 x 줄, 글자 폭 x 열이다.
+const trackCaret = (area: HTMLTextAreaElement, { store, set }: Pick<TCtx, "store" | "set">) => {
   const code = area.closest<HTMLElement>(".pg__code");
   if (!code) {
     return;
@@ -205,6 +210,11 @@ const scrollCaretIntoView = (area: HTMLTextAreaElement) => {
   const style = getComputedStyle(area);
   const lineH = parseFloat(style.lineHeight);
   const top = parseFloat(style.paddingTop) + line * lineH;
+
+  // 선택 중에는 강조를 숨긴다 - 선택 영역과 겹쳐 어느 쪽이 무엇인지 읽기 어렵다.
+  const selecting = area.selectionStart !== area.selectionEnd;
+  set(store.caretLine, selecting ? "display: none" : `transform: translateY(${top}px)`);
+
   if (top < code.scrollTop) {
     code.scrollTop = top;
   } else if (top + lineH > code.scrollTop + code.clientHeight) {
@@ -341,6 +351,7 @@ export default {
   "Row[$0].CLICK_FILE": withSink(selectFile),
   "Row[$0].CLICK_PREVIEW": withSink(runPreview),
   INPUT_SOURCE: withSink(editSource),
-  KEYUP_SOURCE: withSink(followCaret),
+  KEYDOWN_SOURCE: withSink(followCaret),
+  CLICK_SOURCE: withSink(followCaret),
   CLICK_CLEAR_LOGS: withSink(clearLogs),
 };

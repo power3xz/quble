@@ -9,6 +9,7 @@ component Playground {
     editing: string,
     lineNumbers: string,
     lineCount: number,
+    caretLine: string,
     previewName: string,
     logs: { text: string, level: string }[],
     diagnostic: string,
@@ -16,7 +17,8 @@ component Playground {
   }
   events {
     INPUT_SOURCE({ })
-    KEYUP_SOURCE({ })
+    KEYDOWN_SOURCE({ })
+    CLICK_SOURCE({ })
     CLICK_CLEAR_LOGS({ })
   }
   template {
@@ -33,9 +35,10 @@ component Playground {
         div(class="pg__code") {
           pre(class="pg__gutter") { {lineNumbers} }
           div(class="pg__sheet") {
+            div(class="pg__caretline" style={caretLine} /)
             pre(class="pg__view") { {editing} }
             textarea(class="pg__area" spellcheck="false" rows={lineCount}
-              @input:INPUT_SOURCE @keyup:KEYUP_SOURCE /)
+              @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE /)
           }
         }
 
