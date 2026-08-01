@@ -11,7 +11,7 @@ mod lexer;
 mod parse;
 mod src_range;
 
-pub use dts::handlers_dts_file;
+pub use dts::{handler_names_src, handlers_dts_file};
 pub use flatten::{FlattenError, SourceLoader};
 
 use std::path::Path;

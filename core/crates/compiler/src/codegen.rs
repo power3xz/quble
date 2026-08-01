@@ -337,9 +337,7 @@ fn generate_comp(
                 let fields = e
                     .payload
                     .iter()
-                    .map(|(field, value)| {
-                        arg_to_field(field, value, &comp.props, pool, types)
-                    })
+                    .map(|(field, value)| arg_to_field(field, value, &comp.props, pool, types))
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
                     name_const_index: pool.intern_str(&e.name),
@@ -355,9 +353,7 @@ fn generate_comp(
                 let fields = c
                     .fields
                     .iter()
-                    .map(|(field, value)| {
-                        arg_to_field(field, value, &comp.props, pool, types)
-                    })
+                    .map(|(field, value)| arg_to_field(field, value, &comp.props, pool, types))
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(ContextDef {
                     name_const_index: pool.intern_str(&c.name),

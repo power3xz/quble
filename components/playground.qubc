@@ -1,4 +1,5 @@
 use "./playground.css"
+use Completion from "./completion.qubc"
 use FileRow from "./filerow.qubc"
 use LogRow from "./logrow.qubc"
 
@@ -12,6 +13,12 @@ component Playground {
     caretLine: string,
     previewName: string,
     previewSelected: bool,
+    completion: {
+      isOpen: bool,
+      style: string,
+      isAbove: bool,
+      items: { name: string, isSelected: bool }[]
+    },
     logs: { text: string, level: string }[],
     diagnostic: string,
     hasError: bool
@@ -58,6 +65,13 @@ component Playground {
           }
             textarea(class="pg__area" spellcheck="false" rows={lineCount}
               @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE /)
+            @if (completion.isOpen) {
+              div(class="completion" data-above={completion.isAbove} style={completion.style}) {
+                @for (c of completion.items) {
+                  Completion(name={c.name} isSelected={c.isSelected} /)
+                }
+              }
+            }
           }
         }
 

@@ -9,6 +9,9 @@
 //!   5. 성공이면 `qb_res_ptr()`/`qb_res_len()`으로 리소스 경로 목록(개행 구분, resId 순)을
 //!      읽는다. JS가 그 순서대로 Blob URL을 만들어 런타임 `compile(bytes, resources)`에 넘긴다.
 //!
+//! `qb_handler_names(entry)`도 2번까지는 같은 순서를 쓰고 결과를 out 슬롯에 놓는다(개행 구분).
+//! 컴파일과 슬롯을 공유하므로 둘을 번갈아 부르면 앞의 결과가 지워진다 - 읽고 나서 다음을 부른다.
+//!
 //! 경로 의미론은 컴파일러가 모른다(flatten.rs 머리주석) - loader가 정규화 책임을 진다.
 //! playground의 파일 이름 공간은 평탄해서(탭 목록) `./` 접두어만 벗기면 등록된 이름과 맞는다.
 //!
@@ -100,7 +103,7 @@ pub unsafe extern "C" fn qb_add_file(
 #[no_mangle]
 pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u32 {
     let entry = match str_from(entry_ptr, entry_len) {
-        Some(e) => e.to_string(),
+        Some(path) => path.to_string(),
         None => {
             set_out(b"entry path is not valid UTF-8".to_vec());
             return 1;
@@ -133,10 +136,10 @@ pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u
                 output.resources.join("\n").into_bytes(),
                 0,
             ),
-            Err(e) => {
+            Err(err) => {
                 // base_dir=None - 가상 경로라 줄일 기준이 없다(compiler::format_error 주석).
                 (
-                    compiler::format_error(None, &entry, &entry_src, &e).into_bytes(),
+                    compiler::format_error(None, &entry, &entry_src, &err).into_bytes(),
                     Vec::new(),
                     1,
                 )
@@ -145,6 +148,51 @@ pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u
         let mut state = s.borrow_mut();
         state.out = out;
         state.res = res;
+        status
+    })
+}
+
+/// 등록된 파일 중 entry의 핸들러 fullname 목록을 낸다. 0=성공(out=개행으로 이은 이름들),
+/// 1=실패(out=진단 텍스트). 이름이 없으면 성공이되 out이 빈다.
+///
+/// 에디터 자동완성이 편집 중에 계속 부르는 자리다 - codegen까지 가지 않고 평탄화한 AST만
+/// 걸으므로 `qb_compile`보다 가볍다.
+///
+/// # Safety
+/// entry_ptr은 entry_len 바이트만큼 읽을 수 있어야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn qb_handler_names(entry_ptr: *const u8, entry_len: usize) -> u32 {
+    let entry = match str_from(entry_ptr, entry_len) {
+        Some(path) => path.to_string(),
+        None => {
+            set_out(b"entry path is not valid UTF-8".to_vec());
+            return 1;
+        }
+    };
+    STATE.with(|s| {
+        let files = s.borrow().files.clone();
+        let entry_src = match files.iter().find(|(p, _)| *p == entry) {
+            Some((_, src)) => src.clone(),
+            None => {
+                set_out(format!("no such file: {entry}").into_bytes());
+                return 1;
+            }
+        };
+        let loader = |_base: &str, target: &str| {
+            let name = target.strip_prefix("./").unwrap_or(target);
+            files
+                .iter()
+                .find(|(p, _)| p == name)
+                .map(|(p, src)| (p.clone(), src.clone()))
+        };
+        let (out, status) = match compiler::handler_names_src(&entry, &entry_src, &loader) {
+            Ok(names) => (names.join("\n").into_bytes(), 0),
+            Err(err) => (
+                compiler::format_error(None, &entry, &entry_src, &err).into_bytes(),
+                1,
+            ),
+        };
+        set_out(out);
         status
     })
 }
@@ -208,6 +256,17 @@ mod tests {
         let status = unsafe { qb_compile(entry.as_ptr(), entry.len()) };
         let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) }.to_vec();
         (status, out)
+    }
+
+    /// 핸들러 이름을 뽑고 (상태, 목록)을 돌려준다. out 슬롯을 JS와 같은 방식으로 읽어 쪼갠다.
+    fn handler_names(entry: &str) -> (u32, Vec<String>) {
+        let status = unsafe { qb_handler_names(entry.as_ptr(), entry.len()) };
+        let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) };
+        let names = match std::str::from_utf8(out).unwrap() {
+            "" => Vec::new(),
+            text => text.split('\n').map(str::to_string).collect(),
+        };
+        (status, names)
     }
 
     /// 리소스 슬롯을 JS와 같은 방식으로 읽어 경로 목록으로 쪼갠다. 빈 슬롯은 빈 목록.
@@ -450,6 +509,93 @@ mod tests {
             assert_eq!(buf[31], 7);
             qb_free(ptr, len);
         }
+    }
+
+    /// 이름 목록이 fullname으로 나온다 - use로 엮인 자식의 이벤트도 use-site 경로가 붙는다.
+    #[test]
+    fn handler_names_are_fullnames() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use Card from "./card.qubc"
+            component Main {
+              props { x: string }
+              events { ADD({ x }) }
+              template {
+                button(@click:ADD /)
+                @for (item of 3) { Ticket: Card( /) }
+              }
+            }
+        "#,
+        );
+        add_file(
+            "card.qubc",
+            r#"
+            component Card {
+              props { id: string }
+              events { PICK({ id }) }
+              template { button(@click:PICK /) }
+            }
+        "#,
+        );
+        let (status, names) = handler_names("main.qubc");
+        assert_eq!(status, 0, "성공이어야: {names:?}");
+        assert_eq!(names, vec!["ADD", "Ticket[$0].PICK"]);
+    }
+
+    /// 이벤트가 없으면 성공이되 빈 목록(빈 슬롯) - 후보 없음은 에러가 아니다.
+    #[test]
+    fn handler_names_empty_when_no_events() {
+        reset();
+        add_file("main.qubc", HELLO);
+        let (status, names) = handler_names("main.qubc");
+        assert_eq!(status, 0);
+        assert!(names.is_empty(), "실제: {names:?}");
+    }
+
+    /// 문법이 깨지면 1 + 진단 텍스트. 편집 중 계속 부르는 자리라 실패가 정상 경로다.
+    #[test]
+    fn handler_names_syntax_error_returns_diagnostic() {
+        reset();
+        add_file("main.qubc", "component C { template {");
+        let (status, _) = handler_names("main.qubc");
+        assert_eq!(status, 1);
+        let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) };
+        let text = std::str::from_utf8(out).unwrap();
+        assert!(text.contains("main.qubc"), "파일명이 있어야: {text}");
+    }
+
+    /// 등록 안 된 엔트리는 1 + 그 이름이 진단에 나온다.
+    #[test]
+    fn handler_names_unknown_entry_errors() {
+        reset();
+        add_file("main.qubc", HELLO);
+        let (status, _) = handler_names("other.qubc");
+        assert_eq!(status, 1);
+        let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) };
+        assert!(std::str::from_utf8(out).unwrap().contains("other.qubc"));
+    }
+
+    /// out 슬롯을 컴파일과 공유한다 - 이름을 뽑은 뒤 컴파일하면 슬롯이 qubb로 바뀐다.
+    /// JS가 둘을 번갈아 부를 때 앞의 결과를 들고 있으면 안 된다는 계약(머리주석)의 회귀.
+    #[test]
+    fn handler_names_shares_out_slot_with_compile() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            component Main {
+              props { x: string }
+              events { ADD({ x }) }
+              template { button(@click:ADD /) }
+            }
+        "#,
+        );
+        assert_eq!(handler_names("main.qubc").1, vec!["ADD"]);
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 0);
+        assert_eq!(&out[..4], QUBB_MAGIC, "이름 목록이 남으면 안 된다");
     }
 
     /// UTF-8이 아닌 경로/소스는 등록을 무시한다(파일이 늘지 않는다).

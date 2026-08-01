@@ -1,0 +1,11 @@
+use "./completion.css"
+
+component Completion {
+  props { name: string, isSelected: bool }
+  events {
+    CLICK_ITEM({ })
+  }
+  template {
+    button(class="completion__item" data-selected={isSelected} @click:CLICK_ITEM) { {name} }
+  }
+}
