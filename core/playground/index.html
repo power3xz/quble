@@ -72,11 +72,12 @@
     handlers.seed(sources);
 
     const data = {
-      files: sources.map((f, i) => ({
+      files: sources.map((f) => ({
         name: f.name,
         isEntry: f.name.endsWith(".qubc"),
         isEditing: false,
         isPreviewing: false,
+        hasError: false,
       })),
       editingName: sources[0].name,
       lines: handlers.tokenize(sources[0].source, sources[0].name),

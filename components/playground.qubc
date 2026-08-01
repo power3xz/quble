@@ -4,7 +4,7 @@ use LogRow from "./logrow.qubc"
 
 component Playground {
   props {
-    files: { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool }[],
+    files: { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool, hasError: bool }[],
     editingName: string,
     lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string }[],
     lineNumbers: string,
@@ -32,6 +32,7 @@ component Playground {
             isEntry={f.isEntry}
             isEditing={f.isEditing}
             isPreviewing={f.isPreviewing}
+            hasError={f.hasError}
           /)
         }
       }
