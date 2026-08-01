@@ -54,6 +54,7 @@ if (compiled.status !== 0) {
 }
 
 // 2. 셸 핸들러 번들. wasm 래퍼와 런타임을 import하므로 bundle:true가 전부 인라인한다.
+// playground는 배포물이라 minify한다(프리뷰는 로컬 디버깅용이라 그대로 둔다).
 const handlersTs = entry.replace(/\.qubc$/, ".qubc.handlers.ts");
 const handlerBundle = await build({
   entryPoints: [handlersTs],
@@ -61,6 +62,7 @@ const handlerBundle = await build({
   format: "esm",
   platform: "browser",
   target: "es2020",
+  minify: true,
   write: false,
 });
 const handlerJs = handlerBundle.outputFiles[0].text;
@@ -80,6 +82,7 @@ const runtimeBundle = await build({
   format: "esm",
   platform: "browser",
   target: "es2020",
+  minify: true,
   write: false,
 });
 writeFileSync(join(distDir, "quble-runtime.js"), runtimeBundle.outputFiles[0].text);
