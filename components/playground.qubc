@@ -1,0 +1,57 @@
+use "./playground.css"
+use FileRow from "./filerow.qubc"
+use LogRow from "./logrow.qubc"
+
+component Playground {
+  props {
+    files: { name: string, isEntry: bool }[],
+    editingName: string,
+    editing: string,
+    lineNumbers: string,
+    lineCount: number,
+    previewName: string,
+    logs: { text: string, level: string }[],
+    diagnostic: string,
+    hasError: bool
+  }
+  events {
+    INPUT_SOURCE({ })
+    CLICK_CLEAR_LOGS({ })
+  }
+  template {
+    div(class="pg") {
+      aside(class="pg__files") {
+        @for (f of files) {
+          Row: FileRow(name={f.name} isEntry={f.isEntry} /)
+        }
+      }
+
+      main(class="pg__main") {
+        header(class="pg__editing") { {editingName} }
+
+        div(class="pg__code") {
+          pre(class="pg__gutter") { {lineNumbers} }
+          textarea(class="pg__area" spellcheck="false" rows={lineCount} @input:INPUT_SOURCE) { {editing} }
+        }
+
+        @if (hasError) {
+          pre(class="pg__diag") { {diagnostic} }
+        }
+      }
+
+      header(class="pg__preview-head") { "preview: " {previewName} }
+
+      section(class="pg__console") {
+        header(class="pg__console-head") {
+          h2(class="pg__console-title") { "console" }
+          button(class="pg__console-clear" @click:CLICK_CLEAR_LOGS) { "clear" }
+        }
+        div(class="pg__console-body") {
+          @for (l of logs) {
+            Line: LogRow(text={l.text} level={l.level} /)
+          }
+        }
+      }
+    }
+  }
+}

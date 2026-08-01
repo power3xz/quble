@@ -1,0 +1,258 @@
+// playground 셸의 핸들러. 파일을 고르면 편집기에 그 내용을 싣고, .qubc의 run 버튼을 누르면
+// wasm으로 컴파일해 오른쪽(#preview)에 두 번째 quble 인스턴스를 마운트한다.
+//
+// fullname의 `Row[$0].`은 FileRow가 @for 안에서 별칭 Row로 합성되기 때문이다. $0가 몇 번째
+// 파일인지 준다.
+//
+// 미리보기는 run을 눌러야 바뀐다 - 편집 중에는 오른쪽이 그대로다.
+//
+// 소스를 quble 상태가 아니라 여기 캐시(sources)에 두는 이유가 둘이다:
+//   1. 컴파일은 모든 파일의 내용이 필요한데 핸들러가 받는 props는 자기 회차 요소뿐이고,
+//      루트 store에서 배열 요소로 내려가는 경로가 없다(ISSUES).
+//   2. 타이핑마다 set하면 TEXT_VAR 구독이 값 비교 없이 textContent를 덮어써 커서가 튄다.
+// 그래서 편집 중에는 캐시만 갱신하고, 파일을 바꿀 때만 editing을 set한다(그때는 갱신이 맞다).
+
+import { compile as decodeQubb, type THandlers } from "../core/web/runtime.ts";
+import { loadCompiler } from "../core/web/wasm-compiler.ts";
+
+type TStore = {
+  editing: number;
+  editingName: number;
+  lineNumbers: number;
+  lineCount: number;
+  previewName: number;
+  logs: number;
+  diagnostic: number;
+  hasError: number;
+};
+type TCtx = {
+  props: Record<string, number>;
+  store: TStore;
+  set: (leafIndex: number, value: unknown) => void;
+  push: (arrayLeafIndex: number, element: unknown) => void;
+  removeAt: (arrayLeafIndex: number, index: number) => void;
+  event: Event;
+  $0: number;
+};
+
+const compilerReady = loadCompiler("./compiler_wasm.wasm");
+
+// 파일 이름 순서(트리와 같은 순서)와 그 내용. 부트스트랩이 초기 data로 채운다.
+const fileNames: string[] = [];
+const sources = new Map<string, string>();
+
+// 지금 편집 중인 파일과 화면에 반영된 줄 수. 줄 수가 그대로면 갱신을 건너뛴다.
+let currentName: string | null = null;
+let shownLines = 0;
+
+/** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
+export const lineCountOf = (text: string) => text.split("\n").length;
+
+/** 거터에 넣을 줄 번호 - 1부터 줄 수까지. */
+export const lineNumbersFor = (text: string) =>
+  Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
+
+/** 초기 data를 캐시에 심는다. 부트스트랩이 mount 전에 부른다. 첫 파일이 편집기에 실린 채로
+ * 시작하므로 그 파일을 지금 편집 중인 것으로 둔다. */
+export const seed = (files: { name: string; source: string }[]) => {
+  files.forEach((f) => {
+    fileNames.push(f.name);
+    sources.set(f.name, f.source);
+  });
+  currentName = files[0]?.name ?? null;
+  shownLines = lineCountOf(files[0]?.source ?? "");
+};
+
+// 지금 미리보기 중인 인스턴스와 그때 만든 Blob URL들 - 다시 컴파일할 때 정리한다.
+let preview: { destroy: () => void; nodes: Node[] } | null = null;
+let previewUrls: string[] = [];
+
+const clearPreview = () => {
+  preview?.destroy();
+  preview = null;
+  for (const url of previewUrls) {
+    URL.revokeObjectURL(url);
+  }
+  previewUrls = [];
+};
+
+// 콘솔 - 미리보기 앱이 부른 console.*를 셸의 logs 배열에 쌓는다. logs의 leafIndex는 핸들러가
+// 불려야 알 수 있어(ctx.store), 처음 받을 때 여기 담아 두고 가로채기가 쓴다. 그전에 난 로그는
+// pending에 모았다가 주소가 생기면 흘려보낸다.
+type TLogSink = { push: TCtx["push"]; leafIndex: number };
+let logSink: TLogSink | null = null;
+let loggedCount = 0;
+const pendingLogs: { level: string; text: string }[] = [];
+
+const rememberSink = ({ store, push }: TCtx) => {
+  if (logSink) {
+    return;
+  }
+  logSink = { push, leafIndex: store.logs };
+  for (const entry of pendingLogs.splice(0)) {
+    logSink.push(logSink.leafIndex, entry);
+    loggedCount++;
+  }
+};
+
+const appendLog = (level: string, text: string) => {
+  if (!logSink) {
+    pendingLogs.push({ level, text });
+    return;
+  }
+  logSink.push(logSink.leafIndex, { level, text });
+  loggedCount++;
+  scrollLogsToEnd();
+};
+
+// 새 로그가 붙으면 콘솔을 맨 아래로. DOM이 붙은 뒤여야 스크롤 높이가 잡히므로 다음 프레임에.
+const scrollLogsToEnd = () => {
+  requestAnimationFrame(() => {
+    const body = document.querySelector(".pg__console-body");
+    if (body) {
+      body.scrollTop = body.scrollHeight;
+    }
+  });
+};
+
+const installConsoleCapture = () => {
+  for (const level of ["log", "warn", "error"] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(...args);
+      appendLog(
+        level,
+        args.map((a) => (typeof a === "string" ? a : safeStringify(a))).join(" "),
+      );
+    };
+  }
+};
+
+const safeStringify = (value: unknown) => {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+};
+
+installConsoleCapture();
+
+// 파일 선택 - 편집기에 그 내용을 싣는다. 여기서 set은 의도된 갱신이다(타이핑 중이 아니다).
+const selectFile = (_data: unknown, { store, set, $0 }: TCtx) => {
+  currentName = fileNames[$0];
+  const text = sources.get(currentName) ?? "";
+  set(store.editingName, currentName);
+  set(store.editing, text);
+  set(store.lineNumbers, lineNumbersFor(text));
+  shownLines = lineCountOf(text);
+  set(store.lineCount, shownLines);
+};
+
+// 편집 - 소스는 캐시만 갱신한다(editing을 set하면 textarea를 덮어써 커서가 튄다).
+// 줄 수가 바뀌면 거터와 rows는 맞춰 준다 - 둘 다 textarea의 값이 아니라 커서에 영향이 없다.
+const editSource = (_data: unknown, { store, set, event }: TCtx) => {
+  if (!currentName) {
+    return;
+  }
+  const text = (event.target as HTMLTextAreaElement).value;
+  sources.set(currentName, text);
+
+  const count = lineCountOf(text);
+  if (count !== shownLines) {
+    shownLines = count;
+    set(store.lineNumbers, lineNumbersFor(text));
+    set(store.lineCount, count);
+  }
+};
+
+// 로그 비우기 - 뒤에서부터 지운다(앞에서 지우면 인덱스가 당겨져 어긋난다).
+const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
+  for (let i = loggedCount - 1; i >= 0; i--) {
+    removeAt(store.logs, i);
+  }
+  loggedCount = 0;
+};
+
+// 미리보기 - 모든 파일을 등록하고 이 .qubc를 엔트리로 컴파일한다. 핸들러/data는 엔트리와
+// 짝인 것만 쓴다(합성 맥락마다 로직이 달라 합치지 않는다).
+const runPreview = async (_data: unknown, { $0, store, set }: TCtx) => {
+  const fail = (message: string) => {
+    set(store.diagnostic, message);
+    set(store.hasError, true);
+  };
+
+  const entry = fileNames[$0];
+  const stem = entry.replace(/\.qubc$/, "");
+
+  // wasm 등록은 컴파일러가 보는 파일만 - .qubc와 .css.
+  const files: Record<string, string> = {};
+  for (const name of fileNames) {
+    if (name.endsWith(".qubc") || name.endsWith(".css")) {
+      files[name] = sources.get(name) ?? "";
+    }
+  }
+
+  const { compile } = await compilerReady;
+  const result = compile(files, entry);
+  if (!result.ok) {
+    fail(result.diagnostic);
+    return;
+  }
+
+  // 사용자 핸들러는 브라우저에서 모듈로 평가한다(Blob URL + 동적 import).
+  const handlersUrl = URL.createObjectURL(
+    new Blob([sources.get(`${stem}.qubc.handlers.js`) ?? "export default {}"], {
+      type: "text/javascript",
+    }),
+  );
+  let handlers: THandlers = {};
+  let initialData: unknown = {};
+  try {
+    handlers = (await import(/* @vite-ignore */ handlersUrl)).default ?? {};
+    initialData = JSON.parse(sources.get(`${stem}.data.json`) || "{}");
+  } catch (e) {
+    URL.revokeObjectURL(handlersUrl);
+    fail(`${(e as Error).message}`);
+    return;
+  }
+
+  // 여기부터 실패 지점이 없다 - 이전 미리보기를 내리고 새것을 올린다.
+  clearPreview();
+  previewUrls.push(handlersUrl);
+  set(store.diagnostic, "");
+  set(store.hasError, false);
+
+  // 리소스 경로(resId 순)를 그 내용의 Blob URL로 - LOAD_RES가 <link>로 단다.
+  const resourceUrls = result.resources.map((path) => {
+    const url = URL.createObjectURL(
+      new Blob([sources.get(path) ?? ""], { type: "text/css" }),
+    );
+    previewUrls.push(url);
+    return url;
+  });
+
+  try {
+    preview = decodeQubb(result.bytecode, resourceUrls)(0)(initialData, handlers);
+    document.getElementById("preview")?.replaceChildren(...preview.nodes);
+    set(store.previewName, entry);
+  } catch (e) {
+    fail(`mount: ${(e as Error).message}`);
+  }
+};
+
+// 모든 핸들러를 감싸 콘솔 싱크를 먼저 등록한다 - logs의 leafIndex는 ctx로만 오므로, 어느
+// 핸들러든 처음 불릴 때 붙잡아 둔다(그전 로그는 pending에 모였다가 그때 흘러간다).
+const withSink =
+  (handler: (data: unknown, ctx: TCtx) => void | Promise<void>) =>
+  (data: unknown, ctx: TCtx) => {
+    rememberSink(ctx);
+    return handler(data, ctx);
+  };
+
+export default {
+  "Row[$0].CLICK_FILE": withSink(selectFile),
+  "Row[$0].CLICK_PREVIEW": withSink(runPreview),
+  INPUT_SOURCE: withSink(editSource),
+  CLICK_CLEAR_LOGS: withSink(clearLogs),
+};

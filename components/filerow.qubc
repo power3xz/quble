@@ -1,0 +1,15 @@
+component FileRow {
+  props { name: string, isEntry: bool }
+  events {
+    CLICK_FILE({ })
+    CLICK_PREVIEW({ })
+  }
+  template {
+    div(class="row") {
+      button(class="row__name" @click:CLICK_FILE) { {name} }
+      @if (isEntry) {
+        button(class="row__preview" title="preview" @click:CLICK_PREVIEW) { "run" }
+      }
+    }
+  }
+}
