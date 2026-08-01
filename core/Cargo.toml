@@ -14,3 +14,14 @@ default-run = "quble"
 
 [dependencies]
 compiler = { path = "crates/compiler" }
+
+# wasm 컴파일러(playground)는 브라우저가 통째로 받으므로 크기가 첫 로딩에 직결된다.
+# 205KB -> 172KB (gzip 76 -> 67KB): strip이 -21KB, lto+codegen-units=1이 -12KB.
+#
+# opt-level은 기본(3)을 쓴다. 크기 우선으로 낮추면 그만큼 컴파일이 느려지는데, 측정해 보니
+# 남는 거래가 아니었다 - "z"는 150KB까지 줄지만 컴파일이 2.6배 느리고(0.094 -> 0.240ms)
+# 정작 gzip은 6KB밖에 안 준다. "s"도 1.4배 느렸다.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
