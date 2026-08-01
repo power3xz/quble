@@ -1,0 +1,91 @@
+/* 파일 목록의 한 행. 목록 컨테이너(.pg__files)는 셸이 갖는다. */
+
+/* 강조는 행 전체를 덮는다 - 좌우 여백 없이 목록 폭을 다 쓴다. */
+.filerow {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0 0.8rem;
+}
+
+/* hover 배경은 행이 갖는다 - 이름 버튼에 주면 표시(*)와 run 버튼 자리가 빠져 행을 다 못 채운다.
+ * 편집 중 강조(아래)보다 먼저 와서, 강조된 행에 얹혀도 그 배경이 이긴다. */
+.filerow:hover {
+  background: #1b2029;
+}
+
+.filerow[data-editing="true"] {
+  background: #232c3d;
+  box-shadow: inset 0.3rem 0 0 #3d8a63;
+}
+
+.filerow[data-editing="true"] .filerow__name {
+  color: #e6e9ef;
+  font-weight: 600;
+}
+
+.filerow__name {
+  flex: 1;
+  min-width: 0;
+  padding: 0.9rem 0.8rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: none;
+  color: #9aa4b2;
+  font-size: 1.4rem;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 배경은 행이 칠하고(위) 여기서는 글자만 밝힌다. */
+.filerow:hover .filerow__name {
+  color: #e6e9ef;
+}
+
+/* 컴파일 에러가 난 파일 - 편집 중 표시(초록 막대)와 같은 자리를 쓰되 색으로 가른다.
+ * 편집 중이기도 하면 에러가 이긴다(뒤에 와서 막대를 덮는다) - 고쳐야 할 것이 먼저 보여야 한다. */
+.filerow[data-error="true"] {
+  box-shadow: inset 0.3rem 0 0 #e06c75;
+}
+
+.filerow[data-error="true"] .filerow__name {
+  color: #e06c75;
+}
+
+/* 에러 표시 - 이름 뒤에 둔다(앞은 미리보기 표시 자리다). */
+.filerow__error {
+  flex-shrink: 0;
+  color: #e06c75;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+/* 미리보기 중인 파일 - 이름 앞에 표시를 둔다. run 버튼과 같은 색이라 무엇이 도는지 이어진다. */
+.filerow__live {
+  flex-shrink: 0;
+  width: 1.2rem;
+  color: #3d8a63;
+  font-size: 1.6rem;
+  line-height: 1;
+  text-align: center;
+  user-select: none;
+}
+
+.filerow__preview {
+  padding: 0.4rem 1rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: #2f6f4f;
+  color: #fff;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.filerow__preview:hover {
+  background: #3d8a63;
+}

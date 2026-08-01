@@ -1,9 +1,11 @@
+use "./logrow.css"
+
 component LogRow {
   props { text: string, level: string }
   template {
-    div(class="log") {
-      span(class="log__level" data-level={level}) { {level} }
-      span(class="log__text") { {text} }
+    div(class="logrow") {
+      span(class="logrow__level" data-level={level}) { {level} }
+      span(class="logrow__text") { {text} }
     }
   }
 }
