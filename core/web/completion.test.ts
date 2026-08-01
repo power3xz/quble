@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { entryOf, isKeySlot } from "../../components/completion.ts";
+import { entryOf, isKeySlot, usedKeys } from "../../components/completion.ts";
 
 // `|`가 방금 친 따옴표 자리. 그 자리를 따옴표로 바꿔 실제 입력 직후 상태를 만든다.
 const at = (marked: string) => {
@@ -59,6 +59,35 @@ test("default가 아닌 객체는 키 자리가 아니다", () => {
 
 test("앞선 문자열 리터럴에 흔들리지 않는다", () => {
   assert.equal(at('import x from "./y.ts";\nexport default {\n  |'), true);
+});
+
+// `|`가 지금 쓰는 중인 자리(여는 따옴표 다음 칸).
+const used = (marked: string) => usedKeys(marked.replace("|", ""), marked.indexOf("|"));
+
+test("따옴표를 두른 키를 모은다", () => {
+  const keys = used('export default {\n  "A": f,\n  "B.C": g,\n|');
+  assert.deepEqual([...keys].sort(), ["A", "B.C"]);
+});
+
+test("따옴표 없는 키도 모은다 - 식별자로 유효한 이름은 그냥 쓸 수 있다", () => {
+  const keys = used('export default {\n  CLICK_CARD: f,\n  "Flag.CLICK_BADGE": g,\n|');
+  assert.deepEqual([...keys].sort(), ["CLICK_CARD", "Flag.CLICK_BADGE"]);
+});
+
+test("값 자리 문자열은 키가 아니다", () => {
+  const keys = used('export default {\n  A: () => log("CLICK_CARD"),\n|');
+  assert.deepEqual([...keys].sort(), ["A"]);
+});
+
+test("지금 쓰는 중인 자리는 세지 않는다 - 자기 자신 때문에 후보가 사라지면 안 된다", () => {
+  // 캐럿이 "CLI 뒤에 있다. 그 미완성 문자열은 이미 쓴 키가 아니다.
+  const keys = used('export default {\n  "A": f,\n  "|CLI":\n}');
+  assert.deepEqual([...keys].sort(), ["A"]);
+});
+
+test("따옴표 없이 쓰는 중인 자리도 세지 않는다", () => {
+  const keys = used("export default {\n  A: f,\n  |CLI:\n}");
+  assert.deepEqual([...keys].sort(), ["A"]);
 });
 
 test("핸들러 파일에서 짝이 되는 엔트리를 얻는다", () => {

@@ -48,3 +48,32 @@ const enclosingBraceIsDefault = (source: string, from: number) => {
  */
 export const entryOf = (name: string | null) =>
   name?.endsWith(".qubc.handlers.js") ? name.slice(0, -".handlers.js".length) : null;
+
+/**
+ * 소스에 이미 쓰인 키들. 한 번 쓴 fullname은 후보에서 빼려고 모은다 - 같은 키를 두 번 쓰면
+ * 나중 것이 앞의 것을 덮으므로 후보로 내밀 이유가 없다.
+ *
+ * `:` 앞에 오는 것을 잡는다. 두 형태가 있다: `"Flag.CLICK_BADGE":`처럼 따옴표를 두른 것과
+ * `CLICK_CARD:`처럼 맨 것 - 점/괄호가 든 fullname은 따옴표가 필수지만 식별자로 유효한 이름은
+ * 그냥 쓸 수 있다.
+ *
+ * 지금 쓰는 중인 자리(skipAt, 여는 따옴표 안쪽 시작 오프셋)는 제외한다 - 그 자리의 미완성
+ * 문자열까지 "이미 쓴 것"으로 세면 자기 자신 때문에 후보가 사라진다.
+ *
+ * @param source  편집 중인 파일 전체
+ * @param skipAt  건너뛸 문자열의 시작 오프셋(여는 따옴표 다음 칸)
+ */
+export const usedKeys = (source: string, skipAt: number) => {
+  const used = new Set<string>();
+  const re = /(?:"([^"\n]*)"|([A-Za-z_$][\w$]*))\s*:/g;
+  let m = re.exec(source);
+  while (m) {
+    // 따옴표 키면 여는 따옴표 다음 칸이 시작, 맨 키면 이름 자체가 시작이다.
+    const start = m[1] === undefined ? m.index : m.index + 1;
+    if (start !== skipAt) {
+      used.add(m[1] ?? m[2]);
+    }
+    m = re.exec(source);
+  }
+  return used;
+};

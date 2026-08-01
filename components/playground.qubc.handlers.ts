@@ -14,7 +14,7 @@
 
 import { compile as decodeQubb, type THandlers } from "../core/web/runtime.ts";
 import { lazyCompiler } from "../core/web/wasm-compiler.ts";
-import { entryOf, isKeySlot } from "./completion.ts";
+import { entryOf, isKeySlot, usedKeys } from "./completion.ts";
 import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
 import { markError, tokenize } from "./tokenize.ts";
 
@@ -409,6 +409,23 @@ const renderCompletion = ({ store, replace }: Pick<TCtx, "store" | "replace">) =
   );
 };
 
+// 고른 항목이 팝업 밖에 있으면 보이도록 최소한만 스크롤한다. 목록을 replace로 갈아끼우므로
+// DOM이 새로 붙은 다음 프레임에 잰다.
+const revealSelected = () => {
+  requestAnimationFrame(() => {
+    const box = document.querySelector<HTMLElement>(".completion");
+    const item = box?.children[completion?.selected ?? 0] as HTMLElement | undefined;
+    if (!box || !item) {
+      return;
+    }
+    if (item.offsetTop < box.scrollTop) {
+      box.scrollTop = item.offsetTop;
+    } else if (item.offsetTop + item.offsetHeight > box.scrollTop + box.clientHeight) {
+      box.scrollTop = item.offsetTop + item.offsetHeight - box.clientHeight;
+    }
+  });
+};
+
 const closeCompletion = ({ store, set, replace }: Pick<TCtx, "store" | "set" | "replace">) => {
   if (!completion) {
     return;
@@ -429,7 +446,8 @@ const filterCompletion = (area: HTMLTextAreaElement, ctx: TCtx) => {
     closeCompletion(ctx);
     return;
   }
-  completion.shown = completion.names.filter((n) => n.startsWith(prefix));
+  const used = usedKeys(area.value, completion.slotStart);
+  completion.shown = completion.names.filter((n) => n.startsWith(prefix) && !used.has(n));
   completion.selected = 0;
   if (!completion.shown.length) {
     closeCompletion(ctx);
@@ -452,22 +470,32 @@ const openCompletion = async (area: HTMLTextAreaElement, ctx: TCtx) => {
   if (area.value[area.selectionStart - 1] !== '"') {
     return;
   }
-  completion = { slotStart: area.selectionStart, names, shown: names, selected: 0 };
+  const slotStart = area.selectionStart;
+  const used = usedKeys(area.value, slotStart);
+  const shown = names.filter((n) => !used.has(n));
+  if (!shown.length) {
+    return;
+  }
+  completion = { slotStart, names, shown, selected: 0 };
   placeCompletion(area, ctx);
   renderCompletion(ctx);
   ctx.set(ctx.store.completion.isOpen, true);
 };
 
-// 고른 후보를 슬롯에 써넣고 닫는다. 닫는 따옴표는 이미 있으므로(에디터가 아니라 사용자가 쳤든
-// 아니든) 이름만 넣고 그 뒤로 커서를 옮긴다.
+// 고른 후보를 슬롯에 써넣고 닫는다. 닫는 따옴표까지 이쪽이 맞춘다 - 캐럿 뒤에 이미 있으면
+// 그것을 쓰고(따옴표가 겹치지 않게), 없으면 넣는다. 커서는 어느 쪽이든 따옴표 바깥에 둔다.
 const applyCompletion = (name: string, ctx: TCtx) => {
   const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
   if (!area || !completion) {
     return;
   }
   const { slotStart } = completion;
-  area.value = area.value.slice(0, slotStart) + name + area.value.slice(area.selectionStart);
-  area.selectionStart = area.selectionEnd = slotStart + name.length;
+  const rest = area.value.slice(area.selectionStart);
+  const closed = rest.startsWith('"');
+  const tail = closed ? rest.slice(1) : rest;
+
+  area.value = `${area.value.slice(0, slotStart) + name}"${tail}`;
+  area.selectionStart = area.selectionEnd = slotStart + name.length + 1;
 
   closeCompletion(ctx);
   if (currentName) {
@@ -488,10 +516,12 @@ const completionKey = (event: KeyboardEvent, ctx: TCtx) => {
     case "ArrowDown":
       completion.selected = completion.selected >= last ? 0 : completion.selected + 1;
       renderCompletion(ctx);
+      revealSelected();
       return true;
     case "ArrowUp":
       completion.selected = completion.selected <= 0 ? last : completion.selected - 1;
       renderCompletion(ctx);
+      revealSelected();
       return true;
     case "Enter":
     case "Tab":
