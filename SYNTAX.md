@@ -297,6 +297,7 @@ const handlers = {
 - `ctx`가 담는 것:
   - `get(leafIndex)` / `set(leafIndex, value)` - 상태 읽기/쓰기.
   - `push(...)` / `removeAt(...)` - 배열 요소 추가/제거.
+  - `replace(arrayLeafIndex, elems)` - 배열 내용 통째 교체(회차 DOM을 전부 다시 짓는다).
   - `props` - 발화한 컴포넌트 기준 상대 props. `store` - 루트 기준 절대 상태 트리.
   - `context` - `@with`로 주입된 컨텍스트(`context.Area.userId`).
   - `event` - 발화시킨 DOM 이벤트 객체(`event.target.value`로 입력값).

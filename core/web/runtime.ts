@@ -1059,6 +1059,7 @@ class Interpreter {
       get: this.store.get,
       push: this.pushArrayElement,
       removeAt: this.removeArrayElementAt,
+      replace: this.replaceArrayElements,
       props: binding.props,
       store: this.rootStore(),
       context,
@@ -1080,20 +1081,7 @@ class Interpreter {
   // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
   pushArrayElement = (arrayLeafIndex: number, elem: unknown): void => {
     const info = this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
-    // 한 요소를 이 arrayInfo에 심는다: 고정부를 local에 펴(plantFixed) store.alloc으로 삽입하고 그 base를
-    // elemStartLeafIndices에 잇는다. 요소 안 중첩 배열은 plantFixed가 deferred로 돌려주니, 그 배열들의 요소도
-    // 같은 방식으로 재귀해 마저 심는다(plantRoot의 레벨 심기와 같되 store.alloc 삽입).
-    const plantElem = (value: unknown, target: TArrayInfo): void => {
-      const local: unknown[] = [];
-      const deferred = plantFixed(value, target.elemTypeRef, this.module, local, this.arrayPool);
-      target.elemStartLeafIndices.push(this.store.alloc(local));
-      for (const d of deferred) {
-        for (const child of d.value as unknown[]) {
-          plantElem(child, this.arrayPool.entries[d.arrayInfoIndex]);
-        }
-      }
-    };
-    plantElem(elem, info);
+    this.plantArrayElement(elem, info);
     // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
     // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
     // 아니다 - 요소가 전부 제거돼 빈 배열(length 0)이어도 순회는 진행 중이라, length로 판단하면 이 채움을
@@ -1104,6 +1092,20 @@ class Interpreter {
     }
     if (info.sizeLeafIndex !== null) {
       this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for grow 발화
+    }
+  };
+
+  // 한 요소를 arrayInfo에 심는다: 고정부를 local에 펴(plantFixed) store.alloc으로 삽입하고 그 base를
+  // elemStartLeafIndices에 잇는다. 요소 안 중첩 배열은 plantFixed가 deferred로 돌려주니, 그 배열들의 요소도
+  // 같은 방식으로 재귀해 마저 심는다(plantRoot의 레벨 심기와 같되 store.alloc 삽입).
+  plantArrayElement = (value: unknown, target: TArrayInfo): void => {
+    const local: unknown[] = [];
+    const deferred = plantFixed(value, target.elemTypeRef, this.module, local, this.arrayPool);
+    target.elemStartLeafIndices.push(this.store.alloc(local));
+    for (const d of deferred) {
+      for (const child of d.value as unknown[]) {
+        this.plantArrayElement(child, this.arrayPool.entries[d.arrayInfoIndex]);
+      }
     }
   };
 
@@ -1160,6 +1162,46 @@ class Interpreter {
     }
     if (info.sizeLeafIndex !== null) {
       this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
+    }
+  };
+
+  // 배열 내용을 통째로 새 값들로 바꾼다 - 기존 요소를 전부 회수하고 elems를 새로 심는다. push/removeAt이
+  // "무엇이 어떻게 바뀌었나"를 아는 부분 갱신인 반면 이것은 전량 교체라, @for 회차 DOM도 전부 다시 짓는다
+  // (서버 응답으로 목록을 갈아끼우는 등 이전 요소와 대응이 없는 경우가 대상이다).
+  //
+  // 순서가 중요하다: 회차 DOM(truncateFor)을 먼저 떼고 요소 leaf를 회수해야 한다 - 반대로 하면 떼는 도중
+  // 회차가 이미 반납된 leaf를 읽는다. 마지막에 길이 칸을 set해 0에서 새 개수로 grow시킨다(onSize).
+  replaceArrayElements = (arrayLeafIndex: number, elems: unknown[]): void => {
+    const info = this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
+    if (info.forRegionIndex !== null) {
+      truncateFor(this.store, this.regionPool, this.branchPool, info.forRegionIndex, 0);
+      for (const indexLeafIndex of info.indexLeafIndices) {
+        this.store.free(indexLeafIndex, 1);
+      }
+      info.indexLeafIndices.length = 0;
+    }
+    for (const elemStart of info.elemStartLeafIndices) {
+      this.freeArrayElement(elemStart, info.elemTypeRef);
+    }
+    info.elemStartLeafIndices.length = 0;
+    // 길이 칸을 0으로 먼저 낮춘다 - store.set은 값이 같으면 발화를 건너뛰므로, 개수가 그대로인 교체
+    // (3개 -> 다른 3개)에서는 마지막 set이 no-op이 되어 방금 떼어낸 DOM이 되살아나지 않는다.
+    if (info.sizeLeafIndex !== null) {
+      this.store.set(info.sizeLeafIndex, 0);
+    }
+
+    for (const elem of elems) {
+      this.plantArrayElement(elem, info);
+    }
+    // 인덱스 leaf는 순회 중일 때만 채운다(push와 같은 forRegionIndex 기준) - 순회 전이면
+    // reactiveArrayFor의 lazy 채움에 맡긴다.
+    if (info.forRegionIndex !== null) {
+      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+        info.indexLeafIndices[i] = this.store.alloc([i]);
+      }
+    }
+    if (info.sizeLeafIndex !== null) {
+      this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length); // @for 재구축 발화
     }
   };
 
