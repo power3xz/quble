@@ -1,0 +1,34 @@
+[
+  {
+    "name": "main.qubc",
+    "source": "use \"./main.css\"\nuse Card from \"./card.qubc\"\n\ncomponent Main {\n  props { title: string }\n  template {\n    div(class=\"app\") {\n      h1(class=\"app__title\") { {title} }\n      Card(label=\"click me\" /)\n    }\n  }\n}\n"
+  },
+  {
+    "name": "main.qubc.handlers.js",
+    "source": "export default {\n  \"Card.PICK\": (data) => {\n    console.log(\"picked:\", data.label);\n  },\n};\n"
+  },
+  {
+    "name": "main.css",
+    "source": ".app { padding: 24px; font-family: sans-serif; }\n.app__title { font-size: 24px; font-weight: 600; margin-bottom: 12px; }\n"
+  },
+  {
+    "name": "main.data.json",
+    "source": "{ \"title\": \"Hello quble\" }"
+  },
+  {
+    "name": "card.qubc",
+    "source": "use \"./card.css\"\n\ncomponent Card {\n  props { label: string }\n  events { PICK({ label }) }\n  template {\n    button(class=\"card\" @click:PICK) { {label} }\n  }\n}\n"
+  },
+  {
+    "name": "card.qubc.handlers.js",
+    "source": "export default {\n  PICK: (data) => {\n    console.log(\"standalone:\", data.label);\n  },\n};\n"
+  },
+  {
+    "name": "card.css",
+    "source": ".card { padding: 8px 16px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; }\n"
+  },
+  {
+    "name": "card.data.json",
+    "source": "{ \"label\": \"standalone\" }"
+  }
+]

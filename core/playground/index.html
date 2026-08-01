@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>quble playground</title>
+  <link rel="stylesheet" href="./styles/reset.css">
+  <link rel="stylesheet" href="./styles/global.css">
+  <style>
+    /* 셸과 #preview를 같은 칸에 겹친다. 셸이 화면 전체를 grid로 잡고 오른쪽 위를 비워 두므로,
+     * #preview를 같은 자리(오른쪽 위)에 얹으면 그 빈 칸을 채운다. 폭/높이 값은 셸 CSS
+     * (components/playground.css의 .pg)가 혼자 정한다 - 여기서 다시 정의하지 않는다. */
+    html, body { height: 100%; background: #0d1117; color: #e6e9ef; }
+    body { overflow: hidden; }
+
+    .stack { display: grid; height: 100%; }
+    /* min-height: 0 - 안 주면 아이템이 내용만큼 늘어 화면을 넘고 스크롤이 페이지에 생긴다.
+     * 스크롤은 셸 안(편집 영역/콘솔)에서만 나야 한다. */
+    .stack > * { grid-area: 1 / 1; min-height: 0; }
+
+    /* 셸이 비워 둔 오른쪽 위 칸에 맞춘다. 셸의 grid와 같은 트랙을 써야 정확히 포개진다.
+     * 값은 components/playground.css의 .pg(--files-w / --head-h / --console-h)와 같아야 한다. */
+    .stack__preview {
+      display: grid;
+      grid-template-columns: 24rem 1fr 1fr;
+      grid-template-rows: 4.8rem 1fr 20rem;
+      pointer-events: none;
+    }
+    .stack__preview > #preview {
+      grid-area: 2 / 3;
+      overflow: auto;
+      background: #fff;
+      color: #111;
+      pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    quble 인스턴스가 둘이다. 서로 모른다.
+      #editor  <- 셸(playground.qubb). 빌드 타임에 CLI가 컴파일한다.
+      #preview <- 사용자 소스. run 버튼을 눌렀을 때 핸들러가 wasm으로 컴파일해 마운트한다.
+  -->
+  <div class="stack">
+    <div id="editor"></div>
+    <div class="stack__preview"><div id="preview"></div></div>
+  </div>
+  <script type="module">
+    import { mount } from "./quble-runtime.js";
+
+    // 초기 파일들. 셸이 렌더할 mount 데이터도 여기서 유도한다(한 곳에서만 정의).
+    const sources = await fetch("./sources.json").then((r) => r.json());
+
+    // 핸들러가 컴파일에 쓸 소스 캐시를 채운다 - 편집 전에도 run이 동작해야 한다.
+    // manifest의 handlers는 내용 해시가 붙은 경로라 읽어서 그대로 import한다.
+    const manifest = await fetch("./playground.manifest.json").then((r) => r.json());
+    const handlers = await import(`./${manifest.handlers}`);
+    handlers.seed(sources);
+
+    const data = {
+      files: sources.map((f) => ({ name: f.name, isEntry: f.name.endsWith(".qubc") })),
+      editingName: sources[0].name,
+      editing: sources[0].source,
+      lineNumbers: handlers.lineNumbersFor(sources[0].source),
+      lineCount: handlers.lineCountOf(sources[0].source),
+      previewName: "(none)",
+      logs: [],
+      diagnostic: "",
+      hasError: false,
+    };
+
+    window.__quble = await mount("./playground.qubb", document.getElementById("editor"), data);
+  </script>
+</body>
+</html>
