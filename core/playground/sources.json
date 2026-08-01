@@ -1,34 +1,66 @@
 [
   {
-    "name": "main.qubc",
-    "source": "use \"./main.css\"\nuse Card from \"./card.qubc\"\n\ncomponent Main {\n  props { title: string }\n  template {\n    div(class=\"app\") {\n      h1(class=\"app__title\") { {title} }\n      Card(label=\"click me\" /)\n    }\n  }\n}\n"
+    "name": "board.qubc",
+    "source": "use \"./board.css\"\nuse Column from \"./column.qubc\"\n\ncomponent Board {\n  props {\n    title: string,\n    owner: string,\n    columns: Omit<Column, 'position'>[]\n  }\n  contexts {\n    BoardArea { board: title, owner: owner }\n  }\n  events {\n    CLICK_ADD({ title })\n  }\n  template {\n    section(class=\"board\") {\n      header(class=\"board__bar\") {\n        div(class=\"board__id\") {\n          h1(class=\"board__title\") { {title} }\n          span(class=\"board__owner\") { {owner} }\n        }\n        button(class=\"board__add\" @click:CLICK_ADD) { \"+ 컬럼\" }\n      }\n\n      @with BoardArea {\n        div(class=\"board__columns\") {\n          @for (column, index of columns) {\n            Lane: Column(\n              name={column.name}\n              accent={column.accent}\n              position={index}\n              cards={column.cards}\n            /)\n          }\n        }\n      }\n    }\n  }\n}\n"
   },
   {
-    "name": "main.qubc.handlers.js",
-    "source": "export default {\n  \"Card.PICK\": (data) => {\n    console.log(\"picked:\", data.label);\n  },\n};\n"
+    "name": "board.qubc.handlers.js",
+    "source": "// 핸들러 키는 풀네임 - use-site에서 바깥부터 안쪽으로 별칭을 누적한다.\n// Board가 Column을 Lane으로, Column이 Card를 Ticket으로, Card가 Badge를 Flag/Points로 쓴다.\n// 같은 Badge 컴포넌트지만 별칭이 달라 핸들러가 갈린다 - 컴포넌트는 자기 쓰임을 모른다.\n// @for 안이라 회차 번호가 [$0](컬럼) / [$1](카드)로 붙는다.\n\nexport default {\n  CLICK_ADD: (data) => {\n    console.log(\"컬럼 추가:\", data.title);\n  },\n\n  \"Lane[$0].CLICK_ADD\": (data, { $0 }) => {\n    console.log(`카드 추가: ${data.lane} (${$0}번 컬럼)`);\n  },\n\n  \"Lane[$0].CLICK_HEADING\": (data, { context }) => {\n    console.log(\"컬럼 제목:\", data.lane, \"/ 보드:\", context.BoardArea.board);\n  },\n\n  \"Lane[$0].Ticket[$1].CLICK_TITLE\": (data, { $0, $1, context }) => {\n    console.log(`카드: ${data.title}`);\n    console.log(`  자리: ${$0}번 컬럼 ${$1}번째`);\n    console.log(`  레인: ${context.LaneArea.lane}`);\n  },\n\n  \"Lane[$0].Ticket[$1].CLICK_OWNER\": (data) => {\n    console.log(\"담당자:\", data.assignee, \"/ 카드:\", data.title);\n  },\n\n  \"Lane[$0].Ticket[$1].Flag.CLICK_BADGE\": (data) => {\n    console.log(\"긴급 배지:\", data.text);\n  },\n\n  \"Lane[$0].Ticket[$1].Points.CLICK_BADGE\": (data) => {\n    console.log(\"포인트 배지:\", data.text);\n  },\n};\n"
   },
   {
-    "name": "main.css",
-    "source": ".app { padding: 24px; font-family: sans-serif; }\n.app__title { font-size: 24px; font-weight: 600; margin-bottom: 12px; }\n"
+    "name": "board.css",
+    "source": ".board {\n  padding: 16px;\n  background: #f4f5f7;\n  font-family: system-ui, -apple-system, \"Apple SD Gothic Neo\", sans-serif;\n  color: #172b4d;\n}\n\n.board__bar {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 14px;\n}\n\n.board__title {\n  font-size: 18px;\n  font-weight: 700;\n}\n\n.board__owner {\n  font-size: 13px;\n  color: #6b778c;\n}\n\n.board__add {\n  padding: 8px 14px;\n  border: 0;\n  border-radius: 6px;\n  background: #0052cc;\n  color: #fff;\n  font-size: 13px;\n  font-weight: 600;\n  cursor: pointer;\n}\n\n.board__add:hover {\n  background: #0065ff;\n}\n\n.board__columns {\n  display: flex;\n  gap: 12px;\n  align-items: flex-start;\n  overflow-x: auto;\n  padding-bottom: 8px;\n}\n"
   },
   {
-    "name": "main.data.json",
-    "source": "{ \"title\": \"Hello quble\" }"
+    "name": "board.data.json",
+    "source": "{\n  \"title\": \"스프린트 24\",\n  \"owner\": \"플랫폼 팀\",\n  \"columns\": [\n    {\n      \"name\": \"할 일\",\n      \"accent\": \"background: #ffebe6\",\n      \"cards\": [\n        { \"title\": \"로그인 세션 만료 처리\", \"assignee\": \"지현\", \"points\": \"5\", \"urgent\": true },\n        { \"title\": \"검색 결과 정렬 옵션 추가\", \"assignee\": \"민수\", \"points\": \"3\", \"urgent\": false },\n        { \"title\": \"온보딩 문구 다듬기\", \"assignee\": \"서연\", \"points\": \"1\", \"urgent\": false }\n      ]\n    },\n    {\n      \"name\": \"진행 중\",\n      \"accent\": \"background: #deebff\",\n      \"cards\": [\n        { \"title\": \"결제 실패 재시도 로직\", \"assignee\": \"도윤\", \"points\": \"8\", \"urgent\": true },\n        { \"title\": \"이미지 업로드 압축\", \"assignee\": \"지현\", \"points\": \"5\", \"urgent\": false }\n      ]\n    },\n    {\n      \"name\": \"리뷰\",\n      \"accent\": \"background: #fffae6\",\n      \"cards\": [\n        { \"title\": \"알림 설정 화면\", \"assignee\": \"민수\", \"points\": \"3\", \"urgent\": false }\n      ]\n    },\n    {\n      \"name\": \"완료\",\n      \"accent\": \"background: #e3fcef\",\n      \"cards\": [\n        { \"title\": \"다크 모드 토글\", \"assignee\": \"서연\", \"points\": \"2\", \"urgent\": false },\n        { \"title\": \"CSV 내보내기\", \"assignee\": \"도윤\", \"points\": \"5\", \"urgent\": false }\n      ]\n    }\n  ]\n}\n"
+  },
+  {
+    "name": "column.qubc",
+    "source": "use \"./column.css\"\nuse Card from \"./card.qubc\"\n\ncomponent Column {\n  props {\n    name: string,\n    accent: string,\n    position: number,\n    cards: Omit<Card, 'seat'>[]\n  }\n  contexts {\n    LaneArea { lane: name, position: position }\n  }\n  events {\n    CLICK_ADD({ lane: name })\n    CLICK_HEADING({ lane: name, position })\n  }\n  template {\n    div(class=\"col\") {\n      header(class=\"col__head\" style={accent}) {\n        h2(class=\"col__name\" @click:CLICK_HEADING) { {name} }\n      }\n\n      @with LaneArea {\n        div(class=\"col__cards\") {\n          @for (card, seat of cards) {\n            Ticket: Card(\n              title={card.title}\n              assignee={card.assignee}\n              points={card.points}\n              urgent={card.urgent}\n              seat={seat}\n            /)\n          }\n        }\n      }\n\n      button(class=\"col__add\" @click:CLICK_ADD) { \"+ 카드\" }\n    }\n  }\n}\n"
+  },
+  {
+    "name": "column.qubc.handlers.js",
+    "source": "export default {\n  CLICK_ADD: (data) => {\n    console.log(\"카드 추가:\", data.lane);\n  },\n\n  CLICK_HEADING: (data) => {\n    console.log(\"컬럼 제목:\", data.lane, \"/ 자리:\", data.position);\n  },\n\n  \"Ticket[$0].CLICK_TITLE\": (data, { $0, context }) => {\n    console.log(`카드: ${data.title} (${$0}번째)`);\n    console.log(\"  레인:\", context.LaneArea.lane);\n  },\n\n  \"Ticket[$0].CLICK_OWNER\": (data) => {\n    console.log(\"담당자:\", data.assignee);\n  },\n\n  \"Ticket[$0].Flag.CLICK_BADGE\": (data) => {\n    console.log(\"긴급 배지:\", data.text);\n  },\n\n  \"Ticket[$0].Points.CLICK_BADGE\": (data) => {\n    console.log(\"포인트 배지:\", data.text);\n  },\n};\n"
+  },
+  {
+    "name": "column.css",
+    "source": ".col {\n  width: 216px;\n  flex-shrink: 0;\n  border-radius: 8px;\n  background: #ebecf0;\n  padding: 10px;\n}\n\n.col__head {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 10px;\n  padding: 6px 8px;\n  border-radius: 6px;\n}\n\n.col__name {\n  font-size: 14px;\n  font-weight: 700;\n  cursor: pointer;\n}\n\n.col__cards {\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  min-height: 20px;\n}\n\n.col__add {\n  width: 100%;\n  margin-top: 8px;\n  padding: 8px;\n  border: 0;\n  border-radius: 6px;\n  background: none;\n  color: #5e6c84;\n  font-size: 13px;\n  text-align: left;\n  cursor: pointer;\n}\n\n.col__add:hover {\n  background: #dfe1e6;\n  color: #172b4d;\n}\n"
+  },
+  {
+    "name": "column.data.json",
+    "source": "{\n  \"name\": \"진행 중\",\n  \"accent\": \"background: #deebff\",\n  \"position\": 1,\n  \"cards\": [\n    { \"title\": \"결제 실패 재시도 로직\", \"assignee\": \"도윤\", \"points\": \"8\", \"urgent\": true },\n    { \"title\": \"이미지 업로드 압축\", \"assignee\": \"지현\", \"points\": \"5\", \"urgent\": false }\n  ]\n}\n"
   },
   {
     "name": "card.qubc",
-    "source": "use \"./card.css\"\n\ncomponent Card {\n  props { label: string }\n  events { PICK({ label }) }\n  template {\n    button(class=\"card\" @click:PICK) { {label} }\n  }\n}\n"
+    "source": "use \"./card.css\"\nuse Badge from \"./badge.qubc\"\n\ncomponent Card {\n  props {\n    title: string,\n    assignee: string,\n    points: string,\n    urgent: bool,\n    seat: number\n  }\n  events {\n    CLICK_TITLE({ title, seat })\n    CLICK_OWNER({ title, assignee })\n  }\n  template {\n    article(class=\"ticket\") {\n      @if (urgent) {\n        Flag: Badge(text=\"긴급\" tone=\"hot\" /)\n      }\n\n      h3(class=\"ticket__title\" @click:CLICK_TITLE) { {title} }\n\n      footer(class=\"ticket__foot\") {\n        button(class=\"ticket__who\" @click:CLICK_OWNER) { {assignee} }\n        Points: Badge(text={points} tone=\"calm\" /)\n      }\n    }\n  }\n}\n"
   },
   {
     "name": "card.qubc.handlers.js",
-    "source": "export default {\n  PICK: (data) => {\n    console.log(\"standalone:\", data.label);\n  },\n};\n"
+    "source": "export default {\n  CLICK_TITLE: (data) => {\n    console.log(\"카드:\", data.title, \"/ 자리:\", data.seat);\n  },\n\n  CLICK_OWNER: (data) => {\n    console.log(\"담당자:\", data.assignee);\n  },\n\n  \"Flag.CLICK_BADGE\": (data) => {\n    console.log(\"긴급 배지:\", data.text, data.tone);\n  },\n\n  \"Points.CLICK_BADGE\": (data) => {\n    console.log(\"포인트 배지:\", data.text, data.tone);\n  },\n};\n"
   },
   {
     "name": "card.css",
-    "source": ".card { padding: 8px 16px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; }\n"
+    "source": ".ticket {\n  padding: 10px 12px;\n  border-radius: 6px;\n  background: #fff;\n  box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);\n  cursor: pointer;\n}\n\n.ticket:hover {\n  background: #f7f8f9;\n}\n\n.ticket__title {\n  margin: 4px 0 10px;\n  font-size: 14px;\n  line-height: 1.4;\n}\n\n.ticket__foot {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n}\n\n.ticket__who {\n  padding: 3px 8px;\n  border: 0;\n  border-radius: 10px;\n  background: #dfe1e6;\n  color: #42526e;\n  font-size: 12px;\n  cursor: pointer;\n}\n\n.ticket__who:hover {\n  background: #c1c7d0;\n}\n"
   },
   {
     "name": "card.data.json",
-    "source": "{ \"label\": \"standalone\" }"
+    "source": "{\n  \"title\": \"결제 실패 재시도 로직\",\n  \"assignee\": \"도윤\",\n  \"points\": \"8\",\n  \"urgent\": true,\n  \"seat\": 0\n}\n"
+  },
+  {
+    "name": "badge.qubc",
+    "source": "use \"./badge.css\"\n\ncomponent Badge {\n  props { text: string, tone: string }\n  events { CLICK_BADGE({ text, tone }) }\n  template {\n    span(class=\"badge\" data-tone={tone} @click:CLICK_BADGE) { {text} }\n  }\n}\n"
+  },
+  {
+    "name": "badge.qubc.handlers.js",
+    "source": "export default {\n  CLICK_BADGE: (data) => {\n    console.log(\"배지:\", data.text, \"/ 톤:\", data.tone);\n  },\n};\n"
+  },
+  {
+    "name": "badge.css",
+    "source": ".badge {\n  display: inline-block;\n  padding: 2px 8px;\n  border-radius: 10px;\n  font-size: 11px;\n  font-weight: 700;\n  cursor: pointer;\n}\n\n.badge[data-tone=\"hot\"] {\n  background: #ffebe6;\n  color: #bf2600;\n}\n\n.badge[data-tone=\"calm\"] {\n  background: #deebff;\n  color: #0747a6;\n}\n"
+  },
+  {
+    "name": "badge.data.json",
+    "source": "{ \"text\": \"긴급\", \"tone\": \"hot\" }\n"
   }
 ]
