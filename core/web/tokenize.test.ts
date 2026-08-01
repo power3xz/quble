@@ -1,0 +1,192 @@
+// playground 편집기 토크나이저.
+//
+// 가장 중요한 성질은 원문 복원이다 - 화면(.pg__view)이 textarea와 정확히 겹쳐야 캐럿이 글자와
+// 맞는데, 한 글자라도 먹거나 더하면 그 줄부터 전부 어긋난다. 그래서 어떤 입력이든 토큰 text를
+// 이으면 원본이 나와야 한다(빈 줄 채움 한 칸만 예외).
+//
+// 편집 중간 상태(닫히지 않은 문자열/주석)도 반드시 토큰을 내야 한다 - 타이핑 도중에는 늘
+// 문법이 깨져 있다.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { type TLine, tokenize } from "../../components/tokenize.ts";
+
+// 줄을 다시 이어 원문을 만든다. 빈 줄에 넣은 공백 한 칸은 되돌린다.
+const rejoin = (lines: TLine[]) =>
+  lines
+    .map((line) => {
+      const text = line.tokens.map((t) => t.text).join("");
+      return text === " " ? "" : text;
+    })
+    .join("\n");
+
+// 특정 클래스가 붙은 토큰의 텍스트만 모은다.
+const textsOf = (lines: TLine[], name: string) =>
+  lines.flatMap((line) => line.tokens.filter((t) => t.cls === `tok tok--${name}`).map((t) => t.text));
+
+const QUBC = `use "./card.css"
+
+component Card {
+  props { label: string, count: number }
+  events { PICK({ label }) }
+  template {
+    // 주석
+    button(class="card" @click:PICK) { {label} }
+    @if (count) { span() { {count} } }
+  }
+}
+`;
+
+const JS = `import { x } from "./x.js";
+/* 블록
+   주석 */
+export default {
+  "Card.PICK": (data) => {
+    console.log(\`picked: \${data.label}\`, 42);
+  },
+};
+`;
+
+const CSS = `/* 주석 */
+.app__title, #main > .row:hover {
+  --files-w: 24rem;
+  font-size: 1.6rem;
+  content: "x";
+}
+`;
+
+const JSON_SRC = `{
+  "title": "Hello quble",
+  "count": 42,
+  "ok": true,
+  "off": -1.5,
+  "none": null
+}
+`;
+
+const CASES: [string, string][] = [
+  ["a.qubc", QUBC],
+  ["a.handlers.js", JS],
+  ["a.css", CSS],
+  ["a.json", JSON_SRC],
+  ["a.txt", "모르는 확장자\n두 줄"],
+];
+
+test("원문이 그대로 복원된다", () => {
+  for (const [name, source] of CASES) {
+    assert.equal(rejoin(tokenize(source, name)), source, name);
+  }
+});
+
+test("줄 수가 원문과 같다", () => {
+  for (const [name, source] of CASES) {
+    assert.equal(tokenize(source, name).length, source.split("\n").length, name);
+  }
+});
+
+test("빈 줄에도 토큰이 하나는 있다", () => {
+  // 요소에 내용이 없으면 높이가 안 생겨 거터/textarea와 어긋난다.
+  for (const [name, source] of CASES) {
+    for (const line of tokenize(source, name)) {
+      assert.ok(line.tokens.length > 0, name);
+      assert.ok(
+        line.tokens.some((t) => t.text.length > 0),
+        name,
+      );
+    }
+  }
+});
+
+test("qubc - 키워드/타입/이벤트/컴포넌트를 가른다", () => {
+  const lines = tokenize(QUBC, "a.qubc");
+
+  assert.deepEqual(textsOf(lines, "keyword"), ["use", "component", "props", "events", "template", "@if"]);
+  assert.deepEqual(textsOf(lines, "type"), ["Card", "string", "number"]);
+  assert.deepEqual(textsOf(lines, "event"), ["PICK", "@click", "PICK"]);
+  assert.deepEqual(textsOf(lines, "string"), ['"./card.css"', '"card"']);
+  assert.deepEqual(textsOf(lines, "comment"), ["// 주석"]);
+});
+
+test("qubc - 여러 줄 주석이 없어 줄 주석은 그 줄에서 끝난다", () => {
+  const lines = tokenize("// 주석\nuse x", "a.qubc");
+
+  assert.deepEqual(textsOf(lines, "comment"), ["// 주석"]);
+  assert.deepEqual(textsOf(lines, "keyword"), ["use"]);
+});
+
+test("js - 키워드/문자열/주석을 가른다", () => {
+  const lines = tokenize(JS, "a.handlers.js");
+
+  assert.deepEqual(textsOf(lines, "keyword"), ["import", "from", "export", "default"]);
+  assert.deepEqual(textsOf(lines, "number"), ["42"]);
+  // 백틱 문자열은 한 토큰이고, 블록 주석은 두 줄에 걸쳐 잘린다.
+  assert.deepEqual(textsOf(lines, "comment"), ["/* 블록", "   주석 */"]);
+});
+
+test("js - 확장자가 겹쳐도 마지막 조각으로 고른다", () => {
+  // main.qubc.handlers.js는 js다(qubc가 아니다).
+  const lines = tokenize("export default {}", "main.qubc.handlers.js");
+
+  assert.deepEqual(textsOf(lines, "keyword"), ["export", "default"]);
+});
+
+test("css - 선택자/속성/값을 가른다", () => {
+  const lines = tokenize(CSS, "a.css");
+
+  assert.deepEqual(textsOf(lines, "property"), ["--files-w", "font-size", "content"]);
+  assert.deepEqual(textsOf(lines, "selector"), [".", "app__title", "#", "main", ".", "row", "hover"]);
+  // 단위는 숫자에 붙여 한 토큰이다.
+  assert.deepEqual(textsOf(lines, "number"), ["24rem", "1.6rem"]);
+  assert.deepEqual(textsOf(lines, "string"), ['"x"']);
+});
+
+test("json - 키와 값 문자열을 가른다", () => {
+  const lines = tokenize(JSON_SRC, "a.json");
+
+  assert.deepEqual(textsOf(lines, "property"), ['"title"', '"count"', '"ok"', '"off"', '"none"']);
+  assert.deepEqual(textsOf(lines, "string"), ['"Hello quble"']);
+  assert.deepEqual(textsOf(lines, "number"), ["42", "-1.5"]);
+  assert.deepEqual(textsOf(lines, "keyword"), ["true", "null"]);
+});
+
+// 편집 중간 상태 - 타이핑 도중에는 늘 문법이 깨져 있다. 멈추거나 글자를 잃으면 안 된다.
+
+test("닫히지 않은 문자열도 원문을 지킨다", () => {
+  const broken = 'use "./card\ncomponent Card {';
+
+  const lines = tokenize(broken, "a.qubc");
+  assert.equal(rejoin(lines), broken);
+  // 줄을 넘지 않는다 - 다음 줄은 문자열이 아니다.
+  assert.deepEqual(textsOf(lines, "string"), ['"./card']);
+  assert.deepEqual(textsOf(lines, "keyword"), ["use", "component"]);
+});
+
+test("닫히지 않은 블록 주석도 원문을 지킨다", () => {
+  const broken = "/* 열기만\nconst x = 1;";
+
+  const lines = tokenize(broken, "a.js");
+  assert.equal(rejoin(lines), broken);
+  // 끝까지 주석이다.
+  assert.deepEqual(textsOf(lines, "keyword"), []);
+});
+
+test("빈 문자열도 한 줄을 낸다", () => {
+  const lines = tokenize("", "a.qubc");
+
+  assert.equal(lines.length, 1);
+  assert.deepEqual(lines[0].tokens, [{ text: " ", cls: "tok" }]);
+});
+
+test("끝이 개행이면 마지막 빈 줄이 남는다", () => {
+  // 거터의 줄 번호가 같은 규칙(text.split("\n").length)이라 개수가 맞아야 한다.
+  const lines = tokenize("use x\n", "a.qubc");
+
+  assert.equal(lines.length, 2);
+  assert.deepEqual(lines[1].tokens, [{ text: " ", cls: "tok" }]);
+});
+
+test("탭과 공백이 보존된다", () => {
+  const source = "\tif (x) {\n    y\n}";
+
+  assert.equal(rejoin(tokenize(source, "a.js")), source);
+});
