@@ -24,9 +24,7 @@ type TRow = { label: string; cells: string[] };
 const labels = (host: ParentNode) => [...host.querySelectorAll(".label")].map((n) => n.textContent);
 const indices = (host: ParentNode) => [...host.querySelectorAll(".idx")].map((n) => n.textContent);
 const cellsOf = (host: ParentNode) =>
-  [...host.querySelectorAll(".row")].map((row) =>
-    [...row.querySelectorAll(".cell")].map((n) => n.textContent),
-  );
+  [...host.querySelectorAll(".row")].map((row) => [...row.querySelectorAll(".cell")].map((n) => n.textContent));
 
 const picked: number[] = [];
 

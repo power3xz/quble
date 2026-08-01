@@ -16,20 +16,18 @@ body {
   font-size: 1.6rem;
   line-height: 1.5;
   font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    "Apple SD Gothic Neo",
-    "Malgun Gothic",
-    sans-serif;
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
 }
 
 /* reset이 지운 제목 위계를 되살린다. 비율은 브라우저 기본과 거의 같게 둔다(익숙한 값).
  * 본문의 1.5는 큰 글자에서 너무 벌어져 제목만 1.25로 좁힌다. */
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-weight: 600;
   line-height: 1.25;
 }
@@ -60,14 +58,19 @@ h6 {
 
 /* reset이 font: inherit으로 민 강조 요소를 되살린다 - 의미 태그가 시각적으로 구별돼야 한다. */
 
-strong, b {
+strong,
+b {
   font-weight: 700;
 }
 
-em, i {
+em,
+i {
   font-style: italic;
 }
 
-code, pre, kbd, samp {
+code,
+pre,
+kbd,
+samp {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
