@@ -31,7 +31,10 @@ component Playground {
 
         div(class="pg__code") {
           pre(class="pg__gutter") { {lineNumbers} }
-          textarea(class="pg__area" spellcheck="false" rows={lineCount} @input:INPUT_SOURCE) { {editing} }
+          div(class="pg__sheet") {
+            pre(class="pg__view") { {editing} }
+            textarea(class="pg__area" spellcheck="false" rows={lineCount} @input:INPUT_SOURCE /)
+          }
         }
 
         @if (hasError) {

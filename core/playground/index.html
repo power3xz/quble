@@ -69,6 +69,10 @@
     };
 
     window.__quble = await mount("./playground.qubb", document.getElementById("editor"), data);
+
+    // textarea는 값을 quble이 바인딩하지 않는다(uncontrolled - components/playground.css 참고).
+    // 화면은 .pg__view가 그리므로 여기서는 입력용 textarea의 초기 value만 맞춰 준다.
+    document.querySelector(".pg__area").value = sources[0].source;
   </script>
 </body>
 </html>

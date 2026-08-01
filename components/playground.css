@@ -131,21 +131,52 @@
   pointer-events: none;
 }
 
-.pg__area {
-  display: block;
+/* 화면은 .pg__view가 그리고 textarea는 입력만 받는다 - textarea는 uncontrolled라 사용자가 한 번
+ * 타이핑하면 자식 텍스트(defaultValue) 갱신이 value에 반영되지 않아, 파일을 바꿔도 내용이 그대로다.
+ * 그래서 편집 대상 문자열은 quble이 .pg__view에 그리고, textarea에는 값을 바인딩하지 않는다.
+ * (신택스 하이라이트도 .pg__view에 얹을 자리다.)
+ *
+ * 둘을 정확히 포개려면 font/line-height/padding/tab-size/white-space가 같아야 한다 - 한 글자라도
+ * 어긋나면 캐럿이 글자와 따로 논다. textarea는 글자를 감추고(color: transparent) 캐럿만 남긴다. */
+
+.pg__sheet {
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+
+.pg__view,
+.pg__area {
+  display: block;
+  width: 100%;
   padding: 1rem 1.2rem 1rem 0;
   border: 0;
-  outline: none;
-  resize: none;
-  background: none;
-  color: #e6e9ef;
   font: inherit;
   line-height: inherit;
   white-space: pre;
-  overflow: auto;
   tab-size: 2;
+}
+
+.pg__view {
+  min-height: 100%;
+  color: #e6e9ef;
+}
+
+.pg__area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  outline: none;
+  resize: none;
+  background: none;
+  color: transparent;
+  caret-color: #e6e9ef;
+  overflow: hidden;
+}
+
+.pg__area::selection {
+  background: #2f4a6b;
 }
 
 .pg__diag {

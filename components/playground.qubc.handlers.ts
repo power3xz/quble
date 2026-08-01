@@ -138,25 +138,10 @@ const safeStringify = (value: unknown) => {
 
 installConsoleCapture();
 
-// 파일 선택 - 편집기에 그 내용을 싣는다. 여기서 set은 의도된 갱신이다(타이핑 중이 아니다).
-const selectFile = (_data: unknown, { store, set, $0 }: TCtx) => {
-  currentName = fileNames[$0];
-  const text = sources.get(currentName) ?? "";
-  set(store.editingName, currentName);
+// 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, textarea의 value만
+// 여기서 직접 쓴다 - textarea는 uncontrolled라 quble이 값을 바인딩할 수 없다(playground.css).
+const showText = (text: string, { store, set }: Pick<TCtx, "store" | "set">) => {
   set(store.editing, text);
-  set(store.lineNumbers, lineNumbersFor(text));
-  shownLines = lineCountOf(text);
-  set(store.lineCount, shownLines);
-};
-
-// 편집 - 소스는 캐시만 갱신한다(editing을 set하면 textarea를 덮어써 커서가 튄다).
-// 줄 수가 바뀌면 거터와 rows는 맞춰 준다 - 둘 다 textarea의 값이 아니라 커서에 영향이 없다.
-const editSource = (_data: unknown, { store, set, event }: TCtx) => {
-  if (!currentName) {
-    return;
-  }
-  const text = (event.target as HTMLTextAreaElement).value;
-  sources.set(currentName, text);
 
   const count = lineCountOf(text);
   if (count !== shownLines) {
@@ -164,6 +149,29 @@ const editSource = (_data: unknown, { store, set, event }: TCtx) => {
     set(store.lineNumbers, lineNumbersFor(text));
     set(store.lineCount, count);
   }
+};
+
+// 파일 선택 - 그 파일의 내용으로 편집기를 채운다.
+const selectFile = (_data: unknown, ctx: TCtx) => {
+  currentName = fileNames[ctx.$0];
+  const text = sources.get(currentName) ?? "";
+  ctx.set(ctx.store.editingName, currentName);
+  showText(text, ctx);
+
+  const area = document.querySelector<HTMLTextAreaElement>(".pg__area");
+  if (area) {
+    area.value = text;
+  }
+};
+
+// 편집 - textarea의 값이 원본이다. 화면과 캐시를 거기에 맞춘다(value는 이미 사용자가 쳤다).
+const editSource = (_data: unknown, ctx: TCtx) => {
+  if (!currentName) {
+    return;
+  }
+  const text = (ctx.event.target as HTMLTextAreaElement).value;
+  sources.set(currentName, text);
+  showText(text, ctx);
 };
 
 // 로그 비우기 - 뒤에서부터 지운다(앞에서 지우면 인덱스가 당겨져 어긋난다).
@@ -243,12 +251,23 @@ const runPreview = async (_data: unknown, { $0, store, set }: TCtx) => {
 
 // 모든 핸들러를 감싸 콘솔 싱크를 먼저 등록한다 - logs의 leafIndex는 ctx로만 오므로, 어느
 // 핸들러든 처음 불릴 때 붙잡아 둔다(그전 로그는 pending에 모였다가 그때 흘러간다).
+//
+// 예외도 여기서 잡아 콘솔에 남긴다 - 런타임은 핸들러 반환값을 await하지 않아, async 핸들러가
+// 실패하면 unhandled rejection으로 조용히 사라진다.
 const withSink =
   (handler: (data: unknown, ctx: TCtx) => void | Promise<void>) =>
   (data: unknown, ctx: TCtx) => {
     rememberSink(ctx);
-    return handler(data, ctx);
+    try {
+      handler(data, ctx)?.catch(report);
+    } catch (e) {
+      report(e);
+    }
   };
+
+const report = (e: unknown) => {
+  console.error(e instanceof Error ? `${e.message}\n${e.stack ?? ""}` : String(e));
+};
 
 export default {
   "Row[$0].CLICK_FILE": withSink(selectFile),
