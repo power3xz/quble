@@ -10,10 +10,16 @@
 export type TToken = { text: string; cls: string };
 export type TLine = { tokens: TToken[] };
 
-// 언어별 예약어. qubc는 SYNTAX.md의 선언 키워드와 디렉티브, 나머지는 화면에서 눈에 띄어야 하는
-// 것만 고른다(완전한 목록이 목적이 아니다).
-const QUBC_KEYWORDS = new Set(["use", "from", "component", "props", "events", "template"]);
-const QUBC_TYPES = new Set(["string", "number", "bool"]);
+// qubc 예약어는 SYNTAX.md 전체를 따른다 - 선언 블록(#1), 디렉티브(#4), 타입(#2.1).
+// 다른 언어는 화면에서 눈에 띄어야 하는 것만 고른다(완전한 목록이 목적이 아니다).
+const QUBC_KEYWORDS = new Set([
+  "use", "from", "component", "props", "contexts", "events", "template",
+  "of", // @for (x of y)
+]);
+// 디렉티브(@로 시작). @slot은 자리 선언, 나머지는 블록을 연다.
+const QUBC_DIRECTIVES = new Set(["if", "else", "for", "with", "slot"]);
+// 원시 3종과 유틸 타입(Omit/Pick). 배열/객체는 문법 기호라 여기 없다.
+const QUBC_TYPES = new Set(["string", "number", "bool", "Omit", "Pick"]);
 const JS_KEYWORDS = new Set([
   "export", "default", "import", "from", "const", "let", "var", "function",
   "return", "if", "else", "for", "of", "in", "while", "new", "class",
@@ -142,18 +148,41 @@ const scanQubc: TScanner = (text) => {
       continue;
     }
 
-    if (c === '"') {
+    // 큰따옴표는 값 리터럴, 작은따옴표는 유틸 타입의 키(`Omit<Section, 'title'>`) - 자리가 달라
+    // SYNTAX.md가 따옴표로 구분한다. 화면에서는 둘 다 문자열로 둔다.
+    if (c === '"' || c === "'") {
       const string = readString(text, i);
       tokens.push({ text: string, cls: cls("string") });
       i += string.length;
       continue;
     }
 
-    // `@click:PICK` / `@if` / `@for` - 디렉티브와 이벤트 바인딩이 같은 `@`로 시작한다.
+    // 보간 `{IDENT}` / `{a.b}` - 값을 꺼내 쓰는 자리다. `{`는 블록도 열지만(component/props/
+    // template), 보간은 여는 괄호 바로 뒤에 경로가 붙고 곧장 닫힌다는 형태로 갈린다.
+    if (c === "{") {
+      const path = readInterpolation(text, i);
+      if (path !== null) {
+        tokens.push({ text: path, cls: cls("interpolation") });
+        i += path.length;
+        continue;
+      }
+    }
+
+    // 슬롯 지목(`Header << h1(...)`). 한 토큰으로 둬야 `<`, `<`로 갈리지 않는다.
+    if (c === "<" && text[i + 1] === "<") {
+      tokens.push({ text: "<<", cls: cls("keyword") });
+      i += 2;
+      continue;
+    }
+
+    // 디렉티브(`@if`/`@for`/`@with`/`@else`/`@slot`)와 이벤트 바인딩(`@click:PICK`)이 같은 `@`로
+    // 시작한다. 아는 디렉티브면 키워드, 아니면 DOM 이벤트명이다.
     if (c === "@") {
       const name = readIdent(text, i + 1);
-      const directive = name === "if" || name === "for";
-      tokens.push({ text: `@${name}`, cls: cls(directive ? "keyword" : "event") });
+      tokens.push({
+        text: `@${name}`,
+        cls: cls(QUBC_DIRECTIVES.has(name) ? "keyword" : "event"),
+      });
       i += name.length + 1;
       continue;
     }
@@ -176,6 +205,22 @@ const scanQubc: TScanner = (text) => {
     i += 1;
   }
   return tokens;
+};
+
+// `{` 자리에서 보간(`{title}`, `{row.label}`)이면 그 전체를, 아니면 null을 돌려준다.
+//
+// 파서는 자리로 가르지만(자식 자리의 `{`는 보간, 그 밖은 블록) 렉서는 자리를 모른다. 형태로
+// 가른다 - 여는 괄호 바로 뒤에 경로(IDENT[.IDENT]*)가 붙고 곧장 닫히는 것만 보간이다.
+// 블록은 `{ label }`처럼 공백이 끼거나 `{` 뒤에 선언/노드가 온다.
+const readInterpolation = (text: string, from: number): string | null => {
+  let i = from + 1;
+  if (i >= text.length || !IDENT_START.test(text[i])) {
+    return null;
+  }
+  while (i < text.length && (IDENT_PART.test(text[i]) || text[i] === ".")) {
+    i += 1;
+  }
+  return text[i] === "}" ? text.slice(from, i + 1) : null;
 };
 
 // qubc 식별자의 갈래. 전대문자는 이벤트명(PICK), 대문자 시작은 컴포넌트/별칭(Card, Row)이다 -

@@ -24,15 +24,28 @@ const rejoin = (lines: TLine[]) =>
 const textsOf = (lines: TLine[], name: string) =>
   lines.flatMap((line) => line.tokens.filter((t) => t.cls === `tok tok--${name}`).map((t) => t.text));
 
-const QUBC = `use "./card.css"
+// SYNTAX.md의 문법 요소를 한 번씩 지나가는 소스 - 선언 블록 넷, 디렉티브 다섯, 슬롯 지목,
+// 유틸 타입, 보간.
+const QUBC = `use Card from "./card.qubc"
+use "./card.css"
 
-component Card {
-  props { label: string, count: number }
+component Panel {
+  props { label: string, rows: Omit<Card, 'id'>[], count: number, on: bool }
+  contexts { Area { section: "actions", userId: label } }
   events { PICK({ label }) }
   template {
     // 주석
-    button(class="card" @click:PICK) { {label} }
-    @if (count) { span() { {count} } }
+    @with Area {
+      button(class="card" @click:PICK) { "담당자: " {label} }
+      @if (on) { span() { {count} } } @else { hr( /) }
+      @for (row, i of rows) {
+        Item: Card(id={row.id} /)
+      }
+      Shell: Card( ) {
+        Header << h1() { {label} }
+      }
+      @slot(Body)
+    }
   }
 }
 `;
@@ -97,14 +110,97 @@ test("빈 줄에도 토큰이 하나는 있다", () => {
   }
 });
 
-test("qubc - 키워드/타입/이벤트/컴포넌트를 가른다", () => {
+test("qubc - 선언 블록과 디렉티브가 모두 키워드다", () => {
   const lines = tokenize(QUBC, "a.qubc");
 
-  assert.deepEqual(textsOf(lines, "keyword"), ["use", "component", "props", "events", "template", "@if"]);
-  assert.deepEqual(textsOf(lines, "type"), ["Card", "string", "number"]);
+  // SYNTAX.md #1(선언 블록), #4(디렉티브), 슬롯 지목 `<<`, @for의 `of`.
+  assert.deepEqual(textsOf(lines, "keyword"), [
+    "use",
+    "from",
+    "use",
+    "component",
+    "props",
+    "contexts",
+    "events",
+    "template",
+    "@with",
+    "@if",
+    "@else",
+    "@for",
+    "of",
+    "<<",
+    "@slot",
+  ]);
+});
+
+test("qubc - 타입과 유틸 타입을 가른다", () => {
+  const lines = tokenize(QUBC, "a.qubc");
+
+  // 원시 3종 + Omit/Pick. 대문자 시작 식별자(Card, Panel...)도 type으로 묶인다.
+  const types = textsOf(lines, "type");
+  for (const expected of ["string", "number", "bool", "Omit"]) {
+    assert.ok(types.includes(expected), `${expected} 누락`);
+  }
+});
+
+test("qubc - 이벤트명과 이벤트 바인딩을 가른다", () => {
+  const lines = tokenize(QUBC, "a.qubc");
+
+  // 전대문자는 이벤트명, `@click`은 DOM 이벤트 바인딩(디렉티브가 아니다).
   assert.deepEqual(textsOf(lines, "event"), ["PICK", "@click", "PICK"]);
-  assert.deepEqual(textsOf(lines, "string"), ['"./card.css"', '"card"']);
+});
+
+test("qubc - 자식 자리 보간을 가른다", () => {
+  const lines = tokenize(QUBC, "a.qubc");
+
+  // 값을 꺼내 쓰는 자리 - 경로 접근(row.id)도 한 토큰이다.
+  assert.deepEqual(textsOf(lines, "interpolation"), ["{label}", "{count}", "{row.id}", "{label}"]);
+});
+
+test("qubc - 블록 여는 괄호는 보간이 아니다", () => {
+  // `{`는 블록도 연다(component/props/template). 형태로 갈린다.
+  const lines = tokenize("component X {\n  props { a: string }\n}", "a.qubc");
+
+  assert.deepEqual(textsOf(lines, "interpolation"), []);
+});
+
+test("qubc - 문자열 안 중괄호는 그냥 문자열이다", () => {
+  // 문자열 안 보간은 구현되어 있지 않다(렉서가 따옴표 사이를 통째로 담는다).
+  const source = 'span() { "담당자: {label}" }';
+
+  const lines = tokenize(source, "a.qubc");
+  assert.equal(rejoin(lines), source);
+  assert.deepEqual(textsOf(lines, "interpolation"), []);
+  assert.deepEqual(textsOf(lines, "string"), ['"담당자: {label}"']);
+});
+
+test("qubc - 작은따옴표는 유틸 타입 키다", () => {
+  const lines = tokenize(QUBC, "a.qubc");
+
+  assert.ok(textsOf(lines, "string").includes("'id'"));
+});
+
+test("qubc - 주석", () => {
+  const lines = tokenize(QUBC, "a.qubc");
+
   assert.deepEqual(textsOf(lines, "comment"), ["// 주석"]);
+});
+
+test("qubc - 보간이 여럿이어도 원문을 지킨다", () => {
+  const source = 'span() { {a} "와" {b} }';
+
+  const lines = tokenize(source, "a.qubc");
+  assert.equal(rejoin(lines), source);
+  assert.deepEqual(textsOf(lines, "interpolation"), ["{a}", "{b}"]);
+});
+
+test("qubc - 닫히지 않은 보간은 보간이 아니다", () => {
+  // 편집 중간 상태. 멈추지 않고 원문만 지키면 된다.
+  const source = "span() { {a 열기만 }";
+
+  const lines = tokenize(source, "a.qubc");
+  assert.equal(rejoin(lines), source);
+  assert.deepEqual(textsOf(lines, "interpolation"), []);
 });
 
 test("qubc - 여러 줄 주석이 없어 줄 주석은 그 줄에서 끝난다", () => {

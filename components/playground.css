@@ -206,6 +206,11 @@
   color: #a5d6a7;
 }
 
+/* 값을 꺼내 쓰는 자리({title}) - quble의 핵심 문법이라 가장 눈에 띄어야 한다. */
+.tok--interpolation {
+  color: #ffd479;
+}
+
 .tok--number {
   color: #f5a97f;
 }
