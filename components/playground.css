@@ -139,16 +139,18 @@
  * 둘을 정확히 포개려면 font/line-height/padding/tab-size/white-space가 같아야 한다 - 한 글자라도
  * 어긋나면 캐럿이 글자와 따로 논다. textarea는 글자를 감추고(color: transparent) 캐럿만 남긴다. */
 
+/* 폭은 가장 긴 줄(.pg__view)이 정한다 - 뷰포트 폭에 묶으면 긴 줄이 잘려 커서가 화면 밖에서
+ * 사라진다. 짧은 코드에서도 편집 영역을 다 채우도록 min-width로 받친다(거터 폭은 뺀다). */
 .pg__sheet {
   position: relative;
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 auto;
+  min-width: calc(100% - var(--gutter-w));
+  width: max-content;
 }
 
 .pg__view,
 .pg__area {
   display: block;
-  width: 100%;
   padding: 1rem 1.2rem 1rem 0;
   border: 0;
   font: inherit;
@@ -157,7 +159,9 @@
   tab-size: 2;
 }
 
+/* 폭을 주지 않는다 - 이 요소가 콘텐츠만큼 넓어져 .pg__sheet의 폭을 정한다. */
 .pg__view {
+  min-width: 100%;
   min-height: 100%;
   color: #e6e9ef;
 }
@@ -166,6 +170,7 @@
   position: absolute;
   top: 0;
   left: 0;
+  width: 100%;
   height: 100%;
   outline: none;
   resize: none;

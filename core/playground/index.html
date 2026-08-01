@@ -59,7 +59,7 @@
     const data = {
       files: sources.map((f) => ({ name: f.name, isEntry: f.name.endsWith(".qubc") })),
       editingName: sources[0].name,
-      editing: sources[0].source,
+      editing: handlers.viewTextOf(sources[0].source),
       lineNumbers: handlers.lineNumbersFor(sources[0].source),
       lineCount: handlers.lineCountOf(sources[0].source),
       previewName: "(none)",

@@ -52,6 +52,12 @@ export const lineCountOf = (text: string) => text.split("\n").length;
 export const lineNumbersFor = (text: string) =>
   Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
 
+/** .pg__view(<pre>)에 넣을 문자열. 마지막 줄이 비어 있으면 공백 한 칸을 채운다 - <pre>는 빈
+ * 줄에 높이를 주지 않아 화면만 짧아지고, 그만큼 커서가 거터/줄 번호보다 위로 올라간다.
+ * (끝이 개행인 경우와 파일 전체가 빈 경우가 모두 여기 걸린다.) */
+export const viewTextOf = (text: string) =>
+  text.endsWith("\n") || text === "" ? `${text} ` : text;
+
 /** 초기 data를 캐시에 심는다. 부트스트랩이 mount 전에 부른다. 첫 파일이 편집기에 실린 채로
  * 시작하므로 그 파일을 지금 편집 중인 것으로 둔다. */
 export const seed = (files: { name: string; source: string }[]) => {
@@ -141,7 +147,7 @@ installConsoleCapture();
 // 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, textarea의 value만
 // 여기서 직접 쓴다 - textarea는 uncontrolled라 quble이 값을 바인딩할 수 없다(playground.css).
 const showText = (text: string, { store, set }: Pick<TCtx, "store" | "set">) => {
-  set(store.editing, text);
+  set(store.editing, viewTextOf(text));
 
   const count = lineCountOf(text);
   if (count !== shownLines) {
@@ -169,10 +175,72 @@ const editSource = (_data: unknown, ctx: TCtx) => {
   if (!currentName) {
     return;
   }
-  const text = (ctx.event.target as HTMLTextAreaElement).value;
-  sources.set(currentName, text);
-  showText(text, ctx);
+  const area = ctx.event.target as HTMLTextAreaElement;
+  sources.set(currentName, area.value);
+  showText(area.value, ctx);
+  scrollCaretIntoView(area);
 };
+
+// 커서만 움직인 경우(화살표/클릭) - 내용은 그대로고 스크롤만 따라간다.
+const followCaret = (_data: unknown, ctx: TCtx) => {
+  scrollCaretIntoView(ctx.event.target as HTMLTextAreaElement);
+};
+
+// 커서가 화면 밖이면 보이도록 최소한만 스크롤한다.
+//
+// 직접 하는 이유: 실제 스크롤은 .pg__code가 갖고 textarea는 overflow:hidden이라(거터와 어긋나지
+// 않으려고) 커서를 보이게 유지하는 브라우저 기본 동작이 발동하지 않는다. 부모는 커서 위치를
+// 모르므로 여기서 계산해 넣는다. 위치는 폰트가 monospace라 줄 높이 x 줄, 글자 폭 x 열로 얻는다.
+const scrollCaretIntoView = (area: HTMLTextAreaElement) => {
+  const code = area.closest<HTMLElement>(".pg__code");
+  if (!code) {
+    return;
+  }
+
+  const before = area.value.slice(0, area.selectionStart);
+  const lastBreak = before.lastIndexOf("\n");
+  const line = lastBreak === -1 ? 0 : before.slice(0, lastBreak).split("\n").length;
+  const column = before.length - (lastBreak + 1);
+
+  const style = getComputedStyle(area);
+  const lineH = parseFloat(style.lineHeight);
+  const top = parseFloat(style.paddingTop) + line * lineH;
+  if (top < code.scrollTop) {
+    code.scrollTop = top;
+  } else if (top + lineH > code.scrollTop + code.clientHeight) {
+    code.scrollTop = top + lineH - code.clientHeight;
+  }
+
+  // 가로: 거터가 sticky로 왼쪽을 덮으므로 그 폭만큼 더 확보해야 커서가 거터 뒤에 숨지 않는다.
+  const gutter = code.querySelector<HTMLElement>(".pg__gutter")?.offsetWidth ?? 0;
+  const x = area.getBoundingClientRect().left - code.getBoundingClientRect().left
+    + code.scrollLeft + column * charWidth(style.font);
+  if (x - gutter < code.scrollLeft) {
+    code.scrollLeft = Math.max(0, x - gutter);
+  } else if (x > code.scrollLeft + code.clientWidth - CARET_MARGIN) {
+    code.scrollLeft = x - code.clientWidth + CARET_MARGIN;
+  }
+};
+
+// 커서가 오른쪽 끝에 딱 붙지 않도록 남기는 여백(px).
+const CARET_MARGIN = 24;
+
+// monospace 한 글자 폭. 한 글자만 재면 반올림 오차가 열 수만큼 누적되므로 여럿을 재서 나눈다.
+let cachedCharWidth = 0;
+const charWidth = (font: string) => {
+  if (!cachedCharWidth) {
+    const probe = document.createElement("span");
+    probe.textContent = "0".repeat(CHAR_SAMPLE);
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+    probe.style.font = font;
+    document.body.appendChild(probe);
+    cachedCharWidth = probe.getBoundingClientRect().width / CHAR_SAMPLE;
+    probe.remove();
+  }
+  return cachedCharWidth;
+};
+
+const CHAR_SAMPLE = 100;
 
 // 로그 비우기 - 뒤에서부터 지운다(앞에서 지우면 인덱스가 당겨져 어긋난다).
 const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
@@ -273,5 +341,6 @@ export default {
   "Row[$0].CLICK_FILE": withSink(selectFile),
   "Row[$0].CLICK_PREVIEW": withSink(runPreview),
   INPUT_SOURCE: withSink(editSource),
+  KEYUP_SOURCE: withSink(followCaret),
   CLICK_CLEAR_LOGS: withSink(clearLogs),
 };

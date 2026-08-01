@@ -16,6 +16,7 @@ component Playground {
   }
   events {
     INPUT_SOURCE({ })
+    KEYUP_SOURCE({ })
     CLICK_CLEAR_LOGS({ })
   }
   template {
@@ -33,7 +34,8 @@ component Playground {
           pre(class="pg__gutter") { {lineNumbers} }
           div(class="pg__sheet") {
             pre(class="pg__view") { {editing} }
-            textarea(class="pg__area" spellcheck="false" rows={lineCount} @input:INPUT_SOURCE /)
+            textarea(class="pg__area" spellcheck="false" rows={lineCount}
+              @input:INPUT_SOURCE @keyup:KEYUP_SOURCE /)
           }
         }
 
