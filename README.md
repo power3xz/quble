@@ -7,7 +7,7 @@ UI 컴포넌트를 선언하면 **바이트코드(qubb)로 컴파일**되는 프
 
 [**Quble Playground**](https://power3xz.github.io/quble/)
 
-## 문법 맛보기
+## 문법 예시
 
 ### 최소 컴포넌트
 
