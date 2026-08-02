@@ -4,9 +4,22 @@
 # https://<user>.github.io/quble/ 같은 하위 경로에서도 그대로 뜬다.
 name: Pages
 
+# 산출물에 들어가는 것이 바뀔 때만 돈다. 셸/런타임뿐 아니라 컴파일러(qubb와 wasm을 낸다)와
+# 빌드 스크립트도 입력이다 - 여기서 빠지면 그쪽을 고쳤을 때 배포가 낡은 채로 남는다.
+# 목록에 없는 변경은 workflow_dispatch로 수동 배포한다.
 on:
   push:
     branches: [main]
+    paths:
+      - "core/playground/**"
+      - "core/web/**"
+      - "core/build/**"
+      - "core/crates/**"
+      - "core/Cargo.toml"
+      - "core/Cargo.lock"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 # 배포는 하나만 - 연달아 push하면 앞선 실행을 취소하지 않고 끝내게 둔다(반쯤 배포된 상태 방지).
