@@ -14,6 +14,7 @@
 
 import { compile as decodeQubb, type THandlers } from "../web/runtime.ts";
 import { lazyCompiler } from "../web/wasm-compiler.ts";
+import { caretTarget } from "./caretkey.ts";
 import { entryOf, handlerBody, isKeySlot, usedKeys } from "./completion.ts";
 import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
 import { markError, tokenize } from "./tokenize.ts";
@@ -170,10 +171,7 @@ const installConsoleCapture = () => {
     const original = console[level].bind(console);
     console[level] = (...args: unknown[]) => {
       original(...args);
-      appendLog(
-        level,
-        args.map((a) => (typeof a === "string" ? a : safeStringify(a))).join(" "),
-      );
+      appendLog(level, args.map((a) => (typeof a === "string" ? a : safeStringify(a))).join(" "));
     };
   }
 };
@@ -195,9 +193,7 @@ const showText = (text: string, { store, set, replace }: Pick<TCtx, "store" | "s
   // 에러 줄 표시는 그 에러가 난 파일을 싣고 있을 때만.
   replace(
     store.lines,
-    failure && failure.path === currentName
-      ? markError(lines, failure.line, failure.message)
-      : lines,
+    failure && failure.path === currentName ? markError(lines, failure.line, failure.message) : lines,
   );
 
   const count = lineCountOf(text);
@@ -224,9 +220,7 @@ const openFile = (name: string, ctx: TCtx, caretLine = 0) => {
   area.value = text;
   // 줄머리 오프셋 - 앞 줄들의 길이 합에 그 사이 개행 수를 더한다.
   const before = text.split("\n").slice(0, Math.max(0, caretLine - 1));
-  area.selectionStart = area.selectionEnd = before.length
-    ? before.join("").length + before.length
-    : 0;
+  area.selectionStart = area.selectionEnd = before.length ? before.join("").length + before.length : 0;
   trackCaret(area, ctx);
 };
 
@@ -265,6 +259,33 @@ const editSource = (_data: unknown, ctx: TCtx) => {
   }
 };
 
+// Home/End/PageUp/PageDown - 캐럿을 직접 옮긴다. 처리했으면 true.
+//
+// 브라우저에 맡기면 첫 타가 스크롤에 먹힌다: textarea가 화면보다 크고(rows=줄 수, height:100%)
+// overflow:hidden이라 자기 안에서 스크롤할 수 없어, 브라우저가 캐럿을 옮기는 대신 부모
+// (.pg__code)를 캐럿 자리까지 스크롤하는 데 입력을 쓴다. 그래서 같은 키를 두 번 눌러야 움직였다.
+const caretKey = (event: KeyboardEvent, area: HTMLTextAreaElement) => {
+  const code = area.closest<HTMLElement>(".pg__code");
+  if (!code) {
+    return false;
+  }
+  // 보이는 만큼이 한 페이지다 - textarea 높이(콘텐츠 전체)가 아니라 창 높이를 쓴다.
+  const lineH = parseFloat(getComputedStyle(area).lineHeight);
+  const to = caretTarget(event.key, area.value, event.shiftKey ? area.selectionEnd : area.selectionStart, {
+    toDocEdge: event.ctrlKey || event.metaKey,
+    pageLines: Math.max(1, Math.floor(code.clientHeight / lineH) - 1),
+  });
+  if (to === null) {
+    return false;
+  }
+
+  area.selectionEnd = to;
+  if (!event.shiftKey) {
+    area.selectionStart = to;
+  }
+  return true;
+};
+
 // 커서만 움직인 경우(화살표/클릭) - 내용은 그대로고 강조와 스크롤만 따라간다.
 // 다음 프레임에 읽는다: keydown/click 시점에는 브라우저가 아직 커서를 옮기기 전이다.
 //
@@ -273,6 +294,12 @@ const followCaret = (_data: unknown, ctx: TCtx) => {
   const area = ctx.event.target as HTMLTextAreaElement;
   if (ctx.event.type === "keydown" && completionKey(ctx.event as KeyboardEvent, ctx)) {
     ctx.event.preventDefault();
+    return;
+  }
+  // 직접 옮겼으면 이번 프레임에 이미 캐럿이 제자리다 - 다음 프레임을 기다리지 않는다.
+  if (ctx.event.type === "keydown" && caretKey(ctx.event as KeyboardEvent, area)) {
+    ctx.event.preventDefault();
+    trackCaret(area, ctx);
     return;
   }
   requestAnimationFrame(() => trackCaret(area, ctx));
@@ -310,8 +337,11 @@ const trackCaret = (area: HTMLTextAreaElement, { store, set }: Pick<TCtx, "store
 
   // 가로: 거터가 sticky로 왼쪽을 덮으므로 그 폭만큼 더 확보해야 커서가 거터 뒤에 숨지 않는다.
   const gutter = code.querySelector<HTMLElement>(".pg__gutter")?.offsetWidth ?? 0;
-  const x = area.getBoundingClientRect().left - code.getBoundingClientRect().left
-    + code.scrollLeft + column * charWidth(style.font);
+  const x =
+    area.getBoundingClientRect().left -
+    code.getBoundingClientRect().left +
+    code.scrollLeft +
+    column * charWidth(style.font);
   if (x - gutter < code.scrollLeft) {
     code.scrollLeft = Math.max(0, x - gutter);
   } else if (x > code.scrollLeft + code.clientWidth - CARET_MARGIN) {
@@ -348,8 +378,7 @@ const CHAR_SAMPLE = 100;
 // 없다. 짝이 되는 .qubc는 파일명으로 안다: card.qubc.handlers.js -> card.qubc.
 
 // 열려 있는 팝업. slotStart는 따옴표 안쪽 시작 오프셋 - 삽입할 때 여기부터 캐럿까지를 갈아끼운다.
-let completion: { slotStart: number; names: string[]; shown: string[]; selected: number } | null =
-  null;
+let completion: { slotStart: number; names: string[]; shown: string[]; selected: number } | null = null;
 
 // 엔트리별 후보 캐시. .qubc가 바뀌지 않는 한 그대로다 - 핸들러 파일을 타이핑하는 동안은
 // 다시 뽑을 이유가 없다.
@@ -625,9 +654,7 @@ const runPreview = async (_data: unknown, ctx: TCtx) => {
 
   // 리소스 경로(resId 순)를 그 내용의 Blob URL로 - LOAD_RES가 <link>로 단다.
   const resourceUrls = result.resources.map((path) => {
-    const url = URL.createObjectURL(
-      new Blob([sources.get(path) ?? ""], { type: "text/css" }),
-    );
+    const url = URL.createObjectURL(new Blob([sources.get(path) ?? ""], { type: "text/css" }));
     previewUrls.push(url);
     previewLinkedUrls.push(url);
     return url;
@@ -650,16 +677,14 @@ const runPreview = async (_data: unknown, ctx: TCtx) => {
 //
 // 예외도 여기서 잡아 콘솔에 남긴다 - 런타임은 핸들러 반환값을 await하지 않아, async 핸들러가
 // 실패하면 unhandled rejection으로 조용히 사라진다.
-const withSink =
-  (handler: (data: unknown, ctx: TCtx) => void | Promise<void>) =>
-  (data: unknown, ctx: TCtx) => {
-    rememberSink(ctx);
-    try {
-      handler(data, ctx)?.catch(report);
-    } catch (e) {
-      report(e);
-    }
-  };
+const withSink = (handler: (data: unknown, ctx: TCtx) => void | Promise<void>) => (data: unknown, ctx: TCtx) => {
+  rememberSink(ctx);
+  try {
+    handler(data, ctx)?.catch(report);
+  } catch (e) {
+    report(e);
+  }
+};
 
 const report = (e: unknown) => {
   console.error(e instanceof Error ? `${e.message}\n${e.stack ?? ""}` : String(e));
