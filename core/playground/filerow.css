@@ -19,11 +19,6 @@
   box-shadow: inset 0.3rem 0 0 #3d8a63;
 }
 
-.filerow[data-editing="true"] .filerow__name {
-  color: #e6e9ef;
-  font-weight: 600;
-}
-
 .filerow__name {
   flex: 1;
   min-width: 0;
@@ -38,6 +33,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.filerow[data-editing="true"] .filerow__name {
+  color: #e6e9ef;
+  font-weight: 600;
 }
 
 /* 배경은 행이 칠하고(위) 여기서는 글자만 밝힌다. */

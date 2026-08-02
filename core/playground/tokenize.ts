@@ -15,7 +15,13 @@ export type TLine = { tokens: TToken[]; hasError: boolean; error: string };
 // qubc 예약어는 SYNTAX.md 전체를 따른다 - 선언 블록(#1), 디렉티브(#4), 타입(#2.1).
 // 다른 언어는 화면에서 눈에 띄어야 하는 것만 고른다(완전한 목록이 목적이 아니다).
 const QUBC_KEYWORDS = new Set([
-  "use", "from", "component", "props", "contexts", "events", "template",
+  "use",
+  "from",
+  "component",
+  "props",
+  "contexts",
+  "events",
+  "template",
   "of", // @for (x of y)
 ]);
 // 디렉티브(@로 시작). @slot은 자리 선언, 나머지는 블록을 연다.
@@ -23,18 +29,54 @@ const QUBC_DIRECTIVES = new Set(["if", "else", "for", "with", "slot"]);
 // 원시 3종과 유틸 타입(Omit/Pick). 배열/객체는 문법 기호라 여기 없다.
 const QUBC_TYPES = new Set(["string", "number", "bool", "Omit", "Pick"]);
 const JS_KEYWORDS = new Set([
-  "export", "default", "import", "from", "const", "let", "var", "function",
-  "return", "if", "else", "for", "of", "in", "while", "new", "class",
-  "async", "await", "try", "catch", "finally", "throw", "typeof", "null",
-  "undefined", "true", "false", "this",
+  "export",
+  "default",
+  "import",
+  "from",
+  "const",
+  "let",
+  "var",
+  "function",
+  "return",
+  "if",
+  "else",
+  "for",
+  "of",
+  "in",
+  "while",
+  "new",
+  "class",
+  "async",
+  "await",
+  "try",
+  "catch",
+  "finally",
+  "throw",
+  "typeof",
+  "null",
+  "undefined",
+  "true",
+  "false",
+  "this",
 ]);
 const JSON_KEYWORDS = new Set(["true", "false", "null"]);
 // 값처럼 읽히는 리터럴/전역 - 키워드(문법)와 색을 갈라 둔다.
 const JS_VALUES = new Set(["null", "undefined", "true", "false", "this"]);
 // 핸들러에서 자주 보이는 전역. 완전한 목록이 목적이 아니라 눈에 띄어야 하는 것만.
 const JS_GLOBALS = new Set([
-  "console", "document", "window", "Object", "Array", "JSON", "Math",
-  "Number", "String", "Boolean", "Promise", "Date", "Error",
+  "console",
+  "document",
+  "window",
+  "Object",
+  "Array",
+  "JSON",
+  "Math",
+  "Number",
+  "String",
+  "Boolean",
+  "Promise",
+  "Date",
+  "Error",
 ]);
 
 const cls = (name?: string) => (name ? `tok tok--${name}` : "tok");

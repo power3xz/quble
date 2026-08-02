@@ -22,9 +22,7 @@
     {
       "name": "리뷰",
       "accent": "background: #fffae6",
-      "cards": [
-        { "title": "알림 설정 화면", "assignee": "민수", "points": "3", "urgent": false }
-      ]
+      "cards": [{ "title": "알림 설정 화면", "assignee": "민수", "points": "3", "urgent": false }]
     },
     {
       "name": "완료",
