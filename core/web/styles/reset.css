@@ -95,6 +95,8 @@ video {
   padding: 0;
   border: 0;
   font-size: 100%;
+  /* biome-ignore lint/suspicious/noShorthandPropertyOverrides: Meyer 원본의 폴백 - font
+   * shorthand를 모르는 구형 브라우저가 앞줄의 font-size를 쓴다. 합치면 그 폴백이 사라진다. */
   font: inherit;
   vertical-align: baseline;
 }
@@ -133,6 +135,8 @@ blockquote:after,
 q:before,
 q:after {
   content: "";
+  /* biome-ignore lint/suspicious/noDuplicateProperties: Meyer 원본의 폴백 - content: none을
+   * 모르는 구형 브라우저가 앞줄의 빈 문자열을 쓴다. 한 줄로 줄이면 그 폴백이 사라진다. */
   content: none;
 }
 
