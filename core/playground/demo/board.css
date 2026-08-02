@@ -2,42 +2,51 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 16px;
-  background: #f4f5f7;
+  padding: 20px;
+  background: #fcfcfd;
   font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
-  color: #172b4d;
+  color: #1c2024;
 }
 
 .board__bar {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.board__id {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .board__title {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .board__owner {
-  font-size: 13px;
-  color: #6b778c;
+  font-size: 12px;
+  color: #8b8d98;
 }
 
 .board__add {
-  padding: 8px 14px;
-  border: 0;
+  padding: 6px 12px;
+  border: 1px solid #dfe0e3;
   border-radius: 6px;
-  background: #0052cc;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
+  background: #fff;
+  color: #1c2024;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
 }
 
 .board__add:hover {
-  background: #0065ff;
+  border-color: #c9cacd;
+  background: #f8f8fa;
 }
 
 .board__columns {
@@ -50,30 +59,27 @@
   padding-bottom: 8px;
 }
 
-.board__slot {
-  min-height: 0;
-}
-
 /* 컬럼 한 자리 - 컬럼 위에 삭제 버튼을 얹는다. */
 
 .board__slot {
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .board__remove {
   align-self: flex-end;
-  padding: 3px 8px;
+  padding: 2px 6px;
   border: 0;
   border-radius: 4px;
   background: none;
-  color: #6b778c;
+  color: #b9bbc6;
   font-size: 11px;
   cursor: pointer;
 }
 
 .board__remove:hover {
-  background: #ffebe6;
-  color: #bf2600;
+  background: #f4f4f6;
+  color: #1c2024;
 }

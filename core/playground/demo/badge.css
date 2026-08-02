@@ -1,18 +1,23 @@
+/* 알약 대신 각진 테두리형 - 카드 안에서 튀지 않게 채움 없이 선과 글자색으로만 가른다. */
 .badge {
   display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   cursor: pointer;
 }
 
 .badge[data-tone="hot"] {
-  background: #ffebe6;
-  color: #bf2600;
+  border-color: #eccfc8;
+  background: #fdf0ee;
+  color: #b5533c;
 }
 
 .badge[data-tone="calm"] {
-  background: #deebff;
-  color: #0747a6;
+  border-color: #e2e3e8;
+  background: none;
+  color: #7c7f89;
 }

@@ -4,7 +4,7 @@
   "columns": [
     {
       "name": "할 일",
-      "accent": "background: #ffebe6",
+      "accent": "background: #fdf0ee",
       "cards": [
         { "title": "로그인 세션 만료 처리", "assignee": "지현", "points": "5", "urgent": true },
         { "title": "검색 결과 정렬 옵션 추가", "assignee": "민수", "points": "3", "urgent": false },
@@ -13,7 +13,7 @@
     },
     {
       "name": "진행 중",
-      "accent": "background: #deebff",
+      "accent": "background: #eef2fb",
       "cards": [
         { "title": "결제 실패 재시도 로직", "assignee": "도윤", "points": "8", "urgent": true },
         { "title": "이미지 업로드 압축", "assignee": "지현", "points": "5", "urgent": false }
@@ -21,12 +21,12 @@
     },
     {
       "name": "리뷰",
-      "accent": "background: #fffae6",
+      "accent": "background: #faf6ea",
       "cards": [{ "title": "알림 설정 화면", "assignee": "민수", "points": "3", "urgent": false }]
     },
     {
       "name": "완료",
-      "accent": "background: #e3fcef",
+      "accent": "background: #eef5f0",
       "cards": [
         { "title": "다크 모드 토글", "assignee": "연희", "points": "2", "urgent": false },
         { "title": "CSV 내보내기", "assignee": "도윤", "points": "5", "urgent": false }
