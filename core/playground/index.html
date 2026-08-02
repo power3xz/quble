@@ -8,7 +8,7 @@
   <style>
     /* 셸과 #preview를 같은 칸에 겹친다. 셸이 화면 전체를 grid로 잡고 오른쪽 위를 비워 두므로,
      * #preview를 같은 자리(오른쪽 위)에 얹으면 그 빈 칸을 채운다. 폭/높이 값은 셸 CSS
-     * (components/playground.css의 .pg)가 혼자 정한다 - 여기서 다시 정의하지 않는다. */
+     * (./playground.css의 .pg)가 혼자 정한다 - 여기서 다시 정의하지 않는다. */
     html, body { height: 100%; background: #0d1117; color: #e6e9ef; }
     body { overflow: hidden; }
 
@@ -18,7 +18,7 @@
     .stack > * { grid-area: 1 / 1; min-height: 0; }
 
     /* 셸이 비워 둔 오른쪽 위 칸에 맞춘다. 셸의 grid와 같은 트랙을 써야 정확히 포개진다.
-     * 값은 components/playground.css의 .pg(--files-w / --head-h / --console-h)와 같아야 한다. */
+     * 값은 ./playground.css의 .pg(--files-w / --head-h / --console-h)와 같아야 한다. */
     .stack__preview {
       display: grid;
       grid-template-columns: 24rem 1fr 1fr;
@@ -104,7 +104,7 @@
 
     window.__quble = await mount("./playground.qubb", document.getElementById("editor"), data);
 
-    // textarea는 값을 quble이 바인딩하지 않는다(uncontrolled - components/playground.css 참고).
+    // textarea는 값을 quble이 바인딩하지 않는다(uncontrolled - ./playground.css 참고).
     // 화면은 .pg__view가 그리므로 여기서는 입력용 textarea의 초기 value만 맞춰 준다.
     document.querySelector(".pg__area").value = sources[0].source;
 

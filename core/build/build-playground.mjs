@@ -27,7 +27,6 @@ const fnv1a = (bytes) => {
 
 const buildDir = dirname(new URL(import.meta.url).pathname);
 const coreDir = join(buildDir, "..");
-const rootDir = join(coreDir, "..");
 const quble = join(coreDir, "target", "debug", "quble");
 const wasm = join(coreDir, "target", "wasm32-unknown-unknown", "release", "compiler_wasm.wasm");
 
@@ -41,7 +40,7 @@ for (const [path, hint] of [
   }
 }
 
-const entry = join(rootDir, "components", "playground.qubc");
+const entry = join(coreDir, "playground", "playground.qubc");
 const distDir = join("dist", "playground");
 
 rmSync(distDir, { recursive: true, force: true });
@@ -69,8 +68,7 @@ const handlerBundle = await build({
   plugins: [
     {
       name: "runtime-external",
-      setup: (b) =>
-        b.onResolve({ filter: /web\/runtime\.ts$/ }, () => ({ path: runtimeUrl, external: true })),
+      setup: (b) => b.onResolve({ filter: /web\/runtime\.ts$/ }, () => ({ path: runtimeUrl, external: true })),
     },
   ],
   write: false,

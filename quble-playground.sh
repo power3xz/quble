@@ -6,8 +6,7 @@
 #   #editor  <- 셸(playground.qubc). 빌드 타임에 CLI가 컴파일한다.
 #   #preview <- 사용자가 편집한 소스. 미리보기 버튼을 누르면 브라우저의 wasm이 컴파일한다.
 #
-# 셸 UI/핸들러는 components/playground.qubc, moduletab.qubc, playground.qubc.handlers.ts에 있고
-# 진입 페이지는 core/playground/index.html이다(생성물 아님 - 손으로 편집한다).
+# 셸 UI/핸들러와 진입 페이지는 모두 core/playground/에 있다(생성물 아님 - 손으로 편집한다).
 #
 # 사용: ./quble-playground.sh
 set -euo pipefail
