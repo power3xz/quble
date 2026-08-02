@@ -32,7 +32,8 @@ jobs:
       - name: wasm 타겟 추가
         run: rustup target add wasm32-unknown-unknown
 
-      # npm install이 둘이다 - 루트 워크스페이스(core/web)와 core/build(esbuild를 자기 것으로 가진다).
+      # npm install이 둘이다 - 루트 워크스페이스(core/web, core/playground)와
+      # core/build(esbuild를 자기 것으로 가진다).
       - name: 의존성 설치
         run: |
           npm ci

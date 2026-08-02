@@ -1,0 +1,9 @@
+{
+  "name": "quble-playground",
+  "private": true,
+  "type": "module",
+  "description": "브라우저 플레이그라운드 셸 - 에디터 UI(playground.qubc)와 그 핸들러/유틸. 타입체크는 루트 tsconfig가 함께 본다.",
+  "scripts": {
+    "test": "node --experimental-strip-types --test --test-concurrency=1"
+  }
+}

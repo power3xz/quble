@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseDiagnostic } from "../../components/diagnostic.ts";
+import { parseDiagnostic } from "./diagnostic.ts";
 
 test("경로/줄/칸/메시지를 뽑는다", () => {
   const text = [

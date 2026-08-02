@@ -4,8 +4,7 @@
   "type": "module",
   "description": "Quble 클라이언트 런타임(실험) - runtime.ts/region.ts. 테스트는 npm test(node --experimental-strip-types --test) + jsdom.",
   "scripts": {
-    "test": "node --experimental-strip-types --test --test-concurrency=1",
-    "typecheck": "tsc --noEmit"
+    "test": "node --experimental-strip-types --test --test-concurrency=1"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",

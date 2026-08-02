@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { entryOf, handlerBody, isKeySlot, usedKeys } from "../../components/completion.ts";
+import { entryOf, handlerBody, isKeySlot, usedKeys } from "./completion.ts";
 
 // `|`가 방금 친 따옴표 자리. 그 자리를 따옴표로 바꿔 실제 입력 직후 상태를 만든다.
 const at = (marked: string) => {

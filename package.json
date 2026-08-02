@@ -2,13 +2,13 @@
   "name": "quble",
   "private": true,
   "type": "module",
-  "description": "Quble 모노레포 루트 - JS/TS 툴체인(Biome/TS) 고정점. 워크스페이스 멤버는 core/web.",
-  "workspaces": ["core/web"],
+  "description": "Quble 모노레포 루트 - JS/TS 툴체인(Biome/TS) 고정점. 워크스페이스 멤버는 core/web, core/playground.",
+  "workspaces": ["core/web", "core/playground"],
   "scripts": {
     "lint": "biome check .",
     "format": "biome format --write .",
-    "test": "npm test -w quble-web",
-    "typecheck": "npm run typecheck -w quble-web"
+    "test": "npm test --workspaces",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.3"

@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { markError, type TLine, tokenize } from "../../components/tokenize.ts";
+import { markError, type TLine, tokenize } from "./tokenize.ts";
 
 // 줄을 다시 이어 원문을 만든다. 빈 줄에 넣은 공백 한 칸은 되돌린다.
 const rejoin = (lines: TLine[]) =>
