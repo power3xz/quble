@@ -15,17 +15,19 @@ component Column {
     CLICK_ADD_CARD({ lane: name })
     CLICK_HEADING({ lane: name, position })
     CLICK_REMOVE_CARD({ lane: name })
+    GRAB_FROM({ lane: name })
+    DROP_AT_END({ lane: name })
   }
   template {
-    div(class="col") {
-      header(class="col__head" style={accent}) {
-        h2(class="col__name" @click:CLICK_HEADING) { {name} }
+    div(class="column") {
+      header(class="column__head" style={accent}) {
+        h2(class="column__name" @click:CLICK_HEADING) { {name} }
       }
 
       @with LaneArea {
-        div(class="col__cards") {
+        div(class="column__cards" @mousedown:GRAB_FROM @mouseup:DROP_AT_END) {
           @for (card, seat of cards) {
-            div(class="col__slot") {
+            div(class="column__slot") {
               Ticket: Card(
                 title={card.title}
                 assignee={card.assignee}
@@ -33,13 +35,13 @@ component Column {
                 urgent={card.urgent}
                 seat={seat}
               /)
-              button(class="col__remove" @click:CLICK_REMOVE_CARD) { "x" }
+              button(class="column__remove" @click:CLICK_REMOVE_CARD) { "x" }
             }
           }
         }
       }
 
-      button(class="col__add" @click:CLICK_ADD_CARD) { "+ 카드" }
+      button(class="column__add" @click:CLICK_ADD_CARD) { "+ 카드" }
     }
   }
 }

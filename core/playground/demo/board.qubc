@@ -1,11 +1,20 @@
 use "./board.css"
+use Card from "./card.qubc"
 use Column from "./column.qubc"
 
 component Board {
   props {
     title: string,
     owner: string,
-    columns: Omit<Column, 'position'>[]
+    columns: Omit<Column, 'position'>[],
+    ghost: {
+      isDragging: bool,
+      style: string,
+      title: string,
+      assignee: string,
+      points: string,
+      urgent: bool
+    }
   }
   contexts {
     BoardArea { board: title, owner: owner }
@@ -37,6 +46,18 @@ component Board {
               /)
             }
           }
+        }
+      }
+
+      @if (ghost.isDragging) {
+        div(class="ghost" style={ghost.style}) {
+          Drag: Card(
+            title={ghost.title}
+            assignee={ghost.assignee}
+            points={ghost.points}
+            urgent={ghost.urgent}
+            seat=0
+          /)
         }
       }
     }

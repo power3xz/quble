@@ -61,15 +61,17 @@
 
 /* 컬럼 한 자리 - 컬럼 위에 삭제 버튼을 얹는다. */
 
+/* 삭제 버튼 아래로 컬럼이 남은 높이를 다 쓴다(stretch) - 카드가 적은 컬럼도 아래 여백이
+ * 드롭 자리가 된다. 늘리는 쪽은 여기가 맡고, 그 높이를 어떻게 나눌지는 컬럼이 정한다. */
 .board__slot {
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 1fr;
   gap: 4px;
 }
 
 .board__remove {
-  align-self: flex-end;
+  justify-self: end;
   padding: 2px 6px;
   border: 0;
   border-radius: 4px;
@@ -82,4 +84,15 @@
 .board__remove:hover {
   background: #f4f4f6;
   color: #1c2024;
+}
+
+/* 드래그 중 커서를 따라다니는 카드. 자리는 핸들러가 style(transform)로 준다 - left/top이 0이라
+ * 그 값이 곧 화면 좌표다. 커서 밑에 깔리면 mouseup의 target이 고스트가 돼 놓을 자리를 잃으므로
+ * 이벤트를 통과시킨다. */
+.ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  pointer-events: none;
 }

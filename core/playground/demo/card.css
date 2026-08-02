@@ -5,10 +5,25 @@
   border-radius: 6px;
   background: #fff;
   cursor: pointer;
+  /* 끌 때 글자가 잡히면 드래그가 텍스트 선택으로 바뀐다. */
+  user-select: none;
 }
 
 .ticket:hover {
   border-color: #c9cacd;
+}
+
+/* 드래그로 집힌 카드 - 원래 자리는 흐려 두고 커서에는 고스트가 붙는다. 클래스로 얹는 이유는
+ * 이 값을 아는 게 컬럼 핸들러인데 카드의 props는 거기서 못 짚기 때문이다. */
+.ticket--grabbed {
+  opacity: 0.4;
+  border-style: dashed;
+}
+
+/* 고스트가 자기 카드에 드리우는 그림자 - 끌려오는 쪽이 위에 뜬 것으로 보이게 한다. */
+.ghost .ticket {
+  border-color: #c9cacd;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 
 .ticket__title {

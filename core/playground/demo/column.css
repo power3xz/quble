@@ -1,6 +1,7 @@
-.col {
+/* 주어진 높이를 다 쓴다 - 카드가 적어도 아래 여백이 드롭 자리로 남는다(.column__cards가 flex: 1). */
+.column {
   width: 232px;
-  max-height: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -11,7 +12,7 @@
 }
 
 /* 컬럼 색은 data의 accent가 style로 준다(배경). 옅은 색이라 제목 띠 정도로만 읽힌다. */
-.col__head {
+.column__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -20,23 +21,30 @@
   border-radius: 5px;
 }
 
-.col__name {
+.column__name {
   font-size: 13px;
   font-weight: 600;
   color: #1c2024;
   cursor: pointer;
 }
 
-.col__cards {
+/* 카드가 없어도 드롭 자리로 쓸 만큼 높이를 남긴다 - 20px이면 빈 컬럼에 조준하기 어렵다. */
+.column__cards {
   flex: 1;
-  min-height: 20px;
+  min-height: 64px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   overflow-y: auto;
 }
 
-.col__add {
+/* 비었을 때만 보이는 점선 자리 - 여기 놓으라는 표시다. :empty라 카드가 하나라도 있으면 꺼진다. */
+.column__cards:empty {
+  border: 1px dashed #e2e3e8;
+  border-radius: 6px;
+}
+
+.column__add {
   width: 100%;
   margin-top: 8px;
   padding: 7px 8px;
@@ -49,18 +57,18 @@
   cursor: pointer;
 }
 
-.col__add:hover {
+.column__add:hover {
   background: #f4f4f6;
   color: #1c2024;
 }
 
 /* 카드 한 자리 - 카드와 제거 버튼을 겹친다. 버튼은 hover할 때만 보인다. */
 
-.col__slot {
+.column__slot {
   position: relative;
 }
 
-.col__remove {
+.column__remove {
   position: absolute;
   top: 5px;
   right: 5px;
@@ -77,11 +85,11 @@
   cursor: pointer;
 }
 
-.col__slot:hover .col__remove {
+.column__slot:hover .column__remove {
   display: block;
 }
 
-.col__remove:hover {
+.column__remove:hover {
   border-color: #d9d9de;
   color: #1c2024;
 }
