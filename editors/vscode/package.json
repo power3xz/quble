@@ -5,7 +5,7 @@
   "version": "0.0.1",
   "private": true,
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.125.0"
   },
   "categories": [
     "Programming Languages"
@@ -20,7 +20,9 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "package": "npm run build && vsce package --no-dependencies"
+    "package": "npm run build && vsce package --no-dependencies --out quble-vscode.vsix",
+    "install-local": "npm run package && code --install-extension quble-vscode.vsix --force",
+    "test": "node --experimental-strip-types --test --test-concurrency=1"
   },
   "contributes": {
     "languages": [
@@ -47,6 +49,7 @@
   "devDependencies": {
     "@types/node": "^26.1.2",
     "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1"
   }
 }
