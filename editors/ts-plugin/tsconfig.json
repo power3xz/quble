@@ -1,0 +1,11 @@
+{
+  // 루트 설정을 그대로 쓰되 모듈 형식만 CJS로 덮는다 - tsserver는 plugin을 require로 싣고
+  // module.exports가 함수 자체이길 기대한다(`export =`). ESM으로 내면 { default: fn }이 되어
+  // tsserver가 못 찾는다.
+  "extends": "../../tsconfig.json",
+  // 해석 규칙(moduleResolution)은 루트 그대로 bundler다 - 실제로 esbuild가 번들한다.
+  "compilerOptions": {
+    "module": "CommonJS"
+  },
+  "include": ["src/**/*.ts"]
+}
