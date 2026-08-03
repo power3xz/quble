@@ -31,7 +31,7 @@
   },
   "overrides": [
     {
-      "includes": ["core/web/**/*.test.ts", "core/playground/**/*.test.ts"],
+      "includes": ["core/web/**/*.test.ts", "core/playground/**/*.test.ts", "core/wasm-compiler/**/*.test.ts"],
       "linter": {
         "rules": {
           "style": { "noNonNullAssertion": "off" },
