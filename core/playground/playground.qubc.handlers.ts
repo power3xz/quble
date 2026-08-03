@@ -12,8 +12,8 @@
 //   2. 타이핑마다 set하면 TEXT_VAR 구독이 값 비교 없이 textContent를 덮어써 커서가 튄다.
 // 그래서 편집 중에는 캐시만 갱신하고, 파일을 바꿀 때만 lines를 set한다(그때는 갱신이 맞다).
 
+import { lazyCompiler } from "../wasm-compiler/browser.ts";
 import { compile as decodeQubb, type THandlers } from "../web/runtime.ts";
-import { lazyCompiler } from "../web/wasm-compiler.ts";
 import { caretTarget } from "./caretkey.ts";
 import { entryOf, handlerBody, isKeySlot, usedKeys } from "./completion.ts";
 import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";

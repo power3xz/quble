@@ -1,0 +1,9 @@
+{
+  "name": "quble-wasm-compiler",
+  "private": true,
+  "type": "module",
+  "description": "wasm 컴파일러(compiler-wasm)의 JS 래퍼 - ABI 래핑은 환경 중립(wasm-compiler.ts), .wasm을 얻는 방법만 browser.ts/node.ts로 갈린다.",
+  "scripts": {
+    "test": "node --experimental-strip-types --test --test-concurrency=1"
+  }
+}
