@@ -52,7 +52,24 @@
   소스에 대고 셌다. codegen 단계 에러 전부가 해당. **해결:** lex/parse가 쓰던 `Sourced<E>`를
   codegen에도 적용 - `FlatComp`가 출처를 들고 `generate`의 컴포넌트 루프에서 에러에 붙인다.
 
+- **핸들러 타입 공급이 d.ts 파일 방식 (LSP 아님)** - 확장이 `.qubc`를 컴파일해 짝
+  `x.qubc.d.ts`(`Handlers` 인터페이스)를 디스크에 쓰고, handlers.ts가 `import type { Handlers }
+  from './x.qubc'`로 받아 키/payload/context를 타입으로 강제했다. 한계: (1) import 한 줄이
+  필요하다 - `.ts`<->`.d.ts` 같은 basename 자동 짝은 TS가 안 묶고(실험으로 확인), Svelte식
+  "옆에 두면 자동"은 비-TS 소스(`.svelte`) 모듈 해석이라 우리 `.ts` 핸들러엔 안 통한다.
+  (2) d.ts가 디스크 부산물이다(gitignore). (3) 생성이 handlers.ts 열림/`.qubc` 저장 시 매번 풀
+  컴파일이다. **해결:** TS Language Service plugin으로 갔다(`editors/ts-plugin`). 짝 `.qubc`를
+  컴파일한 d.ts를 handlers.ts 스냅샷 **앞에** 한 줄로 얹고 `export const handlers`에 타입을
+  표기한다 - tsserver만 그 스냅샷을 보고 디스크와 화면은 원본 그대로다. 이름 `handlers`가 규약이
+  됐고(`export default` 폐기), 세 한계가 모두 사라졌다. 대신 에디터 밖에서는 타입이 안 붙는다
+  (미해결).
+
 ## 미해결
+
+- **핸들러 타입이 에디터 안에서만 붙는다** - ts-plugin이 tsserver 안에서 주입하므로 `tsc`나
+  CI에서는 handlers.ts가 타입 없이 남는다. d.ts 파일 방식을 걷어내면서 생긴 맞바꿈(import 한
+  줄과 디스크 부산물을 없앤 대가). 에디터 밖 검사가 필요해지면 빌드 스텝에서 d.ts를 뽑는 길이
+  있다 - 타입 생성 알맹이(`handlersDts`)는 그대로 쓸 수 있다.
 
 - **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
   소스에 설명을 달 수 없다(비ASCII를 쓰면 `unexpected character`로 터진다).
@@ -98,19 +115,6 @@
   단 발급 지점은 Const/Scope 축을 모르고 pool 인덱스는 leaf 아닌 자리(속성값 등)에도 쓰여
   u16 전체가 정당하므로, 상한 검사는 **leaf로 인코딩되는 지점**(FieldValue 생성/encode)에서
   축별로 걸어야 정확하다. FieldValue 작업에 딸린 별개 스텝.
-
-- **핸들러 타입 공급이 d.ts 파일 방식 (LSP 아님)** - 확장이 `.qubc`를 컴파일해 짝
-  `x.qubc.d.ts`(`Handlers` 인터페이스)를 디스크에 쓰고, handlers.ts가 `import type { Handlers }
-  from './x.qubc'`로 받아 키/payload/context를 타입으로 강제한다(잘못된 fullname은 컴파일 에러,
-  리터럴은 literal type). 한계: (1) import 한 줄이 필요하다 - `.ts`<->`.d.ts` 같은 basename
-  자동 짝은 TS가 안 묶고(실험으로 확인), Svelte식 "옆에 두면 자동"은 비-TS 소스(`.svelte`)
-  모듈 해석이라 우리 `.ts` 핸들러엔 안 통한다. (2) d.ts가 디스크 부산물이다(gitignore). (3)
-  생성이 handlers.ts 열림/`.qubc` 저장 시 매번 풀 컴파일이고, 컴파일러 경로가 워크스페이스
-  루트 기준 하드코딩이다(다른 레포에서 쓰려면 못 씀). 더 깔끔한 길은 **TS Language Service
-  plugin(또는 LSP)** 으로 메모리상 가상 타입을 주입하는 것 - import도 파일도 없이 `handlers`에
-  타입이 붙는다(Svelte의 `svelte2tsx`+`svelte-language-server`가 이 층위). 비용이 커서
-  보류했다(별도 npm 패키지 + LanguageService 프록시 + 가상 SourceFile 주입). 타입 생성 알맹이
-  (`handlersDts`)는 어느 길이든 재사용되니, plugin은 그 위의 "주입 배관"만 얹으면 된다.
 
 - **지연 로드(lazy load) 미구현** - 지연 build는 하지만(비활성 `@if` 가지는 켜질 때 해석),
   그 가지의 자식 def는 이미 qubb에 통째로 들어있다. "가지 켜질 때 그 코드를 그제서야 받는" 진짜
