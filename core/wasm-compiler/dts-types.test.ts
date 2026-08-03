@@ -3,31 +3,50 @@
 //
 // 통과 케이스만 두면 "무엇이든 받는 타입"도 통과한다 - 막혀야 하는 것이 막히는지를 에러 코드로
 // 함께 본다.
+//
+// d.ts는 wasm(handlersDts)이 낸다 - 에디터가 탈 경로와 같은 것을 검증한다.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { loadCompiler } from "./node.ts";
 
-const HERE = dirname(fileURLToPath(import.meta.url)); // core/web
-const CORE = join(HERE, ".."); // core
-const ROOT = join(CORE, ".."); // repo root
-const DTS_BIN = join(CORE, "target", "debug", "quble-dts");
-const FIXTURE = join(ROOT, "components", "handler_types.fixture.qubc");
+const HERE = dirname(fileURLToPath(import.meta.url)); // core/wasm-compiler
+const ROOT = join(HERE, "..", ".."); // repo root
 const TSC = join(ROOT, "node_modules", ".bin", "tsc");
+
+// 세 축을 다 두는 컴포넌트 - 원시(leaf 하나), 배열(칸 하나가 leaf), 객체(필드마다 leaf).
+const ENTRY = "a.qubc";
+const SOURCE = `component HandlerTypes {
+  props {
+    title: string,
+    count: number,
+    tags: string[],
+    cards: { title: string, done: bool }[],
+    ghost: { style: string, inner: { label: string } }
+  }
+  events {
+    EDIT({ title })
+  }
+  template {
+    button(class="ht" @click:EDIT) { {title} }
+  }
+}`;
 
 let work: string;
 
-before(() => {
-  if (!existsSync(DTS_BIN)) {
-    throw new Error(`quble-dts 바이너리 없음(${DTS_BIN}). 테스트 전에 'cargo build'를 실행하세요.`);
+before(async () => {
+  const compiler = await loadCompiler();
+  const result = compiler.handlersDts({ [ENTRY]: SOURCE }, ENTRY);
+  if (!result.ok) {
+    throw new Error(`d.ts 생성 실패: ${result.diagnostic}`);
   }
   work = mkdtempSync(join(tmpdir(), "quble-dts-"));
-  const dts = execFileSync(DTS_BIN, [FIXTURE], { encoding: "utf8" });
-  writeFileSync(join(work, "handlers.d.ts"), dts);
+  writeFileSync(join(work, "handlers.d.ts"), result.dts);
 });
 
 after(() => {
