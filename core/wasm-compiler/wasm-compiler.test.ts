@@ -94,6 +94,26 @@ test("호출마다 파일 목록이 새로 시작한다", () => {
   assert.equal(result.ok, false);
 });
 
+test("핸들러 d.ts 텍스트를 낸다", () => {
+  const result = compiler.handlersDts(SIMPLE, ENTRY);
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.match(result.dts, /export interface Handlers \{/);
+  assert.match(result.dts, /'GO': Handler<\{ title: string \}, \{ title: LeafIndex<string> \}/);
+});
+
+// handlerNames는 실패를 빈 배열로 뭉개지만 d.ts는 이유를 돌려준다.
+test("d.ts가 실패하면 진단이 온다", () => {
+  const result = compiler.handlersDts({ [ENTRY]: "component A { template {" }, ENTRY);
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+  assert.match(result.diagnostic, /error/);
+});
+
 test("use 그래프를 등록된 파일로 해소한다", () => {
   const files = {
     "child.qubc": `component Child {

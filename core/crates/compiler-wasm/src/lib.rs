@@ -9,8 +9,9 @@
 //!   5. 성공이면 `qb_res_ptr()`/`qb_res_len()`으로 리소스 경로 목록(개행 구분, resId 순)을
 //!      읽는다. JS가 그 순서대로 Blob URL을 만들어 런타임 `compile(bytes, resources)`에 넘긴다.
 //!
-//! `qb_handler_names(entry)`도 2번까지는 같은 순서를 쓰고 결과를 out 슬롯에 놓는다(개행 구분).
-//! 컴파일과 슬롯을 공유하므로 둘을 번갈아 부르면 앞의 결과가 지워진다 - 읽고 나서 다음을 부른다.
+//! `qb_handler_names(entry)`(개행으로 이은 fullname)와 `qb_handlers_dts(entry)`(핸들러 타입
+//! .d.ts 텍스트)도 2번까지는 같은 순서를 쓰고 결과를 out 슬롯에 놓는다. 셋 다 슬롯을
+//! 공유하므로 번갈아 부르면 앞의 결과가 지워진다 - 읽고 나서 다음을 부른다.
 //!
 //! 경로 의미론은 컴파일러가 모른다(flatten.rs 머리주석) - loader가 정규화 책임을 진다.
 //! playground의 파일 이름 공간은 평탄해서(탭 목록) `./` 접두어만 벗기면 등록된 이름과 맞는다.
@@ -162,6 +163,51 @@ pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u
 /// entry_ptr은 entry_len 바이트만큼 읽을 수 있어야 한다.
 #[no_mangle]
 pub unsafe extern "C" fn qb_handler_names(entry_ptr: *const u8, entry_len: usize) -> u32 {
+    with_entry_src(entry_ptr, entry_len, |entry, src, loader| {
+        compiler::handler_names_src(entry, src, loader).map(|names| names.join("\n").into_bytes())
+    })
+}
+
+/// 등록된 파일 중 entry의 핸들러 타입(.d.ts 텍스트)을 낸다. 0=성공(out=d.ts), 1=실패(out=진단).
+///
+/// 짝 핸들러 파일에 타입을 붙이는 쪽(에디터)이 쓴다 - 바이너리(quble-dts)를 띄우지 않고
+/// 같은 프로세스에서 부르려고 여기에 낸다.
+///
+/// # Safety
+/// entry_ptr은 entry_len 바이트만큼 읽을 수 있어야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn qb_handlers_dts(entry_ptr: *const u8, entry_len: usize) -> u32 {
+    with_entry_src(entry_ptr, entry_len, |entry, src, loader| {
+        compiler::handlers_dts_src(entry, src, loader).map(String::into_bytes)
+    })
+}
+
+/// `qb_add_file`로 등록된 파일들에서 `use` 대상을 찾는 loader. 클로저가 아니라 이름 있는 타입인
+/// 이유는 with_entry_src가 이걸 만들어 콜백에 넘기기 때문이다 - 클로저는 저마다 타입이 달라
+/// 호출자가 고르는 제네릭으로 묶이지 않는다.
+struct RegisteredFiles<'a>(&'a [(String, String)]);
+
+impl compiler::SourceLoader for RegisteredFiles<'_> {
+    /// wasm은 디렉터리가 없어 base를 안 본다 - 등록된 이름으로 곧장 맞춘다(`./` 접두는 뗀다).
+    fn load(&self, _base: &str, target: &str) -> Option<(String, String)> {
+        let name = target.strip_prefix("./").unwrap_or(target);
+        self.0
+            .iter()
+            .find(|(path, _)| path == name)
+            .map(|(path, src)| (path.clone(), src.clone()))
+    }
+}
+
+/// entry 경로를 읽고 등록된 파일에서 그 소스를 찾아 `run`에 넘긴다. 결과는 out 슬롯에 놓고
+/// 상태를 돌려준다 - 소스를 받아 텍스트를 내는 함수들(handler_names/handlers_dts)의 공통부다.
+/// loader는 등록된 파일 목록에서 `use` 대상을 찾는다(`./` 접두는 떼고 이름으로 맞춘다).
+///
+/// # Safety
+/// entry_ptr은 entry_len 바이트만큼 읽을 수 있어야 한다.
+unsafe fn with_entry_src<R>(entry_ptr: *const u8, entry_len: usize, run: R) -> u32
+where
+    R: FnOnce(&str, &str, &RegisteredFiles) -> Result<Vec<u8>, compiler::CompileError>,
+{
     let entry = match str_from(entry_ptr, entry_len) {
         Some(path) => path.to_string(),
         None => {
@@ -178,15 +224,9 @@ pub unsafe extern "C" fn qb_handler_names(entry_ptr: *const u8, entry_len: usize
                 return 1;
             }
         };
-        let loader = |_base: &str, target: &str| {
-            let name = target.strip_prefix("./").unwrap_or(target);
-            files
-                .iter()
-                .find(|(p, _)| p == name)
-                .map(|(p, src)| (p.clone(), src.clone()))
-        };
-        let (out, status) = match compiler::handler_names_src(&entry, &entry_src, &loader) {
-            Ok(names) => (names.join("\n").into_bytes(), 0),
+        let loader = RegisteredFiles(&files);
+        let (out, status) = match run(&entry, &entry_src, &loader) {
+            Ok(bytes) => (bytes, 0),
             Err(err) => (
                 compiler::format_error(None, &entry, &entry_src, &err).into_bytes(),
                 1,
@@ -596,6 +636,108 @@ mod tests {
         let (status, out) = compile("main.qubc");
         assert_eq!(status, 0);
         assert_eq!(&out[..4], QUBB_MAGIC, "이름 목록이 남으면 안 된다");
+    }
+
+    /// 핸들러 d.ts를 내고 (상태, 텍스트)를 돌려준다. out 슬롯을 JS와 같은 방식으로 읽는다.
+    fn handlers_dts(entry: &str) -> (u32, String) {
+        let status = unsafe { qb_handlers_dts(entry.as_ptr(), entry.len()) };
+        let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) };
+        (status, std::str::from_utf8(out).unwrap().to_string())
+    }
+
+    /// 합성 트리를 걸어 fullname마다 시그니처를 낸다 - 이름만 내는 handler_names와 달리
+    /// payload/props까지 타입으로 나온다.
+    #[test]
+    fn handlers_dts_emits_typed_interface() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            component Main {
+              props { x: string, tags: string[] }
+              events { ADD({ x }) }
+              template { button(@click:ADD /) }
+            }
+        "#,
+        );
+        let (status, text) = handlers_dts("main.qubc");
+        assert_eq!(status, 0, "성공이어야: {text}");
+        assert!(text.contains("export interface Handlers {"), "실제: {text}");
+        assert!(
+            text.contains(
+                "'ADD': Handler<{ x: string }, { x: LeafIndex<string>; tags: LeafIndex<string[]> }"
+            ),
+            "실제: {text}"
+        );
+    }
+
+    /// use 그래프를 등록된 파일로 해소해 자식 이벤트까지 낸다(loader가 도는지).
+    #[test]
+    fn handlers_dts_follows_use_graph() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            use Card from "./card.qubc"
+            component Main {
+              props { id: string }
+              template { div() { Ticket: Card(id={id} /) } }
+            }
+        "#,
+        );
+        add_file(
+            "card.qubc",
+            r#"
+            component Card {
+              props { id: string }
+              events { PICK({ id }) }
+              template { button(@click:PICK /) }
+            }
+        "#,
+        );
+        let (status, text) = handlers_dts("main.qubc");
+        assert_eq!(status, 0, "성공이어야: {text}");
+        assert!(text.contains("'Ticket.PICK':"), "실제: {text}");
+    }
+
+    /// 문법이 깨지면 1 + 진단 텍스트. 편집 중 계속 부르는 자리라 실패가 정상 경로다.
+    #[test]
+    fn handlers_dts_syntax_error_returns_diagnostic() {
+        reset();
+        add_file("main.qubc", "component C { template {");
+        let (status, text) = handlers_dts("main.qubc");
+        assert_eq!(status, 1);
+        assert!(text.contains("main.qubc"), "파일명이 있어야: {text}");
+    }
+
+    /// 등록 안 된 엔트리는 1 + 그 이름이 진단에 나온다.
+    #[test]
+    fn handlers_dts_unknown_entry_errors() {
+        reset();
+        add_file("main.qubc", HELLO);
+        let (status, text) = handlers_dts("other.qubc");
+        assert_eq!(status, 1);
+        assert!(text.contains("other.qubc"), "실제: {text}");
+    }
+
+    /// out 슬롯을 컴파일과 공유한다 - d.ts를 낸 뒤 컴파일하면 슬롯이 qubb로 바뀐다.
+    #[test]
+    fn handlers_dts_shares_out_slot_with_compile() {
+        reset();
+        add_file(
+            "main.qubc",
+            r#"
+            component Main {
+              props { x: string }
+              events { ADD({ x }) }
+              template { button(@click:ADD /) }
+            }
+        "#,
+        );
+        assert!(handlers_dts("main.qubc").1.contains("'ADD':"));
+        let (status, out) = compile("main.qubc");
+        assert_eq!(status, 0);
+        assert_eq!(&out[..4], QUBB_MAGIC, "d.ts 텍스트가 남으면 안 된다");
     }
 
     /// UTF-8이 아닌 경로/소스는 등록을 무시한다(파일이 늘지 않는다).

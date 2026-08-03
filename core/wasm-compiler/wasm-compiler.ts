@@ -13,6 +13,7 @@ type TWasmExports = {
   qb_add_file: (pathPtr: number, pathLen: number, srcPtr: number, srcLen: number) => void;
   qb_compile: (entryPtr: number, entryLen: number) => number;
   qb_handler_names: (entryPtr: number, entryLen: number) => number;
+  qb_handlers_dts: (entryPtr: number, entryLen: number) => number;
   qb_out_ptr: () => number;
   qb_out_len: () => number;
   qb_res_ptr: () => number;
@@ -26,6 +27,9 @@ export type TSourceFiles = Record<string, string>;
 export type TCompileResult =
   | { ok: true; bytecode: Uint8Array; resources: string[] }
   | { ok: false; diagnostic: string };
+
+/** 성공이면 d.ts 텍스트, 실패면 진단 텍스트. */
+export type TDtsResult = { ok: true; dts: string } | { ok: false; diagnostic: string };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -114,7 +118,22 @@ export const makeCompiler = (instance: WebAssembly.Instance) => {
     return decoder.decode(out).split("\n");
   };
 
-  return { compile, handlerNames };
+  /**
+   * entry의 핸들러 타입(.d.ts 텍스트). 짝 핸들러 파일에 타입을 붙이는 쪽이 쓴다.
+   *
+   * handlerNames와 달리 실패를 뭉개지 않는다 - 이름 후보는 없으면 자동완성이 안 뜨고 말지만,
+   * 타입은 왜 안 붙었는지를 소비자가 알려줘야 한다.
+   *
+   * @param files  경로 -> 소스 (.qubc/.css)
+   * @param entry  엔트리 경로(files의 키). 핸들러 파일의 짝이 되는 `.qubc`다.
+   */
+  const handlersDts = (files: TSourceFiles, entry: string): TDtsResult => {
+    const { status, out } = run(wasm.qb_handlers_dts, files, entry);
+    const text = decoder.decode(out);
+    return status === 0 ? { ok: true, dts: text } : { ok: false, diagnostic: text };
+  };
+
+  return { compile, handlerNames, handlersDts };
 };
 
 /** 컴파일러 핸들 - 환경별 로더가 돌려주는 것. */
