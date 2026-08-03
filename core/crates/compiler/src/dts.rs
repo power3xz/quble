@@ -2,9 +2,10 @@
 //! 합성 트리의 fullname마다 data(payload)/props/context 타입을 산출한다. 바이트코드는 props
 //! 이름을 버리므로(scope 인덱스만) 이름이 살아 있는 AST에서 뽑는 게 유일한 길이다.
 //!
-//! props는 값이 아니라 leafIndex(주소기)라 `LeafIndex<T>`로 낸다 - `get(k)`가 T를 내주고
-//! `set(k, v)`가 T를 받는다(REACTIVITY.md #7.1). store/get의 대상 트리는 아직 미정이라 store는
-//! 뺀다. props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
+//! props는 값이 아니라 leafIndex(주소기)라 `LeafIndex<T>`로 낸다 - `get(k)`가 그 값을 내주고
+//! `set(k, v)`가 받는다(REACTIVITY.md #7.1). 배열 leaf는 push/removeAt/replace로 조작한다.
+//! store/get의 대상 트리는 아직 미정이라 store는 뺀다. props의 T는 선언 타입을 TS로
+//! 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 
 use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
@@ -59,14 +60,28 @@ struct Handler {
     loop_depth: u16,
 }
 
-/// d.ts 서두: 공통 타입. `Handler<Data, Props, Ctx>`가 핸들러 하나의 모양(params 배치, get/set)을
-/// 담고, 각 fullname은 자기 Data/Props/Ctx만 인자로 채운다. get/set은 지금 하나(<T> 제네릭)로
-/// 퉁친다 - props에 타입 표기가 오면 분리가 필요해질 수 있다.
+/// d.ts 서두: 공통 타입. `Handler<Data, Props, Ctx>`가 핸들러 하나의 모양(params 배치, 조작 함수)을
+/// 담고, 각 fullname은 자기 Data/Props/Ctx만 인자로 채운다.
+///
+/// 배열 조작(push/removeAt/replace)은 대상이 배열 leaf여야 한다 - `LeafIndex<TElement[]>`로
+/// 받아 배열 아닌 leaf를 넘기면 타입에서 걸리고, 요소 타입도 함께 맞춘다. removeAt은 요소
+/// 타입을 안 쓰므로 제네릭 없이 `unknown[]`으로 둔다.
+///
+/// 제네릭 이름을 자리별로 나눈 이유 - `get`의 것은 leaf가 담은 값(TValue)이고 `push`의 것은
+/// 그 배열의 요소(TElement)라 뜻이 다르다. 한 이름으로 두면 나란히 놓였을 때 같은 것으로 읽힌다.
 const PRELUDE: &str = "\
 type LeafIndex<T> = number & { readonly __leaf: T };
 type Handler<Data, Props, Ctx, Loop> = (
   data: Data,
-  params: { context: Ctx; props: Props; get: <T>(k: LeafIndex<T>) => T; set: <T>(k: LeafIndex<T>, v: T) => void } & Loop,
+  params: {
+    context: Ctx;
+    props: Props;
+    get: <TValue>(k: LeafIndex<TValue>) => TValue;
+    set: <TValue>(k: LeafIndex<TValue>, v: TValue) => void;
+    push: <TElement>(k: LeafIndex<TElement[]>, v: TElement) => void;
+    removeAt: (k: LeafIndex<unknown[]>, i: number) => void;
+    replace: <TElement>(k: LeafIndex<TElement[]>, v: TElement[]) => void;
+  } & Loop,
 ) => void;
 ";
 
@@ -102,7 +117,7 @@ fn signature(h: &Handler) -> String {
         join(
             h.props
                 .iter()
-                .map(|p| format!("{}: LeafIndex<{}>", p.name, type_to_ts(&p.type_)))
+                .map(|p| format!("{}: {}", p.name, leaf_tree_to_ts(&p.type_)))
         )
     );
     let ctx = if h.contexts.is_empty() {
@@ -124,6 +139,31 @@ fn signature(h: &Handler) -> String {
         )
     };
     format!("Handler<{data}, {props}, {ctx}, {loops}>")
+}
+
+/// prop 선언 타입 -> 핸들러가 받는 leafIndex 트리(runtime.ts leafTree와 같은 규칙).
+///
+/// ```text
+/// 원시  string              -> LeafIndex<string>
+/// 배열  { title }[]         -> LeafIndex<{ title: string }[]>
+/// 객체  { name, id }        -> { name: LeafIndex<string>; id: LeafIndex<number> }
+/// ```
+///
+/// 객체는 주소가 아니라 필드마다 leaf가 따로 서서(`set(props.ghost.title, ..)`) 감싸지 않고
+/// 내려간다. 배열은 칸 하나가 leaf라(push/removeAt가 그걸 받는다) 요소 안쪽은 값이므로
+/// type_to_ts로 넘긴다 - 감싸는 규칙과 값 규칙이 여기서 갈린다.
+fn leaf_tree_to_ts(ty: &Type) -> String {
+    match ty {
+        Type::Object(fields) => {
+            let body = join(
+                fields
+                    .iter()
+                    .map(|(k, t)| format!("{k}: {}", leaf_tree_to_ts(t))),
+            );
+            format!("{{ {body} }}")
+        }
+        _ => format!("LeafIndex<{}>", type_to_ts(ty)),
+    }
 }
 
 /// prop 선언 타입 -> TS 타입 문자열. 원시는 이름 매핑, 배열은 `T[]`, 객체는 `{ k: T; ... }`.
@@ -436,6 +476,59 @@ mod tests {
         assert!(out.contains("type Handler<Data, Props, Ctx, Loop> = ("));
     }
 
+    /// 핸들러 params에 배열 조작 3종이 있다. 대상을 `LeafIndex<TElement[]>`로 받아야 배열 아닌
+    /// leaf가 걸리고 요소 타입도 그 배열에 묶인다 - 제약이 실제로 서는지는 dts-types.test.ts.
+    #[test]
+    fn prelude_has_array_ops() {
+        let out = dts(r#"
+            component Thumb {
+              events { CLICK({ x }) }
+              template { img(@click:CLICK /) }
+            }
+        "#);
+        assert!(out.contains("push: <TElement>(k: LeafIndex<TElement[]>, v: TElement) => void;"));
+        assert!(out.contains("removeAt: (k: LeafIndex<unknown[]>, i: number) => void;"));
+        assert!(
+            out.contains("replace: <TElement>(k: LeafIndex<TElement[]>, v: TElement[]) => void;")
+        );
+    }
+
+    /// 한 컴포넌트의 배열 prop들이 저마다 다른 요소 타입으로 나온다 - push/replace의 TElement는
+    /// 넘긴 leaf에서 추론되므로, 원시 배열과 객체 배열이 섞여 있어도 서로 안 넘나든다.
+    #[test]
+    fn array_props_keep_distinct_element_types() {
+        let out = dts(r#"
+            component C {
+              props { tags: string[], sizes: number[], cards: { title: string }[] }
+              events { GO({ tags }) }
+              template { button(@click:GO /) }
+            }
+        "#);
+        assert!(
+            out.contains(
+                "{ tags: LeafIndex<string[]>; sizes: LeafIndex<number[]>; cards: LeafIndex<{ title: string }[]> }"
+            ),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// 객체 배열 안에 또 배열이 있는 prop(보드의 columns 모양) - 안쪽까지 재귀로 펼쳐져야
+    /// push/replace가 요소 모양을 통째로 강제한다.
+    #[test]
+    fn nested_array_inside_object_element() {
+        let out = dts(r#"
+            component C {
+              props { columns: { name: string, cards: { title: string }[] }[] }
+              events { GO({ name }) }
+              template { button(@click:GO /) }
+            }
+        "#);
+        assert!(
+            out.contains("columns: LeafIndex<{ name: string; cards: { title: string }[] }[]>"),
+            "실제 출력:\n{out}"
+        );
+    }
+
     /// 단순 event - data(값)/props(leafIndex). context 없으면 Ctx는 {}.
     /// props 타입이 leafIndex의 T로 매핑된다(string/number/bool 각각).
     #[test]
@@ -452,9 +545,10 @@ mod tests {
         ), "실제 출력:\n{out}");
     }
 
-    /// 배열/객체 prop 타입이 재귀적으로 TS 타입으로 매핑된다(T[], { k: T }).
+    /// 배열은 칸 하나가 leaf(LeafIndex<T[]>)지만 객체는 필드마다 leaf가 따로 선다 - 객체를
+    /// 통째로 감싸면 `set(props.owner.name, ..)`을 못 쓴다(runtime.ts leafTree와 같은 규칙).
     #[test]
-    fn array_and_object_prop_types() {
+    fn array_is_one_leaf_object_splits_per_field() {
         let out = dts(r#"
             component C {
               props { tags: string[], owner: { name: string, id: number } }
@@ -464,7 +558,25 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "{ tags: LeafIndex<string[]>; owner: LeafIndex<{ name: string; id: number }> }"
+                "{ tags: LeafIndex<string[]>; owner: { name: LeafIndex<string>; id: LeafIndex<number> } }"
+            ),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// 객체 안 객체도 끝까지 내려가 잎에만 leafIndex가 붙는다(보드의 ghost 모양).
+    #[test]
+    fn nested_object_leaves_only_at_scalars() {
+        let out = dts(r#"
+            component C {
+              props { ghost: { style: string, card: { title: string, urgent: bool } } }
+              events { GO({ style }) }
+              template { button(@click:GO /) }
+            }
+        "#);
+        assert!(
+            out.contains(
+                "ghost: { style: LeafIndex<string>; card: { title: LeafIndex<string>; urgent: LeafIndex<boolean> } }"
             ),
             "실제 출력:\n{out}"
         );

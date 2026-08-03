@@ -1,0 +1,15 @@
+component HandlerTypes {
+  props {
+    title: string,
+    count: number,
+    tags: string[],
+    cards: { title: string, done: bool }[],
+    ghost: { style: string, inner: { label: string } }
+  }
+  events {
+    EDIT({ title })
+  }
+  template {
+    button(class="ht" @click:EDIT) { {title} }
+  }
+}
