@@ -1,10 +1,10 @@
 // 자동완성의 자리 판정. 셸 핸들러에서 떼어 둔다 - DOM에 묶이지 않아 그것만 테스트할 수 있다.
 
 /**
- * 방금 친 큰따옴표가 핸들러 맵(`default {`)의 키를 여는 자리인가. fullname은 그 층에만 들어가므로
- * 중첩 객체나 함수 안에서는 뜨면 안 된다.
+ * 방금 친 큰따옴표가 핸들러 맵(`handlers = {`)의 키를 여는 자리인가. fullname은 그 층에만
+ * 들어가므로 중첩 객체나 함수 안에서는 뜨면 안 된다.
  *
- * 캐럿에서 뒤로 훑어 **나를 감싼** 여는 중괄호를 찾고(닫힌 쌍은 상쇄), 그 앞이 `default`면
+ * 캐럿에서 뒤로 훑어 **나를 감싼** 여는 중괄호를 찾고(닫힌 쌍은 상쇄), 그 앞이 `handlers =`면
  * 키 자리다. 감싼 괄호가 무엇인지만 보므로 절대 깊이를 셀 필요가 없다.
  *
  * 문자열/주석 안은 건너뛰지 않는다 - 여는 따옴표를 친 시점이라 그 앞은 코드이고, 앞선 문자열
@@ -21,12 +21,12 @@ export const isKeySlot = (source: string, quotePos: number) => {
   if (prev !== "{" && prev !== ",") {
     return false;
   }
-  return enclosingBraceIsDefault(source, quotePos);
+  return enclosingBraceIsHandlers(source, quotePos);
 };
 
-// 캐럿을 감싼 여는 중괄호를 뒤로 훑어 찾고(닫힌 쌍은 상쇄), 그 앞이 `default`인지 본다.
+// 캐럿을 감싼 여는 중괄호를 뒤로 훑어 찾고(닫힌 쌍은 상쇄), 그 앞이 `handlers =`인지 본다.
 // 감싼 괄호가 무엇인지만 보므로 절대 깊이를 셀 필요가 없다.
-const enclosingBraceIsDefault = (source: string, from: number) => {
+const enclosingBraceIsHandlers = (source: string, from: number) => {
   let closed = 0;
   for (let i = from - 1; i >= 0; i--) {
     const ch = source[i];
@@ -34,7 +34,7 @@ const enclosingBraceIsDefault = (source: string, from: number) => {
       closed++;
     } else if (ch === "{") {
       if (closed === 0) {
-        return /\bdefault\s*$/.test(source.slice(0, i));
+        return /\bhandlers\s*=\s*$/.test(source.slice(0, i));
       }
       closed--;
     }
