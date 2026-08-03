@@ -11,9 +11,9 @@ use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::CompileError;
 
-/// 엔트리 소스에서 핸들러 d.ts 텍스트를 낸다(compile_src와 대칭). use 그래프를 평탄화해
-/// 루트(0)에서 합성 트리를 걸어 fullname마다 시그니처를 낸다.
-pub fn handlers_dts_src(
+/// 엔트리 소스에서 핸들러 d.ts 텍스트를 낸다. use 그래프를 평탄화해 루트(0)에서 합성 트리를
+/// 걸어 fullname마다 시그니처를 낸다.
+pub fn handlers_dts(
     entry_path: &str,
     src: &str,
     loader: &impl SourceLoader,
@@ -24,7 +24,7 @@ pub fn handlers_dts_src(
 
 /// 엔트리 소스에서 핸들러 fullname 목록만 낸다(트리 순서). d.ts와 같은 순회를 쓰되 타입을
 /// 렌더하지 않는다 - 에디터 자동완성처럼 이름만 필요한 쪽이 텍스트를 되파싱하지 않게 한다.
-pub fn handler_names_src(
+pub fn handler_names(
     entry_path: &str,
     src: &str,
     loader: &impl SourceLoader,
@@ -33,8 +33,8 @@ pub fn handler_names_src(
     Ok(collect(&comps).into_iter().map(|h| h.fullname).collect())
 }
 
-/// 파일 경로로 d.ts를 낸다(compile_file과 대칭). 엔트리를 읽고 fs loader로 use를 해소한다.
-pub fn handlers_dts_file(path: &str) -> Result<String, CompileError> {
+/// 파일 경로로 d.ts를 낸다. 엔트리를 읽고 fs loader로 use를 해소한다.
+pub fn handlers_dts_from_path(path: &str) -> Result<String, CompileError> {
     let not_found = || {
         CompileError::Flatten(crate::FlattenError::NotFound {
             base: String::new(),
@@ -43,7 +43,7 @@ pub fn handlers_dts_file(path: &str) -> Result<String, CompileError> {
     };
     let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
     let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
-    handlers_dts_src(&entry.to_string_lossy(), &src, &crate::fs_loader)
+    handlers_dts(&entry.to_string_lossy(), &src, &crate::fs_loader)
 }
 
 /// 한 fullname에 대응하는 핸들러 시그니처.
@@ -455,12 +455,12 @@ mod tests {
 
     /// use 없는 단일 소스로 d.ts를 낸다(loader 미호출).
     fn dts(src: &str) -> String {
-        handlers_dts_src("entry", src, &(|_: &str, _: &str| None)).unwrap()
+        handlers_dts("entry", src, &(|_: &str, _: &str| None)).unwrap()
     }
 
     /// use 없는 단일 소스로 fullname 목록을 낸다(loader 미호출).
     fn names(src: &str) -> Vec<String> {
-        handler_names_src("entry", src, &(|_: &str, _: &str| None)).unwrap()
+        handler_names("entry", src, &(|_: &str, _: &str| None)).unwrap()
     }
 
     /// 서두 공통 타입(LeafIndex, Handler)이 나온다.

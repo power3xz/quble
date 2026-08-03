@@ -164,7 +164,7 @@ pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u
 #[no_mangle]
 pub unsafe extern "C" fn qb_handler_names(entry_ptr: *const u8, entry_len: usize) -> u32 {
     with_entry_src(entry_ptr, entry_len, |entry, src, loader| {
-        compiler::handler_names_src(entry, src, loader).map(|names| names.join("\n").into_bytes())
+        compiler::handler_names(entry, src, loader).map(|names| names.join("\n").into_bytes())
     })
 }
 
@@ -178,7 +178,7 @@ pub unsafe extern "C" fn qb_handler_names(entry_ptr: *const u8, entry_len: usize
 #[no_mangle]
 pub unsafe extern "C" fn qb_handlers_dts(entry_ptr: *const u8, entry_len: usize) -> u32 {
     with_entry_src(entry_ptr, entry_len, |entry, src, loader| {
-        compiler::handlers_dts_src(entry, src, loader).map(String::into_bytes)
+        compiler::handlers_dts(entry, src, loader).map(String::into_bytes)
     })
 }
 
