@@ -63,7 +63,7 @@ document.addEventListener("mouseup", () => {
   }, 0);
 });
 
-export default {
+export const handlers = {
   CLICK_ADD_COLUMN: (data, { props, push }) => {
     madeColumns += 1;
     push(props.columns, {

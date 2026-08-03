@@ -6,7 +6,7 @@ type AddCtx = { props: Record<string, number>; push: (a: number, e: unknown) => 
 type DelCtx = { $0: number; props: Record<string, number>; removeAt: (a: number, i: number) => void };
 
 let seq = 4; // 초기 3개 뒤 순번
-const handlers = {
+export const handlers = {
   ADD: (_data: Record<string, unknown>, ctx: AddCtx) => {
     ctx.push(ctx.props.todos, { text: `새 할 일 ${seq++}`, done: "o" });
   },
@@ -14,5 +14,3 @@ const handlers = {
     ctx.removeAt(ctx.props.todos, ctx.$0);
   },
 };
-
-export default handlers;

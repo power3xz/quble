@@ -13,7 +13,7 @@ type TManifest = {
 };
 
 /**
- * manifest.handlers가 가리키는 JS를 로드해 fullname -> handler 맵(default export)을 돌려준다.
+ * manifest.handlers가 가리키는 JS를 로드해 fullname -> handler 맵(handlers export)을 돌려준다.
  * handlers 필드가 없으면 빈 맵. 핸들러 경로는 manifest 기준 상대경로라 base로 해소한다.
  * @param manifest  파싱된 manifest 객체 ({ resources, handlers? })
  * @param base      manifest.handlers 상대경로 해소 기준 URL
@@ -25,7 +25,7 @@ export const loadHandlers = async (manifest: TManifest, base: string | URL): Pro
   }
   const url = new URL(manifest.handlers, base).href;
   const mod = await import(url);
-  return mod.default;
+  return mod.handlers;
 };
 
 /**

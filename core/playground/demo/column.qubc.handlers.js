@@ -5,7 +5,7 @@ const next = (list, current) => list[(list.indexOf(current) + 1) % list.length];
 
 let made = 0;
 
-export default {
+export const handlers = {
   CLICK_ADD_CARD: (data, { props, push }) => {
     made += 1;
     push(props.cards, {

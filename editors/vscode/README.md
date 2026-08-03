@@ -23,7 +23,7 @@ context를 타입으로 강제한다 - 잘못된 이벤트명은 컴파일 에�
 // card.qubc.handlers.ts
 import type { Handlers } from "./card.qubc";
 
-const handlers: Handlers = {
+export const handlers: Handlers = {
   // 키를 치면 fullname 후보가 뜨고, 빠진 핸들러/없는 이벤트명을 TS가 잡는다.
   'MainThumb.CLICK_THUMBNAIL': (data, { props, context, get, set }) => {
     data.avatar;                    // string (payload 값)
@@ -31,7 +31,6 @@ const handlers: Handlers = {
     set(props.avatar, get(props.name)); // props는 leafIndex - get/set으로 읽고 쓴다
   },
 };
-export default handlers;
 ```
 
 일부 이벤트만 처리하려면 `Partial<Handlers>`를 쓴다.

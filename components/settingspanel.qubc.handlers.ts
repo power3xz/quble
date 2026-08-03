@@ -8,7 +8,7 @@ import type { Handlers } from "./settingspanel.qubc";
 // SAVE/DISCARD 버튼은 dirty=false 고정이라 뜨지 않고, 두 핸들러는 store/reactivity 모델이
 // 정해진 뒤 채운다.
 
-const handlers: Partial<Handlers> = {
+export const handlers: Partial<Handlers> = {
   // 섹션 헤더 클릭 - open을 반전해 펼침/접힘.
   "General.TOGGLE_SECTION": (data, { props, get, set }) => {
     set(props.open, !get(props.open));
@@ -45,5 +45,3 @@ const handlers: Partial<Handlers> = {
     console.log(data);
   }
 };
-
-export default handlers;
