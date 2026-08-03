@@ -4,3 +4,4 @@ dist/
 .dev-host-data/
 .DS_Store
 *.qubc.d.ts
+*.wasm
