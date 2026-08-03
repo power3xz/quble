@@ -4,8 +4,9 @@
 //!
 //! props는 값이 아니라 leafIndex(주소기)라 `LeafIndex<T>`로 낸다 - `get(k)`가 그 값을 내주고
 //! `set(k, v)`가 받는다(REACTIVITY.md #7.1). 배열 leaf는 push/removeAt/replace로 조작한다.
-//! store/get의 대상 트리는 아직 미정이라 store는 뺀다. props의 T는 선언 타입을 TS로
-//! 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
+//! store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘기지만 여기서는 `any`로 둔다 -
+//! 타입을 정확히 내려면 루트 props를 시그니처마다 실어야 하고, 그 대상 트리가 아직 미정이다.
+//! props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 
 use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
@@ -76,6 +77,8 @@ type Handler<Data, Props, Ctx, Loop> = (
   params: {
     context: Ctx;
     props: Props;
+    event: Event;
+    store: any;
     get: <TValue>(k: LeafIndex<TValue>) => TValue;
     set: <TValue>(k: LeafIndex<TValue>, v: TValue) => void;
     push: <TElement>(k: LeafIndex<TElement[]>, v: TElement) => void;
@@ -491,6 +494,20 @@ mod tests {
         assert!(
             out.contains("replace: <TElement>(k: LeafIndex<TElement[]>, v: TElement[]) => void;")
         );
+    }
+
+    /// 핸들러 params에 event와 store가 있다. 런타임이 실제로 넘기는 것들이라 빠지면 핸들러가
+    /// 그것을 받는 순간 타입이 안 맞는다(core/web/runtime.ts의 핸들러 호출부).
+    #[test]
+    fn prelude_has_event_and_store() {
+        let out = dts(r#"
+            component Thumb {
+              events { CLICK({ x }) }
+              template { img(@click:CLICK /) }
+            }
+        "#);
+        assert!(out.contains("event: Event;"));
+        assert!(out.contains("store: any;"));
     }
 
     /// 한 컴포넌트의 배열 prop들이 저마다 다른 요소 타입으로 나온다 - push/replace의 TElement는
