@@ -16,15 +16,21 @@
     "onLanguage:quble"
   ],
   "dependencies": {
-    "quble-wasm-compiler": "*"
+    "quble-ts-plugin": "0.0.1"
   },
   "scripts": {
     "build": "node build.mjs",
-    "package": "npm run build && vsce package --no-dependencies --out quble-vscode.vsix",
+    "package": "npm run build && vsce package --out quble-vscode.vsix",
     "install-local": "npm run package && code --install-extension quble-vscode.vsix --force",
     "test": "node --experimental-strip-types --test --test-concurrency=1"
   },
   "contributes": {
+    "typescriptServerPlugins": [
+      {
+        "name": "quble-ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ],
     "languages": [
       {
         "id": "quble",
