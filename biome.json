@@ -12,6 +12,8 @@
       "core/playground/**",
       "core/wasm-compiler/**",
       "core/build/**",
+      "editors/vscode/src/**",
+      "editors/vscode/build.mjs",
       "!**/node_modules",
       "!**/dist",
       "!**/*.qubc.d.ts"

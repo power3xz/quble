@@ -1,0 +1,7 @@
+# 번들(dist/)만 담는다 - 소스와 의존성은 이미 그 안에 들어 있다.
+src/**
+node_modules/**
+build.mjs
+.dev-host-data/**
+**/*.ts
+**/tsconfig.json

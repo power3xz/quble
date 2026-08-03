@@ -18,9 +18,14 @@
     "noEmit": true
   },
   // 워크스페이스 멤버를 한 벌의 설정으로 함께 본다 - 멤버가 늘 때 tsconfig를 복제하지 않는다.
-  // 여기 적힌 것만 들어오므로 components/(데모/픽스처)와 editors/ 밑 에디터 이력 파일은
-  // 저절로 빠진다.
-  "include": ["core/web/**/*.ts", "core/playground/**/*.ts", "core/wasm-compiler/**/*.ts"],
+  // 여기 적힌 것만 들어오므로 components/(데모/픽스처)는 저절로 빠진다. 확장은 src/만 -
+  // 그 옆 .dev-host-data(개발 호스트 프로필)까지 끌어오면 안 된다.
+  "include": [
+    "core/web/**/*.ts",
+    "core/playground/**/*.ts",
+    "core/wasm-compiler/**/*.ts",
+    "editors/vscode/src/**/*.ts"
+  ],
   // include 패턴에 멤버 밑 node_modules가 걸리므로 명시로 끊는다. exclude를 두면 tsc의
   // 기본 제외가 덮이니 여기에 적힌 것이 전부다 - 항목을 더할 때 node_modules를 지우지 않는다.
   "exclude": ["**/node_modules"]
