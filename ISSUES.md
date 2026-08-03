@@ -71,6 +71,17 @@
   줄과 디스크 부산물을 없앤 대가). 에디터 밖 검사가 필요해지면 빌드 스텝에서 d.ts를 뽑는 길이
   있다 - 타입 생성 알맹이(`handlersDts`)는 그대로 쓸 수 있다.
 
+- **확장이 클린 클론에서 `npm install`부터 못 한다** - `editors/vscode`의 `dependencies`에
+  `"quble-ts-plugin": "0.0.1"`이 있는데 레지스트리에 없는 이름이라 404다. 실물은 `npm run
+  build`가 `node_modules/quble-ts-plugin`에 직접 놓으므로, build를 먼저 돌리면 install이 된다
+  (README도 그 순서). install보다 build가 앞서는 뒤집힌 구조다. 세 요구가 서로 물려 있다:
+  (1) `dependencies`에 이름이 있어야 VSCode가 tsserver의 `pluginProbeLocations`에 확장 경로를
+  넣는다(없으면 조용히 실패), (2) `npm install`이 그 spec으로 뭔가 설치할 수 있어야 한다
+  (`file:../ts-plugin`이면 된다), (3) vsce 포장 시점에는 **실물**이어야 한다 - 링크면
+  `npm list`가 링크 너머 devDependencies를 훑다 실패한다(ts-plugin의 `@types/node`가 루트와
+  버전이 달라 hoist되지 않고 자기 밑에 남는 것이 방아쇠). `file:`은 (2)를 만족하고 (3)에서
+  걸리며, `0.0.1`은 그 반대다.
+
 - **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
   소스에 설명을 달 수 없다(비ASCII를 쓰면 `unexpected character`로 터진다).
 
