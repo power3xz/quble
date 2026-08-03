@@ -91,3 +91,15 @@ export const toOriginal = (injection: TInjection, position: number) => {
 /** 원본 기준 오프셋을 주입본 기준으로 옮긴다. */
 export const toInjected = (injection: TInjection, position: number) =>
   injection.lead + (position <= injection.at ? position : position + injection.width);
+
+/**
+ * 주입본 기준 오프셋이 우리가 넣은 텍스트(앞의 d.ts 또는 타입 표기) 안인지. 원본에 없는
+ * 자리라 되돌릴 곳이 없다 - 하이라이팅 스팬이 여기 걸리면 버려야 한다.
+ */
+export const isInjected = (injection: TInjection, position: number) => {
+  if (position < injection.lead) {
+    return true;
+  }
+  const withoutLead = position - injection.lead;
+  return withoutLead > injection.at && withoutLead < injection.at + injection.width;
+};

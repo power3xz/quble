@@ -10,7 +10,7 @@
 import { existsSync } from "node:fs";
 import type ts from "typescript/lib/tsserverlibrary";
 import { dtsFor } from "./compiler.ts";
-import { injectionFor, type TInjection, toInjected, toOriginal } from "./inject.ts";
+import { injectionFor, isInjected, type TInjection, toInjected, toOriginal } from "./inject.ts";
 
 const HANDLERS_SUFFIX = ".qubc.handlers.ts";
 
@@ -216,6 +216,33 @@ const init = ({ typescript: tsModule }: { typescript: typeof ts }) => {
         ...info,
         textSpan: { ...info.textSpan, start: toOriginal(injection, info.textSpan.start) },
       };
+    };
+
+    // 시맨틱 하이라이팅. 스팬은 (start, length, 분류) 3개씩 평평하게 온다.
+    //
+    // syntactic 쪽은 프록시하지 않는다 - 에디터의 자동 들여쓰기/괄호 짝맞추기가 그 결과를
+    // 먹고 파일을 고쳐써서, 위치가 어긋나면 소스가 실제로 깨진다. 색만 쓰는 semantic만 맞춘다.
+    proxy.getEncodedSemanticClassifications = (fileName, span, format) => {
+      const injection = injections.get(fileName);
+      if (injection === undefined) {
+        return service.getEncodedSemanticClassifications(fileName, span, format);
+      }
+      const start = toInjected(injection, span.start);
+      const classifications = service.getEncodedSemanticClassifications(
+        fileName,
+        { start, length: toInjected(injection, span.start + span.length) - start },
+        format,
+      );
+      // 우리가 넣은 텍스트에 걸린 스팬은 원본에 자리가 없다 - 되돌리면 엉뚱한 곳을 칠한다.
+      const spans: number[] = [];
+      for (let index = 0; index < classifications.spans.length; index += 3) {
+        const at = classifications.spans[index];
+        if (isInjected(injection, at)) {
+          continue;
+        }
+        spans.push(toOriginal(injection, at), classifications.spans[index + 1], classifications.spans[index + 2]);
+      }
+      return { ...classifications, spans };
     };
 
     // 확장이 configurePlugin으로 경로를 넘기면 여기로 온다. 그전에 만든 스냅샷은 주입이

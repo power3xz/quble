@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import tsModule from "typescript";
-import { injectionFor, toInjected, toOriginal } from "./src/inject.ts";
+import { injectionFor, isInjected, toInjected, toOriginal } from "./src/inject.ts";
 
 const DTS = 'export interface Handlers {\n  "A": Handler<{}, {}, {}, {}>;\n}\n';
 
@@ -121,4 +121,23 @@ test("주입한 텍스트에서 원본 위치의 글자가 맞는다", () => {
   // 원본의 "A"가 주입본에서도 같은 글자를 가리켜야 편집기 밑줄이 제자리에 그어진다.
   const quoteAt = source.indexOf('"A"');
   assert.equal(result.text[toInjected(result, quoteAt)], '"');
+});
+
+test("우리가 넣은 텍스트 안의 위치를 가려낸다", () => {
+  const result = inject("export const handlers = {};\n");
+  assert.notEqual(result, null);
+  if (result === null) {
+    return;
+  }
+
+  // 앞에 얹은 d.ts - 원본에 없는 자리다.
+  assert.equal(isInjected(result, 0), true);
+  assert.equal(isInjected(result, result.lead - 1), true);
+  // 타입 표기(`: Partial<...>`) 안 - 역시 원본에 없다.
+  assert.equal(isInjected(result, result.lead + result.at + 1), true);
+
+  // 원본에서 온 자리는 아니다.
+  assert.equal(isInjected(result, result.lead), false);
+  assert.equal(isInjected(result, result.lead + result.at), false);
+  assert.equal(isInjected(result, result.lead + result.at + result.width), false);
 });
