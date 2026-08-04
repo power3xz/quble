@@ -8,7 +8,7 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "npm test --workspaces",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p editors/ts-plugin"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p editors/ts-plugin/tsconfig.src.json && tsc --noEmit -p editors/ts-plugin/tsconfig.test.json && node --experimental-strip-types editors/ts-plugin/typecheck-handlers.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.3"

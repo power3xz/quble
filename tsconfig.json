@@ -21,8 +21,9 @@
   // 여기 적힌 것만 들어오므로 components/(데모/픽스처)는 저절로 빠진다. 확장은 src/만 -
   // 그 옆 .dev-host-data(개발 호스트 프로필)까지 끌어오면 안 된다.
   //
-  // editors/ts-plugin만 자기 tsconfig를 둔다 - 모듈 형식이 CJS로 갈려(tsserver가 require로
-  // 싣는다) 여기 설정으로는 못 본다. typecheck 스크립트가 그쪽도 함께 돌린다.
+  // editors/ts-plugin만 자기 tsconfig를 둔다 - plugin 본체의 모듈 형식이 CJS로 갈려(tsserver가
+  // require로 싣는다) 여기 설정으로는 못 본다. 그쪽은 본체와 테스트가 다시 갈리므로 설정이
+  // 셋이다(솔루션 + src + test). typecheck 스크립트가 함께 돌린다.
   "include": [
     "core/web/**/*.ts",
     "core/playground/**/*.ts",
@@ -31,5 +32,9 @@
   ],
   // include 패턴에 멤버 밑 node_modules가 걸리므로 명시로 끊는다. exclude를 두면 tsc의
   // 기본 제외가 덮이니 여기에 적힌 것이 전부다 - 항목을 더할 때 node_modules를 지우지 않는다.
-  "exclude": ["**/node_modules"]
+  //
+  // *.qubc.handlers.ts는 tsc가 볼 수 없다 - 핸들러 표의 타입을 ts-plugin이 편집기 스냅샷에만
+  // 주입하므로 주입 없이 열면 ctx가 unknown이 된다. 대신 editors/ts-plugin/typecheck-handlers.ts가
+  // LanguageService에 plugin을 올려 검사한다(typecheck 스크립트가 함께 돌린다).
+  "exclude": ["**/node_modules", "**/*.qubc.handlers.ts"]
 }
