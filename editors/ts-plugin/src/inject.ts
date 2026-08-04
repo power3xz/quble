@@ -16,7 +16,10 @@ import type ts from "typescript/lib/tsserverlibrary";
 export type TInjection = { text: string; lead: number; at: number; width: number };
 
 /**
- * `export const handlers` 선언의 이름 끝 오프셋. 없으면 -1.
+ * `handlers` 선언의 이름 끝 오프셋. 없으면 -1.
+ *
+ * export 여부는 보지 않는다 - 나중에 묶어 내보내는 경우(`export { handlers }`)에도 붙어야 하고,
+ * 타입이 필요한 이유는 그 이름이 핸들러 표라는 것이지 모듈 밖으로 나가는지가 아니다.
  *
  * 정규식이 아니라 파서로 찾는다 - 주석이나 문자열 안의 같은 글자에 속지 않는다.
  * 이미 타입 표기가 있으면 건드리지 않는다(-1) - 사람이 적은 것을 덮으면 안 된다.
@@ -25,10 +28,6 @@ const handlersNameEnd = (tsModule: typeof ts, source: string) => {
   const file = tsModule.createSourceFile("h.ts", source, tsModule.ScriptTarget.Latest, true);
   for (const statement of file.statements) {
     if (!tsModule.isVariableStatement(statement)) {
-      continue;
-    }
-    const exported = statement.modifiers?.some((m) => m.kind === tsModule.SyntaxKind.ExportKeyword);
-    if (exported !== true) {
       continue;
     }
     for (const declaration of statement.declarationList.declarations) {

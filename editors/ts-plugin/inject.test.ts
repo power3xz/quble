@@ -45,12 +45,20 @@ test("handlers 선언이 없으면 건드리지 않는다", () => {
   assert.equal(inject("export function seed() {}\n"), null);
 });
 
-test("export가 아닌 handlers는 대상이 아니다", () => {
-  assert.equal(inject("const handlers = {};\n"), null);
+test("export가 아니어도 붙인다 - 나중에 묶어 내보낼 수 있다", () => {
+  const result = inject("const handlers = {};\nexport { handlers };\n");
+
+  assert.match(result?.text ?? "", /const handlers: Partial<__qubleHandlers> = \{\};/);
 });
 
 test("이미 타입이 적혀 있으면 덮지 않는다", () => {
   assert.equal(inject("export const handlers: Partial<Handlers> = {};\n"), null);
+  assert.equal(inject("const handlers: Partial<Handlers> = {};\n"), null);
+});
+
+test("이름이 handlers가 아니면 대상이 아니다", () => {
+  assert.equal(inject("const handlersUrl = {};\n"), null);
+  assert.equal(inject("export const myHandlers = {};\n"), null);
 });
 
 test("주석이나 문자열 안의 handlers에 속지 않는다", () => {
