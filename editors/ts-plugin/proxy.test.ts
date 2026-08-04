@@ -61,6 +61,9 @@ const SOURCE = [
   "  return 2;",
   "};",
   "",
+  // 시맨틱 분류(하이라이팅)가 걸리는 이름 - 클래스여야 분류가 나온다.
+  "class Marker {}",
+  "",
 ].join("\n");
 
 writeFileSync(QUBC, COMPONENT);
@@ -334,6 +337,30 @@ test("심볼 검색 - 결과가 원본 자리를 가리킨다", () => {
   // textSpan은 이름이 아니라 선언 전체를 덮는다 - 보정이 어긋나면 다른 글자가 나온다.
   assert.notEqual(found, undefined);
   assert.equal(textOf(found?.textSpan), "helper = (value: string) => value");
+});
+
+test("시맨틱 분류(비인코딩) - 칠할 자리가 원본이다", () => {
+  const proxy = setup();
+  const classified = proxy.getSemanticClassifications(FILE, { start: 0, length: SOURCE.length });
+  const marker = classified.find((entry) => textOf(entry.textSpan) === "Marker");
+
+  // 보정을 빠뜨리면 주입본 좌표라 원본에서는 엉뚱한 글자를 칠한다.
+  assert.notEqual(marker, undefined, `분류 결과: ${classified.map((c) => textOf(c.textSpan)).join(", ")}`);
+});
+
+test("시맨틱 분류 - 인코딩과 비인코딩이 같은 자리를 가리킨다", () => {
+  const proxy = setup();
+  const range = { start: 0, length: SOURCE.length };
+
+  const plain = proxy.getSemanticClassifications(FILE, range).map((entry) => textOf(entry.textSpan));
+  const encoded = proxy.getEncodedSemanticClassifications(FILE, range);
+  const fromEncoded: string[] = [];
+  for (let index = 0; index < encoded.spans.length; index += 3) {
+    fromEncoded.push(textOf({ start: encoded.spans[index], length: encoded.spans[index + 1] }));
+  }
+
+  // 한쪽만 보정하면 부르는 쪽에 따라 색이 밀린다 - 실제로 그런 상태였다.
+  assert.deepEqual(plain, fromEncoded);
 });
 
 test("진단 - 앞에 얹은 d.ts에서 난 것은 사용자에게 보이지 않는다", () => {
