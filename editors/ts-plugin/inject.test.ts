@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import tsModule from "typescript";
-import { injectionFor, isInjected, toInjected, toOriginal } from "./src/inject.ts";
+import { injectionFor, isInjected, locationToOriginal, spanToOriginal, toInjected, toOriginal } from "./src/inject.ts";
 
 const DTS = 'export interface Handlers {\n  "A": Handler<{}, {}, {}, {}>;\n}\n';
 
@@ -129,6 +129,85 @@ test("주입한 텍스트에서 원본 위치의 글자가 맞는다", () => {
   // 원본의 "A"가 주입본에서도 같은 글자를 가리켜야 편집기 밑줄이 제자리에 그어진다.
   const quoteAt = source.indexOf('"A"');
   assert.equal(result.text[toInjected(result, quoteAt)], '"');
+});
+
+test("스팬을 되돌리면 원본의 같은 글자 범위를 가리킨다", () => {
+  const source = 'export const handlers = {\n  "A": () => {},\n};\n';
+  const result = inject(source);
+  assert.notEqual(result, null);
+  if (result === null) {
+    return;
+  }
+
+  // 주입본에서 "A"를 덮는 스팬 - 되돌리면 원본의 "A"와 같은 자리여야 한다.
+  const quoteAt = source.indexOf('"A"');
+  const span = { start: toInjected(result, quoteAt), length: 3 };
+
+  assert.deepEqual(spanToOriginal(result, span), { start: quoteAt, length: 3 });
+});
+
+test("삽입 지점을 걸친 스팬은 표기 길이를 뺀 만큼으로 줄인다", () => {
+  const source = "export const handlers = {};\n";
+  const result = inject(source);
+  assert.notEqual(result, null);
+  if (result === null) {
+    return;
+  }
+
+  // `handlers`의 s부터 `= {`까지 - 그 사이에 우리가 심은 `: Partial<...>`이 끼어 있다.
+  // start만 옮기고 길이를 그대로 두면 원본에서 표기 길이만큼 뒤로 넘친다.
+  const from = result.at - 1;
+  const to = result.at + 3;
+  const span = { start: toInjected(result, from), length: toInjected(result, to) - toInjected(result, from) };
+
+  assert.deepEqual(spanToOriginal(result, span), { start: from, length: to - from });
+});
+
+test("contextSpan도 함께 되돌린다 - 빠뜨리면 점프가 엉뚱한 자리에 내려앉는다", () => {
+  const result = inject("export const handlers = {};\n");
+  assert.notEqual(result, null);
+  if (result === null) {
+    return;
+  }
+
+  const location = {
+    fileName: "h.ts",
+    textSpan: { start: toInjected(result, 7), length: 5 },
+    contextSpan: { start: toInjected(result, 0), length: 6 },
+  };
+
+  assert.deepEqual(locationToOriginal(result, "h.ts", location), {
+    fileName: "h.ts",
+    textSpan: { start: 7, length: 5 },
+    contextSpan: { start: 0, length: 6 },
+  });
+});
+
+test("다른 파일의 위치는 건드리지 않는다 - 그쪽은 주입본이 아니다", () => {
+  const result = inject("export const handlers = {};\n");
+  assert.notEqual(result, null);
+  if (result === null) {
+    return;
+  }
+
+  const location = { fileName: "other.ts", textSpan: { start: 3, length: 5 } };
+
+  assert.deepEqual(locationToOriginal(result, "h.ts", location), location);
+});
+
+test("contextSpan이 없으면 없는 채로 둔다", () => {
+  const result = inject("export const handlers = {};\n");
+  assert.notEqual(result, null);
+  if (result === null) {
+    return;
+  }
+
+  const back = locationToOriginal(result, "h.ts", {
+    fileName: "h.ts",
+    textSpan: { start: toInjected(result, 4), length: 2 },
+  });
+
+  assert.equal("contextSpan" in back, false);
 });
 
 test("우리가 넣은 텍스트 안의 위치를 가려낸다", () => {

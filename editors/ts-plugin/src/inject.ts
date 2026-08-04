@@ -102,3 +102,33 @@ export const isInjected = (injection: TInjection, position: number) => {
   const withoutLead = position - injection.lead;
   return withoutLead > injection.at && withoutLead < injection.at + injection.width;
 };
+
+/**
+ * 스팬 하나를 원본 기준으로 되돌린다. 길이는 양 끝을 각각 되돌려 다시 잰다 - 스팬이 삽입
+ * 지점을 걸치면 그 안에 표기 길이가 끼어 있어, start만 옮기고 길이를 그대로 두면 뒤가 넘친다.
+ */
+export const spanToOriginal = (injection: TInjection, span: ts.TextSpan): ts.TextSpan => {
+  const start = toOriginal(injection, span.start);
+  return { start, length: toOriginal(injection, span.start + span.length) - start };
+};
+
+/**
+ * `textSpan`/`contextSpan`을 가진 결과 하나를 원본 기준으로 되돌린다. 주입한 파일에서 온
+ * 것만 손대고 다른 파일의 위치는 그대로 둔다 - 그쪽은 주입본이 아니다.
+ *
+ * `contextSpan`을 빠뜨리면 편집기가 그것으로 점프해 엉뚱한 자리에 내려앉는다.
+ */
+export const locationToOriginal = <T extends { fileName?: string; textSpan: ts.TextSpan; contextSpan?: ts.TextSpan }>(
+  injection: TInjection,
+  fileName: string,
+  location: T,
+): T => {
+  if (location.fileName !== undefined && location.fileName !== fileName) {
+    return location;
+  }
+  return {
+    ...location,
+    textSpan: spanToOriginal(injection, location.textSpan),
+    ...(location.contextSpan === undefined ? {} : { contextSpan: spanToOriginal(injection, location.contextSpan) }),
+  };
+};
