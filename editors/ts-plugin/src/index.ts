@@ -10,7 +10,15 @@
 import { existsSync } from "node:fs";
 import type ts from "typescript/lib/tsserverlibrary";
 import { dtsFor } from "./compiler.ts";
-import { injectionFor, isInjected, type TInjection, toInjected, toOriginal } from "./inject.ts";
+import {
+  injectionFor,
+  isInjected,
+  locationToOriginal,
+  spanToOriginal,
+  type TInjection,
+  toInjected,
+  toOriginal,
+} from "./inject.ts";
 
 const HANDLERS_SUFFIX = ".qubc.handlers.ts";
 
@@ -130,6 +138,19 @@ const init = ({ typescript: tsModule }: { typescript: typeof ts }) => {
     // 앞에 붙인 d.ts 안에서 난 진단은 사용자 코드가 아니므로 버린다.
     const inLead = (injection: TInjection, start: number | undefined) => start !== undefined && start < injection.lead;
 
+    // 오프셋을 줄/열로 바꾸는 자리. tsserver가 응답을 만들 때 두 갈래로 나뉜다:
+    // textSpan은 열린 파일 버퍼(scriptInfo, 원본)로 세고, definitions/references는 이것으로
+    // 센다(주입본). 우리가 스팬을 원본 기준으로 되돌려 내보내므로 이쪽도 원본으로 세야
+    // 한다 - 그러지 않으면 정의 위치만 lead만큼 밀려 엉뚱한 줄로 점프한다.
+    proxy.toLineColumnOffset = (fileName, position) => {
+      const injection = injections.get(fileName);
+      const base = service.toLineColumnOffset?.(fileName, position);
+      if (injection === undefined || base === undefined) {
+        return base ?? { line: 0, character: 0 };
+      }
+      return service.toLineColumnOffset?.(fileName, toInjected(injection, position)) ?? base;
+    };
+
     proxy.getSemanticDiagnostics = (fileName) => {
       const diagnostics = service.getSemanticDiagnostics(fileName);
       const injection = injections.get(fileName);
@@ -180,26 +201,157 @@ const init = ({ typescript: tsModule }: { typescript: typeof ts }) => {
       );
     };
 
-    proxy.getDefinitionAtPosition = (fileName, position) => {
+    // 위치를 하나 받아 위치 목록을 내는 것들(정의/타입정의/구현/참조/강조)은 보정이 같다:
+    // 들어가는 position은 주입본으로, 나오는 스팬은 원본으로. 주입한 d.ts로 떨어지는 결과는
+    // 갈 곳이 없어(디스크에 없는 텍스트다) 버린다.
+    const atPosition = <T extends { fileName?: string; textSpan: ts.TextSpan; contextSpan?: ts.TextSpan }>(
+      fileName: string,
+      position: number,
+      query: (at: number) => readonly T[] | undefined,
+    ) => {
       const injection = injections.get(fileName);
-      const definitions = service.getDefinitionAtPosition(
+      const found = query(injection === undefined ? position : toInjected(injection, position));
+      if (found === undefined || injection === undefined) {
+        return found;
+      }
+      const ours = (item: T) => item.fileName === undefined || item.fileName === fileName;
+      return found
+        .filter((item) => !ours(item) || !inLead(injection, item.textSpan.start))
+        .map((item) => locationToOriginal(injection, fileName, item));
+    };
+
+    proxy.getDefinitionAtPosition = (fileName, position) =>
+      atPosition(fileName, position, (at) => service.getDefinitionAtPosition(fileName, at));
+
+    // 편집기(VS Code)가 Go to Definition에 실제로 쓰는 것은 이쪽이다 - definitions만 고쳐
+    // 두면 정작 점프가 주입본 좌표로 나가 엉뚱한 자리에 내려앉는다.
+    proxy.getDefinitionAndBoundSpan = (fileName, position) => {
+      const injection = injections.get(fileName);
+      const result = service.getDefinitionAndBoundSpan(
         fileName,
         injection === undefined ? position : toInjected(injection, position),
       );
-      if (definitions === undefined || injection === undefined) {
-        return definitions;
+      if (result === undefined || injection === undefined) {
+        return result;
       }
-      // 주입한 d.ts로 가는 정의는 갈 곳이 없다(디스크에 없는 텍스트다) - 뺀다.
-      return definitions
-        .filter((definition) => definition.fileName !== fileName || !inLead(injection, definition.textSpan.start))
-        .map((definition) =>
-          definition.fileName === fileName
-            ? {
-                ...definition,
-                textSpan: { ...definition.textSpan, start: toOriginal(injection, definition.textSpan.start) },
-              }
-            : definition,
-        );
+      const definitions = result.definitions
+        ?.filter((definition) => definition.fileName !== fileName || !inLead(injection, definition.textSpan.start))
+        .map((definition) => locationToOriginal(injection, fileName, definition));
+      // textSpan은 커서 밑 낱말의 범위다 - 이것이 어긋나면 밑줄과 클릭 판정이 밀린다.
+      return { ...result, definitions, textSpan: spanToOriginal(injection, result.textSpan) };
+    };
+
+    proxy.getTypeDefinitionAtPosition = (fileName, position) =>
+      atPosition(fileName, position, (at) => service.getTypeDefinitionAtPosition(fileName, at));
+
+    proxy.getImplementationAtPosition = (fileName, position) =>
+      atPosition(fileName, position, (at) => service.getImplementationAtPosition(fileName, at));
+
+    proxy.getReferencesAtPosition = (fileName, position) => {
+      const found = atPosition(fileName, position, (at) => service.getReferencesAtPosition(fileName, at));
+      return found === undefined ? undefined : [...found];
+    };
+
+    // 참조는 한 겹 더 싸여 있다 - 심볼마다 references 배열을 들고, 그 심볼의 정의 위치도
+    // 따로 갖는다(definition.textSpan). 둘 다 되돌려야 목록과 미리보기가 맞는다.
+    proxy.findReferences = (fileName, position) => {
+      const injection = injections.get(fileName);
+      const symbols = service.findReferences(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+      );
+      if (symbols === undefined || injection === undefined) {
+        return symbols;
+      }
+      return symbols.map((symbol) => ({
+        ...symbol,
+        definition: locationToOriginal(injection, fileName, symbol.definition),
+        references: symbol.references
+          .filter((reference) => reference.fileName !== fileName || !inLead(injection, reference.textSpan.start))
+          .map((reference) => locationToOriginal(injection, fileName, reference)),
+      }));
+    };
+
+    // 같은 심볼 강조. 파일마다 스팬 묶음이 오므로 우리 파일 것만 되돌린다.
+    proxy.getDocumentHighlights = (fileName, position, filesToSearch) => {
+      const injection = injections.get(fileName);
+      const highlights = service.getDocumentHighlights(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+        filesToSearch,
+      );
+      if (highlights === undefined || injection === undefined) {
+        return highlights;
+      }
+      return highlights.map((entry) =>
+        entry.fileName !== fileName
+          ? entry
+          : {
+              ...entry,
+              highlightSpans: entry.highlightSpans
+                .filter((span) => !inLead(injection, span.textSpan.start))
+                .map((span) => ({
+                  ...span,
+                  textSpan: spanToOriginal(injection, span.textSpan),
+                  ...(span.contextSpan === undefined
+                    ? {}
+                    : { contextSpan: spanToOriginal(injection, span.contextSpan) }),
+                })),
+            },
+      );
+    };
+
+    // 이름 바꾸기. 여기가 어긋나면 색이 아니라 소스가 실제로 깨진다 - 편집기가 이 위치를
+    // 그대로 고쳐쓴다. 우리가 넣은 텍스트에 걸린 자리는 원본에 없으므로 반드시 버린다.
+    proxy.getRenameInfo = (fileName, position, options) => {
+      const injection = injections.get(fileName);
+      const info = service.getRenameInfo(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+        options,
+      );
+      if (injection === undefined || info.canRename !== true) {
+        return info;
+      }
+      return { ...info, triggerSpan: spanToOriginal(injection, info.triggerSpan) };
+    };
+
+    proxy.findRenameLocations = (
+      fileName,
+      position,
+      findInStrings,
+      findInComments,
+      preferences?: boolean | ts.UserPreferences,
+    ) => {
+      const injection = injections.get(fileName);
+      const locations = service.findRenameLocations(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+        findInStrings,
+        findInComments,
+        // 오버로드가 boolean/UserPreferences 두 갈래다 - 받은 것을 그대로 넘긴다.
+        preferences as boolean,
+      );
+      if (locations === undefined || injection === undefined) {
+        return locations;
+      }
+      return locations
+        .filter((location) => location.fileName !== fileName || !isInjected(injection, location.textSpan.start))
+        .map((location) => locationToOriginal(injection, fileName, location));
+    };
+
+    // 시그니처 도움말 - 인자를 치는 동안 뜨는 것이라 위치가 밀리면 엉뚱한 인자를 짚는다.
+    proxy.getSignatureHelpItems = (fileName, position, options) => {
+      const injection = injections.get(fileName);
+      const help = service.getSignatureHelpItems(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+        options,
+      );
+      if (help === undefined || injection === undefined) {
+        return help;
+      }
+      return { ...help, applicableSpan: spanToOriginal(injection, help.applicableSpan) };
     };
 
     proxy.getQuickInfoAtPosition = (fileName, position) => {

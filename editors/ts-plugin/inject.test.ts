@@ -210,6 +210,28 @@ test("contextSpan이 없으면 없는 채로 둔다", () => {
   assert.equal("contextSpan" in back, false);
 });
 
+test("원본 오프셋을 주입본에서 세면 원본과 같은 줄이다", () => {
+  // tsserver는 definitions를 toLineColumnOffset(주입본 기준)으로 줄/열로 바꾼다. 우리가
+  // 원본 오프셋을 toInjected로 옮겨 넘겨야 그 셈이 원본 줄과 맞는다 - 안 그러면 앞에 얹은
+  // d.ts가 한 줄이라 정의 위치만 그 줄 수만큼 밀린다.
+  const source = "export const handlers = {\n  A: () => {},\n};\nconst tail = 1;\n";
+  const result = inject(source);
+  assert.notEqual(result, null);
+  if (result === null) {
+    return;
+  }
+
+  const lineOf = (text: string, offset: number) => text.slice(0, offset).split("\n").length;
+
+  for (let position = 0; position < source.length; position++) {
+    assert.equal(
+      lineOf(result.text, toInjected(result, position)),
+      lineOf(source, position),
+      `원본 ${position}의 줄이 어긋난다`,
+    );
+  }
+});
+
 test("우리가 넣은 텍스트 안의 위치를 가려낸다", () => {
   const result = inject("export const handlers = {};\n");
   assert.notEqual(result, null);
