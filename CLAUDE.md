@@ -21,6 +21,7 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 - **REACTIVITY.md** - reactivity + handler model (store, `get`/`set`) - the settled conclusion.
 - **ROADMAP.md** - feature progress by domain (what is done / in-flight / not started).
 - **ISSUES.md** - known problems (symptom + repro; fix filled in once decided).
+- **NEXT.md** - what to do next, and what is still undecided. Entries are removed once done.
 - **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
 - **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
