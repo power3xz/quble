@@ -54,6 +54,13 @@ const SOURCE = [
   "  CLICK: (_data, ctx) => other(String(ctx.props.name)),",
   "};",
   "",
+  // 쓰지 않는 변수 - 제안 진단(회색 힌트)이 걸린다. handlers 선언 뒤라 보정에 width까지
+  // 관여하는 구간이고, 그래서 보정을 빠뜨리면 원본 밖으로 밀려난다.
+  "const tail = () => {",
+  "  const spare = 1;",
+  "  return 2;",
+  "};",
+  "",
 ].join("\n");
 
 writeFileSync(QUBC, COMPONENT);
@@ -272,6 +279,61 @@ test("빠른 수정 - 진단 자리를 보고 고칠 것을 찾는다", () => {
       }
     }
   }
+});
+
+test("import 정리 - 고치는 자리가 import 문이다(엉뚱한 코드를 자르면 안 된다)", () => {
+  const proxy = setup();
+  const changes = proxy.organizeImports({ type: "file", fileName: FILE }, {}, {});
+
+  for (const change of changes) {
+    if (change.fileName !== FILE) {
+      continue;
+    }
+    for (const edit of change.textChanges) {
+      // 이 파일에는 import가 없으므로 편집이 나온다면 최소한 원본 범위 안이어야 한다.
+      assert.equal(edit.span.start <= SOURCE.length, true, `편집이 원본 밖: ${textOf(edit.span)}`);
+    }
+  }
+});
+
+test("회색 힌트 - 쓰지 않는 변수를 그 자리에 표시한다", () => {
+  const proxy = setup();
+  const found = proxy.getSuggestionDiagnostics(FILE);
+  const unused = found.find((diagnostic) => textOf({ start: diagnostic.start, length: diagnostic.length }) === "spare");
+
+  // 보정을 빠뜨리면 파일 끝 밖으로 밀려 화면에 아예 안 그려진다.
+  assert.notEqual(unused, undefined, `쓰지 않는 변수를 못 찾았다: ${found.map((d) => textOf(d)).join(", ")}`);
+});
+
+test("호출 계층 - 준비 항목이 원본 자리를 가리킨다", () => {
+  const proxy = setup();
+  const prepared = proxy.prepareCallHierarchy(FILE, at("helper", offsetOf("const helper")));
+  const item = Array.isArray(prepared) ? prepared[0] : prepared;
+
+  assert.notEqual(item, undefined);
+  assert.equal(textOf(item?.selectionSpan), "helper");
+});
+
+test("호출 계층 - 들어오는 호출의 자리가 원본이다", () => {
+  const proxy = setup();
+  const calls = proxy.provideCallHierarchyIncomingCalls(FILE, at("helper", offsetOf("const helper")));
+
+  assert.equal(calls.length > 0, true);
+  for (const call of calls) {
+    for (const span of call.fromSpans) {
+      assert.equal(textOf(span), "helper");
+    }
+  }
+});
+
+test("심볼 검색 - 결과가 원본 자리를 가리킨다", () => {
+  const proxy = setup();
+  const items = proxy.getNavigateToItems("helper", undefined, FILE);
+  const found = items.find((item) => item.fileName === FILE && item.name === "helper");
+
+  // textSpan은 이름이 아니라 선언 전체를 덮는다 - 보정이 어긋나면 다른 글자가 나온다.
+  assert.notEqual(found, undefined);
+  assert.equal(textOf(found?.textSpan), "helper = (value: string) => value");
 });
 
 test("진단 - 앞에 얹은 d.ts에서 난 것은 사용자에게 보이지 않는다", () => {

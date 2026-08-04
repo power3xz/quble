@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import type ts from "typescript/lib/tsserverlibrary";
 import { dtsFor } from "./compiler.ts";
 import {
+  callHierarchyItemToOriginal,
   fileEditsToOriginal,
   injectionFor,
   isInjected,
@@ -422,6 +423,138 @@ export const pluginInit = ({ typescript: tsModule }: { typescript: typeof ts }) 
         return combined;
       }
       return { ...combined, changes: fileEditsToOriginal(injection, scope.fileName, combined.changes) };
+    };
+
+    // import 정리. 위치를 받지 않지만 파일 전체를 고쳐쓰므로 편집 자리가 어긋나면 import가
+    // 아니라 엉뚱한 코드가 잘린다 - 실제로 그랬다.
+    proxy.organizeImports = (args, formatOptions, preferences) => {
+      const changes = service.organizeImports(args, formatOptions, preferences);
+      const injection = injections.get(args.fileName);
+      return injection === undefined ? changes : fileEditsToOriginal(injection, args.fileName, changes);
+    };
+
+    // 파일 이름이 바뀌면 그것을 가리키던 import를 고친다 - 우리 파일도 대상이 될 수 있다.
+    proxy.getEditsForFileRename = (oldFilePath, newFilePath, formatOptions, preferences) => {
+      const changes = service.getEditsForFileRename(oldFilePath, newFilePath, formatOptions, preferences);
+      // 어느 파일이 고쳐질지 모르므로 주입된 것 전부를 되돌린다.
+      let mapped = changes;
+      for (const [fileName, injection] of injections) {
+        mapped = fileEditsToOriginal(injection, fileName, mapped);
+      }
+      return mapped;
+    };
+
+    // 붙여넣기가 부족한 import를 채워 준다. 넣을 자리가 밀리면 코드 한복판에 import가 박힌다.
+    // 붙여넣을 위치는 TextSpan이 아니라 TextRange(pos/end)로 온다.
+    proxy.getPasteEdits = (args, formatOptions) => {
+      const injection = injections.get(args.targetFile);
+      const pasted = service.getPasteEdits(
+        injection === undefined
+          ? args
+          : {
+              ...args,
+              pasteLocations: args.pasteLocations.map((range) => ({
+                pos: toInjected(injection, range.pos),
+                end: toInjected(injection, range.end),
+              })),
+            },
+        formatOptions,
+      );
+      return injection === undefined
+        ? pasted
+        : { ...pasted, edits: fileEditsToOriginal(injection, args.targetFile, pasted.edits) };
+    };
+
+    // 코드 액션 실행 - 편집을 그대로 적용하므로 위치가 어긋나면 소스가 깨진다.
+    // 오버로드가 여럿이라 인자를 그대로 넘긴다.
+    // biome-ignore lint/suspicious/noExplicitAny: applyCodeActionCommand는 오버로드가 6개다.
+    proxy.applyCodeActionCommand = ((...args: any[]) => (service.applyCodeActionCommand as any)(...args)) as never;
+
+    // 회색 힌트(쓰지 않는 변수 등). 진단과 같은 보정이다 - 안 하면 파일 끝 밖으로 밀려
+    // 화면에 아예 안 그려진다.
+    proxy.getSuggestionDiagnostics = (fileName) => {
+      const diagnostics = service.getSuggestionDiagnostics(fileName);
+      const injection = injections.get(fileName);
+      if (injection === undefined) {
+        return diagnostics;
+      }
+      return diagnostics
+        .filter((diagnostic) => !inLead(injection, diagnostic.start))
+        .map((diagnostic) => {
+          const start = toOriginal(injection, diagnostic.start);
+          return { ...diagnostic, start, length: toOriginal(injection, diagnostic.start + diagnostic.length) - start };
+        });
+    };
+
+    // 심볼 검색(Cmd+T). 여러 파일의 결과가 섞여 오므로 주입된 것만 되돌린다.
+    proxy.getNavigateToItems = (searchValue, maxResultCount, fileName, excludeDtsFiles, excludeLibFiles) => {
+      const items = service.getNavigateToItems(searchValue, maxResultCount, fileName, excludeDtsFiles, excludeLibFiles);
+      return items.map((item) => {
+        const injection = injections.get(item.fileName);
+        return injection === undefined ? item : { ...item, textSpan: spanToOriginal(injection, item.textSpan) };
+      });
+    };
+
+    // 호출 계층. 항목의 파일 키가 fileName이 아니라 file이라 따로 되돌린다.
+    proxy.prepareCallHierarchy = (fileName, position) => {
+      const injection = injections.get(fileName);
+      const prepared = service.prepareCallHierarchy(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+      );
+      if (prepared === undefined || injection === undefined) {
+        return prepared;
+      }
+      return Array.isArray(prepared)
+        ? prepared.map((item) => callHierarchyItemToOriginal(injection, fileName, item))
+        : callHierarchyItemToOriginal(injection, fileName, prepared);
+    };
+
+    proxy.provideCallHierarchyIncomingCalls = (fileName, position) => {
+      const injection = injections.get(fileName);
+      const calls = service.provideCallHierarchyIncomingCalls(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+      );
+      if (injection === undefined) {
+        return calls;
+      }
+      // fromSpans는 호출하는 쪽 파일(call.from.file)의 자리다 - 그 파일의 주입으로 되돌린다.
+      return calls.map((call) => {
+        const caller = injections.get(call.from.file);
+        return {
+          from: callHierarchyItemToOriginal(injection, fileName, call.from),
+          fromSpans: caller === undefined ? call.fromSpans : call.fromSpans.map((span) => spanToOriginal(caller, span)),
+        };
+      });
+    };
+
+    proxy.provideCallHierarchyOutgoingCalls = (fileName, position) => {
+      const injection = injections.get(fileName);
+      const calls = service.provideCallHierarchyOutgoingCalls(
+        fileName,
+        injection === undefined ? position : toInjected(injection, position),
+      );
+      if (injection === undefined) {
+        return calls;
+      }
+      // outgoing의 fromSpans는 호출하는 쪽(= 이 파일)의 자리다.
+      return calls.map((call) => ({
+        to: callHierarchyItemToOriginal(injection, fileName, call.to),
+        fromSpans: call.fromSpans.map((span) => spanToOriginal(injection, span)),
+      }));
+    };
+
+    // "다른 파일로 옮기기"의 후보 목록 - 위치를 받아 판단하므로 입력만 보정하면 된다.
+    proxy.getMoveToRefactoringFileSuggestions = (fileName, positionOrRange, preferences, triggerReason, kind) => {
+      const injection = injections.get(fileName);
+      return service.getMoveToRefactoringFileSuggestions(
+        fileName,
+        injection === undefined ? positionOrRange : positionOrRangeToInjected(injection, positionOrRange),
+        preferences,
+        triggerReason,
+        kind,
+      );
     };
 
     // 시그니처 도움말 - 인자를 치는 동안 뜨는 것이라 위치가 밀리면 엉뚱한 인자를 짚는다.

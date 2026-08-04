@@ -164,3 +164,20 @@ export const fileEditsToOriginal = (
             .map((edit) => ({ ...edit, span: spanToOriginal(injection, edit.span) })),
         },
   );
+
+/**
+ * 호출 계층 항목을 원본 기준으로 되돌린다. 파일 키가 `fileName`이 아니라 `file`이라
+ * [[locationToOriginal]]로는 처리되지 않는다.
+ */
+export const callHierarchyItemToOriginal = (
+  injection: TInjection,
+  fileName: string,
+  item: ts.CallHierarchyItem,
+): ts.CallHierarchyItem =>
+  item.file !== fileName
+    ? item
+    : {
+        ...item,
+        span: spanToOriginal(injection, item.span),
+        selectionSpan: spanToOriginal(injection, item.selectionSpan),
+      };
