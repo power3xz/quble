@@ -76,6 +76,7 @@ export const pluginInit = ({ typescript: tsModule }: { typescript: typeof ts }) 
     const injectionCache = new Map<string, { source: string; version: string; injection: TInjection | null }>();
 
     // 짝 .qubc가 바뀌었는지는 handlers.ts 버전으로 알 수 없다 - .qubc 자체의 버전을 본다.
+    // 캐시 판정과 아래 버전 문자열이 이것을 함께 쓴다.
     const originalGetScriptVersion = host.getScriptVersion.bind(host);
     const qubcVersion = (qubcPath: string) => originalGetScriptVersion(qubcPath);
 
@@ -84,14 +85,28 @@ export const pluginInit = ({ typescript: tsModule }: { typescript: typeof ts }) 
     // wasm 경로가 생기면 세대를 올려 두 단을 모두 통과시킨다.
     let generation = 0;
 
+    // handlers.ts의 버전에 짝 .qubc의 버전을 섞는다. handlers.ts 자신은 그대로인데 .qubc만
+    // 바뀌는 경우가 흔한데(이벤트 추가/삭제), 그때 버전이 그대로면 TS가 스냅샷을 다시 읽지
+    // 않아 주입이 옛 d.ts에 머문다 - 편집기에서 .qubc를 고쳐도 타입이 안 따라온다.
     host.getScriptVersion = (fileName) => {
       const version = originalGetScriptVersion(fileName);
-      return qubcFor(fileName) === null ? version : `${version}#${generation}`;
+      const qubc = qubcFor(fileName);
+      return qubc === null ? version : `${version}#${generation}#${qubcVersion(qubc)}`;
     };
 
+    // 프로젝트 버전에도 같은 것이 필요하다 - 파일 버전이 바뀌어도 프로젝트 버전이 그대로면
+    // TS가 파일 버전을 묻지도 않는다. 어느 .qubc가 바뀌었는지는 여기서 모르므로 짝이 있는
+    // 파일들의 버전을 모아 잇는다.
     const originalGetProjectVersion = host.getProjectVersion?.bind(host);
     if (originalGetProjectVersion !== undefined) {
-      host.getProjectVersion = () => `${originalGetProjectVersion()}#${generation}`;
+      host.getProjectVersion = () => {
+        const qubcVersions = (host.getScriptFileNames() ?? [])
+          .map(qubcFor)
+          .filter((qubc): qubc is string => qubc !== null)
+          .map(qubcVersion)
+          .join(",");
+        return `${originalGetProjectVersion()}#${generation}#${qubcVersions}`;
+      };
     }
 
     const dtsTextFor = (qubcPath: string) => {
