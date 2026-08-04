@@ -7,6 +7,9 @@
 //! store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘기지만 여기서는 `any`로 둔다 -
 //! 타입을 정확히 내려면 루트 props를 시그니처마다 실어야 하고, 그 대상 트리가 아직 미정이다.
 //! props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
+//! 핸들러 반환은 `void | Promise<void>`다 - 런타임은 반환값을 await하지 않지만(그래서 async
+//! 핸들러의 실패는 조용히 사라진다), 핸들러를 받아 감싸는 쪽이 그 Promise를 잡아 건질 수
+//! 있어야 하므로 타입에 드러낸다.
 
 use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
@@ -85,7 +88,7 @@ type Handler<Data, Props, Ctx, Loop> = (
     removeAt: (k: LeafIndex<unknown[]>, i: number) => void;
     replace: <TElement>(k: LeafIndex<TElement[]>, v: TElement[]) => void;
   } & Loop,
-) => void;
+) => void | Promise<void>;
 ";
 
 /// 평탄화된 컴포넌트들에서 루트(0)의 합성 트리를 걸어 핸들러들을 모은다(트리 순서).
@@ -508,6 +511,20 @@ mod tests {
         "#);
         assert!(out.contains("event: Event;"));
         assert!(out.contains("store: any;"));
+    }
+
+    /// 반환 타입이 async를 드러낸다. `=> void`로도 async 핸들러를 넣는 것 자체는 통과하지만
+    /// (TS의 void 반환 특례), 그 타입을 읽는 쪽이 Promise를 못 본다 - 핸들러를 받아 감싸며
+    /// `handler(...)?.catch(..)`로 실패를 건지려면 반환 타입에 Promise가 있어야 한다.
+    #[test]
+    fn prelude_allows_async_handler() {
+        let out = dts(r#"
+            component Thumb {
+              events { CLICK({ x }) }
+              template { img(@click:CLICK /) }
+            }
+        "#);
+        assert!(out.contains(") => void | Promise<void>;"));
     }
 
     /// 한 컴포넌트의 배열 prop들이 저마다 다른 요소 타입으로 나온다 - push/replace의 TElement는
