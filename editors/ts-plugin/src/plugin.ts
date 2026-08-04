@@ -614,6 +614,29 @@ export const pluginInit = ({ typescript: tsModule }: { typescript: typeof ts }) 
       return { ...classifications, spans };
     };
 
+    // 같은 것의 비인코딩 판. VS Code는 인코딩 쪽만 쓰지만 다른 클라이언트가 이것을 부를 수
+    // 있어 함께 맞춘다 - 한쪽만 고쳐 두면 부르는 쪽에 따라 색이 밀린다.
+    proxy.getSemanticClassifications = ((
+      fileName: string,
+      span: ts.TextSpan,
+      format?: ts.SemanticClassificationFormat,
+    ) => {
+      const injection = injections.get(fileName);
+      if (injection === undefined) {
+        return service.getSemanticClassifications(fileName, span, format as ts.SemanticClassificationFormat);
+      }
+      const start = toInjected(injection, span.start);
+      const classified = service.getSemanticClassifications(
+        fileName,
+        { start, length: toInjected(injection, span.start + span.length) - start },
+        format as ts.SemanticClassificationFormat,
+      );
+      return classified
+        .filter((entry) => !isInjected(injection, entry.textSpan.start))
+        .map((entry) => ({ ...entry, textSpan: spanToOriginal(injection, entry.textSpan) }));
+      // biome-ignore lint/suspicious/noExplicitAny: 오버로드가 둘이라 그대로 통과시킨다.
+    }) as any;
+
     // 확장이 configurePlugin으로 경로를 넘기면 여기로 온다. 그전에 만든 스냅샷은 주입이
     // 안 된 것이므로 캐시를 비우고 프로젝트를 다시 계산시킨다.
     const applyConfiguration = (config: unknown) => {
