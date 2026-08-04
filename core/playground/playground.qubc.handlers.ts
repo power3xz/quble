@@ -21,35 +21,13 @@ import { markError, tokenize } from "./tokenize.ts";
 
 export { tokenize };
 
-type TStore = {
-  files: number;
-  lines: number;
-  editingName: number;
-  lineNumbers: number;
-  lineCount: number;
-  caretLine: number;
-  previewName: number;
-  previewSelected: number;
-  logs: number;
-  diagnostic: number;
-  hasError: number;
-  completion: {
-    isOpen: number;
-    style: number;
-    isAbove: number;
-    items: number;
-  };
-};
-type TCtx = {
-  props: Record<string, number>;
-  store: TStore;
-  set: (leafIndex: number, value: unknown) => void;
-  push: (arrayLeafIndex: number, element: unknown) => void;
-  removeAt: (arrayLeafIndex: number, index: number) => void;
-  replace: (arrayLeafIndex: number, elems: unknown[]) => void;
-  event: Event;
-  $0: number;
-};
+// 헬퍼가 받는 ctx의 타입. 손으로 적지 않고 `handlers`에서 역산한다 - 그 선언에는 ts-plugin이
+// 짝 .qubc의 `Partial<Handlers>`를 표기로 붙이므로 주입된 것이 유일한 출처가 된다. 손으로 적으면
+// `set`의 `LeafIndex<T>`처럼 주입된 모양과 어긋나 대입 검사에서 걸린다.
+//
+// 모든 핸들러의 ctx를 합친 유니온이라 회차 인덱스($0, $1...)는 여기 없다 - @for 깊이는 이벤트마다
+// 다르다. 그것을 쓰는 헬퍼는 인덱스를 number 인자로 받고, 꺼내는 일은 리터럴의 화살표가 한다.
+type TCtx = Parameters<NonNullable<(typeof handlers)[keyof typeof handlers]>>[1];
 
 // 미리보기를 눌러야 쓰이므로 첫 화면에서는 받지 않는다 - 처음 컴파일할 때 받는다.
 const getCompiler = lazyCompiler("./compiler_wasm.wasm");
@@ -127,32 +105,36 @@ const clearPreview = () => {
   previewUrls = [];
 };
 
-// 콘솔 - 미리보기 앱이 부른 console.*를 셸의 logs 배열에 쌓는다. logs의 leafIndex는 핸들러가
-// 불려야 알 수 있어(ctx.store), 처음 받을 때 여기 담아 두고 가로채기가 쓴다. 그전에 난 로그는
-// pending에 모았다가 주소가 생기면 흘려보낸다.
-type TLogSink = { push: TCtx["push"]; leafIndex: number };
-let logSink: TLogSink | null = null;
+// 콘솔 - 미리보기 앱이 부른 console.*를 셸의 logs 배열에 쌓는다. 로그를 만드는 쪽(가로채기)은
+// 미리보기 앱이 부르는 자리라 ctx가 없다 - 넣을 자리(store.logs)와 넣는 법(push)을 아는 것은
+// 핸들러뿐이라, 처음 핸들러가 돌 때 그 둘을 담은 함수를 만들어 둔다.
+//
+// 그전에 난 로그는 pending에 모였다가 함수가 생길 때 흘러간다.
+let addLogLine: ((level: string, text: string) => void) | null = null;
 let loggedCount = 0;
 const pendingLogs: { level: string; text: string }[] = [];
 
-const rememberSink = ({ store, push }: TCtx) => {
-  if (logSink) {
+// 로그를 쌓는 함수를 만든다. 넣을 자리를 변수로 꺼내지 않고 클로저에 가둔다 - 그 타입(LeafIndex)은
+// 주입된 ctx만 아는 것이라, 밖으로 꺼내면 손으로 적어야 한다.
+const openLog = ({ store, push }: TCtx) => {
+  if (addLogLine) {
     return;
   }
-  logSink = { push, leafIndex: store.logs };
-  for (const entry of pendingLogs.splice(0)) {
-    logSink.push(logSink.leafIndex, entry);
+  addLogLine = (level, text) => {
+    push(store.logs, { level, text });
     loggedCount++;
+  };
+  for (const entry of pendingLogs.splice(0)) {
+    addLogLine(entry.level, entry.text);
   }
 };
 
 const appendLog = (level: string, text: string) => {
-  if (!logSink) {
+  if (!addLogLine) {
     pendingLogs.push({ level, text });
     return;
   }
-  logSink.push(logSink.leafIndex, { level, text });
-  loggedCount++;
+  addLogLine(level, text);
   scrollLogsToEnd();
 };
 
@@ -224,8 +206,8 @@ const openFile = (name: string, ctx: TCtx, caretLine = 0) => {
   trackCaret(area, ctx);
 };
 
-// 파일 선택 - 그 행이 쏜 이벤트라 $0가 몇 번째 파일인지 준다.
-const selectFile = (_data: unknown, ctx: TCtx) => openFile(fileNames[ctx.$0], ctx);
+// 파일 선택 - 몇 번째 파일인지는 회차 인덱스로 온다(부르는 쪽이 ctx.$0에서 꺼내 넘긴다).
+const selectFile = (at: number, ctx: TCtx) => openFile(fileNames[at], ctx);
 
 // 진단을 눌러 에러가 난 파일의 그 줄로 간다. 다른 파일에서 난 에러(use로 딸려온 파일)는
 // 편집기에 표시할 자리가 없어 이게 유일한 이동 수단이다.
@@ -576,10 +558,10 @@ const completionKey = (event: KeyboardEvent, ctx: TCtx) => {
   }
 };
 
-// 항목 클릭 - $0가 몇 번째 후보인지 준다.
-const clickCompletionItem = (_data: unknown, ctx: TCtx) => {
+// 항목 클릭 - 몇 번째 후보인지는 회차 인덱스로 온다.
+const clickCompletionItem = (at: number, ctx: TCtx) => {
   if (completion) {
-    applyCompletion(completion.shown[ctx.$0], ctx);
+    applyCompletion(completion.shown[at], ctx);
   }
 };
 
@@ -596,8 +578,8 @@ const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
 //
 // 편집기에도 그 파일을 싣는다 - 미리보기와 편집 대상이 다르면 어느 소스가 화면에 그려진
 // 것인지 알 수 없다.
-const runPreview = async (_data: unknown, ctx: TCtx) => {
-  const { $0, store, set } = ctx;
+const runPreview = async (at: number, ctx: TCtx) => {
+  const { store, set } = ctx;
   // 진단을 기억해 두고 편집기와 파일 목록을 다시 그린다 - 에러가 이 파일에 있으면 그 줄이
   // 강조되고, 어느 파일이든 목록의 그 행에 표시가 붙는다.
   const fail = (message: string) => {
@@ -609,9 +591,9 @@ const runPreview = async (_data: unknown, ctx: TCtx) => {
   };
 
   failure = null;
-  selectFile(_data, ctx);
+  selectFile(at, ctx);
 
-  const entry = fileNames[$0];
+  const entry = fileNames[at];
   const stem = entry.replace(/\.qubc$/, "");
 
   // wasm 등록은 컴파일러가 보는 파일만 - .qubc와 .css.
@@ -672,31 +654,42 @@ const runPreview = async (_data: unknown, ctx: TCtx) => {
   }
 };
 
-// 모든 핸들러를 감싸 콘솔 싱크를 먼저 등록한다 - logs의 leafIndex는 ctx로만 오므로, 어느
-// 핸들러든 처음 불릴 때 붙잡아 둔다(그전 로그는 pending에 모였다가 그때 흘러간다).
-//
-// 예외도 여기서 잡아 콘솔에 남긴다 - 런타임은 핸들러 반환값을 await하지 않아, async 핸들러가
-// 실패하면 unhandled rejection으로 조용히 사라진다.
-const withSink = (handler: (data: unknown, ctx: TCtx) => void | Promise<void>) => (data: unknown, ctx: TCtx) => {
-  rememberSink(ctx);
-  try {
-    handler(data, ctx)?.catch(report);
-  } catch (e) {
-    report(e);
-  }
-};
-
 const report = (e: unknown) => {
   console.error(e instanceof Error ? `${e.message}\n${e.stack ?? ""}` : String(e));
 };
 
-export const handlers = {
-  "Row[$0].CLICK_FILE": withSink(selectFile),
-  "Row[$0].CLICK_PREVIEW": withSink(runPreview),
-  INPUT_SOURCE: withSink(editSource),
-  KEYDOWN_SOURCE: withSink(followCaret),
-  CLICK_SOURCE: withSink(followCaret),
-  CLICK_CLEAR_LOGS: withSink(clearLogs),
-  CLICK_DIAGNOSTIC: withSink(jumpToError),
-  "Completion[$0].CLICK_ITEM": withSink(clickCompletionItem),
-};
+// 모든 핸들러를 감싸 로그 함수를 먼저 만든다 - logs의 leafIndex는 ctx로만 오므로, 어느
+// 핸들러든 처음 불릴 때 붙잡는다(그전 로그는 pending에 모였다가 그때 흘러간다).
+//
+// 예외도 여기서 잡아 콘솔에 남긴다 - 런타임은 핸들러 반환값을 await하지 않아, async 핸들러가
+// 실패하면 unhandled rejection으로 조용히 사라진다.
+//
+// 인자와 반환을 `typeof handlers`로 둔 것이 타입의 핵심이다. 아래 리터럴이 이 자리에서 그
+// 표기(ts-plugin이 붙인 `Partial<Handlers>`)를 문맥으로 받아, 화살표의 `data`/`ctx`가 **키마다**
+// 추론된다 - 회차 인덱스도 그 이벤트의 @for 깊이대로 딸려온다. 없는 이벤트명은 초과 속성으로
+// 걸린다. 제네릭(`<T extends ...>`)으로 두면 그 검사가 풀리므로 쓰지 않는다.
+const wrap = (table: typeof handlers): typeof handlers =>
+  Object.fromEntries(
+    Object.entries(table).map(([name, handler]) => [
+      name,
+      (data: never, ctx: never) => {
+        openLog(ctx);
+        try {
+          (handler as (d: never, c: never) => void | Promise<void>)(data, ctx)?.catch(report);
+        } catch (e) {
+          report(e);
+        }
+      },
+    ]),
+  );
+
+export const handlers = wrap({
+  "Row[$0].CLICK_FILE": (_data, ctx) => selectFile(ctx.$0, ctx),
+  "Row[$0].CLICK_PREVIEW": (_data, ctx) => runPreview(ctx.$0, ctx),
+  INPUT_SOURCE: editSource,
+  KEYDOWN_SOURCE: followCaret,
+  CLICK_SOURCE: followCaret,
+  CLICK_CLEAR_LOGS: clearLogs,
+  CLICK_DIAGNOSTIC: jumpToError,
+  "Completion[$0].CLICK_ITEM": (_data, ctx) => clickCompletionItem(ctx.$0, ctx),
+});
