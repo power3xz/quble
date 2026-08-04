@@ -1,21 +1,46 @@
 {
-  "name": "quble",
+  "name": "quble-vscode",
   "displayName": "Quble",
-  "description": "Quble 컴포넌트 언어(.qubc) 신택스 하이라이팅",
+  "description": "Quble 컴포넌트 언어(.qubc) 신택스 하이라이팅과 핸들러 타입 생성",
   "version": "0.0.1",
   "private": true,
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.125.0"
   },
-  "categories": ["Programming Languages"],
-  "main": "./extension.js",
-  "activationEvents": ["onLanguage:typescript", "onLanguage:quble"],
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:quble"
+  ],
+  "dependencies": {
+    "quble-ts-plugin": "0.0.1"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "package": "npm run build && vsce package --out quble-vscode.vsix",
+    "install-local": "npm run package && code --install-extension quble-vscode.vsix --force",
+    "test": "node --experimental-strip-types --test --test-concurrency=1"
+  },
   "contributes": {
+    "typescriptServerPlugins": [
+      {
+        "name": "quble-ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ],
     "languages": [
       {
         "id": "quble",
-        "aliases": ["Quble", "quble"],
-        "extensions": [".qubc"],
+        "aliases": [
+          "Quble",
+          "quble"
+        ],
+        "extensions": [
+          ".qubc"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -26,5 +51,11 @@
         "path": "./syntaxes/quble.tmLanguage.json"
       }
     ]
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1"
   }
 }

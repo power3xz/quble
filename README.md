@@ -132,7 +132,7 @@ Ticket[$0].CLICK_OWNER
 핸들러는 그 키로 잡는다.
 
 ```ts
-export default {
+export const handlers = {
   // @for 밖에서 쏜 이벤트라 회차 세그먼트가 없다
   CLICK_HEADING: (data) => {
     console.log("컬럼 제목:", data.lane, "/ 자리:", data.position);

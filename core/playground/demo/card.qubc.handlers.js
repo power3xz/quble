@@ -3,7 +3,7 @@ const POINTS = ["1", "2", "3", "5", "8", "13"];
 
 const next = (list, current) => list[(list.indexOf(current) + 1) % list.length];
 
-export default {
+export const handlers = {
   CLICK_CARD: (data) => {
     console.log("카드:", data.title, "/ 자리:", data.seat);
   },

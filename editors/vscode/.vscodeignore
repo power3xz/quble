@@ -1,0 +1,8 @@
+# 확장 코드는 번들(dist/) 하나로 들어간다 - 소스와 그 의존은 이미 그 안에 있다.
+# node_modules/quble-ts-plugin만 예외로 남는다: tsserver가 이름으로 찾아 require하므로
+# 번들에 못 넣고 실물이 그 자리에 있어야 한다(build.mjs 참고).
+src/**
+build.mjs
+.dev-host-data/**
+**/tsconfig.json
+**/*.ts

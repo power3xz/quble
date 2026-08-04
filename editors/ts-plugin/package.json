@@ -1,0 +1,16 @@
+{
+  "name": "quble-ts-plugin",
+  "version": "0.0.1",
+  "private": true,
+  "description": "TS Language Service plugin - *.qubc.handlers.ts에 짝 .qubc의 Handlers 타입을 붙인다(디스크 d.ts도 import도 없이). tsserver가 require로 싣는다 - CJS.",
+  "main": "./dist/index.js",
+  "files": ["dist"],
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "quble-wasm-compiler": "*",
+    "typescript": "^6.0.3"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test --test-concurrency=1"
+  }
+}

@@ -1,5 +1,3 @@
-import type { Handlers } from "./settingspanel.qubc";
-
 // 설정 패널 핸들러. open/enabled는 bool prop이라 get/set이 boolean으로 오간다.
 // @if가 실제 boolean에 반응하므로 토글이 화면(섹션 접힘/펼침, 스위치 on/off)에 그대로 보인다.
 //
@@ -8,7 +6,7 @@ import type { Handlers } from "./settingspanel.qubc";
 // SAVE/DISCARD 버튼은 dirty=false 고정이라 뜨지 않고, 두 핸들러는 store/reactivity 모델이
 // 정해진 뒤 채운다.
 
-const handlers: Partial<Handlers> = {
+export const handlers = {
   // 섹션 헤더 클릭 - open을 반전해 펼침/접힘.
   "General.TOGGLE_SECTION": (data, { props, get, set }) => {
     set(props.open, !get(props.open));
@@ -45,5 +43,3 @@ const handlers: Partial<Handlers> = {
     console.log(data);
   }
 };
-
-export default handlers;
