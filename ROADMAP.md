@@ -77,7 +77,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] VSCode `.qubc` 신택스 하이라이팅 (`editors/vscode/`) - 현행 문법만 칠한다.
 - [x] 핸들러 타입 - `.qubc`에서 뽑은 `Handlers`를 TS plugin(`editors/ts-plugin`)이 편집 중인
   handlers.ts에 주입해 이벤트별 payload/context를 타입 강제(잘못된 fullname은 컴파일 에러).
-  `export const handlers`가 규약이고 import도 디스크 d.ts도 없다. 에디터 밖은 ISSUES.md.
+  `export const handlers`가 규약이고 import도 디스크 d.ts도 없다. 에디터 밖(`tsc`/CI)은
+  plugin을 올린 LanguageService로 검사한다(`typecheck-handlers.ts`).
 - [ ] playground - 브라우저에서 `.qubc`를 편집해 바로 컴파일/렌더한다. 여러 파일을 탭으로
   두고 `use`로 엮는다. 핸들러도 브라우저에서 작성한다. 컴파일 실패는 진단으로 보인다.
   전제: 컴파일러가 브라우저에서 돌아야 한다(wasm).

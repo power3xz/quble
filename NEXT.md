@@ -8,40 +8,19 @@
 
 ## 할 것
 
-### playground 핸들러의 타입 오류 (미해결, 이번 작업의 출발점)
+### 주석 지원
 
-`core/playground/playground.qubc.handlers.ts`가 `TStore`/`TCtx`를 **손으로 적어** 쓰는데, plugin이
-주입하는 진짜 타입과 어긋난다. `withSink`가 그 `TCtx`로 핸들러를 받아 `handlers`에 넣으므로
-대입 검사에서 걸린다.
+`.qubc`에 주석을 쓸 수 있어야 한다. 문법은 SYNTAX.md에 정하고, 컴파일러(렉서)와 편집기
+하이라이팅이 함께 따라가야 한다.
 
-어긋나는 지점은 조작 함수들이다. 손으로 적은 쪽은 `set: (leafIndex: number, value: unknown)`
-인데 주입된 쪽은 `set: <T>(k: LeafIndex<T>, v: T) => void`다. `LeafIndex<T>`가
-`number & { readonly __leaf: T }`라 `number`를 받을 수 없어 반공변 자리에서 막힌다.
+### `store`의 타입 (지금 d.ts에서 `any`)
 
-**시도한 것과 결과** (2026-08-04):
+`dts.rs`가 `store: any`로 낸다(PRELUDE). 런타임은 루트(defs[0]) 기준 leafIndex 트리를 넘기는데,
+타입을 정확히 내려면 루트 props를 시그니처마다 실어야 하고 그 대상 트리가 미정이라 미뤄 둔 것이다
+(dts.rs 서두 주석).
 
-- **`withSink`를 항등 래퍼로** - `<F extends (...args: never[]) => void | Promise<void>>(h: F): F`.
-  래퍼가 타입을 만들지 않으므로 주입된 `Partial<Handlers>`가 인라인 화살표의 `data`/`ctx`까지
-  흐른다. 실측으로 확인했다(음성 대조 3건 모두 잡힘).
-- **`TCtx`를 `handlers`에서 역산** - `Parameters<NonNullable<(typeof handlers)[keyof typeof
-  handlers]>>[1]`. 손으로 적는 타입이 없어지고 주입된 것이 유일한 출처가 된다. `$0`은
-  `Extract<TCtx, { $0: number }>`로 뽑는다.
-- **막힌 곳**: 위 둘을 실제 파일에 적용하면 plugin이 있을 때는 오류 0이지만, **plugin 없는
-  `tsc`에서 순환 참조 16건**이 난다(`TCtx circularly references itself`). `TCtx`가 `typeof
-  handlers`를 참조하고 handlers가 헬퍼를 부르고 헬퍼가 `TCtx`를 쓰는 닫힌 고리다. 주입이 있으면
-  `handlers`에 타입 표기가 붙어 고리가 끊기지만, `npm run typecheck`는 주입 없이 돈다.
-
-**정해야 할 것**: (1) 이 파일을 `tsc` 대상에서 빼고 plugin을 유일한 검사자로 삼을지, (2) 순환을
-피하는 다른 역산 경로가 있는지, (3) 아니면 `LeafIndex`를 손으로 한 번 선언하고 `TCtx`를 그것에
-맞춰 고칠지(이중 관리가 되지만 순환은 없다).
-
-`store`가 d.ts에서 `any`라(`dts.rs` 주석: 루트 props를 시그니처마다 실어야 하고 대상 트리가
-미정) 이 파일이 얻는 실제 타입 안전은 제한적이다 - 이 파일은 `store`를 20번 쓰고 `props`는 0번
-쓴다. 그래서 오류 해결과 타입 안전은 별개로 봐야 한다.
-
-### 병합된 브랜치 정리
-
-`dts-array-ops`, `handler-autocomplete` 둘 다 main에 들어갔다(`git branch --merged main`).
+이것 때문에 핸들러 파일이 얻는 타입 안전이 반쪽이다 - playground 핸들러는 `store`를 20번 쓰고
+`props`는 0번 쓴다. `set(store.lineCount, ...)`의 leafIndex가 검사되지 않는다는 뜻이다.
 
 ## 정할 것
 
@@ -85,8 +64,9 @@
 **미룬 이유**: CLI로 d.ts를 뽑는 용도가 따로 필요한지 안 정했다. 필요 없으면 그 바이너리와
 `handlers_dts_from_path`(파일에서 읽는 쪽)를 함께 지울 수 있다.
 
-에디터 밖 타입 검사(ISSUES.md의 미해결 항목)를 빌드 스텝으로 붙이기로 하면 이쪽이 그 자리가
-될 수 있다 - 위의 handlers.ts 타입 오류와도 맞물린다.
+한때 "에디터 밖 타입 검사를 붙이면 이쪽이 그 자리가 된다"고 봤으나 그 자리는 없어졌다 -
+`editors/ts-plugin/typecheck-handlers.ts`가 wasm으로 d.ts를 얻어 검사한다(2026-08-04). 이 바이너리를
+남길 이유는 이제 CLI 용도 하나뿐이다.
 
 ### 그 밖
 

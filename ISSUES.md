@@ -61,15 +61,17 @@
   컴파일이다. **해결:** TS Language Service plugin으로 갔다(`editors/ts-plugin`). 짝 `.qubc`를
   컴파일한 d.ts를 handlers.ts 스냅샷 **앞에** 한 줄로 얹고 `export const handlers`에 타입을
   표기한다 - tsserver만 그 스냅샷을 보고 디스크와 화면은 원본 그대로다. 이름 `handlers`가 규약이
-  됐고(`export default` 폐기), 세 한계가 모두 사라졌다. 대신 에디터 밖에서는 타입이 안 붙는다
-  (미해결).
+  됐고(`export default` 폐기), 세 한계가 모두 사라졌다.
+
+- **핸들러 타입이 에디터 안에서만 붙었다** - 위 plugin 방식의 맞바꿈이었다. 주입이 tsserver
+  안에서만 일어나므로 `tsc`나 CI에서는 handlers.ts가 타입 없이 남았고, 그래서 그 파일은 타입을
+  **손으로 적어** 쓰고 있었다 - 주입된 것과 어긋나 편집기에서는 오히려 오류가 났다(출처가 둘).
+  **해결:** `editors/ts-plugin/typecheck-handlers.ts`. `tsc` 대신 LanguageService를 세우고 plugin을
+  올려, 편집기가 보는 것과 같은 주입본에 진단을 묻는다(`typecheck` 스크립트가 돌린다).
+  tsconfig의 `plugins`는 language service 전용이라 `tsc`로는 안 되는 것을 확인했다. 손으로 적던
+  타입은 없앴다 - `handlers` 리터럴이 주입된 표기를 문맥으로 받아 키마다 ctx가 추론된다.
 
 ## 미해결
-
-- **핸들러 타입이 에디터 안에서만 붙는다** - ts-plugin이 tsserver 안에서 주입하므로 `tsc`나
-  CI에서는 handlers.ts가 타입 없이 남는다. d.ts 파일 방식을 걷어내면서 생긴 맞바꿈(import 한
-  줄과 디스크 부산물을 없앤 대가). 에디터 밖 검사가 필요해지면 빌드 스텝에서 d.ts를 뽑는 길이
-  있다 - 타입 생성 알맹이(`handlersDts`)는 그대로 쓸 수 있다.
 
 - **확장이 클린 클론에서 `npm install`부터 못 한다** - `editors/vscode`의 `dependencies`에
   `"quble-ts-plugin": "0.0.1"`이 있는데 레지스트리에 없는 이름이라 404다. 실물은 `npm run
