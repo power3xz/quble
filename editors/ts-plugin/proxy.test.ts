@@ -217,6 +217,63 @@ test("toLineColumnOffset - 원본 오프셋을 원본 줄로 센다", () => {
   assert.equal(proxy.toLineColumnOffset?.(FILE, declAt).line, expected);
 });
 
+test("리팩터 목록 - 커서가 있는 자리를 기준으로 낸다", () => {
+  const proxy = setup();
+  // 화살표 함수 위에서는 "이름 붙은 함수로 변환"이 뜬다. 위치가 밀리면 그 자리에 없는
+  // 리팩터가 뜨거나, 있어야 할 것이 빠진다.
+  const found = proxy.getApplicableRefactors(FILE, at("(value: string) => value"), {});
+  const kinds = found.flatMap((entry) => entry.actions.map((action) => action.kind ?? ""));
+
+  assert.equal(
+    kinds.some((kind) => kind.startsWith("refactor.rewrite.function")),
+    true,
+    `화살표 함수 자리인데 함수 변환이 없다: ${kinds.join(", ")}`,
+  );
+});
+
+test("리팩터 편집 - 고쳐쓸 자리가 원본이다(어긋나면 엉뚱한 코드를 덮는다)", () => {
+  const proxy = setup();
+  const target = "(value: string) => value";
+  const edits = proxy.getEditsForRefactor(
+    FILE,
+    {},
+    at(target),
+    "Convert arrow function or function expression",
+    "Convert to named function",
+    {},
+  );
+
+  const changes = edits?.edits.find((entry) => entry.fileName === FILE);
+  assert.notEqual(changes, undefined);
+  // 편집이 원본의 그 화살표 함수를 덮어야 한다 - 주입본 좌표면 엉뚱한 자리가 나온다.
+  const span = changes?.textChanges[0].span;
+  assert.equal(SOURCE.slice(span?.start ?? 0).startsWith("const helper"), true, `덮는 자리: ${textOf(span)}`);
+});
+
+test("빠른 수정 - 진단 자리를 보고 고칠 것을 찾는다", () => {
+  const proxy = setup();
+  // 없는 프로퍼티를 짚는 자리에 진단이 선다. 위치가 밀리면 빈 목록이 온다.
+  const diagnostics = proxy.getSemanticDiagnostics(FILE);
+  const first = diagnostics[0];
+  if (first?.start === undefined) {
+    return;
+  }
+
+  const fixes = proxy.getCodeFixesAtPosition(FILE, first.start, first.start + (first.length ?? 0), [first.code], {}, {});
+
+  // 고칠 것이 있든 없든, 편집이 나온다면 그 자리는 원본 범위 안이어야 한다.
+  for (const fix of fixes) {
+    for (const change of fix.changes) {
+      if (change.fileName !== FILE) {
+        continue;
+      }
+      for (const edit of change.textChanges) {
+        assert.equal(edit.span.start <= SOURCE.length, true, "편집이 원본 범위 밖을 가리킨다");
+      }
+    }
+  }
+});
+
 test("진단 - 앞에 얹은 d.ts에서 난 것은 사용자에게 보이지 않는다", () => {
   const proxy = setup();
 

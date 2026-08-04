@@ -11,9 +11,11 @@ import { existsSync } from "node:fs";
 import type ts from "typescript/lib/tsserverlibrary";
 import { dtsFor } from "./compiler.ts";
 import {
+  fileEditsToOriginal,
   injectionFor,
   isInjected,
   locationToOriginal,
+  positionOrRangeToInjected,
   spanToOriginal,
   type TInjection,
   toInjected,
@@ -343,6 +345,83 @@ export const pluginInit = ({ typescript: tsModule }: { typescript: typeof ts }) 
       return locations
         .filter((location) => location.fileName !== fileName || !isInjected(injection, location.textSpan.start))
         .map((location) => locationToOriginal(injection, fileName, location));
+    };
+
+    // 리팩터/빠른수정(전구 아이콘). 커서 자리를 보정하지 않으면 앞에 얹은 d.ts 길이만큼
+    // 밀린 곳을 보고 목록을 낸다 - 엉뚱한 자리의 리팩터가 뜨고, 고르면 그 자리가 고쳐진다.
+    // 표시만 어긋나는 것과 달리 소스가 실제로 깨지므로 편집 스팬도 함께 되돌린다.
+    proxy.getApplicableRefactors = (
+      fileName,
+      positionOrRange,
+      preferences,
+      triggerReason,
+      kind,
+      includeInteractiveActions,
+    ) => {
+      const injection = injections.get(fileName);
+      return service.getApplicableRefactors(
+        fileName,
+        injection === undefined ? positionOrRange : positionOrRangeToInjected(injection, positionOrRange),
+        preferences,
+        triggerReason,
+        kind,
+        includeInteractiveActions,
+      );
+    };
+
+    proxy.getEditsForRefactor = (
+      fileName,
+      formatOptions,
+      positionOrRange,
+      refactorName,
+      actionName,
+      preferences,
+      interactiveRefactorArguments,
+    ) => {
+      const injection = injections.get(fileName);
+      const edits = service.getEditsForRefactor(
+        fileName,
+        formatOptions,
+        injection === undefined ? positionOrRange : positionOrRangeToInjected(injection, positionOrRange),
+        refactorName,
+        actionName,
+        preferences,
+        interactiveRefactorArguments,
+      );
+      if (edits === undefined || injection === undefined) {
+        return edits;
+      }
+      return {
+        ...edits,
+        edits: fileEditsToOriginal(injection, fileName, edits.edits),
+        ...(edits.renameLocation === undefined ? {} : { renameLocation: toOriginal(injection, edits.renameLocation) }),
+      };
+    };
+
+    proxy.getCodeFixesAtPosition = (fileName, start, end, errorCodes, formatOptions, preferences) => {
+      const injection = injections.get(fileName);
+      const fixes = service.getCodeFixesAtPosition(
+        fileName,
+        injection === undefined ? start : toInjected(injection, start),
+        injection === undefined ? end : toInjected(injection, end),
+        errorCodes,
+        formatOptions,
+        preferences,
+      );
+      if (injection === undefined) {
+        return fixes;
+      }
+      return fixes.map((fix) => ({ ...fix, changes: fileEditsToOriginal(injection, fileName, fix.changes) }));
+    };
+
+    // 같은 종류의 오류를 파일 전체에서 한 번에 고치는 것 - 위치를 받지 않지만 결과는 편집이다.
+    proxy.getCombinedCodeFix = (scope, fixId, formatOptions, preferences) => {
+      const combined = service.getCombinedCodeFix(scope, fixId, formatOptions, preferences);
+      const injection = injections.get(scope.fileName);
+      if (injection === undefined) {
+        return combined;
+      }
+      return { ...combined, changes: fileEditsToOriginal(injection, scope.fileName, combined.changes) };
     };
 
     // 시그니처 도움말 - 인자를 치는 동안 뜨는 것이라 위치가 밀리면 엉뚱한 인자를 짚는다.

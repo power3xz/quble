@@ -132,3 +132,35 @@ export const locationToOriginal = <T extends { fileName?: string; textSpan: ts.T
     ...(location.contextSpan === undefined ? {} : { contextSpan: spanToOriginal(injection, location.contextSpan) }),
   };
 };
+
+/**
+ * 편집기에 넘길 위치나 범위를 주입본 기준으로 옮긴다. 리팩터/코드액션은 커서 자리를
+ * 숫자로도 범위로도 받는다.
+ */
+export const positionOrRangeToInjected = (injection: TInjection, positionOrRange: number | ts.TextRange) =>
+  typeof positionOrRange === "number"
+    ? toInjected(injection, positionOrRange)
+    : { pos: toInjected(injection, positionOrRange.pos), end: toInjected(injection, positionOrRange.end) };
+
+/**
+ * 파일별 편집 묶음을 원본 기준으로 되돌린다. 여기가 어긋나면 색이 아니라 소스가 실제로
+ * 깨진다 - 편집기가 이 자리를 그대로 고쳐쓴다.
+ *
+ * 우리가 넣은 텍스트(앞의 d.ts, 타입 표기)에 걸린 편집은 버린다. 원본에 없는 자리라
+ * 되돌릴 곳이 없고, 억지로 옮기면 엉뚱한 코드를 덮어쓴다.
+ */
+export const fileEditsToOriginal = (
+  injection: TInjection,
+  fileName: string,
+  changes: readonly ts.FileTextChanges[],
+): ts.FileTextChanges[] =>
+  changes.map((change) =>
+    change.fileName !== fileName
+      ? change
+      : {
+          ...change,
+          textChanges: change.textChanges
+            .filter((edit) => !isInjected(injection, edit.span.start))
+            .map((edit) => ({ ...edit, span: spanToOriginal(injection, edit.span) })),
+        },
+  );
