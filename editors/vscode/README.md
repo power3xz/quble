@@ -11,8 +11,8 @@ Quble 컴포넌트 언어(`.qubc`) 신택스 하이라이팅.
 
 ## 핸들러 타입
 
-`*.qubc.handlers.ts`에서 `export const handlers`를 선언하면 타입이 저절로 붙는다 - 파일에
-`import`를 적지 않고, 디스크에 d.ts도 안 생긴다. TS가 fullname/payload/props/context를 타입으로
+`*.qubc.handlers.ts`에서 `handlers`를 선언하면 타입이 저절로 붙는다(`export` 여부는 상관없다 -
+나중에 묶어 내보내도 된다) - 파일에 `import`를 적지 않고, 디스크에 d.ts도 안 생긴다. TS가 fullname/payload/props/context를 타입으로
 강제한다 - 잘못된 이벤트명은 컴파일 에러, payload 필드는 정확한 타입(리터럴은 그 값으로 좁힘),
 `params.context.<이름>.<필드>`/`params.props.<이름>`까지 잡힌다. `props`는 값이 아니라
 leafIndex(`LeafIndex<T>`)라 `get`/`set`으로 읽고 쓰고, 배열은 `push`/`removeAt`/`replace`로
@@ -36,9 +36,13 @@ export const handlers = {
 동작: `editors/ts-plugin`이 TS Language Service plugin으로 tsserver 안에서 돈다. 짝 `.qubc`를
 wasm 컴파일러가 AST에서 걸어 낸 d.ts를, 편집 중인 handlers.ts 스냅샷 앞에 얹고 `handlers`에
 타입을 표기한다. tsserver만 그 스냅샷을 보고 디스크와 화면은 원본 그대로다. 확장이 하는 일은
-plugin 등록과 wasm 경로 전달뿐이다.
+plugin 등록과 wasm 경로 전달뿐이다. 구현은 `../ts-plugin/IMPLEMENTATION.md`에 있다.
 
 에디터 밖(`tsc`, CI)에서는 타입이 안 붙는다 - plugin은 tsserver 안에서만 돈다.
+
+프로젝트를 여는 동안 잠깐 타입이 안 붙을 수 있다. VS Code가 그 사이 완성/정의 이동 같은 것을
+문법 전용 tsserver로 보내는데, 그쪽에는 wasm 경로가 전달되지 않아 주입이 없다. 로딩이 끝나면
+정상으로 돌아온다.
 
 ## 빌드와 설치
 
