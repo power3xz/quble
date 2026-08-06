@@ -18,10 +18,22 @@ before(() => {
   qubb = buildFixture("set_object");
 });
 
-type TUser = { name: string; age: number; tags: string[]; contact: { email: string } };
+type TPost = { title: string; marks: string[] };
+type TUser = {
+  name: string;
+  age: number;
+  tags: string[];
+  posts: TPost[];
+  contact: { email: string };
+};
 
 const textOf = (host: ParentNode, sel: string) => host.querySelector(sel)?.textContent;
 const tagsOf = (host: ParentNode) => [...host.querySelectorAll(".tag")].map((n) => n.textContent);
+const postsOf = (host: ParentNode) =>
+  [...host.querySelectorAll(".post")].map((p) => [
+    p.querySelector(".ptitle")?.textContent,
+    [...p.querySelectorAll(".mark")].map((m) => m.textContent),
+  ]);
 
 // SWAP을 누르면 큐에서 다음 값을 꺼내 user 노드를 통째로 갈아끼운다.
 const handlersFor = (queue: Partial<TUser>[]): THandlers => ({
@@ -39,13 +51,17 @@ const USER: TUser = {
   name: "kim",
   age: 30,
   tags: ["a", "b"],
+  posts: [
+    { title: "p1", marks: ["m1", "m2"] },
+    { title: "p2", marks: ["m3"] },
+  ],
   contact: { email: "kim@x.com" },
 };
 
 const instantiate = (queue: Partial<TUser>[] = []) => {
   const inst = compile(qubb)(0)({ title: "t", user: USER }, handlersFor(queue));
   const host = mount(inst);
-  return { host, h1: host.querySelector("h1") as HTMLElement };
+  return { host, h1: host.querySelector("h1") as HTMLElement, arrayPool: inst.arrayPool };
 };
 
 test("준 필드가 화면까지 반영된다", () => {
@@ -85,6 +101,60 @@ test("배열 필드를 안 주면 비워진다", () => {
 
   h1.click();
   assert.deepEqual(tagsOf(host), [], "안 준 배열은 요소가 없어진다");
+});
+
+// 안 준 배열은 화면에서 사라지는 것으로 끝이 아니라 store 칸까지 반납해야 한다 - 목록만 비우고
+// leaf를 안 놓으면 갈아끼울 때마다 pool이 자란다. 요소/인덱스 leaf가 free list로 돌아갔는지는
+// 다시 채웠을 때 최대 leaf가 안 늘어나는 것으로 본다(for-array-remove.test.ts와 같은 기준).
+test("안 준 배열의 leaf가 회수돼 재사용된다", () => {
+  const { h1, arrayPool } = instantiate([
+    { name: "han" },
+    { name: "back", age: 1, tags: ["x", "y"], contact: { email: "b@x" } },
+  ]);
+  const info = arrayPool.entries[0]; // tags
+  const idxBefore = Math.max(...info.indexLeafIndices);
+
+  h1.click(); // 배열 안 줌 -> 요소/인덱스 leaf가 free list로
+  assert.equal(info.elemStartLeafIndices.length, 0, "요소 목록이 비어야");
+  assert.equal(info.indexLeafIndices.length, 0, "인덱스 목록도 비어야");
+
+  // 같은 개수로 다시 채우면 반납분을 다시 쓴다. 인덱스 leaf로 본다 - 요소 leaf의 초기 자리는
+  // 루트 고정부 안(plantRoot가 심은 앞쪽)이라 반납돼도 다른 배열의 alloc과 버킷을 다투어
+  // 자리 번호가 오르내린다. 인덱스 leaf는 처음부터 alloc으로 받은 것이라 그 비교가 성립한다.
+  h1.click();
+  const idxAfter = Math.max(...info.indexLeafIndices);
+  assert.ok(idxAfter <= idxBefore, `회수분을 다시 써야: before=${idxBefore} after=${idxAfter}`);
+});
+
+// 객체 배열의 요소가 또 배열을 품으면(posts[].marks) 회수가 한 겹 더 들어간다 - freeArrayElement가
+// 요소를 걸으며 배열 칸을 만나면 그 자식 배열의 요소와 arrayInfo까지 재귀로 반납해야 한다. 목록만
+//비우고 안쪽을 놓치면 arrayPool이 갈아끼울 때마다 자란다.
+test("요소가 품은 배열까지 재귀로 회수된다", () => {
+  const { host, h1, arrayPool } = instantiate([
+    { name: "empty" },
+    {
+      name: "back",
+      posts: [
+        { title: "q1", marks: ["n1", "n2"] },
+        { title: "q2", marks: ["n3"] },
+      ],
+    },
+  ]);
+  const poolBefore = arrayPool.entries.length;
+
+  h1.click(); // posts 안 줌 -> 요소와 그 안 marks 배열까지 회수돼야
+  assert.deepEqual(postsOf(host), [], "게시글이 비어야");
+
+  h1.click(); // 같은 모양으로 다시 채움 -> 반납분(arrayInfo 포함) 재사용
+  assert.deepEqual(
+    postsOf(host),
+    [
+      ["q1", ["n1", "n2"]],
+      ["q2", ["n3"]],
+    ],
+    "다시 채운 값",
+  );
+  assert.equal(arrayPool.entries.length, poolBefore, "arrayPool이 안 늘어야(안쪽 arrayInfo 재사용)");
 });
 
 // 노드를 두 번 갈아끼워도 자리가 유지되는지 - 첫 교체가 base/typeRef를 흔들면 두 번째가 어긋난다.

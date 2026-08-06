@@ -1,7 +1,13 @@
 component C {
   props {
     title: string,
-    user: { name: string, age: number, tags: string[], contact: { email: string } }
+    user: {
+      name: string,
+      age: number,
+      tags: string[],
+      posts: { title: string, marks: string[] }[],
+      contact: { email: string }
+    }
   }
   events {
     SWAP({ title })
@@ -15,6 +21,16 @@ component C {
       ul() {
         @for (tag of user.tags) {
           li(class="tag") { {tag} }
+        }
+      }
+      ul(class="posts") {
+        @for (post of user.posts) {
+          li(class="post") {
+            span(class="ptitle") { {post.title} }
+            @for (mark of post.marks) {
+              span(class="mark") { {mark} }
+            }
+          }
         }
       }
     }
