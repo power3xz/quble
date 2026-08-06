@@ -1,0 +1,22 @@
+component C {
+  props {
+    title: string,
+    user: { name: string, age: number, tags: string[], contact: { email: string } }
+  }
+  events {
+    SWAP({ title })
+  }
+  template {
+    div() {
+      h1(@click:SWAP) { {title} }
+      span(class="name") { {user.name} }
+      span(class="age") { {user.age} }
+      span(class="email") { {user.contact.email} }
+      ul() {
+        @for (tag of user.tags) {
+          li(class="tag") { {tag} }
+        }
+      }
+    }
+  }
+}

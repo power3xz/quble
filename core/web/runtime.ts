@@ -694,15 +694,28 @@ const leafCountOf = (module: TModule, typeRef: number): number => {
   return count;
 };
 
+// 객체 노드가 자기 위치를 들고 다니는 키(시작 칸, 그 칸부터의 타입) - setObject가 덮어쓸 고정
+// 블록을 이 둘로 안다. 심볼이라 값 키와 안 섞이고, Symbol.for라 런타임이 여러 벌 로드돼도 같은 키다.
+const NODE_BASE = Symbol.for("quble.node.base");
+const NODE_TYPE = Symbol.for("quble.node.typeRef");
+
+// leafTree가 만든 객체 노드 - 필드는 잎(leafIndex)이거나 또 노드고, 자기 자리가 심볼로 얹혀 있다.
+// d.ts가 핸들러에게 내는 TLeafObject<T>가 이것이다(그쪽은 브랜드만, 자리는 런타임 몫).
+type TLeafObject = {
+  [NODE_BASE]: number;
+  [NODE_TYPE]: number;
+  [field: string]: unknown;
+};
+
 // props 중첩 객체를 감싼다 - 없는 prop명을 문자열로 접근하면 즉시 throw. 핸들러는 우리 통제 밖의
 // 자유 코드라(d.ts는 힌트일 뿐 강제 못 함), 오타/리터럴 바인딩(STORE 아님) prop을 만지면 조용히
 // undefined로 새지 않고 여기서 잡는다. 심볼 키(Symbol.toPrimitive 등 JS 내부)와 존재 키는 통과.
 // leafTree가 중첩 객체마다 감싸므로 props.item.typo도 안쪽 객체가 잡는다.
-const propsGuard = (obj: Record<string, unknown>): Record<string, unknown> =>
+const propsGuard = <T extends Record<string | symbol, unknown>>(obj: T): T =>
   new Proxy(obj, {
     get(target, key) {
       if (typeof key === "symbol" || key in target) {
-        return target[key as string];
+        return target[key];
       }
       throw new Error(`prop '${key}' 없음 - 오타이거나 리터럴 바인딩 prop(STORE만 접근 가능)`);
     },
@@ -1009,7 +1022,8 @@ class Interpreter {
     if (t.tag !== "object") {
       return base; // 스칼라(leafIndex) / 배열(칸 leafIndex)
     }
-    const obj: Record<string, unknown> = {};
+    // 자리(NODE_BASE/NODE_TYPE)를 함께 싣는다 - setObject가 여기서부터 이 타입대로 덮어쓴다.
+    const obj: TLeafObject = { [NODE_BASE]: base, [NODE_TYPE]: typeRef };
     let offset = 0;
     for (const [nameConst, fieldTypeRef] of t.fields) {
       obj[this.module.constpool[nameConst] as string] = this.leafTree(fieldTypeRef, base + offset);
@@ -1057,6 +1071,7 @@ class Interpreter {
       event: domEventObject,
       set: this.store.set,
       get: this.store.get,
+      setObject: this.setObject,
       push: this.pushArrayElement,
       removeAt: this.removeArrayElementAt,
       replace: this.replaceArrayElements,
@@ -1165,7 +1180,7 @@ class Interpreter {
     }
   };
 
-  // 배열 내용을 통째로 새 값들로 바꾼다 - 겹치는 앞자리는 값만 덮어쓰고(overwriteArrayElement) 꼬리만
+  // 배열 내용을 통째로 새 값들로 바꾼다 - 겹치는 앞자리는 값만 덮어쓰고(overwriteFixedBlock) 꼬리만
   // 늘리거나 줄인다. 요소를 전부 회수하고 다시 심으면 회차 DOM도 전부 다시 지어야 하는데, 목록 대부분이
   // 그대로인 교체(편집기 한 줄 수정 등)에서는 그 재구축이 통째로 낭비다. 자리를 유지하면 회차 DOM은
   // 그대로 두고 바뀐 텍스트/속성만 구독 발화로 움직인다.
@@ -1181,7 +1196,7 @@ class Interpreter {
   replaceInto = (info: TArrayInfo, elems: unknown[]): void => {
     const kept = Math.min(info.elemStartLeafIndices.length, elems.length);
     for (let i = 0; i < kept; i++) {
-      this.overwriteArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef, elems[i]);
+      this.overwriteFixedBlock(info.elemStartLeafIndices[i], info.elemTypeRef, elems[i]);
     }
 
     // 꼬리 제거 - 회차 DOM(truncateFor)을 먼저 떼고 요소 leaf를 회수해야 한다. 반대로 하면 떼는 도중
@@ -1214,13 +1229,21 @@ class Interpreter {
     }
   };
 
-  // 요소 하나를 기존 자리(start)에 덮어쓴다 - 고정 칸은 store.set으로 값만 바꾸고, 배열 칸을 만나면
+  // 객체 노드 하나를 값으로 갈아끼운다 - 안 준 필드는 undefined가 된다(병합이 아니라 교체).
+  // 노드가 실어 둔 자리가 요소 하나의 고정 블록과 같은 모양이라 overwriteFixedBlock에 그대로
+  // 맡긴다 - 배열 필드도 그 안에서 replaceInto로 함께 간다.
+  setObject = (node: TLeafObject, value: unknown): void => {
+    this.overwriteFixedBlock(node[NODE_BASE], node[NODE_TYPE], value);
+  };
+
+  // 고정 블록 하나(start부터 typeRef 구조)를 기존 자리에 덮어쓴다 - 배열 요소도 객체 노드도 같은
+  // 모양이라 replace/setObject가 함께 쓴다. 고정 칸은 store.set으로 값만 바꾸고, 배열 칸을 만나면
   // 그 칸 값(arrayInfoIndex)은 그대로 둔 채 그 자식 배열에 대해 replaceInto로 재귀한다. 배열 칸에
   // set을 하면 arrayInfo 포인터가 깨져 그 배열의 모든 요소 leaf를 잃는다.
   //
   // 커서 진행 순서는 freeArrayElement의 walk와 같아야 한다(객체는 필드 선언 순, 스칼라/배열은 한 칸) -
   // 둘 다 같은 고정부 레이아웃(plantFixed)을 걷는다.
-  overwriteArrayElement = (start: number, typeRef: number, value: unknown): void => {
+  overwriteFixedBlock = (start: number, typeRef: number, value: unknown): void => {
     let cursor = start;
     const walk = (ref: number, v: unknown): void => {
       const t = this.module.types[ref];

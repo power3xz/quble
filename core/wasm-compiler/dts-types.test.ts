@@ -27,7 +27,7 @@ const SOURCE = `component HandlerTypes {
     count: number,
     tags: string[],
     cards: { title: string, done: bool }[],
-    ghost: { style: string, inner: { label: string } }
+    ghost: { style: string, marks: string[], inner: { label: string } }
   }
   events {
     EDIT({ title })
@@ -58,7 +58,7 @@ after(() => {
 const typecheck = (body: string): string | null => {
   const source = `import type { THandlers } from "./handlers";
 export default {
-  EDIT: (_data, { props, store, get, set, push, removeAt, replace }) => {
+  EDIT: (_data, { props, store, get, set, setObject, push, removeAt, replace }) => {
 ${body}
   },
 } satisfies Partial<THandlers>;
@@ -155,4 +155,53 @@ test("없는 store 필드는 막는다", () => {
 test("store leaf 값 타입이 다르면 set이 막는다", () => {
   const out = typecheck(`set(store.count, "not a number");`);
   assert.match(out ?? "", /TS2345/);
+});
+
+// setObject는 객체 노드를 통째로 갈아끼운다. 값이 Partial이라 필드를 다 안 적어도 되지만,
+// 그건 타입이 허용하는 범위일 뿐 의미는 교체다(안 준 필드는 undefined - 런타임 테스트가 못박는다).
+//
+// 컴파일러는 바깥 객체만 TLeafObject로 내고 안쪽은 값 타입 속 평범한 객체로 둔다 - 안쪽이 다시
+// 노드가 되는 것은 TLeafObject의 매핑이 파생한 결과라, 중첩(ghost.inner)이 그 파생을 검증한다.
+test("객체 노드를 setObject로 갈아끼운다", () => {
+  assert.equal(
+    typecheck(`
+    setObject(props.ghost, { style: "s", inner: { label: "L" } });
+    setObject(props.ghost, { style: "s" });
+    setObject(props.ghost.inner, { label: "L" });
+    setObject(store.ghost.inner, { label: "L" });
+  `),
+    null,
+  );
+});
+
+test("없는 필드를 setObject에 주면 막는다", () => {
+  const out = typecheck(`setObject(props.ghost, { nope: 1 });`);
+  assert.match(out ?? "", /TS2353|TS2345/);
+  assert.match(out ?? "", /nope/);
+});
+
+test("setObject 필드 값 타입이 다르면 막는다", () => {
+  const out = typecheck(`setObject(props.ghost, { style: 123 });`);
+  assert.match(out ?? "", /TS2322|TS2345/);
+});
+
+// leaf는 칸 하나라 노드가 아니다 - set이 받을 것을 setObject에 넘기면 걸려야 한다(반대도 마찬가지).
+test("leaf는 setObject 대상이 아니다", () => {
+  const out = typecheck(`setObject(props.title, { a: 1 });`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+// 객체 노드 안의 배열도 leaf 한 칸이어야 한다(push/removeAt 대상). 최상위 배열(props.tags)은
+// 컴파일러가 직접 TLeafIndex로 내지만, 노드 안쪽은 TLeafObject의 매핑이 파생한다 - JS에서 배열도
+// object라 매핑이 배열을 object보다 먼저 걸러야 성립한다. 순서가 뒤집히면 노드로 파생돼 여기서
+// push가 막힌다(대상을 setObject에 주는 쪽은 값 검사에 먼저 걸려 순서 오류를 못 잡는다).
+test("객체 노드 안 배열도 leaf 한 칸이다", () => {
+  assert.equal(
+    typecheck(`
+    push(props.ghost.marks, "m");
+    removeAt(props.ghost.marks, 0);
+    replace(props.ghost.marks, ["a"]);
+  `),
+    null,
+  );
 });

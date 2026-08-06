@@ -66,36 +66,9 @@ struct Handler {
     loop_depth: u16,
 }
 
-/// d.ts 서두: 공통 타입. `THandler<Data, Props, Ctx, Loop, Store>`가 핸들러 하나의 모양(params
-/// 배치, 조작 함수)을 담고, 각 fullname은 자기 Data/Props/Ctx/Loop/Store를 인자로 채운다.
-///
-/// Store는 트리 전체에서 루트 하나라 모든 시그니처가 같은 이름을 채운다. 그래도 제네릭 자리에
-/// 두는 이유 - params의 다른 넷이 다 제네릭인데 store만 본문에 박으면 무엇이 채워지는지가
-/// 시그니처에서 안 보인다.
-///
-/// 배열 조작(push/removeAt/replace)은 대상이 배열 leaf여야 한다 - `TLeafIndex<TElement[]>`로
-/// 받아 배열 아닌 leaf를 넘기면 타입에서 걸리고, 요소 타입도 함께 맞춘다. removeAt은 요소
-/// 타입을 안 쓰므로 제네릭 없이 `unknown[]`으로 둔다.
-///
-/// 제네릭 이름을 자리별로 나눈 이유 - `get`의 것은 leaf가 담은 값(TValue)이고 `push`의 것은
-/// 그 배열의 요소(TElement)라 뜻이 다르다. 한 이름으로 두면 나란히 놓였을 때 같은 것으로 읽힌다.
-const PRELUDE: &str = "\
-type TLeafIndex<T> = number & { readonly __leaf: T };
-type THandler<Data, Props, Ctx, Loop, Store> = (
-  data: Data,
-  params: {
-    context: Ctx;
-    props: Props;
-    event: Event;
-    store: Store;
-    get: <TValue>(k: TLeafIndex<TValue>) => TValue;
-    set: <TValue>(k: TLeafIndex<TValue>, v: TValue) => void;
-    push: <TElement>(k: TLeafIndex<TElement[]>, v: TElement) => void;
-    removeAt: (k: TLeafIndex<unknown[]>, i: number) => void;
-    replace: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;
-  } & Loop,
-) => void | Promise<void>;
-";
+/// d.ts 서두: fullname마다 달라지지 않는 공통 타입. 실물은 옆 `prelude.d.ts`에 있다 - TS 문법을
+/// Rust 문자열에 담으면 편집기가 못 읽고 이스케이프에 묶인다. 주석도 그 파일이 갖는다.
+const PRELUDE: &str = include_str!("prelude.d.ts");
 
 /// 평탄화된 컴포넌트들에서 루트(0)의 합성 트리를 걸어 핸들러들을 모은다(트리 순서).
 fn collect(comps: &[FlatComp]) -> Vec<Handler> {
@@ -156,7 +129,9 @@ fn props_type_name(comp_name: &str) -> String {
     format!("TProps_{comp_name}")
 }
 
-/// props 선언을 leafIndex 트리 객체 타입으로.
+/// props 선언을 leafIndex 트리 객체 타입으로. 최상위에는 `TLeafObject`를 안 단다 - 대상은
+/// 필드로 내려간 객체 노드(`props.obj`)뿐이다. 최상위는 컴포넌트마다 슬롯이 흩어져 있어
+/// (buildProps가 prop별 슬롯에서 base를 읽는다) 덮어쓸 연속 블록이 아니다.
 fn props_type(props: &[Prop]) -> String {
     format!(
         "{{ {} }}",
@@ -200,22 +175,15 @@ fn signature(h: &Handler, root_name: &str) -> String {
 /// ```text
 /// 원시  string              -> TLeafIndex<string>
 /// 배열  { title }[]         -> TLeafIndex<{ title: string }[]>
-/// 객체  { name, id }        -> { name: TLeafIndex<string>; id: TLeafIndex<number> }
+/// 객체  { name, id }        -> TLeafObject<{ name: string; id: number }>
 /// ```
 ///
-/// 객체는 주소가 아니라 필드마다 leaf가 따로 서서(`set(props.ghost.title, ..)`) 감싸지 않고
-/// 내려간다. 배열은 칸 하나가 leaf라(push/removeAt가 그걸 받는다) 요소 안쪽은 값이므로
-/// type_to_ts로 넘긴다 - 감싸는 규칙과 값 규칙이 여기서 갈린다.
+/// 배열은 칸 하나가 leaf라(push/removeAt가 그걸 받는다) 요소 안쪽은 값이다. 객체는 여러 leaf의
+/// 묶음이라 `TLeafObject`가 받고, 필드로 내려가는 길(`set(props.ghost.title, ..)`)은 그쪽 매핑이
+/// 파생한다 - 여기서는 값 타입만 낸다.
 fn leaf_tree_to_ts(ty: &Type) -> String {
     match ty {
-        Type::Object(fields) => {
-            let body = join(
-                fields
-                    .iter()
-                    .map(|(k, t)| format!("{k}: {}", leaf_tree_to_ts(t))),
-            );
-            format!("{{ {body} }}")
-        }
+        Type::Object(_) => format!("TLeafObject<{}>", type_to_ts(ty)),
         _ => format!("TLeafIndex<{}>", type_to_ts(ty)),
     }
 }
@@ -528,7 +496,7 @@ mod tests {
             }
         "#);
         assert!(out.contains("type TLeafIndex<T> = number & { readonly __leaf: T };"));
-        assert!(out.contains("type THandler<Data, Props, Ctx, Loop, Store> = ("));
+        assert!(out.contains("type THandler<TData, TProps, TCtx, TLoopIndices, TStore> = ("));
     }
 
     /// 핸들러 params에 배열 조작 3종이 있다. 대상을 `TLeafIndex<TElement[]>`로 받아야 배열 아닌
@@ -548,10 +516,54 @@ mod tests {
         );
     }
 
+    /// setObject는 객체 노드(TLeafObject)를 받고 값은 Partial이다 - 안 준 필드가 undefined가 되는
+    /// 교체라, 필드를 다 적지 않아도 타입이 통과해야 한다. leaf 한 칸을 쓰는 set과 대상이 달라
+    /// 오버로드가 아니라 별도 이름이다.
+    #[test]
+    fn prelude_has_set_object() {
+        let out = dts(r#"
+            component Thumb {
+              props { owner: { name: string } }
+              events { CLICK({ x }) }
+              template { img(@click:CLICK /) }
+            }
+        "#);
+        assert!(out.contains("type TLeafObject<T> = { readonly __obj: T } & {"));
+        assert!(
+            out.contains(
+                "setObject: <TValue>(k: TLeafObject<TValue>, v: Partial<TValue>) => void;"
+            ),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// 객체는 `TLeafObject<값타입>`으로 나가고 필드로 내려가는 길은 그 매핑이 파생한다 - 값
+    /// 타입을 한 번만 실어 중첩이 깊어져도 텍스트가 제곱으로 안 붇는다. 파생이 실제로 서는지는
+    /// (`props.owner.name`이 leaf, 배열은 leaf 한 칸) dts-types.test.ts가 tsc로 확인한다.
+    ///
+    /// props 최상위에는 안 붙는다 - buildProps가 prop별 슬롯에서 base를 읽어 흩어져 있어
+    /// (컴포넌트마다 부모가 넘긴 자리) 덮어쓸 연속 블록이 아니다.
+    #[test]
+    fn object_prop_is_one_leaf_object() {
+        let out = dts(r#"
+            component C {
+              props { title: string, owner: { name: string } }
+              events { GO({ title }) }
+              template { button(@click:GO /) }
+            }
+        "#);
+        assert!(
+            out.contains(
+                "type TProps_C = { title: TLeafIndex<string>; owner: TLeafObject<{ name: string }> };"
+            ),
+            "실제 출력:\n{out}"
+        );
+    }
+
     /// 핸들러 params에 event와 store가 있다. 런타임이 실제로 넘기는 것들이라 빠지면 핸들러가
     /// 그것을 받는 순간 타입이 안 맞는다(core/web/runtime.ts의 핸들러 호출부).
     ///
-    /// store는 Store 제네릭으로 받고 시그니처가 루트 props 타입을 채운다 - 런타임이 루트
+    /// store는 TStore 제네릭으로 받고 시그니처가 루트 props 타입을 채운다 - 런타임이 루트
     /// (defs[0]) 기준 leafIndex 트리를 넘기므로 그 트리가 곧 루트의 props다.
     #[test]
     fn prelude_has_event_and_store() {
@@ -563,7 +575,7 @@ mod tests {
             }
         "#);
         assert!(out.contains("event: Event;"));
-        assert!(out.contains("store: Store;"));
+        assert!(out.contains("store: TStore;"));
         assert!(
             out.contains("'CLICK': THandler<{ x: string }, TProps_Thumb, {}, {}, TProps_Thumb>;"),
             "실제 출력:\n{out}"
@@ -674,10 +686,10 @@ mod tests {
         );
     }
 
-    /// 배열은 칸 하나가 leaf(TLeafIndex<T[]>)지만 객체는 필드마다 leaf가 따로 선다 - 객체를
-    /// 통째로 감싸면 `set(props.owner.name, ..)`을 못 쓴다(runtime.ts leafTree와 같은 규칙).
+    /// 배열은 칸 하나가 leaf(TLeafIndex<T[]>)고 객체는 여러 leaf의 묶음(TLeafObject)이다 -
+    /// 나란히 두면 그 갈림이 드러난다(runtime.ts leafTree와 같은 규칙).
     #[test]
-    fn array_is_one_leaf_object_splits_per_field() {
+    fn array_is_one_leaf_object_is_a_node() {
         let out = dts(r#"
             component C {
               props { tags: string[], owner: { name: string, id: number } }
@@ -687,15 +699,17 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "{ tags: TLeafIndex<string[]>; owner: { name: TLeafIndex<string>; id: TLeafIndex<number> } }"
+                "{ tags: TLeafIndex<string[]>; owner: TLeafObject<{ name: string; id: number }> }"
             ),
             "실제 출력:\n{out}"
         );
     }
 
-    /// 객체 안 객체도 끝까지 내려가 잎에만 leafIndex가 붙는다(보드의 ghost 모양).
+    /// 객체 안 객체도 값 타입 그대로 한 번만 실린다(보드의 ghost 모양) - 안쪽을 바깥에 다시
+    /// 펴 실으면 중첩 깊이만큼 텍스트가 제곱으로 붇는다. 잎까지 내려가는 길은 TLeafObject의
+    /// 매핑이 파생한다.
     #[test]
-    fn nested_object_leaves_only_at_scalars() {
+    fn nested_object_carries_value_type_once() {
         let out = dts(r#"
             component C {
               props { ghost: { style: string, card: { title: string, urgent: bool } } }
@@ -705,7 +719,7 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "ghost: { style: TLeafIndex<string>; card: { title: TLeafIndex<string>; urgent: TLeafIndex<boolean> } }"
+                "ghost: TLeafObject<{ style: string; card: { title: string; urgent: boolean } }>"
             ),
             "실제 출력:\n{out}"
         );
