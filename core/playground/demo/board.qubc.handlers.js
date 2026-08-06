@@ -10,14 +10,14 @@ let madeCards = 0;
 // 함께 들고 있어야 다른 컬럼에 놓을 때 원래 자리에서 빼낼 수 있다.
 let grabbed = null;
 
-// 컬럼의 현재 카드들을 렌더된 DOM에서 읽는다. 재배열은 배열 전체를 replace해야 하는데
-// store에서 배열 요소를 읽어 올 수 없어(ISSUES), 화면에 그려진 값을 되읽어 되돌려준다.
-const cardsOf = (list) =>
-  [...list.children].map((slot) => ({
-    title: slot.querySelector(".ticket__title").textContent,
-    assignee: slot.querySelector(".ticket__who").textContent,
-    points: slot.querySelector('.badge[data-tone="calm"]').textContent,
-    urgent: slot.querySelector('.badge[data-tone="hot"]') !== null,
+// 컬럼의 카드들을 store에서 값으로 읽는다 - 재배열은 배열 전체를 setArray해야 하므로 지금 값이
+// 필요하다. 요소를 값 객체로 한 번에 주는 것은 없어 필드마다 get한다.
+const cardsOf = (cards, { get }) =>
+  Array.from({ length: cards.length }, (_, i) => ({
+    title: get(cards[i].title),
+    assignee: get(cards[i].assignee),
+    points: get(cards[i].points),
+    urgent: get(cards[i].urgent),
   }));
 
 // from번째 카드를 to번째 자리로 옮긴다. 제자리면 false.
@@ -126,23 +126,29 @@ export const handlers = {
   // 집기 - 카드가 아니라 컬럼이 받는다. 빼낼 때 그 컬럼의 cards를 짚어야 하는데(removeAt)
   // 카드 쪽 핸들러는 자기 값만 알기 때문이다. 어느 카드인지는 mousedown의 target으로 되짚는다.
   "Lane[$0].GRAB_FROM": (_data, ctx) => {
-    const { props, store, set, event, $0 } = ctx;
+    const { props, store, get, set, event, $0 } = ctx;
     const card = event.target.closest(".ticket");
     if (!card) {
       return; // 카드 사이 여백을 눌렀다
     }
+    // 어느 자리를 눌렀는지는 커서 위치라 DOM으로만 안다 - 그 자리의 값은 store에서 읽는다.
     const slot = card.closest(".column__slot");
     const seat = [...slot.parentNode.children].indexOf(slot);
-    const picked = cardsOf(slot.parentNode)[seat];
+    const picked = {
+      title: get(props.cards[seat].title),
+      assignee: get(props.cards[seat].assignee),
+      points: get(props.cards[seat].points),
+      urgent: get(props.cards[seat].urgent),
+    };
 
-    // 고스트에 실을 값 - 끌고 있는 카드 그대로다.
+    // 고스트에 실을 값 - 끌고 있는 카드 그대로다. style은 startGhost가 커서를 따라 계속 set하므로
+    // 여기서 건드리지 않는다(setObject로 통째 교체하면 그 값이 날아간다).
     set(store.ghost.title, picked.title);
     set(store.ghost.assignee, picked.assignee);
     set(store.ghost.points, picked.points);
     set(store.ghost.urgent, picked.urgent);
     set(store.ghost.isDragging, true);
-    // 집힌 카드를 흐리게 - quble이 그리는 data-dragging과 겹치지 않게 클래스로 얹는다
-    // (그 값은 컬럼이 아니라 카드의 props라 여기서 못 짚는다).
+    // 집힌 카드를 흐리게 - quble이 그리는 data-dragging과 겹치지 않게 클래스로 얹는다.
     card.classList.add("ticket--grabbed");
 
     const stopGhost = startGhost(card, event, ctx);
@@ -161,7 +167,8 @@ export const handlers = {
 
   // 놓기 - 놓는 컬럼이 받는다. 같은 컬럼이면 순서만 바꾸고, 다른 컬럼이면 집은 쪽에서 빼고
   // 이쪽에 끼운다. 두 배열 모두 필요한데 집은 쪽 cards는 GRAB_FROM이 기억해 둔 것을 쓴다.
-  "Lane[$0].DROP_AT_END": (_data, { props, replace, removeAt, event, $0 }) => {
+  "Lane[$0].DROP_AT_END": (_data, ctx) => {
+    const { props, setArray, removeAt, event, $0 } = ctx;
     if (!grabbed) {
       return;
     }
@@ -169,15 +176,13 @@ export const handlers = {
     grabbed = null;
     release();
 
-    // 위임 리스너라 currentTarget은 document다 - 바인딩된 요소는 target에서 되짚는다.
-    const list = event.target.closest(".column__cards");
-    const cards = cardsOf(list);
+    const cards = cardsOf(props.cards, ctx);
 
     if (lane === $0) {
       if (!reorder(cards, seat, dropSeat(event, cards.length))) {
         return;
       }
-      replace(props.cards, cards);
+      setArray(props.cards, cards);
       console.log(`옮김: ${$0}번 컬럼 안에서 ${seat}번째 카드`);
       return;
     }
@@ -185,7 +190,7 @@ export const handlers = {
     // 컬럼 간 - 넣는 쪽을 먼저 그리고 빼는 쪽을 지운다. 순서를 바꾸면 빼는 순간 화면이
     // 한 번 줄었다 늘어난다.
     cards.splice(Math.min(dropSeat(event, cards.length), cards.length), 0, card);
-    replace(props.cards, cards);
+    setArray(props.cards, cards);
     removeAt(cardsLeaf, seat);
     console.log(`옮김: ${lane}번 컬럼 ${seat}번째 -> ${$0}번 컬럼`);
   },
