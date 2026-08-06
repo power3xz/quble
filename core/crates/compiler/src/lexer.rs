@@ -152,6 +152,8 @@ impl std::fmt::Display for Directive {
 #[derive(Debug, PartialEq, Eq)]
 pub enum LexErrorKind {
     UnterminatedString,
+    /// `/*`를 열고 `*/`로 안 닫았다.
+    UnterminatedComment,
     UnexpectedChar(char),
     /// `@` 뒤에 알 수 없는 디렉티브 키워드.
     UnknownDirective(String),
@@ -161,6 +163,7 @@ impl std::fmt::Display for LexErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
+            LexErrorKind::UnterminatedComment => write!(f, "unterminated block comment"),
             LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character `{c}`"),
             LexErrorKind::UnknownDirective(s) => write!(f, "unknown directive `@{s}`"),
         }
@@ -181,6 +184,26 @@ pub struct Lexed {
     pub ranges: Vec<SrcRange>,
 }
 
+/// `/*`를 이미 먹은 자리에서 짝 `*/`까지 건너뛴다. 중첩은 안 센다 - 안쪽 `/*`를 무시하고 첫
+/// `*/`에서 닫는다(C/JS와 같다). `open`은 여는 `/`의 오프셋으로, 못 닫았을 때 그 자리부터
+/// 끝까지를 에러 구간으로 짚는다(UnterminatedString과 같은 규칙).
+fn skip_block_comment(
+    chars: &mut std::iter::Peekable<std::str::CharIndices>,
+    open: usize,
+    src_len: usize,
+) -> Result<(), LexError> {
+    while let Some((_, c)) = chars.next() {
+        if c == '*' && chars.peek().is_some_and(|&(_, n)| n == '/') {
+            chars.next();
+            return Ok(());
+        }
+    }
+    Err(LexError {
+        kind: LexErrorKind::UnterminatedComment,
+        range: SrcRange::new(open, src_len),
+    })
+}
+
 pub fn lex(src: &str) -> Result<Lexed, LexError> {
     let mut toks = Vec::new();
     let mut ranges = Vec::new();
@@ -198,9 +221,28 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                 chars.next();
                 prev_ws = true;
             }
+            // `/`는 셋으로 갈린다 - `//` 줄 주석, `/*` 블록 주석, 그 외는 self-close 표기.
+            //
+            // 주석은 토큰을 안 내고 앞 공백 여부를 그대로 통과시킨다(prev_ws = ws_before). 공백을
+            // 새로 세우면 안 된다 - `img(class="x"/**//)`처럼 공백 없이 붙은 주석이 `/` 앞 공백을
+            // 대신해 self-close 검증(SYNTAX #3.1.1)을 뚫는다. 주석은 투명해야 한다.
             '/' => {
                 chars.next();
-                toks.push(Token::Slash(ws_before));
+                match chars.peek() {
+                    Some(&(_, '/')) => {
+                        // 줄 끝까지. 개행은 남겨 둔다 - 공백 분기가 마저 먹으며 prev_ws를 세운다.
+                        while chars.peek().is_some_and(|&(_, c)| c != '\n') {
+                            chars.next();
+                        }
+                        prev_ws = ws_before;
+                    }
+                    Some(&(_, '*')) => {
+                        chars.next();
+                        skip_block_comment(&mut chars, start, src.len())?;
+                        prev_ws = ws_before;
+                    }
+                    _ => toks.push(Token::Slash(ws_before)),
+                }
             }
             '{' => {
                 chars.next();
