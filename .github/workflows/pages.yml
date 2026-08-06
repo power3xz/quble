@@ -1,4 +1,4 @@
-# playground를 GitHub Pages에 배포한다.
+# playground를 검증하고 GitHub Pages에 배포한다.
 # dist/는 gitignore라 산출물이 레포에 없다 - CI가 매번 빌드한다(quble-playground.sh의 1~3단계와 동일).
 # 산출 경로는 core/dist/playground 하나뿐이고, 그 안의 자산 참조는 전부 상대경로라
 # https://<user>.github.io/quble/ 같은 하위 경로에서도 그대로 뜬다.
@@ -36,7 +36,41 @@ permissions:
   id-token: write
 
 jobs:
+  # 배포 전 게이트. playground도 제품이라 검증을 통과한 것만 내보낸다.
+  # npm test/typecheck는 core/wasm-compiler/compiler_wasm.wasm을 읽으므로(gitignore라 레포에 없다)
+  # build:wasm으로 먼저 채운다 - 이게 없으면 테스트가 아니라 파일 없음으로 죽는다.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: wasm 타겟 추가
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: wasm 빌드 (test/typecheck가 읽는다)
+        run: npm run build:wasm --prefix core/wasm-compiler
+
+      - name: cargo test
+        run: cargo test --manifest-path core/Cargo.toml --workspace
+
+      - name: npm test
+        run: npm test
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: lint
+        run: npm run lint
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
