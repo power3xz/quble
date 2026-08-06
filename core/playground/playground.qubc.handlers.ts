@@ -6,11 +6,9 @@
 //
 // 미리보기는 run을 눌러야 바뀐다 - 편집 중에는 오른쪽이 그대로다.
 //
-// 소스를 quble 상태가 아니라 여기 캐시(sources)에 두는 이유가 둘이다:
-//   1. 컴파일은 모든 파일의 내용이 필요한데 핸들러가 받는 props는 자기 회차 요소뿐이고,
-//      루트 store에서 배열 요소로 내려가는 경로가 없다(ISSUES).
-//   2. 타이핑마다 set하면 TEXT_VAR 구독이 값 비교 없이 textContent를 덮어써 커서가 튄다.
-// 그래서 편집 중에는 캐시만 갱신하고, 파일을 바꿀 때만 lines를 set한다(그때는 갱신이 맞다).
+// 소스는 quble 상태가 아니라 여기 캐시(sources)에 둔다 - 타이핑마다 set하면 TEXT_VAR 구독이
+// 값 비교 없이 textContent를 덮어써 커서가 튄다. 그래서 편집 중에는 캐시만 갱신하고, 파일을
+// 바꿀 때만 lines를 set한다(그때는 갱신이 맞다). props의 files에 source 칸이 없는 것도 이 때문이다.
 
 import { lazyCompiler } from "quble-wasm-compiler/browser.ts";
 import { compile as decodeQubb, type THandlers } from "../web/runtime.ts";
@@ -46,22 +44,15 @@ let shownLines = 0;
 // 파일 목록의 에러 표시는 이 값과 파일 이름을 맞춰 켠다(에러가 난 파일이 편집 중이 아니어도 보인다).
 let failure: TDiagnostic | null = null;
 
-// 파일 목록을 다시 그린다 - 에러 표시(hasError)만 바뀌므로 개수는 늘 그대로다. setArray가 개수가
-// 같으면 요소 자리를 지키므로, 행들이 들고 있는 leafIndex(moveFlag가 보관한 것)가 그대로 유효하다.
-//
-// 행 하나만 켜면 되는데 목록 전체를 넘기는 이유: 에러가 난 파일은 클릭된 적이 없을 수 있어
-// 그 행의 leafIndex를 모른다(배열 요소를 이름으로 못 짚는다 - ISSUES).
-const refreshFiles = ({ store, setArray }: Pick<TCtx, "store" | "setArray">) => {
-  setArray(
-    store.files,
-    fileNames.map((name) => ({
-      name,
-      isEntry: name.endsWith(".qubc"),
-      isEditing: name === currentName,
-      isPreviewing: name === previewingName,
-      hasError: failure?.path === name,
-    })),
-  );
+// 파일 목록의 표시(편집 중/미리보기 중/에러)를 지금 상태에 맞춘다. 개수는 안 바뀌므로 행마다
+// 필요한 칸만 set한다 - 목록째 갈아끼우면 안 바뀐 행의 DOM 텍스트까지 다시 쓴다.
+const refreshFiles = ({ store, set }: Pick<TCtx, "store" | "set">) => {
+  fileNames.forEach((name, i) => {
+    const row = store.files[i];
+    set(row.isEditing, name === currentName);
+    set(row.isPreviewing, name === previewingName);
+    set(row.hasError, failure?.path === name);
+  });
 };
 
 // 지금 미리보기 중인 파일 - 목록을 다시 그릴 때 표시를 되살리려면 이름으로 들고 있어야 한다.
@@ -408,8 +399,7 @@ const placeCompletion = (area: HTMLTextAreaElement, { store, set }: Pick<TCtx, "
 // completion.css의 .completion max-height와 같은 값(18rem, 1rem = 10px).
 const POPUP_MAX_H = 180;
 
-// 후보 목록을 화면에 싣는다. 선택 이동도 이걸 다시 부른다 - 배열 요소의 leafIndex를 개별로
-// 짚을 수 없어(ISSUES) 목록째 갈아끼운다. 후보가 열 개 남짓이라 실측상 문제가 없다.
+// 후보 목록을 화면에 싣는다 - 목록 자체가 바뀔 때(열기/타이핑으로 걸러짐)만 부른다.
 const renderCompletion = ({ store, setArray }: Pick<TCtx, "store" | "setArray">) => {
   setArray(
     store.completion.items,
@@ -420,8 +410,19 @@ const renderCompletion = ({ store, setArray }: Pick<TCtx, "store" | "setArray">)
   );
 };
 
-// 고른 항목이 팝업 밖에 있으면 보이도록 최소한만 스크롤한다. 목록을 setArray로 갈아끼우므로
-// DOM이 새로 붙은 다음 프레임에 잰다.
+// 선택만 옮긴다(화살표) - 목록은 그대로라 켜고 끄는 두 칸만 만진다. 목록째 갈아끼우면 후보
+// 이름들의 DOM 텍스트까지 다시 쓴다.
+const moveSelection = (to: number, { store, set }: Pick<TCtx, "store" | "set">) => {
+  if (!completion) {
+    return;
+  }
+  set(store.completion.items[completion.selected].isSelected, false);
+  completion.selected = to;
+  set(store.completion.items[to].isSelected, true);
+};
+
+// 고른 항목이 팝업 밖에 있으면 보이도록 최소한만 스크롤한다. 목록이 방금 붙었을 수 있어
+// (renderCompletion) DOM이 자리를 잡은 다음 프레임에 잰다.
 const revealSelected = () => {
   requestAnimationFrame(() => {
     const box = document.querySelector<HTMLElement>(".completion");
@@ -537,13 +538,11 @@ const completionKey = (event: KeyboardEvent, ctx: TCtx) => {
   const last = completion.shown.length - 1;
   switch (event.key) {
     case "ArrowDown":
-      completion.selected = completion.selected >= last ? 0 : completion.selected + 1;
-      renderCompletion(ctx);
+      moveSelection(completion.selected >= last ? 0 : completion.selected + 1, ctx);
       revealSelected();
       return true;
     case "ArrowUp":
-      completion.selected = completion.selected <= 0 ? last : completion.selected - 1;
-      renderCompletion(ctx);
+      moveSelection(completion.selected <= 0 ? last : completion.selected - 1, ctx);
       revealSelected();
       return true;
     case "Enter":
