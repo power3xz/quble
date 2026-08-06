@@ -21,9 +21,23 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 - **REACTIVITY.md** - reactivity + handler model (store, `get`/`set`) - the settled conclusion.
 - **ROADMAP.md** - feature progress by domain (what is done / in-flight / not started).
 - **ISSUES.md** - known problems (symptom + repro; fix filled in once decided).
-- **NEXT.md** - what to do next, and what is still undecided. Entries are removed once done.
+- **NEXT.md** - what is in flight, what to do next, and what is still undecided
+  ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See *NEXT.md 갱신* below.
 - **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
 - **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
+
+### NEXT.md 갱신
+
+NEXT.md는 "하는 중 / 할 것 / 정할 것" 세 섹션이고, 항목은 섹션 사이를 옮겨 다닌다.
+갱신은 내가(Claude) 먼저 챙긴다 - 사용자가 시켜야 하는 일이 아니다. 단 **고치기 전에
+무엇을 어떻게 바꿀지 말하고 승인을 받는다** - 알아서 고쳐 놓고 알리지 않는다.
+
+- 작업에 착수하면 그 항목을 "할 것"에서 "하는 중"으로 옮긴다.
+- 작업이 끝나면 "하는 중"에서 지운다. 완료 표시를 남기지 않는다(진행 기록은 ROADMAP,
+  문제는 ISSUES 소관).
+- 새 항목은 착수 조건이 다 됐으면 "할 것", 지금 정할 수 없으면 "정할 것"에 넣는다.
+- 본문을 옮겨 적지 말고 원문(ISSUES/ROADMAP/DESIGN)을 가리킨다. 아직 안 들어간 영역은
+  "무엇을 정해야 하는지"까지만 - 방법을 미리 적으면 방향을 가둔다.
 
 ## Project Status
 
