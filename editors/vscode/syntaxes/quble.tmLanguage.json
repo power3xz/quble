@@ -3,6 +3,7 @@
   "name": "Quble",
   "scopeName": "source.quble",
   "patterns": [
+    { "include": "#comment" },
     { "include": "#use" },
     { "include": "#component" },
     { "include": "#block-keyword" },
@@ -15,6 +16,17 @@
     { "include": "#string" }
   ],
   "repository": {
+    "comment": {
+      "comment": "// 줄 끝까지, /* */ 블록.",
+      "patterns": [
+        { "match": "//.*$", "name": "comment.line.double-slash.quble" },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "name": "comment.block.quble"
+        }
+      ]
+    },
     "use": {
       "comment": "use X, Y from \"path\" - 다른 소스의 컴포넌트 import.",
       "begin": "\\b(use)\\b",

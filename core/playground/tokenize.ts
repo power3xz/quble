@@ -210,7 +210,13 @@ const scanQubc: TScanner = (text) => {
       continue;
     }
 
-    // qubc에는 주석이 없다 - `/`는 self-close(`img( /)`)로만 쓰인다.
+    // `/`는 주석이거나 self-close(`img( /)`)다 - 뒤 한 글자로 가른다.
+    if (c === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
+      const comment = text[i + 1] === "/" ? readLineComment(text, i) : readBlockComment(text, i);
+      tokens.push({ text: comment, cls: cls("comment") });
+      i += comment.length;
+      continue;
+    }
 
     // 큰따옴표는 값 리터럴, 작은따옴표는 유틸 타입의 키(`Omit<Section, 'title'>`) - 자리가 달라
     // SYNTAX.md가 따옴표로 구분한다. 화면에서는 둘 다 문자열로 둔다.
