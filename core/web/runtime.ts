@@ -1072,9 +1072,9 @@ class Interpreter {
       set: this.store.set,
       get: this.store.get,
       setObject: this.setObject,
+      setArray: this.setArrayElements,
       push: this.pushArrayElement,
       removeAt: this.removeArrayElementAt,
-      replace: this.replaceArrayElements,
       props: binding.props,
       store: this.rootStore(),
       context,
@@ -1187,13 +1187,13 @@ class Interpreter {
   //
   // 자리를 유지한다는 건 i번째 요소 leaf가 다른 값을 갖게 된다는 뜻이다 - push/removeAt의 "값 고정,
   // 위치 이동"과 반대 방향이지만, 전량 교체는 이전 요소와의 대응 자체가 없으므로 이쪽이 맞다.
-  replaceArrayElements = (arrayLeafIndex: number, elems: unknown[]): void => {
-    this.replaceInto(this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))], elems);
+  setArrayElements = (arrayLeafIndex: number, elems: unknown[]): void => {
+    this.setArrayInto(this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))], elems);
   };
 
-  // replace의 본체 - arrayInfo를 직접 받는다(요소 안 중첩 배열은 칸 값이 arrayInfoIndex라
+  // setArray의 본체 - arrayInfo를 직접 받는다(요소 안 중첩 배열은 칸 값이 arrayInfoIndex라
   // arrayLeafIndex가 없어 여기로 재귀한다).
-  replaceInto = (info: TArrayInfo, elems: unknown[]): void => {
+  setArrayInto = (info: TArrayInfo, elems: unknown[]): void => {
     const kept = Math.min(info.elemStartLeafIndices.length, elems.length);
     for (let i = 0; i < kept; i++) {
       this.overwriteFixedBlock(info.elemStartLeafIndices[i], info.elemTypeRef, elems[i]);
@@ -1231,14 +1231,14 @@ class Interpreter {
 
   // 객체 노드 하나를 값으로 갈아끼운다 - 안 준 필드는 undefined가 된다(병합이 아니라 교체).
   // 노드가 실어 둔 자리가 요소 하나의 고정 블록과 같은 모양이라 overwriteFixedBlock에 그대로
-  // 맡긴다 - 배열 필드도 그 안에서 replaceInto로 함께 간다.
+  // 맡긴다 - 배열 필드도 그 안에서 setArrayInto로 함께 간다.
   setObject = (node: TLeafObject, value: unknown): void => {
     this.overwriteFixedBlock(node[NODE_BASE], node[NODE_TYPE], value);
   };
 
   // 고정 블록 하나(start부터 typeRef 구조)를 기존 자리에 덮어쓴다 - 배열 요소도 객체 노드도 같은
-  // 모양이라 replace/setObject가 함께 쓴다. 고정 칸은 store.set으로 값만 바꾸고, 배열 칸을 만나면
-  // 그 칸 값(arrayInfoIndex)은 그대로 둔 채 그 자식 배열에 대해 replaceInto로 재귀한다. 배열 칸에
+  // 모양이라 setArray/setObject가 함께 쓴다. 고정 칸은 store.set으로 값만 바꾸고, 배열 칸을 만나면
+  // 그 칸 값(arrayInfoIndex)은 그대로 둔 채 그 자식 배열에 대해 setArrayInto로 재귀한다. 배열 칸에
   // set을 하면 arrayInfo 포인터가 깨져 그 배열의 모든 요소 leaf를 잃는다.
   //
   // 커서 진행 순서는 freeArrayElement의 walk와 같아야 한다(객체는 필드 선언 순, 스칼라/배열은 한 칸) -
@@ -1255,7 +1255,7 @@ class Interpreter {
         return;
       }
       if (t.tag === "array") {
-        this.replaceInto(this.arrayPool.entries[Number(this.store.get(cursor))], Array.isArray(v) ? v : []);
+        this.setArrayInto(this.arrayPool.entries[Number(this.store.get(cursor))], Array.isArray(v) ? v : []);
       } else {
         this.store.set(cursor, v);
       }

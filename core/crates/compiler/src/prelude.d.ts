@@ -29,13 +29,17 @@ type TLeafObject<T> = { readonly __obj: T } & {
 // 이유 - params의 다른 넷이 다 제네릭인데 store만 본문에 박으면 무엇이 채워지는지가 시그니처에서
 // 안 보인다.
 //
-// 배열 조작(push/removeAt/replace)은 대상이 배열 leaf여야 한다 - TLeafIndex<TElement[]>로 받아
+// set 계열은 "그 자리에 이 값을 넣는다"로 묶이고 대상 종류가 접미사로 갈린다 - set은 leaf 한 칸,
+// setObject는 객체 노드, setArray는 배열 칸. push/removeAt만 요소 단위 조작이다.
+//
+// setObject/setArray를 오버로드하지 않고 이름을 나눈 이유 - 대상이 leafIndex 한 칸이 아니라
+// (객체는 여러 leaf의 묶음, 배열 칸은 요소 뭉치의 핸들) 호출부에서 무엇을 갈아끼우는지가 이름에
+// 드러나야 한다. setObject의 값은 Partial<T>인데도 병합이 아니라 교체다 - 안 준 필드는
+// undefined가 된다(obj = {..} 대입과 같은 뜻).
+//
+// 배열 조작(push/removeAt/setArray)은 대상이 배열 leaf여야 한다 - TLeafIndex<TElement[]>로 받아
 // 배열 아닌 leaf를 넘기면 타입에서 걸리고, 요소 타입도 함께 맞춘다. removeAt은 요소 타입을 안
 // 쓰므로 제네릭 없이 unknown[]으로 둔다.
-//
-// setObject는 객체 노드 하나를 값으로 갈아끼운다 - leaf 한 칸을 쓰는 set과 대상이 달라 오버로드하지
-// 않고 이름을 나눈다. 값이 Partial<T>인데도 병합이 아니라 교체다 - 안 준 필드는 undefined가 된다
-// (obj = {..} 대입과 같은 뜻).
 //
 // 제네릭 이름을 자리별로 나눈 이유 - get의 것은 leaf가 담은 값(TValue)이고 push의 것은 그 배열의
 // 요소(TElement)라 뜻이 다르다. 한 이름으로 두면 나란히 놓였을 때 같은 것으로 읽힌다.
@@ -52,8 +56,8 @@ type THandler<TData, TProps, TCtx, TLoopIndices, TStore> = (
     get: <TValue>(k: TLeafIndex<TValue>) => TValue;
     set: <TValue>(k: TLeafIndex<TValue>, v: TValue) => void;
     setObject: <TValue>(k: TLeafObject<TValue>, v: Partial<TValue>) => void;
+    setArray: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;
     push: <TElement>(k: TLeafIndex<TElement[]>, v: TElement) => void;
     removeAt: (k: TLeafIndex<unknown[]>, i: number) => void;
-    replace: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;
   } & TLoopIndices,
 ) => void | Promise<void>;

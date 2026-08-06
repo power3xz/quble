@@ -15,9 +15,10 @@ Quble 컴포넌트 언어(`.qubc`) 신택스 하이라이팅.
 나중에 묶어 내보내도 된다) - 파일에 `import`를 적지 않고, 디스크에 d.ts도 안 생긴다. TS가 fullname/payload/props/context를 타입으로
 강제한다 - 잘못된 이벤트명은 컴파일 에러, payload 필드는 정확한 타입(리터럴은 그 값으로 좁힘),
 `params.context.<이름>.<필드>`/`params.props.<이름>`까지 잡힌다. `props`는 값이 아니라
-leafIndex(`LeafIndex<T>`)라 `get`/`set`으로 읽고 쓰고, 배열은 `push`/`removeAt`/`replace`로
-다룬다(배열이 아닌 것을 넘기면 타입에서 걸린다). 객체 prop은 통째로가 아니라 필드마다 주소가
-있어서 `set(props.ghost.style, ...)`처럼 마지막 필드까지 적어야 한다.
+leafIndex(`TLeafIndex<T>`)라 `get`/`set`으로 읽고 쓰고, 배열은 `push`/`removeAt`/`setArray`로
+다룬다(배열이 아닌 것을 넘기면 타입에서 걸린다). 객체 prop은 필드마다 주소가 있어서
+`set(props.ghost.style, ...)`처럼 마지막 필드까지 적거나, `setObject(props.ghost, {...})`로
+통째로 갈아끼운다(안 준 필드는 `undefined`가 된다).
 
 ```ts
 // card.qubc.handlers.ts - import 없음. 이름이 handlers면 짝 card.qubc의 타입이 붙는다.

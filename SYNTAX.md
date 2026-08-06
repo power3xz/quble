@@ -296,8 +296,9 @@ const handlers = {
 - 시그니처는 `(data, ctx)`. `data`는 events 선언대로 조립된 payload.
 - `ctx`가 담는 것:
   - `get(leafIndex)` / `set(leafIndex, value)` - 상태 읽기/쓰기.
+  - `setObject(objectNode, values)` - 객체 노드 통째 교체(안 준 필드는 `undefined`).
+  - `setArray(arrayLeafIndex, elems)` - 배열 내용 통째 교체(겹치는 앞자리는 회차 DOM을 유지).
   - `push(...)` / `removeAt(...)` - 배열 요소 추가/제거.
-  - `replace(arrayLeafIndex, elems)` - 배열 내용 통째 교체(회차 DOM을 전부 다시 짓는다).
   - `props` - 발화한 컴포넌트 기준 상대 props. `store` - 루트 기준 절대 상태 트리.
   - `context` - `@with`로 주입된 컨텍스트(`context.Area.userId`).
   - `event` - 발화시킨 DOM 이벤트 객체(`event.target.value`로 입력값).

@@ -46,13 +46,13 @@ let shownLines = 0;
 // 파일 목록의 에러 표시는 이 값과 파일 이름을 맞춰 켠다(에러가 난 파일이 편집 중이 아니어도 보인다).
 let failure: TDiagnostic | null = null;
 
-// 파일 목록을 다시 그린다 - 에러 표시(hasError)만 바뀌므로 개수는 늘 그대로다. replace가 개수가
+// 파일 목록을 다시 그린다 - 에러 표시(hasError)만 바뀌므로 개수는 늘 그대로다. setArray가 개수가
 // 같으면 요소 자리를 지키므로, 행들이 들고 있는 leafIndex(moveFlag가 보관한 것)가 그대로 유효하다.
 //
 // 행 하나만 켜면 되는데 목록 전체를 넘기는 이유: 에러가 난 파일은 클릭된 적이 없을 수 있어
 // 그 행의 leafIndex를 모른다(배열 요소를 이름으로 못 짚는다 - ISSUES).
-const refreshFiles = ({ store, replace }: Pick<TCtx, "store" | "replace">) => {
-  replace(
+const refreshFiles = ({ store, setArray }: Pick<TCtx, "store" | "setArray">) => {
+  setArray(
     store.files,
     fileNames.map((name) => ({
       name,
@@ -170,10 +170,10 @@ installConsoleCapture();
 
 // 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, textarea의 value만
 // 여기서 직접 쓴다 - textarea는 uncontrolled라 quble이 값을 바인딩할 수 없다(playground.css).
-const showText = (text: string, { store, set, replace }: Pick<TCtx, "store" | "set" | "replace">) => {
+const showText = (text: string, { store, set, setArray }: Pick<TCtx, "store" | "set" | "setArray">) => {
   const lines = tokenize(text, currentName ?? "");
   // 에러 줄 표시는 그 에러가 난 파일을 싣고 있을 때만.
-  replace(
+  setArray(
     store.lines,
     failure && failure.path === currentName ? markError(lines, failure.line, failure.message) : lines,
   );
@@ -410,8 +410,8 @@ const POPUP_MAX_H = 180;
 
 // 후보 목록을 화면에 싣는다. 선택 이동도 이걸 다시 부른다 - 배열 요소의 leafIndex를 개별로
 // 짚을 수 없어(ISSUES) 목록째 갈아끼운다. 후보가 열 개 남짓이라 실측상 문제가 없다.
-const renderCompletion = ({ store, replace }: Pick<TCtx, "store" | "replace">) => {
-  replace(
+const renderCompletion = ({ store, setArray }: Pick<TCtx, "store" | "setArray">) => {
+  setArray(
     store.completion.items,
     (completion?.shown ?? []).map((name, i) => ({
       name,
@@ -420,7 +420,7 @@ const renderCompletion = ({ store, replace }: Pick<TCtx, "store" | "replace">) =
   );
 };
 
-// 고른 항목이 팝업 밖에 있으면 보이도록 최소한만 스크롤한다. 목록을 replace로 갈아끼우므로
+// 고른 항목이 팝업 밖에 있으면 보이도록 최소한만 스크롤한다. 목록을 setArray로 갈아끼우므로
 // DOM이 새로 붙은 다음 프레임에 잰다.
 const revealSelected = () => {
   requestAnimationFrame(() => {
@@ -437,12 +437,12 @@ const revealSelected = () => {
   });
 };
 
-const closeCompletion = ({ store, set, replace }: Pick<TCtx, "store" | "set" | "replace">) => {
+const closeCompletion = ({ store, set, setArray }: Pick<TCtx, "store" | "set" | "setArray">) => {
   if (!completion) {
     return;
   }
   completion = null;
-  replace(store.completion.items, []);
+  setArray(store.completion.items, []);
   set(store.completion.isOpen, false);
 };
 

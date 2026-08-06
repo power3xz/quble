@@ -1,4 +1,4 @@
-// 배열 통째 교체(replace) - 겹치는 앞자리는 값만 덮어쓰고 꼬리만 늘리거나 줄인다.
+// 배열 통째 교체(setArray) - 겹치는 앞자리는 값만 덮어쓰고 꼬리만 늘리거나 줄인다.
 //
 // 확인할 것이 둘이다. 하나는 결과가 맞는가 - 회차 DOM/인덱스 변수/중첩 배열/이벤트 바인딩이 새 목록과
 // 맞아야 한다. 다른 하나는 자리를 정말 지키는가 - 겹치는 회차의 DOM 노드가 같은 객체로 남아야 한다
@@ -32,11 +32,11 @@ const picked: number[] = [];
 // REPLACE를 누르면 큐에서 다음 목록을 꺼내 통째로 갈아끼운다.
 const handlersFor = (queue: TRow[][]): THandlers => ({
   REPLACE: (_data: Record<string, unknown>, ctx: Record<string, unknown>) => {
-    const replace = ctx.replace as (arrayLeafIndex: number, elems: unknown[]) => void;
+    const setArray = ctx.setArray as (arrayLeafIndex: number, elems: unknown[]) => void;
     const props = ctx.props as Record<string, number>;
     const next = queue.shift();
     if (next !== undefined) {
-      replace(props.rows, next);
+      setArray(props.rows, next);
     }
   },
   // @for 직속 element라 익명 회차 세그먼트가 앞에 붙는다(SYNTAX.md).

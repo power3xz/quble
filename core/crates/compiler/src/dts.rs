@@ -3,7 +3,7 @@
 //! 이름을 버리므로(scope 인덱스만) 이름이 살아 있는 AST에서 뽑는 게 유일한 길이다.
 //!
 //! props는 값이 아니라 leafIndex(주소기)라 `TLeafIndex<T>`로 낸다 - `get(k)`가 그 값을 내주고
-//! `set(k, v)`가 받는다(REACTIVITY.md #7.1). 배열 leaf는 push/removeAt/replace로 조작한다.
+//! `set(k, v)`가 받는다(REACTIVITY.md #7.1). 배열 leaf는 push/removeAt/setArray로 조작한다.
 //! store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘기므로 루트의 props 타입을 그대로
 //! 싣는다 - props와 같은 leafIndex 트리라 `set`/`push`가 같은 규칙으로 걸린다.
 //! props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
@@ -143,8 +143,9 @@ fn props_type(props: &[Prop]) -> String {
     )
 }
 
-/// 핸들러 하나를 `THandler<Data, Props, Ctx, Loop, Store>`로 낸다. context 없으면 Ctx는 `{}`,
-/// @for 밖이면 Loop는 `{}`. Store는 루트 props라 핸들러마다 같은 이름이 들어간다.
+/// 핸들러 하나를 `THandler<TData, TProps, TCtx, TLoopIndices, TStore>`로 낸다. context 없으면
+/// TCtx는 `{}`, @for 밖이면 TLoopIndices는 `{}`. TStore는 루트 props라 핸들러마다 같은 이름이
+/// 들어간다.
 fn signature(h: &Handler, root_name: &str) -> String {
     let data = format!("{{ {} }}", fields_type(&h.data, value_type));
     let props = props_type_name(&h.comp_name);
@@ -157,7 +158,7 @@ fn signature(h: &Handler, root_name: &str) -> String {
             }));
         format!("{{ {fields} }}")
     };
-    // Loop: 회차 인덱스 $0..$(loop_depth-1). 전부 number(회차 번호). @for 밖이면 {}.
+    // TLoopIndices: 회차 인덱스 $0..$(loop_depth-1). 전부 number(회차 번호). @for 밖이면 {}.
     let loops = if h.loop_depth == 0 {
         "{}".to_string()
     } else {
@@ -512,7 +513,7 @@ mod tests {
         assert!(out.contains("push: <TElement>(k: TLeafIndex<TElement[]>, v: TElement) => void;"));
         assert!(out.contains("removeAt: (k: TLeafIndex<unknown[]>, i: number) => void;"));
         assert!(
-            out.contains("replace: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;")
+            out.contains("setArray: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;")
         );
     }
 
@@ -596,7 +597,7 @@ mod tests {
         assert!(out.contains(") => void | Promise<void>;"));
     }
 
-    /// 한 컴포넌트의 배열 prop들이 저마다 다른 요소 타입으로 나온다 - push/replace의 TElement는
+    /// 한 컴포넌트의 배열 prop들이 저마다 다른 요소 타입으로 나온다 - push/setArray의 TElement는
     /// 넘긴 leaf에서 추론되므로, 원시 배열과 객체 배열이 섞여 있어도 서로 안 넘나든다.
     #[test]
     fn array_props_keep_distinct_element_types() {
@@ -616,7 +617,7 @@ mod tests {
     }
 
     /// 객체 배열 안에 또 배열이 있는 prop(보드의 columns 모양) - 안쪽까지 재귀로 펼쳐져야
-    /// push/replace가 요소 모양을 통째로 강제한다.
+    /// push/setArray가 요소 모양을 통째로 강제한다.
     #[test]
     fn nested_array_inside_object_element() {
         let out = dts(r#"

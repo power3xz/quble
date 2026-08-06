@@ -58,7 +58,7 @@ after(() => {
 const typecheck = (body: string): string | null => {
   const source = `import type { THandlers } from "./handlers";
 export default {
-  EDIT: (_data, { props, store, get, set, setObject, push, removeAt, replace }) => {
+  EDIT: (_data, { props, store, get, set, setObject, push, removeAt, setArray }) => {
 ${body}
   },
 } satisfies Partial<THandlers>;
@@ -82,14 +82,14 @@ test("배열 leaf에 요소 타입이 맞으면 통과한다", () => {
     typecheck(`
     push(props.tags, "new");
     push(props.cards, { title: "t", done: false });
-    replace(props.tags, ["a", "b"]);
+    setArray(props.tags, ["a", "b"]);
     removeAt(props.cards, 0);
   `),
     null,
   );
 });
 
-test("배열 아닌 leaf는 push/replace가 막는다", () => {
+test("배열 아닌 leaf는 push/setArray가 막는다", () => {
   const out = typecheck(`push(props.title, "x");`);
   assert.match(out ?? "", /TS2345/);
   assert.match(out ?? "", /TLeafIndex<string\[\]>/);
@@ -103,8 +103,8 @@ test("배열 요소 모양이 다르면 막는다", () => {
 
 // 요소 타입은 넘긴 leaf에서 추론된다 - string[] 자리에 number[]를 주면 그 leaf 기준으로 걸린다.
 // 배열 리터럴은 요소마다 걸려(TS2322) 인자 단위 불일치(TS2345)와 코드가 다르다.
-test("replace는 그 배열의 요소 타입을 요구한다", () => {
-  const out = typecheck(`replace(props.tags, [1, 2]);`);
+test("setArray는 그 배열의 요소 타입을 요구한다", () => {
+  const out = typecheck(`setArray(props.tags, [1, 2]);`);
   assert.match(out ?? "", /'number' is not assignable to type 'string'/);
 });
 
@@ -200,7 +200,7 @@ test("객체 노드 안 배열도 leaf 한 칸이다", () => {
     typecheck(`
     push(props.ghost.marks, "m");
     removeAt(props.ghost.marks, 0);
-    replace(props.ghost.marks, ["a"]);
+    setArray(props.ghost.marks, ["a"]);
   `),
     null,
   );
