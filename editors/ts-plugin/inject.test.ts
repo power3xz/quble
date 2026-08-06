@@ -5,7 +5,7 @@ import { test } from "node:test";
 import tsModule from "typescript";
 import { injectionFor, isInjected, locationToOriginal, spanToOriginal, toInjected, toOriginal } from "./src/inject.ts";
 
-const DTS = 'export interface Handlers {\n  "A": Handler<{}, {}, {}, {}>;\n}\n';
+const DTS = 'export interface THandlers {\n  "A": THandler<{}, {}, {}, {}>;\n}\n';
 
 // biome-ignore lint/suspicious/noExplicitAny: tsserverlibrary 타입으로 받지만 런타임은 같은 모듈이다.
 const ts = tsModule as any;
@@ -16,19 +16,19 @@ test("export const handlers에 타입 표기를 심는다", () => {
   const result = inject("export const handlers = {\n  A: () => {},\n};\n");
 
   assert.notEqual(result, null);
-  assert.match(result?.text ?? "", /export const handlers: Partial<__qubleHandlers> = \{/);
+  assert.match(result?.text ?? "", /export const handlers: Partial<__QBL_THandlers> = \{/);
 });
 
 test("d.ts 본문을 앞에 붙인다 - 가상 파일도 import도 없다", () => {
   const result = inject("export const handlers = {};\n");
 
-  assert.match(result?.text ?? "", /interface __qubleHandlers \{/);
+  assert.match(result?.text ?? "", /interface __QBL_THandlers \{/);
   assert.doesNotMatch(result?.text ?? "", /import\(/);
 });
 
 test("붙인 d.ts의 export를 떼 지역 선언으로 만든다", () => {
   // export가 남으면 handlers.ts의 모듈 형태를 건드린다.
-  const lead = (inject("export const handlers = {};\n")?.text ?? "").slice(0, -"export const handlers: Partial<__qubleHandlers> = {};\n".length);
+  const lead = (inject("export const handlers = {};\n")?.text ?? "").slice(0, -"export const handlers: Partial<__QBL_THandlers> = {};\n".length);
 
   assert.doesNotMatch(lead, /\bexport\b/);
 });
@@ -48,7 +48,7 @@ test("handlers 선언이 없으면 건드리지 않는다", () => {
 test("export가 아니어도 붙인다 - 나중에 묶어 내보낼 수 있다", () => {
   const result = inject("const handlers = {};\nexport { handlers };\n");
 
-  assert.match(result?.text ?? "", /const handlers: Partial<__qubleHandlers> = \{\};/);
+  assert.match(result?.text ?? "", /const handlers: Partial<__QBL_THandlers> = \{\};/);
 });
 
 test("이미 타입이 적혀 있으면 덮지 않는다", () => {
@@ -79,7 +79,7 @@ test("리터럴이 안 닫혀도 뒤가 삼켜지지 않는다", () => {
   // 타이핑 중이 이 상태다 - d.ts가 뒤에 있으면 미완성 문자열 안으로 빨려 들어간다.
   const result = inject('export const handlers = {\n  "CLI');
 
-  assert.match(result?.text ?? "", /interface __qubleHandlers \{[^]*\}.*export const handlers/);
+  assert.match(result?.text ?? "", /interface __QBL_THandlers \{[^]*\}.*export const handlers/);
 });
 
 test("삽입 지점 앞의 위치는 그대로다", () => {

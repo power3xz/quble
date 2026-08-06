@@ -662,11 +662,15 @@ mod tests {
         );
         let (status, text) = handlers_dts("main.qubc");
         assert_eq!(status, 0, "성공이어야: {text}");
-        assert!(text.contains("export interface Handlers {"), "실제: {text}");
+        assert!(text.contains("export interface THandlers {"), "실제: {text}");
         assert!(
             text.contains(
-                "'ADD': Handler<{ x: string }, { x: LeafIndex<string>; tags: LeafIndex<string[]> }"
+                "type TProps_Main = { x: TLeafIndex<string>; tags: TLeafIndex<string[]> };"
             ),
+            "실제: {text}"
+        );
+        assert!(
+            text.contains("'ADD': THandler<{ x: string }, TProps_Main"),
             "실제: {text}"
         );
     }

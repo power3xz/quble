@@ -41,7 +41,7 @@ const handlersNameEnd = (tsModule: typeof ts, source: string) => {
 
 // d.ts 본문을 이 파일 안의 지역 선언으로 만든다. export를 떼야 handlers.ts의 모듈 형태를
 // 건드리지 않고, 사용자가 같은 이름을 써도 부딪히지 않게 접두를 붙인다.
-const PREFIX = "__quble";
+const PREFIX = "__QBL_";
 
 // 개행을 지워 한 줄로 만든다 - 원본 앞에 놓이므로 줄이 늘면 원본의 모든 줄 번호가 밀린다.
 // 줄 주석은 한 줄로 접으면 뒤를 통째로 삼키므로 먼저 지운다.
@@ -49,7 +49,7 @@ const localize = (dts: string) =>
   dts
     .replace(/^\s*\/\/.*$/gm, "")
     .replace(/^export\s+/gm, "")
-    .replace(/\b(LeafIndex|Handler|Handlers)\b/g, `${PREFIX}$1`)
+    .replace(/\b(TLeafIndex|THandler|THandlers|TProps_\w+)\b/g, `${PREFIX}$1`)
     .replace(/\s*\n\s*/g, " ")
     .trim();
 
@@ -69,7 +69,7 @@ export const injectionFor = (tsModule: typeof ts, source: string, dts: string): 
   }
   // Partial로 붙인다 - 이벤트를 다 구현할 의무는 없다. 잡아야 할 것은 없는 이벤트명이지
   // 안 쓴 이벤트가 아니다.
-  const annotation = `: Partial<${PREFIX}Handlers>`;
+  const annotation = `: Partial<${PREFIX}THandlers>`;
   const body = `${source.slice(0, at)}${annotation}${source.slice(at)}`;
   // 끝에 공백 하나를 둬 d.ts의 마지막 토큰과 원본 첫 토큰이 붙지 않게 한다.
   const lead = `${localize(dts)} `;

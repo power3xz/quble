@@ -2,7 +2,7 @@
 //! 합성 트리의 fullname마다 data(payload)/props/context 타입을 산출한다. 바이트코드는 props
 //! 이름을 버리므로(scope 인덱스만) 이름이 살아 있는 AST에서 뽑는 게 유일한 길이다.
 //!
-//! props는 값이 아니라 leafIndex(주소기)라 `LeafIndex<T>`로 낸다 - `get(k)`가 그 값을 내주고
+//! props는 값이 아니라 leafIndex(주소기)라 `TLeafIndex<T>`로 낸다 - `get(k)`가 그 값을 내주고
 //! `set(k, v)`가 받는다(REACTIVITY.md #7.1). 배열 leaf는 push/removeAt/replace로 조작한다.
 //! store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘기지만 여기서는 `any`로 둔다 -
 //! 타입을 정확히 내려면 루트 props를 시그니처마다 실어야 하고, 그 대상 트리가 아직 미정이다.
@@ -55,7 +55,9 @@ struct Handler {
     fullname: String,
     /// event payload 필드: (필드명, 값 출처). data는 값이라 리터럴/변수로 타입이 갈린다.
     data: Vec<(String, ArgValue)>,
-    /// 이벤트가 묶인 컴포넌트의 props(leafIndex 주소기). T는 선언 타입을 TS로 매핑한다.
+    /// 이벤트가 묶인 컴포넌트. props 타입 이름을 여기서 만든다.
+    comp_name: String,
+    /// 그 컴포넌트의 props(leafIndex 주소기). T는 선언 타입을 TS로 매핑한다.
     props: Vec<Prop>,
     /// 발생 시점 활성 @with 컨텍스트: (컨텍스트명, 필드들). 안쪽 우선(뒤가 이김).
     contexts: Vec<(String, Vec<(String, ArgValue)>)>,
@@ -64,29 +66,29 @@ struct Handler {
     loop_depth: u16,
 }
 
-/// d.ts 서두: 공통 타입. `Handler<Data, Props, Ctx>`가 핸들러 하나의 모양(params 배치, 조작 함수)을
+/// d.ts 서두: 공통 타입. `THandler<Data, Props, Ctx>`가 핸들러 하나의 모양(params 배치, 조작 함수)을
 /// 담고, 각 fullname은 자기 Data/Props/Ctx만 인자로 채운다.
 ///
-/// 배열 조작(push/removeAt/replace)은 대상이 배열 leaf여야 한다 - `LeafIndex<TElement[]>`로
+/// 배열 조작(push/removeAt/replace)은 대상이 배열 leaf여야 한다 - `TLeafIndex<TElement[]>`로
 /// 받아 배열 아닌 leaf를 넘기면 타입에서 걸리고, 요소 타입도 함께 맞춘다. removeAt은 요소
 /// 타입을 안 쓰므로 제네릭 없이 `unknown[]`으로 둔다.
 ///
 /// 제네릭 이름을 자리별로 나눈 이유 - `get`의 것은 leaf가 담은 값(TValue)이고 `push`의 것은
 /// 그 배열의 요소(TElement)라 뜻이 다르다. 한 이름으로 두면 나란히 놓였을 때 같은 것으로 읽힌다.
 const PRELUDE: &str = "\
-type LeafIndex<T> = number & { readonly __leaf: T };
-type Handler<Data, Props, Ctx, Loop> = (
+type TLeafIndex<T> = number & { readonly __leaf: T };
+type THandler<Data, Props, Ctx, Loop> = (
   data: Data,
   params: {
     context: Ctx;
     props: Props;
     event: Event;
     store: any;
-    get: <TValue>(k: LeafIndex<TValue>) => TValue;
-    set: <TValue>(k: LeafIndex<TValue>, v: TValue) => void;
-    push: <TElement>(k: LeafIndex<TElement[]>, v: TElement) => void;
-    removeAt: (k: LeafIndex<unknown[]>, i: number) => void;
-    replace: <TElement>(k: LeafIndex<TElement[]>, v: TElement[]) => void;
+    get: <TValue>(k: TLeafIndex<TValue>) => TValue;
+    set: <TValue>(k: TLeafIndex<TValue>, v: TValue) => void;
+    push: <TElement>(k: TLeafIndex<TElement[]>, v: TElement) => void;
+    removeAt: (k: TLeafIndex<unknown[]>, i: number) => void;
+    replace: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;
   } & Loop,
 ) => void | Promise<void>;
 ";
@@ -100,13 +102,33 @@ fn collect(comps: &[FlatComp]) -> Vec<Handler> {
 }
 
 /// 평탄화된 컴포넌트들에서 루트(0)의 합성 트리를 걸어 d.ts 텍스트를 만든다.
+///
+/// props 타입은 컴포넌트마다 한 번 내고 핸들러는 이름으로 참조한다 - 시그니처에 인라인으로
+/// 펴면 한 컴포넌트의 핸들러 수만큼 같은 텍스트가 반복된다.
 fn render(comps: &[FlatComp]) -> String {
     let handlers = collect(comps);
 
     let mut out = String::new();
     out.push_str(PRELUDE);
     out.push('\n');
-    out.push_str("export interface Handlers {\n");
+
+    let mut emitted: Vec<&str> = Vec::new();
+    for h in &handlers {
+        if emitted.contains(&h.comp_name.as_str()) {
+            continue;
+        }
+        emitted.push(&h.comp_name);
+        out.push_str(&format!(
+            "type {} = {};\n",
+            props_type_name(&h.comp_name),
+            props_type(&h.props)
+        ));
+    }
+    if !emitted.is_empty() {
+        out.push('\n');
+    }
+
+    out.push_str("export interface THandlers {\n");
     for h in &handlers {
         out.push_str(&format!("  '{}': {};\n", h.fullname, signature(h)));
     }
@@ -114,18 +136,29 @@ fn render(comps: &[FlatComp]) -> String {
     out
 }
 
-/// 핸들러 하나를 `Handler<Data, Props, Ctx, Loop>`로 낸다. context 없으면 Ctx는 `{}`,
-/// @for 밖이면 Loop는 `{}`.
-fn signature(h: &Handler) -> String {
-    let data = format!("{{ {} }}", fields_type(&h.data, value_type));
-    let props = format!(
+/// 컴포넌트 props 타입의 이름. 밑줄이 "여기서부터 컴포넌트 이름"을 나눈다 - 붙여 쓰면
+/// 이름이 Props로 시작하거나 소문자로 시작할 때 경계가 흐려진다.
+fn props_type_name(comp_name: &str) -> String {
+    format!("TProps_{comp_name}")
+}
+
+/// props 선언을 leafIndex 트리 객체 타입으로.
+fn props_type(props: &[Prop]) -> String {
+    format!(
         "{{ {} }}",
         join(
-            h.props
+            props
                 .iter()
                 .map(|p| format!("{}: {}", p.name, leaf_tree_to_ts(&p.type_)))
         )
-    );
+    )
+}
+
+/// 핸들러 하나를 `THandler<Data, Props, Ctx, Loop>`로 낸다. context 없으면 Ctx는 `{}`,
+/// @for 밖이면 Loop는 `{}`.
+fn signature(h: &Handler) -> String {
+    let data = format!("{{ {} }}", fields_type(&h.data, value_type));
+    let props = props_type_name(&h.comp_name);
     let ctx = if h.contexts.is_empty() {
         "{}".to_string()
     } else {
@@ -144,15 +177,15 @@ fn signature(h: &Handler) -> String {
             join((0..h.loop_depth).map(|i| format!("${i}: number")))
         )
     };
-    format!("Handler<{data}, {props}, {ctx}, {loops}>")
+    format!("THandler<{data}, {props}, {ctx}, {loops}>")
 }
 
 /// prop 선언 타입 -> 핸들러가 받는 leafIndex 트리(runtime.ts leafTree와 같은 규칙).
 ///
 /// ```text
-/// 원시  string              -> LeafIndex<string>
-/// 배열  { title }[]         -> LeafIndex<{ title: string }[]>
-/// 객체  { name, id }        -> { name: LeafIndex<string>; id: LeafIndex<number> }
+/// 원시  string              -> TLeafIndex<string>
+/// 배열  { title }[]         -> TLeafIndex<{ title: string }[]>
+/// 객체  { name, id }        -> { name: TLeafIndex<string>; id: TLeafIndex<number> }
 /// ```
 ///
 /// 객체는 주소가 아니라 필드마다 leaf가 따로 서서(`set(props.ghost.title, ..)`) 감싸지 않고
@@ -168,7 +201,7 @@ fn leaf_tree_to_ts(ty: &Type) -> String {
             );
             format!("{{ {body} }}")
         }
-        _ => format!("LeafIndex<{}>", type_to_ts(ty)),
+        _ => format!("TLeafIndex<{}>", type_to_ts(ty)),
     }
 }
 
@@ -449,6 +482,7 @@ fn emit(
     handlers.push(Handler {
         fullname,
         data,
+        comp_name: comp.name.clone(),
         props: comp.props.clone(),
         contexts,
         loop_depth,
@@ -469,7 +503,7 @@ mod tests {
         handler_names("entry", src, &(|_: &str, _: &str| None)).unwrap()
     }
 
-    /// 서두 공통 타입(LeafIndex, Handler)이 나온다.
+    /// 서두 공통 타입(TLeafIndex, THandler)이 나온다.
     #[test]
     fn prelude_defines_common_types() {
         let out = dts(r#"
@@ -478,11 +512,11 @@ mod tests {
               template { img(@click:CLICK /) }
             }
         "#);
-        assert!(out.contains("type LeafIndex<T> = number & { readonly __leaf: T };"));
-        assert!(out.contains("type Handler<Data, Props, Ctx, Loop> = ("));
+        assert!(out.contains("type TLeafIndex<T> = number & { readonly __leaf: T };"));
+        assert!(out.contains("type THandler<Data, Props, Ctx, Loop> = ("));
     }
 
-    /// 핸들러 params에 배열 조작 3종이 있다. 대상을 `LeafIndex<TElement[]>`로 받아야 배열 아닌
+    /// 핸들러 params에 배열 조작 3종이 있다. 대상을 `TLeafIndex<TElement[]>`로 받아야 배열 아닌
     /// leaf가 걸리고 요소 타입도 그 배열에 묶인다 - 제약이 실제로 서는지는 dts-types.test.ts.
     #[test]
     fn prelude_has_array_ops() {
@@ -492,10 +526,10 @@ mod tests {
               template { img(@click:CLICK /) }
             }
         "#);
-        assert!(out.contains("push: <TElement>(k: LeafIndex<TElement[]>, v: TElement) => void;"));
-        assert!(out.contains("removeAt: (k: LeafIndex<unknown[]>, i: number) => void;"));
+        assert!(out.contains("push: <TElement>(k: TLeafIndex<TElement[]>, v: TElement) => void;"));
+        assert!(out.contains("removeAt: (k: TLeafIndex<unknown[]>, i: number) => void;"));
         assert!(
-            out.contains("replace: <TElement>(k: LeafIndex<TElement[]>, v: TElement[]) => void;")
+            out.contains("replace: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;")
         );
     }
 
@@ -540,7 +574,7 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "{ tags: LeafIndex<string[]>; sizes: LeafIndex<number[]>; cards: LeafIndex<{ title: string }[]> }"
+                "{ tags: TLeafIndex<string[]>; sizes: TLeafIndex<number[]>; cards: TLeafIndex<{ title: string }[]> }"
             ),
             "실제 출력:\n{out}"
         );
@@ -558,13 +592,39 @@ mod tests {
             }
         "#);
         assert!(
-            out.contains("columns: LeafIndex<{ name: string; cards: { title: string }[] }[]>"),
+            out.contains("columns: TLeafIndex<{ name: string; cards: { title: string }[] }[]>"),
             "실제 출력:\n{out}"
         );
     }
 
     /// 단순 event - data(값)/props(leafIndex). context 없으면 Ctx는 {}.
-    /// props 타입이 leafIndex의 T로 매핑된다(string/number/bool 각각).
+    /// 한 컴포넌트의 핸들러가 여럿이면 props 타입은 한 번만 선언되고 시그니처들이 그 이름을
+    /// 나눠 쓴다 - 인라인으로 펴던 때는 같은 텍스트가 핸들러 수만큼 반복됐다.
+    #[test]
+    fn props_type_declared_once_per_component() {
+        let out = dts(r#"
+            component C {
+              props { title: string, count: number }
+              events { OPEN({ }) CLOSE({ }) }
+              template { div() { button(@click:OPEN /) span(@click:CLOSE /) } }
+            }
+        "#);
+        assert_eq!(
+            out.matches("type TProps_C =").count(),
+            1,
+            "props 타입 선언이 한 번이어야 한다:\n{out}"
+        );
+        assert!(out.contains("'OPEN': THandler<{  }, TProps_C, {}, {}>;"), "실제 출력:\n{out}");
+        assert!(out.contains("'CLOSE': THandler<{  }, TProps_C, {}, {}>;"), "실제 출력:\n{out}");
+        // 인라인 잔재가 없어야 한다 - 있으면 참조가 아니라 펴 쓴 것이다.
+        assert!(
+            !out.contains("{ title: TLeafIndex<string>; count: TLeafIndex<number> }, {}"),
+            "props가 시그니처에 인라인으로 남았다:\n{out}"
+        );
+    }
+
+    /// props 타입이 leafIndex의 T로 매핑된다(string/number/bool 각각). 그 타입은 컴포넌트마다
+    /// 한 번 선언되고 시그니처는 이름으로 참조한다.
     #[test]
     fn single_event_props_and_leafindex() {
         let out = dts(r#"
@@ -575,11 +635,15 @@ mod tests {
             }
         "#);
         assert!(out.contains(
-            "'CLICK': Handler<{ avatar: string }, { avatar: LeafIndex<string>; size: LeafIndex<number>; active: LeafIndex<boolean> }, {}, {}>;"
+            "type TProps_Thumb = { avatar: TLeafIndex<string>; size: TLeafIndex<number>; active: TLeafIndex<boolean> };"
         ), "실제 출력:\n{out}");
+        assert!(
+            out.contains("'CLICK': THandler<{ avatar: string }, TProps_Thumb, {}, {}>;"),
+            "실제 출력:\n{out}"
+        );
     }
 
-    /// 배열은 칸 하나가 leaf(LeafIndex<T[]>)지만 객체는 필드마다 leaf가 따로 선다 - 객체를
+    /// 배열은 칸 하나가 leaf(TLeafIndex<T[]>)지만 객체는 필드마다 leaf가 따로 선다 - 객체를
     /// 통째로 감싸면 `set(props.owner.name, ..)`을 못 쓴다(runtime.ts leafTree와 같은 규칙).
     #[test]
     fn array_is_one_leaf_object_splits_per_field() {
@@ -592,7 +656,7 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "{ tags: LeafIndex<string[]>; owner: { name: LeafIndex<string>; id: LeafIndex<number> } }"
+                "{ tags: TLeafIndex<string[]>; owner: { name: TLeafIndex<string>; id: TLeafIndex<number> } }"
             ),
             "실제 출력:\n{out}"
         );
@@ -610,7 +674,7 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "ghost: { style: LeafIndex<string>; card: { title: LeafIndex<string>; urgent: LeafIndex<boolean> } }"
+                "ghost: { style: TLeafIndex<string>; card: { title: TLeafIndex<string>; urgent: TLeafIndex<boolean> } }"
             ),
             "실제 출력:\n{out}"
         );
@@ -678,7 +742,7 @@ mod tests {
             }
         "#);
         assert!(
-            out.contains(r#"Handler<{ count: string; label: "clicks" }"#),
+            out.contains(r#"THandler<{ count: string; label: "clicks" }"#),
             "실제 출력:\n{out}"
         );
     }
@@ -693,7 +757,7 @@ mod tests {
             }
         "#);
         assert!(
-            out.contains(r#"Handler<{ n: 42; b: true; s: "hi" }"#),
+            out.contains(r#"THandler<{ n: 42; b: true; s: "hi" }"#),
             "실제 출력:\n{out}"
         );
     }

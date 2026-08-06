@@ -100,8 +100,9 @@ test("핸들러 d.ts 텍스트를 낸다", () => {
   if (!result.ok) {
     return;
   }
-  assert.match(result.dts, /export interface Handlers \{/);
-  assert.match(result.dts, /'GO': Handler<\{ title: string \}, \{ title: LeafIndex<string> \}/);
+  assert.match(result.dts, /export interface THandlers \{/);
+  assert.match(result.dts, /type TProps_A = \{ title: TLeafIndex<string> \};/);
+  assert.match(result.dts, /'GO': THandler<\{ title: string \}, TProps_A/);
 });
 
 // handlerNames는 실패를 빈 배열로 뭉개지만 d.ts는 이유를 돌려준다.

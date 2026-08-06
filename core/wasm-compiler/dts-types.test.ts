@@ -56,12 +56,12 @@ after(() => {
 // 핸들러 본문을 넣어 tsc를 돌린다. 통과면 null, 아니면 진단 텍스트.
 // tsconfig가 잡히면 include에 걸려 다른 파일까지 끌고 오므로 끊는다(--ignoreConfig).
 const typecheck = (body: string): string | null => {
-  const source = `import type { Handlers } from "./handlers";
+  const source = `import type { THandlers } from "./handlers";
 export default {
   EDIT: (_data, { props, get, set, push, removeAt, replace }) => {
 ${body}
   },
-} satisfies Partial<Handlers>;
+} satisfies Partial<THandlers>;
 `;
   const file = join(work, "probe.ts");
   writeFileSync(file, source);
@@ -92,7 +92,7 @@ test("배열 leaf에 요소 타입이 맞으면 통과한다", () => {
 test("배열 아닌 leaf는 push/replace가 막는다", () => {
   const out = typecheck(`push(props.title, "x");`);
   assert.match(out ?? "", /TS2345/);
-  assert.match(out ?? "", /LeafIndex<string\[\]>/);
+  assert.match(out ?? "", /TLeafIndex<string\[\]>/);
 });
 
 test("배열 요소 모양이 다르면 막는다", () => {
