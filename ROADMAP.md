@@ -46,7 +46,9 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
     타입 표기가 필요하다. `{expr}`(필드 접근/경로)과 `props 객체`의 공통 전제 - 값의 형태를
     알아야 접근할 수 있다. 최종적으로는 보간/합성에서의 타입 검사까지. 전제 미결: props에
     타입 단서가 없고(IDEAS.md), qubb 포맷에 타입을 싣는지. 방법 미정.
-  - [x] props 객체 (여러 필드 - 각 속성값이 leafIndex를 가리키는 중첩 구조)
+  - [x] props 주소 트리 - 스칼라는 leafIndex, 객체/배열은 노드다. 객체는 필드로
+    (`props.ghost.style`), 배열은 인덱스로(`props.items[2].title`) 내려간다. 통째 교체는
+    `setObject`/`setArray`.
   - [x] leafIndex 할당기 / free list - 배열 항목 제거 시 회수하고 다음 할당이 재사용.
 
 ## 합성 / 이벤트

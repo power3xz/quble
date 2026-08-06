@@ -668,7 +668,7 @@ mod tests {
         );
         assert!(
             text.contains(
-                "type TProps_Main = { x: TLeafIndex<string>; tags: TLeafIndex<string[]> };"
+                "type TProps_Main = { x: TLeafIndex<string>; tags: TLeafArray<string> };"
             ),
             "실제: {text}"
         );

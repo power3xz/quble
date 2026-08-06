@@ -10,7 +10,6 @@ import { mount } from "./test-helpers/dom.ts";
 
 const { compile } = await import("./runtime.ts");
 type THandlers = import("./runtime.ts").THandlers;
-type TInstance = ReturnType<ReturnType<ReturnType<typeof compile>>>;
 
 let qubb: Uint8Array;
 before(() => {
@@ -20,9 +19,8 @@ before(() => {
 type Ctx = {
   $0: number;
   $1: number;
-  props: Record<string, number>;
-  get: (leafIndex: number) => unknown;
-  push: (arrayLeafIndex: number, elem: unknown) => void;
+  props: { rows: Record<number, { cells: unknown }> };
+  push: (arrayNode: unknown, elem: unknown) => void;
 };
 
 const cellsOf = (host: ParentNode) =>
@@ -34,9 +32,8 @@ const cellsOf = (host: ParentNode) =>
   );
 
 // DEL_CELL 핸들러를 "push + 발화 인덱스 기록"으로 재활용한다 - 버튼 클릭이 자기 ($0, $1)을 남기고,
-// 첫 클릭이 자기 행(cells)에 "x"를 push해 grow를 일으킨다. 요소 레이아웃: label 1칸 + cells 배열 칸 1.
+// 첫 클릭이 자기 행(cells)에 "x"를 push해 grow를 일으킨다.
 const instantiate = (values: unknown, pushOnFirst: boolean) => {
-  let inst: TInstance;
   const fired: [number, number][] = [];
   let pushed = false;
   const handlers: THandlers = {
@@ -45,14 +42,11 @@ const instantiate = (values: unknown, pushOnFirst: boolean) => {
       fired.push([ctx.$0, ctx.$1]);
       if (pushOnFirst && !pushed) {
         pushed = true;
-        const rowsInfo = inst.arrayPool.entries[Number(ctx.get(ctx.props.rows))];
-        const cellsArrayLeaf = rowsInfo.elemStartLeafIndices[ctx.$0] + 1;
-        ctx.push(cellsArrayLeaf, "x");
+        ctx.push(ctx.props.rows[ctx.$0].cells, "x");
       }
     },
   };
-  inst = compile(qubb)(0)(values, handlers);
-  const host = mount(inst);
+  const host = mount(compile(qubb)(0)(values, handlers));
   return { host, fired };
 };
 

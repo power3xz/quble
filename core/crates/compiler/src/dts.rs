@@ -171,20 +171,21 @@ fn signature(h: &Handler, root_name: &str) -> String {
     format!("THandler<{data}, {props}, {ctx}, {loops}, {store}>")
 }
 
-/// prop 선언 타입 -> 핸들러가 받는 leafIndex 트리(runtime.ts leafTree와 같은 규칙).
+/// prop 선언 타입 -> 핸들러가 받는 주소 트리(runtime.ts leafTree와 같은 규칙).
 ///
 /// ```text
 /// 원시  string              -> TLeafIndex<string>
-/// 배열  { title }[]         -> TLeafIndex<{ title: string }[]>
+/// 배열  { title }[]         -> TLeafArray<{ title: string }>
 /// 객체  { name, id }        -> TLeafObject<{ name: string; id: number }>
 /// ```
 ///
-/// 배열은 칸 하나가 leaf라(push/removeAt가 그걸 받는다) 요소 안쪽은 값이다. 객체는 여러 leaf의
-/// 묶음이라 `TLeafObject`가 받고, 필드로 내려가는 길(`set(props.ghost.title, ..)`)은 그쪽 매핑이
-/// 파생한다 - 여기서는 값 타입만 낸다.
+/// 스칼라만 leaf 한 칸이다. 객체/배열은 여러 leaf의 묶음이라 각자의 노드 타입이 받고, 안으로
+/// 내려가는 길(`set(props.ghost.title, ..)`, `props.items[2]`)은 그쪽 매핑이 파생한다 - 여기서는
+/// 값 타입만 낸다. 배열은 요소 타입을 실어야 매핑이 인덱싱 결과를 안다.
 fn leaf_tree_to_ts(ty: &Type) -> String {
     match ty {
         Type::Object(_) => format!("TLeafObject<{}>", type_to_ts(ty)),
+        Type::Array(elem) => format!("TLeafArray<{}>", type_to_ts(elem)),
         _ => format!("TLeafIndex<{}>", type_to_ts(ty)),
     }
 }
@@ -510,10 +511,10 @@ mod tests {
               template { img(@click:CLICK /) }
             }
         "#);
-        assert!(out.contains("push: <TElement>(k: TLeafIndex<TElement[]>, v: TElement) => void;"));
-        assert!(out.contains("removeAt: (k: TLeafIndex<unknown[]>, i: number) => void;"));
+        assert!(out.contains("push: <TElement>(k: TLeafArray<TElement>, v: TElement) => void;"));
+        assert!(out.contains("removeAt: <TElement>(k: TLeafArray<TElement>, i: number) => void;"));
         assert!(
-            out.contains("setArray: <TElement>(k: TLeafIndex<TElement[]>, v: TElement[]) => void;")
+            out.contains("setArray: <TElement>(k: TLeafArray<TElement>, v: TElement[]) => void;")
         );
     }
 
@@ -610,7 +611,7 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "{ tags: TLeafIndex<string[]>; sizes: TLeafIndex<number[]>; cards: TLeafIndex<{ title: string }[]> }"
+                "{ tags: TLeafArray<string>; sizes: TLeafArray<number>; cards: TLeafArray<{ title: string }> }"
             ),
             "실제 출력:\n{out}"
         );
@@ -628,7 +629,7 @@ mod tests {
             }
         "#);
         assert!(
-            out.contains("columns: TLeafIndex<{ name: string; cards: { title: string }[] }[]>"),
+            out.contains("columns: TLeafArray<{ name: string; cards: { title: string }[] }>"),
             "실제 출력:\n{out}"
         );
     }
@@ -700,7 +701,7 @@ mod tests {
         "#);
         assert!(
             out.contains(
-                "{ tags: TLeafIndex<string[]>; owner: TLeafObject<{ name: string; id: number }> }"
+                "{ tags: TLeafArray<string>; owner: TLeafObject<{ name: string; id: number }> }"
             ),
             "실제 출력:\n{out}"
         );

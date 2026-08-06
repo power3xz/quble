@@ -27,6 +27,8 @@ const SOURCE = `component HandlerTypes {
     count: number,
     tags: string[],
     cards: { title: string, done: bool }[],
+    grid: string[][],
+    boards: { rows: { title: string }[] }[],
     ghost: { style: string, marks: string[], inner: { label: string } }
   }
   events {
@@ -92,7 +94,7 @@ test("배열 leaf에 요소 타입이 맞으면 통과한다", () => {
 test("배열 아닌 leaf는 push/setArray가 막는다", () => {
   const out = typecheck(`push(props.title, "x");`);
   assert.match(out ?? "", /TS2345/);
-  assert.match(out ?? "", /TLeafIndex<string\[\]>/);
+  assert.match(out ?? "", /TLeafArray<string>/);
 });
 
 test("배열 요소 모양이 다르면 막는다", () => {
@@ -106,6 +108,105 @@ test("배열 요소 모양이 다르면 막는다", () => {
 test("setArray는 그 배열의 요소 타입을 요구한다", () => {
   const out = typecheck(`setArray(props.tags, [1, 2]);`);
   assert.match(out ?? "", /'number' is not assignable to type 'string'/);
+});
+
+// 배열 노드는 인덱스로 요소에 내려간다. 요소가 객체면 객체 노드(set/setObject 대상), 스칼라면
+// leaf다 - TLeafArray의 매핑이 요소 타입에 따라 갈라 준다.
+test("배열 인덱스로 요소에 내려간다", () => {
+  assert.equal(
+    typecheck(`
+    set(props.cards[0].title, "t");
+    setObject(props.cards[1], { done: true });
+    const s: string = get(props.tags[2]);
+    const n: number = props.cards.length;
+    void s;
+    void n;
+  `),
+    null,
+  );
+});
+
+test("요소 필드 값 타입이 다르면 막는다", () => {
+  const out = typecheck(`set(props.cards[0].title, 123);`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+test("요소에 없는 필드는 막는다", () => {
+  const out = typecheck(`set(props.cards[0].nope, "x");`);
+  assert.match(out ?? "", /TS2339/);
+  assert.match(out ?? "", /nope/);
+});
+
+// 스칼라 배열의 요소는 leaf라 객체처럼 못 판다.
+test("스칼라 배열 요소는 leaf지 객체가 아니다", () => {
+  const out = typecheck(`setObject(props.tags[0], { a: 1 });`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+// 객체 안 배열도 같은 규칙 - ghost.marks는 노드고 인덱싱하면 leaf다.
+test("객체 안 배열도 인덱싱된다", () => {
+  assert.equal(
+    typecheck(`
+    const m: string = get(props.ghost.marks[0]);
+    void m;
+  `),
+    null,
+  );
+});
+
+// 노드는 leaf가 아니라 get 대상이 아니다 - 배열/객체 둘 다. 런타임이 넘겨받으면 leaves[객체]라
+// 조용히 undefined가 되므로(타입이 유일한 방어선) 여기서 막히는지가 중요하다.
+test("배열 노드는 get에 못 넘긴다", () => {
+  const out = typecheck(`get(props.tags);`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+test("객체 노드는 get에 못 넘긴다", () => {
+  const out = typecheck(`get(props.ghost);`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+// 배열의 배열 - 인덱싱 한 번이면 또 배열 노드고, 두 번이면 leaf다. 매핑이 요소가 배열일 때
+// TLeafArray로 다시 내려가는지를 본다(안 그러면 안쪽이 객체 노드나 leaf로 잘못 파생된다).
+test("배열의 배열은 한 겹씩 내려간다", () => {
+  assert.equal(
+    typecheck(`
+    push(props.grid, ["a", "b"]);
+    push(props.grid[0], "c");
+    setArray(props.grid[0], ["x"]);
+    removeAt(props.grid[0], 0);
+    const s: string = get(props.grid[0][1]);
+    const n: number = props.grid[0].length;
+    void s;
+    void n;
+  `),
+    null,
+  );
+});
+
+test("배열의 배열 - 안쪽도 노드라 get에 못 넘긴다", () => {
+  const out = typecheck(`get(props.grid[0]);`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+test("배열의 배열 - 요소 타입이 다르면 막는다", () => {
+  const out = typecheck(`push(props.grid[0], 123);`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+// 객체 요소가 또 배열을 품는 경우(보드의 columns 모양) - 배열 -> 객체 -> 배열 -> 객체로 번갈아
+// 내려간다. 한 층이라도 잘못 파생되면 마지막 set이 걸린다.
+test("배열 안 객체 안 배열까지 내려간다", () => {
+  assert.equal(
+    typecheck(`
+    set(props.boards[0].rows[1].title, "t");
+    push(props.boards[0].rows, { title: "new" });
+    setObject(props.boards[0].rows[0], { title: "x" });
+    const n: number = props.boards[0].rows.length;
+    void n;
+  `),
+    null,
+  );
 });
 
 // 객체 prop은 필드마다 leaf가 따로 서므로(runtime.ts leafTree) 통째로는 주소가 아니다.
