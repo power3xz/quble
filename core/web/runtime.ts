@@ -694,8 +694,10 @@ const leafCountOf = (module: TModule, typeRef: number): number => {
   return count;
 };
 
-// 객체 노드가 자기 위치를 들고 다니는 키(시작 칸, 그 칸부터의 타입) - setObject가 덮어쓸 고정
-// 블록을 이 둘로 안다. 심볼이라 값 키와 안 섞이고, Symbol.for라 런타임이 여러 벌 로드돼도 같은 키다.
+// 노드가 자기 위치를 들고 다니는 키(시작 칸, 그 칸부터의 타입) - setObject가 덮어쓸 고정 블록을
+// 이 둘로 안다. 배열 노드는 NODE_BASE에 배열 칸 leafIndex를 싣는다(그 칸 값이 arrayInfoIndex라
+// push/removeAt/setArray가 거기서 요소 목록에 닿는다). 심볼이라 값 키와 안 섞이고, Symbol.for라
+// 런타임이 여러 벌 로드돼도 같은 키다.
 const NODE_BASE = Symbol.for("quble.node.base");
 const NODE_TYPE = Symbol.for("quble.node.typeRef");
 
@@ -704,7 +706,7 @@ const NODE_TYPE = Symbol.for("quble.node.typeRef");
 type TLeafObject = {
   [NODE_BASE]: number;
   [NODE_TYPE]: number;
-  [field: string]: unknown;
+  [field: string | symbol]: unknown;
 };
 
 // props 중첩 객체를 감싼다 - 없는 prop명을 문자열로 접근하면 즉시 throw. 핸들러는 우리 통제 밖의
@@ -1015,12 +1017,16 @@ class Interpreter {
     return propsGuard(props);
   };
 
-  // base부터 typeRef 구조 따라 잎=leafIndex 중첩값을 만든다. 스칼라/배열은 base 하나, 객체는
-  // 필드마다 앞 형제 leaf 수만큼 offset을 밀어 재귀한다(store 레이아웃 = 깊이우선 연속).
+  // base부터 typeRef 구조 따라 잎=leafIndex 중첩값을 만든다. 스칼라는 base 하나, 객체는 필드마다
+  // 앞 형제 leaf 수만큼 offset을 밀어 재귀하고(store 레이아웃 = 깊이우선 연속), 배열은 인덱스를
+  // 접근 시점에 푸는 노드다.
   leafTree = (typeRef: number, base: number): unknown => {
     const t = this.module.types[typeRef];
+    if (t.tag === "array") {
+      return this.arrayNode(base, t.elemTypeRef);
+    }
     if (t.tag !== "object") {
-      return base; // 스칼라(leafIndex) / 배열(칸 leafIndex)
+      return base; // 스칼라(leafIndex)
     }
     // 자리(NODE_BASE/NODE_TYPE)를 함께 싣는다 - setObject가 여기서부터 이 타입대로 덮어쓴다.
     const obj: TLeafObject = { [NODE_BASE]: base, [NODE_TYPE]: typeRef };
@@ -1030,6 +1036,42 @@ class Interpreter {
       offset += leafCountOf(this.module, fieldTypeRef);
     }
     return propsGuard(obj);
+  };
+
+  // 배열 칸 하나를 노드로 낸다 - `props.items[2].title`처럼 요소로 내려가는 길이다.
+  //
+  // 요소를 미리 펴지 않고 접근 시점에 푼다(Proxy). 요소 주소는 컴파일타임 offset이 아니라
+  // arrayInfo.elemStartLeafIndices가 들고 있고(alloc/free로 자리가 오간다), push/removeAt으로
+  // 목록이 계속 바뀌므로 미리 만든 노드는 곧 낡는다. 회차가 많으면 안 쓸 노드를 그만큼 만드는
+  // 낭비이기도 하다.
+  //
+  // NODE_BASE는 배열 칸 leafIndex다 - 그 칸 값이 arrayInfoIndex라 push/removeAt/setArray가
+  // 여기서 요소 목록에 닿는다(arrayInfoOf). length는 지금 목록 길이를 그때그때 읽는다.
+  arrayNode = (arrayLeafIndex: number, elemTypeRef: number): unknown => {
+    const target: TLeafObject = { [NODE_BASE]: arrayLeafIndex, [NODE_TYPE]: elemTypeRef };
+    return new Proxy(target, {
+      get: (t, key) => {
+        if (typeof key === "symbol" || key in t) {
+          return t[key];
+        }
+        const info = this.arrayInfoOf(arrayLeafIndex);
+        if (key === "length") {
+          return info.elemStartLeafIndices.length;
+        }
+        const i = Number(key);
+        if (!Number.isInteger(i) || i < 0 || i >= info.elemStartLeafIndices.length) {
+          throw new Error(`배열 인덱스 '${String(key)}' 없음 - 길이 ${info.elemStartLeafIndices.length}`);
+        }
+        return this.leafTree(elemTypeRef, info.elemStartLeafIndices[i]);
+      },
+    });
+  };
+
+  // 배열 노드/칸에서 arrayInfo를 얻는다 - 핸들러가 넘긴 노드든 내부 경로의 leafIndex든 같은 자리로
+  // 모은다(노드는 NODE_BASE에 그 칸을 싣고 있다).
+  arrayInfoOf = (k: unknown): TArrayInfo => {
+    const arrayLeafIndex = typeof k === "number" ? k : (k as TLeafObject)[NODE_BASE];
+    return this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
   };
 
   // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
@@ -1094,8 +1136,8 @@ class Interpreter {
   // (plantFixed로 로컬에 펴 store.alloc으로 삽입, 요소 안 중첩 배열은 plantRoot처럼 레벨별로 마저 심음),
   // 그 시작 leaf를 elemStartLeafIndices에 잇고 길이 칸(sizeLeafIndex)을 set해 @for grow를 깨운다. sizeLeafIndex가
   // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
-  pushArrayElement = (arrayLeafIndex: number, elem: unknown): void => {
-    const info = this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
+  pushArrayElement = (k: unknown, elem: unknown): void => {
+    const info = this.arrayInfoOf(k);
     this.plantArrayElement(elem, info);
     // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
     // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
@@ -1158,8 +1200,8 @@ class Interpreter {
   // (재빌드/재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
   // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
   // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
-  removeArrayElementAt = (arrayLeafIndex: number, i: number): void => {
-    const info = this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
+  removeArrayElementAt = (k: unknown, i: number): void => {
+    const info = this.arrayInfoOf(k);
     if (info.forRegionIndex !== null) {
       removeBranchAt(this.store, this.regionPool, this.branchPool, info.forRegionIndex, i);
     }
@@ -1187,8 +1229,8 @@ class Interpreter {
   //
   // 자리를 유지한다는 건 i번째 요소 leaf가 다른 값을 갖게 된다는 뜻이다 - push/removeAt의 "값 고정,
   // 위치 이동"과 반대 방향이지만, 전량 교체는 이전 요소와의 대응 자체가 없으므로 이쪽이 맞다.
-  setArrayElements = (arrayLeafIndex: number, elems: unknown[]): void => {
-    this.setArrayInto(this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))], elems);
+  setArrayElements = (k: unknown, elems: unknown[]): void => {
+    this.setArrayInto(this.arrayInfoOf(k), elems);
   };
 
   // setArray의 본체 - arrayInfo를 직접 받는다(요소 안 중첩 배열은 칸 값이 arrayInfoIndex라

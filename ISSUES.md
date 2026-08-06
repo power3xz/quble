@@ -4,6 +4,14 @@
 
 ## 해결됨
 
+- **루트 store에서 배열 요소 경로로 못 내려감** - `store.items[2].title` 같은 접근이 안 됐다
+  (`leafTree`가 배열을 칸 leafIndex 하나로 두고 멈췄다). **해결:** 배열 칸도 노드로 낸다
+  (`arrayNode`). 요소 주소는 컴파일타임 offset이 아니라 `elemStartLeafIndices`가 들고
+  push/removeAt으로 계속 바뀌므로, 요소 노드를 미리 펴지 않고 **인덱싱하는 그 순간에** 만든다
+  (Proxy). 노드가 `NODE_BASE`에 배열 칸 leafIndex를 실어 push/removeAt/setArray가 거기서 요소
+  목록에 닿는다. 타입은 `TLeafIndex<T[]>`에서 `TLeafArray<T>`로 갈리고, 요소가 객체면 객체 노드,
+  스칼라면 leaf로 파생된다. `length`도 지금 개수를 준다.
+
 - **라이브 NodeList 순회로 노드 누락 (@for 다중 노드에서 발각)** - runtime.ts가 fragment의
   자식을 부모에 붙일 때 `for (const node of fragment.childNodes) parent.appendChild(node)`로
   돌았다. `childNodes`는 라이브라 `appendChild`가 노드를 fragment에서 떼어낼 때마다 컬렉션이
@@ -96,10 +104,6 @@
 
 - **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
   소스에 설명을 달 수 없다(비ASCII를 쓰면 `unexpected character`로 터진다).
-
-- **루트 store에서 배열 요소 경로로 못 내려감** - `store.items[2].title` 같은 접근이 안 된다
-  (`leafTree`가 배열을 칸 leafIndex 하나로 두고 멈춘다). `@for`로 요소를 자식에 넘기는 경로는
-  된다(`core/web/for-item-props-set.test.ts`).
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
   실패한다(`get_const`가 `&str` 대신 `&Const` 반환). renderer는 바이트코드로 렌더 가능한지 보는

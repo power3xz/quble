@@ -10,7 +10,6 @@ import { mount } from "./test-helpers/dom.ts";
 
 const { compile } = await import("./runtime.ts");
 type THandlers = import("./runtime.ts").THandlers;
-type TInstance = ReturnType<ReturnType<ReturnType<typeof compile>>>;
 
 let qubb: Uint8Array;
 before(() => {
@@ -20,9 +19,8 @@ before(() => {
 type Ctx = {
   $0: number;
   $1: number;
-  props: Record<string, number>;
-  get: (leafIndex: number) => unknown;
-  removeAt: (arrayLeafIndex: number, i: number) => void;
+  props: { rows: Record<number, { cells: unknown }> };
+  removeAt: (arrayNode: unknown, i: number) => void;
 };
 
 // 각 행을 "안쪽셀들"로 - "j:val" 목록. 안쪽 인덱스 표시({j})와 값을 함께 본다.
@@ -35,18 +33,14 @@ const cellsOf = (host: ParentNode) =>
   );
 
 const instantiate = (values: unknown) => {
-  let inst: TInstance;
   const handlers: THandlers = {
-    // 안쪽 셀 제거: 바깥 rows arrayInfo에서 $0번째 요소({label, cells})의 cells 배열 leafIndex에 도달해 $1 제거.
-    // 요소 레이아웃은 label(스칼라 1칸) + cells(배열 칸 1)라 cells 배열 칸 = 요소 시작 + 1.
+    // 안쪽 셀 제거: $0번째 행의 cells 배열로 내려가 $1을 뺀다.
     "[$0][$1].DEL_CELL": (_d, c) => {
       const ctx = c as unknown as Ctx;
-      const rowsInfo = inst.arrayPool.entries[Number(ctx.get(ctx.props.rows))];
-      const cellsArrayLeaf = rowsInfo.elemStartLeafIndices[ctx.$0] + 1;
-      ctx.removeAt(cellsArrayLeaf, ctx.$1);
+      ctx.removeAt(ctx.props.rows[ctx.$0].cells, ctx.$1);
     },
   };
-  inst = compile(qubb)(0)(values, handlers);
+  const inst = compile(qubb)(0)(values, handlers);
   const host = mount(inst);
   return { host, inst };
 };
