@@ -112,7 +112,15 @@ store는 원시값만 담는다. 배열은 store에 색인(`arrayInfoIndex`) **�
 ```
 store 칸 = arrayInfoIndex ──> arrayPool[arrayInfoIndex] = {
     elemSize              원소 하나의 leaf 수 (string[]=1, {c,d}[]=2). 컴파일 확정.
+    elemTypeRef           원소의 타입. elemSize는 "몇 칸"만 알려줘 객체 원소를 다시
+                          조립(assemble)할 수 없으므로, "어떤 모양"인지를 함께 든다.
     elemStartLeafIndices  원소 i의 첫 leafIndex 목록. 길이 = 배열 길이.
+    sizeLeafIndex         요소 수를 담은 store 칸(#4의 length 토픽). @for 순회 대상이
+                          될 때만 lazy 확보, 아니면 null - 안 쓰이는 배열은 길이 칸을
+                          낭비하지 않는다.
+    indexLeafIndices      elemStartLeafIndices와 나란한 요소별 회차 번호 칸. 몸체의
+                          {i}/$0가 이걸 읽어, 중간 제거 시 뒤 칸을 당기면 자동 갱신된다.
+                          @for 순회될 때만 lazy. count-for는 꼬리만 줄어 안 쓴다.
   }
 
 원소 i, 필드 j  =  store.get( elemStartLeafIndices[i] + j )
@@ -163,9 +171,18 @@ leaves:  [ title  tags색인  title  tags색인 │ tags[0]원소...  tags[1]원
 | `store.user.name`   | 텍스트 노드 핸들러     | textContent 교체                                      |
 | `store.list.length` | **`@for` 블록 핸들러** | 항목 노드 추가/제거 + 파생 리프 인덱스 동적 할당/해제 |
 
-push/pop = length 변경 -> `@for` 재구성. length가 **항목 인스턴스의 생애주기를 관장**한다 -
+push/removeAt = length 변경 -> `@for` 재구성. length가 **항목 인스턴스의 생애주기를 관장**한다 -
 항목 생성 시 할당기에서 base를 받아 리프들을 구독 등록, 제거 시 그 구간을 회수(#3). "구조 변경은
 반응성이 아니라 `@for` 영역"의 구체 메커니즘이 곧 length 토픽이다.
+
+그 칸이 `arrayInfo.sizeLeafIndex`다(#3.2). 구현된 동작:
+
+- `push` - 원소 하나(elemSize칸)를 발급해 값을 심고 `elemStartLeafIndices`에 시작 위치를 잇는다.
+  그 다음 `store.set(sizeLeafIndex, 새 길이)`가 `@for` grow를 발화한다. `@for` 몸체가 이미 가진
+  "원소 하나 심는 명령"을 재사용하므로 새 opcode가 필요 없다.
+- `removeAt` - 회차 branch를 떼고(`removeBranchAt`) 그 원소의 leaf들을 freelist로 회수,
+  `elemStartLeafIndices`에서 제거. 중첩 배열이면 안쪽 배열의 길이 칸까지 함께 회수한다.
+  뒤 요소의 `indexLeafIndices`를 당겨 인덱스가 자동 갱신된다.
 
 ## 5. 객체 변경 = 리프 일괄 set
 
