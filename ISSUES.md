@@ -4,6 +4,11 @@
 
 ## 해결됨
 
+- **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
+  소스에 설명을 달 수 없었다(비ASCII를 쓰면 `unexpected character`로 터졌다). **해결:** `//`와
+  `/* */`를 렉서가 건너뛴다(SYNTAX #1.1). 주석은 앞 공백 여부를 그대로 통과시킨다 - 공백을
+  세우면 `img(class="x"/**//)`처럼 붙여 쓴 주석이 `/` 앞 공백을 대신해 self-close 검증이 뚫린다.
+
 - **루트 store에서 배열 요소 경로로 못 내려감** - `store.items[2].title` 같은 접근이 안 됐다
   (`leafTree`가 배열을 칸 leafIndex 하나로 두고 멈췄다). **해결:** 배열 칸도 노드로 낸다
   (`arrayNode`). 요소 주소는 컴파일타임 offset이 아니라 `elemStartLeafIndices`가 들고
@@ -101,9 +106,6 @@
   `npm list`가 링크 너머 devDependencies를 훑다 실패한다(ts-plugin의 `@types/node`가 루트와
   버전이 달라 hoist되지 않고 자기 밑에 남는 것이 방아쇠). `file:`은 (2)를 만족하고 (3)에서
   걸리며, `0.0.1`은 그 반대다.
-
-- **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
-  소스에 설명을 달 수 없다(비ASCII를 쓰면 `unexpected character`로 터진다).
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
   실패한다(`get_const`가 `&str` 대신 `&Const` 반환). renderer는 바이트코드로 렌더 가능한지 보는

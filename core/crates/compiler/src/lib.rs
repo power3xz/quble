@@ -2402,6 +2402,56 @@ mod tests {
         assert_eq!(error_snippet(src), r#""x /) } }"#);
     }
 
+    #[test]
+    fn lex_error_points_at_unterminated_comment() {
+        // 닫는 `*/`가 없으면 여는 `/*`부터 소스 끝까지다(문자열과 같은 규칙).
+        let src = "component C { /* 설명 template { div( /) } }";
+        assert_eq!(error_snippet(src), "/* 설명 template { div( /) } }");
+    }
+
+    /// 주석은 토큰을 안 낸다 - 어디에 끼든 없는 것처럼 컴파일된다. 줄 주석은 개행까지,
+    /// 블록 주석은 짝 `*/`까지. 비ASCII도 주석 안에서는 통과해야 한다(전에는 렉서가 터졌다).
+    #[test]
+    fn comments_are_ignored() {
+        let src = r#"
+            // 이 컴포넌트는 카드를 그린다
+            component C {
+              /* props는
+                 여러 줄로 설명한다 */
+              props { title: string, tags: string[] }
+              template {
+                div(class="card") { // 제목만
+                  {title}
+                }
+              }
+            }
+        "#;
+        assert!(compile(src).is_ok(), "주석이 컴파일을 막으면 안 된다");
+    }
+
+    /// 주석은 앞 공백 여부에 투명하다 - `/` 앞 공백 강제(SYNTAX #3.1.1)가 주석 때문에 느슨해지지도,
+    /// 엄해지지도 않아야 한다. 공백을 세우면 `img(class="x"/**//)`가 통과해 검증이 뚫린다.
+    #[test]
+    fn comment_is_transparent_to_self_close_space() {
+        // 주석은 앞 공백 여부를 그대로 통과시킨다 - 공백을 만들지도, 지우지도 않는다.
+        // 공백이 있으면 주석이 끼어도 self-close가 서고,
+        assert!(
+            compile(r#"component C { template { img(class="x" /* 설명 *//) } }"#).is_ok(),
+            "공백 뒤 주석은 self-close를 막지 않아야 한다"
+        );
+        // 공백이 없으면 주석이 그 자리를 대신하지 못한다(대신하면 SYNTAX #3.1.1이 뚫린다).
+        assert!(
+            compile(r#"component C { template { img(class="x"/* 설명 *//) } }"#).is_err(),
+            "공백 없이 붙은 주석이 앞 공백을 대신하면 안 된다"
+        );
+    }
+
+    /// self-close `/`는 그대로 살아 있어야 한다 - 주석 분기가 `/` 하나짜리까지 먹으면 안 된다.
+    #[test]
+    fn self_close_still_works_after_comment_support() {
+        assert!(compile(r#"component C { template { img(class="x" /) } }"#).is_ok());
+    }
+
     /// next()로 읽은 뒤 그 토큰을 탓하는 자리 - just_read()가 한 칸 밀리지 않는지.
     #[test]
     fn parse_error_points_at_unexpected_token() {

@@ -3,10 +3,14 @@
   "name": "Quble",
   "scopeName": "source.quble",
   "patterns": [
+    { "include": "#comment" },
     { "include": "#use" },
     { "include": "#component" },
     { "include": "#block-keyword" },
     { "include": "#directive" },
+    { "include": "#of" },
+    { "include": "#type-key" },
+    { "include": "#type" },
     { "include": "#event-name" },
     { "include": "#composition" },
     { "include": "#tag" },
@@ -15,6 +19,17 @@
     { "include": "#string" }
   ],
   "repository": {
+    "comment": {
+      "comment": "// 줄 끝까지, /* */ 블록.",
+      "patterns": [
+        { "match": "//.*$", "name": "comment.line.double-slash.quble" },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "name": "comment.block.quble"
+        }
+      ]
+    },
     "use": {
       "comment": "use X, Y from \"path\" - 다른 소스의 컴포넌트 import.",
       "begin": "\\b(use)\\b",
@@ -40,8 +55,24 @@
       "name": "keyword.other.block.quble"
     },
     "directive": {
-      "match": "(@)(with|if|else|click|input|change|submit|focus|blur|keydown|keyup|mousedown|mouseup|mouseenter|mouseleave|scroll)\\b",
+      "comment": "구조(@if/@else/@for/@with/@slot)와 DOM 이벤트(@click 등). lexer.rs Directive::keyword와 같은 목록.",
+      "match": "(@)(if|else|for|with|slot|click|input|change|submit|focus|blur|keydown|keyup|mousedown|mouseup|mouseenter|mouseleave|scroll)\\b",
       "name": "keyword.control.directive.quble"
+    },
+    "type": {
+      "comment": "원시 3종과 유틸 타입. 배열/객체는 문법 기호라 여기 없다.",
+      "match": "\\b(string|number|bool|Omit|Pick)\\b",
+      "name": "support.type.quble"
+    },
+    "type-key": {
+      "comment": "작은따옴표 타입 키 - Omit<Section, 'title'>. 큰따옴표(값 리터럴)와 자리가 다르다.",
+      "match": "'[^'\\n]*'",
+      "name": "string.quoted.single.quble"
+    },
+    "of": {
+      "comment": "@for (x of y)의 of.",
+      "match": "\\b(of)\\b",
+      "name": "keyword.control.of.quble"
     },
     "composition": {
       "comment": "Alias: Comp(...) 또는 Comp(...) - 대문자 식별자. 별칭이 있으면 별칭이 경로 마디.",
@@ -66,7 +97,8 @@
       "name": "constant.other.event.quble"
     },
     "tag": {
-      "match": "\\b([a-z][a-zA-Z0-9-]*)(?=\\s*\\()",
+      "comment": "div(...) 같은 요소. 앞에 @가 붙은 것은 디렉티브라 뺀다(@for (x of y)의 for).",
+      "match": "(?<!@)\\b([a-z][a-zA-Z0-9-]*)(?=\\s*\\()",
       "name": "entity.name.tag.quble"
     },
     "attribute": {

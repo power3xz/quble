@@ -156,6 +156,30 @@ test("qubc - 자식 자리 보간을 가른다", () => {
   assert.deepEqual(textsOf(lines, "interpolation"), ["{label}", "{count}", "{row.id}", "{label}"]);
 });
 
+test("qubc - 주석을 가른다", () => {
+  const src = 'component X {\n  // 줄 주석\n  /* 여러\n     줄 */\n  template { img( /) }\n}';
+  const lines = tokenize(src, "a.qubc");
+
+  // 블록 주석은 줄이 갈려도 각 조각이 주석으로 남는다.
+  assert.deepEqual(textsOf(lines, "comment"), ["// 줄 주석", "/* 여러", "     줄 */"]);
+  assert.equal(rejoin(lines), src, "원문 복원");
+});
+
+test("qubc - self-close `/`는 주석이 아니다", () => {
+  const lines = tokenize("component X {\n  template { img( /) }\n}", "a.qubc");
+
+  assert.deepEqual(textsOf(lines, "comment"), []);
+});
+
+// 편집 중간 상태 - 타이핑 도중에는 늘 닫혀 있지 않다.
+test("qubc - 안 닫힌 블록 주석도 토큰을 낸다", () => {
+  const src = "component X {\n  /* 쓰다 말았다\n";
+  const lines = tokenize(src, "a.qubc");
+
+  assert.equal(rejoin(lines), src, "원문 복원");
+  assert.deepEqual(textsOf(lines, "comment"), ["/* 쓰다 말았다"]);
+});
+
 test("qubc - 블록 여는 괄호는 보간이 아니다", () => {
   // `{`는 블록도 연다(component/props/template). 형태로 갈린다.
   const lines = tokenize("component X {\n  props { a: string }\n}", "a.qubc");
@@ -179,13 +203,11 @@ test("qubc - 작은따옴표는 유틸 타입 키다", () => {
   assert.ok(textsOf(lines, "string").includes("'id'"));
 });
 
-test("qubc - 주석 문법이 없다", () => {
-  // `/`는 self-close(`img( /)`)로만 쓰인다. `//`를 주석으로 칠하면 없는 문법을 있는 것처럼
-  // 보여 준다.
-  const lines = tokenize("// not a comment\nuse x", "a.qubc");
+test("qubc - 줄 주석은 그 줄만 먹는다", () => {
+  const lines = tokenize("// 주석\nuse x", "a.qubc");
 
-  assert.deepEqual(textsOf(lines, "comment"), []);
-  assert.deepEqual(textsOf(lines, "keyword"), ["use"]);
+  assert.deepEqual(textsOf(lines, "comment"), ["// 주석"]);
+  assert.deepEqual(textsOf(lines, "keyword"), ["use"], "다음 줄은 정상 토큰이다");
 });
 
 test("qubc - 보간이 여럿이어도 원문을 지킨다", () => {
