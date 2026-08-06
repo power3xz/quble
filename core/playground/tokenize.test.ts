@@ -157,7 +157,7 @@ test("qubc - 자식 자리 보간을 가른다", () => {
 });
 
 test("qubc - 주석을 가른다", () => {
-  const src = 'component X {\n  // 줄 주석\n  /* 여러\n     줄 */\n  template { img( /) }\n}';
+  const src = "component X {\n  // 줄 주석\n  /* 여러\n     줄 */\n  template { img( /) }\n}";
   const lines = tokenize(src, "a.qubc");
 
   // 블록 주석은 줄이 갈려도 각 조각이 주석으로 남는다.
