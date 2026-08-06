@@ -58,7 +58,7 @@ after(() => {
 const typecheck = (body: string): string | null => {
   const source = `import type { THandlers } from "./handlers";
 export default {
-  EDIT: (_data, { props, get, set, push, removeAt, replace }) => {
+  EDIT: (_data, { props, store, get, set, push, removeAt, replace }) => {
 ${body}
   },
 } satisfies Partial<THandlers>;
@@ -128,5 +128,31 @@ test("객체 prop 자체는 leaf가 아니라 set에 못 넘긴다", () => {
 
 test("leaf 값 타입이 다르면 set이 막는다", () => {
   const out = typecheck(`set(props.count, "not a number");`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+// store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘긴다. 여기서는 루트가 곧 이 컴포넌트라
+// store와 props가 같은 트리다 - props와 같은 규칙으로 걸리는지를 store 쪽으로 다시 본다.
+// `any`였을 때는 아래 셋이 모두 통과했다(검사가 아예 없었다).
+test("store leaf가 props와 같은 규칙으로 짚힌다", () => {
+  assert.equal(
+    typecheck(`
+    set(store.title, "s");
+    push(store.tags, "new");
+    const n: number = get(store.count);
+    void n;
+  `),
+    null,
+  );
+});
+
+test("없는 store 필드는 막는다", () => {
+  const out = typecheck(`set(store.nope, 1);`);
+  assert.match(out ?? "", /TS2339/);
+  assert.match(out ?? "", /nope/);
+});
+
+test("store leaf 값 타입이 다르면 set이 막는다", () => {
+  const out = typecheck(`set(store.count, "not a number");`);
   assert.match(out ?? "", /TS2345/);
 });

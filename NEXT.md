@@ -13,15 +13,6 @@
 `.qubc`에 주석을 쓸 수 있어야 한다. 문법은 SYNTAX.md에 정하고, 컴파일러(렉서)와 편집기
 하이라이팅이 함께 따라가야 한다.
 
-### `store`의 타입 (지금 d.ts에서 `any`)
-
-`dts.rs`가 `store: any`로 낸다(PRELUDE). 런타임은 루트(defs[0]) 기준 leafIndex 트리를 넘기는데,
-타입을 정확히 내려면 루트 props를 시그니처마다 실어야 하고 그 대상 트리가 미정이라 미뤄 둔 것이다
-(dts.rs 서두 주석).
-
-이것 때문에 핸들러 파일이 얻는 타입 안전이 반쪽이다 - playground 핸들러는 `store`를 20번 쓰고
-`props`는 0번 쓴다. `set(store.lineCount, ...)`의 leafIndex가 검사되지 않는다는 뜻이다.
-
 ## 정할 것
 
 ### wasm 크기 - dts를 feature로 가를지

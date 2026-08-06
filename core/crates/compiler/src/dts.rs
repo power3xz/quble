@@ -4,8 +4,8 @@
 //!
 //! props는 값이 아니라 leafIndex(주소기)라 `TLeafIndex<T>`로 낸다 - `get(k)`가 그 값을 내주고
 //! `set(k, v)`가 받는다(REACTIVITY.md #7.1). 배열 leaf는 push/removeAt/replace로 조작한다.
-//! store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘기지만 여기서는 `any`로 둔다 -
-//! 타입을 정확히 내려면 루트 props를 시그니처마다 실어야 하고, 그 대상 트리가 아직 미정이다.
+//! store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘기므로 루트의 props 타입을 그대로
+//! 싣는다 - props와 같은 leafIndex 트리라 `set`/`push`가 같은 규칙으로 걸린다.
 //! props의 T는 선언 타입을 TS로 매핑한다(bool->boolean, T[]->T[], 객체->{...}).
 //! 핸들러 반환은 `void | Promise<void>`다 - 런타임은 반환값을 await하지 않지만(그래서 async
 //! 핸들러의 실패는 조용히 사라진다), 핸들러를 받아 감싸는 쪽이 그 Promise를 잡아 건질 수
@@ -66,8 +66,12 @@ struct Handler {
     loop_depth: u16,
 }
 
-/// d.ts 서두: 공통 타입. `THandler<Data, Props, Ctx>`가 핸들러 하나의 모양(params 배치, 조작 함수)을
-/// 담고, 각 fullname은 자기 Data/Props/Ctx만 인자로 채운다.
+/// d.ts 서두: 공통 타입. `THandler<Data, Props, Ctx, Loop, Store>`가 핸들러 하나의 모양(params
+/// 배치, 조작 함수)을 담고, 각 fullname은 자기 Data/Props/Ctx/Loop/Store를 인자로 채운다.
+///
+/// Store는 트리 전체에서 루트 하나라 모든 시그니처가 같은 이름을 채운다. 그래도 제네릭 자리에
+/// 두는 이유 - params의 다른 넷이 다 제네릭인데 store만 본문에 박으면 무엇이 채워지는지가
+/// 시그니처에서 안 보인다.
 ///
 /// 배열 조작(push/removeAt/replace)은 대상이 배열 leaf여야 한다 - `TLeafIndex<TElement[]>`로
 /// 받아 배열 아닌 leaf를 넘기면 타입에서 걸리고, 요소 타입도 함께 맞춘다. removeAt은 요소
@@ -77,13 +81,13 @@ struct Handler {
 /// 그 배열의 요소(TElement)라 뜻이 다르다. 한 이름으로 두면 나란히 놓였을 때 같은 것으로 읽힌다.
 const PRELUDE: &str = "\
 type TLeafIndex<T> = number & { readonly __leaf: T };
-type THandler<Data, Props, Ctx, Loop> = (
+type THandler<Data, Props, Ctx, Loop, Store> = (
   data: Data,
   params: {
     context: Ctx;
     props: Props;
     event: Event;
-    store: any;
+    store: Store;
     get: <TValue>(k: TLeafIndex<TValue>) => TValue;
     set: <TValue>(k: TLeafIndex<TValue>, v: TValue) => void;
     push: <TElement>(k: TLeafIndex<TElement[]>, v: TElement) => void;
@@ -105,14 +109,22 @@ fn collect(comps: &[FlatComp]) -> Vec<Handler> {
 ///
 /// props 타입은 컴포넌트마다 한 번 내고 핸들러는 이름으로 참조한다 - 시그니처에 인라인으로
 /// 펴면 한 컴포넌트의 핸들러 수만큼 같은 텍스트가 반복된다.
+///
+/// 루트(0)의 것은 핸들러가 없어도 낸다 - store가 그 타입이라 핸들러 유무와 무관하게 필요하다.
 fn render(comps: &[FlatComp]) -> String {
     let handlers = collect(comps);
+    let root = &comps[0].comp;
 
     let mut out = String::new();
     out.push_str(PRELUDE);
     out.push('\n');
 
-    let mut emitted: Vec<&str> = Vec::new();
+    let mut emitted: Vec<&str> = vec![&root.name];
+    out.push_str(&format!(
+        "type {} = {};\n",
+        props_type_name(&root.name),
+        props_type(&root.props)
+    ));
     for h in &handlers {
         if emitted.contains(&h.comp_name.as_str()) {
             continue;
@@ -124,13 +136,15 @@ fn render(comps: &[FlatComp]) -> String {
             props_type(&h.props)
         ));
     }
-    if !emitted.is_empty() {
-        out.push('\n');
-    }
+    out.push('\n');
 
     out.push_str("export interface THandlers {\n");
     for h in &handlers {
-        out.push_str(&format!("  '{}': {};\n", h.fullname, signature(h)));
+        out.push_str(&format!(
+            "  '{}': {};\n",
+            h.fullname,
+            signature(h, &root.name)
+        ));
     }
     out.push_str("}\n");
     out
@@ -154,9 +168,9 @@ fn props_type(props: &[Prop]) -> String {
     )
 }
 
-/// 핸들러 하나를 `THandler<Data, Props, Ctx, Loop>`로 낸다. context 없으면 Ctx는 `{}`,
-/// @for 밖이면 Loop는 `{}`.
-fn signature(h: &Handler) -> String {
+/// 핸들러 하나를 `THandler<Data, Props, Ctx, Loop, Store>`로 낸다. context 없으면 Ctx는 `{}`,
+/// @for 밖이면 Loop는 `{}`. Store는 루트 props라 핸들러마다 같은 이름이 들어간다.
+fn signature(h: &Handler, root_name: &str) -> String {
     let data = format!("{{ {} }}", fields_type(&h.data, value_type));
     let props = props_type_name(&h.comp_name);
     let ctx = if h.contexts.is_empty() {
@@ -177,7 +191,8 @@ fn signature(h: &Handler) -> String {
             join((0..h.loop_depth).map(|i| format!("${i}: number")))
         )
     };
-    format!("THandler<{data}, {props}, {ctx}, {loops}>")
+    let store = props_type_name(root_name);
+    format!("THandler<{data}, {props}, {ctx}, {loops}, {store}>")
 }
 
 /// prop 선언 타입 -> 핸들러가 받는 leafIndex 트리(runtime.ts leafTree와 같은 규칙).
@@ -513,7 +528,7 @@ mod tests {
             }
         "#);
         assert!(out.contains("type TLeafIndex<T> = number & { readonly __leaf: T };"));
-        assert!(out.contains("type THandler<Data, Props, Ctx, Loop> = ("));
+        assert!(out.contains("type THandler<Data, Props, Ctx, Loop, Store> = ("));
     }
 
     /// 핸들러 params에 배열 조작 3종이 있다. 대상을 `TLeafIndex<TElement[]>`로 받아야 배열 아닌
@@ -535,16 +550,24 @@ mod tests {
 
     /// 핸들러 params에 event와 store가 있다. 런타임이 실제로 넘기는 것들이라 빠지면 핸들러가
     /// 그것을 받는 순간 타입이 안 맞는다(core/web/runtime.ts의 핸들러 호출부).
+    ///
+    /// store는 Store 제네릭으로 받고 시그니처가 루트 props 타입을 채운다 - 런타임이 루트
+    /// (defs[0]) 기준 leafIndex 트리를 넘기므로 그 트리가 곧 루트의 props다.
     #[test]
     fn prelude_has_event_and_store() {
         let out = dts(r#"
             component Thumb {
+              props { avatar: string }
               events { CLICK({ x }) }
               template { img(@click:CLICK /) }
             }
         "#);
         assert!(out.contains("event: Event;"));
-        assert!(out.contains("store: any;"));
+        assert!(out.contains("store: Store;"));
+        assert!(
+            out.contains("'CLICK': THandler<{ x: string }, TProps_Thumb, {}, {}, TProps_Thumb>;"),
+            "실제 출력:\n{out}"
+        );
     }
 
     /// 반환 타입이 async를 드러낸다. `=> void`로도 async 핸들러를 넣는 것 자체는 통과하지만
@@ -614,8 +637,14 @@ mod tests {
             1,
             "props 타입 선언이 한 번이어야 한다:\n{out}"
         );
-        assert!(out.contains("'OPEN': THandler<{  }, TProps_C, {}, {}>;"), "실제 출력:\n{out}");
-        assert!(out.contains("'CLOSE': THandler<{  }, TProps_C, {}, {}>;"), "실제 출력:\n{out}");
+        assert!(
+            out.contains("'OPEN': THandler<{  }, TProps_C, {}, {}, TProps_C>;"),
+            "실제 출력:\n{out}"
+        );
+        assert!(
+            out.contains("'CLOSE': THandler<{  }, TProps_C, {}, {}, TProps_C>;"),
+            "실제 출력:\n{out}"
+        );
         // 인라인 잔재가 없어야 한다 - 있으면 참조가 아니라 펴 쓴 것이다.
         assert!(
             !out.contains("{ title: TLeafIndex<string>; count: TLeafIndex<number> }, {}"),
@@ -638,7 +667,9 @@ mod tests {
             "type TProps_Thumb = { avatar: TLeafIndex<string>; size: TLeafIndex<number>; active: TLeafIndex<boolean> };"
         ), "실제 출력:\n{out}");
         assert!(
-            out.contains("'CLICK': THandler<{ avatar: string }, TProps_Thumb, {}, {}>;"),
+            out.contains(
+                "'CLICK': THandler<{ avatar: string }, TProps_Thumb, {}, {}, TProps_Thumb>;"
+            ),
             "실제 출력:\n{out}"
         );
     }
@@ -726,7 +757,7 @@ mod tests {
             }
         "#);
         assert!(
-            out.contains(r#", { Area: { section: "actions"; user: string } }, {}>"#),
+            out.contains(r#", { Area: { section: "actions"; user: string } }, {}, TProps_C>"#),
             "실제 출력:\n{out}"
         );
     }
