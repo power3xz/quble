@@ -243,10 +243,14 @@ handler(data, { props, store, get, set }) {
 구독자가 갱신된다 - props는 읽기전용이 아니라 쓰기가 반응성에 닿는다. 값 변경이 다른 로직을 촉발하지
 않으므로(도입부 단방향) props 쓰기도 안전하다.
 
-**구현 순서: props가 먼저.** `props`/payload/context는 소스(AST)에 이름이 그대로 있어 d.ts로
-바로 나온다. `store`는 루트 전체 상태 트리인데 소스에 그 선언 개념이 아직 없다 - 타입 표기(ROADMAP)와
-상태 트리 구조(DESIGN #5.1)가 정해진 뒤라야 소스에서 뽑을 수 있다. 그래서 지금은 `props`까지 내고,
-`store`/`get`/`set` 타입은 그 뒤에 얹는다.
+**주소 트리의 모양.** 스칼라만 leafIndex 한 칸이다. 객체/배열은 여러 leaf의 묶음이라 각자 노드고,
+필드(`props.ghost.style`)와 인덱스(`props.items[2].title`, `props.items.length`)로 내려간다.
+통째 교체는 `setObject`(안 준 필드는 `undefined`) / `setArray`, 요소 조작은 `push`/`removeAt`이다.
+`store`는 루트(defs[0]) 기준 같은 트리라 규칙이 같다 - 그래서 d.ts가 루트 props 타입을 그대로
+`store`에 싣는다.
+
+배열 요소의 주소는 컴파일타임에 확정되지 않는다 - `elemStartLeafIndices`가 들고 push/removeAt으로
+계속 바뀌므로, 런타임은 인덱싱하는 그 순간에 요소 노드를 만든다.
 
 **두 스텝으로 나눈다.**
 
