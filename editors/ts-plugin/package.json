@@ -11,6 +11,6 @@
     "typescript": "^6.0.3"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test --test-concurrency=1"
+    "test": "node --experimental-strip-types --test"
   }
 }

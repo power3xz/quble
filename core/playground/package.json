@@ -7,6 +7,6 @@
     "quble-wasm-compiler": "*"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test --test-concurrency=1"
+    "test": "node --experimental-strip-types --test"
   }
 }

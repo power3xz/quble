@@ -22,7 +22,7 @@
     "build": "node build.mjs",
     "package": "npm run build && vsce package --out quble-vscode.vsix",
     "install-local": "npm run package && code --install-extension quble-vscode.vsix --force",
-    "test": "node --experimental-strip-types --test --test-concurrency=1"
+    "test": "node --experimental-strip-types --test"
   },
   "contributes": {
     "typescriptServerPlugins": [
