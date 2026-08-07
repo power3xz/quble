@@ -47,9 +47,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: wasm 타겟 추가
         run: rustup target add wasm32-unknown-unknown
+
+      # 레지스트리(~/.cargo)와 빌드 산출물(core/target)을 함께 둔다. 키는 커밋 SHA - 같은
+      # 커밋이면 굽는 결과가 같으므로 test가 구운 것을 build가 그대로 받아 다시 안 굽는다.
+      # 커밋이 바뀌면 restore-keys가 직전 캐시를 내주고 cargo가 바뀐 크레이트만 다시 굽는다.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: cargo-${{ github.sha }}
+          restore-keys: cargo-
 
       - name: 의존성 설치
         run: npm ci
@@ -82,9 +95,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: wasm 타겟 추가
         run: rustup target add wasm32-unknown-unknown
+
+      # test와 같은 키 - 같은 커밋이니 그 job이 구운 core/target을 그대로 받아 아래 두
+      # cargo build가 재컴파일 없이 끝난다.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: cargo-${{ github.sha }}
+          restore-keys: cargo-
 
       # npm install이 둘이다 - 루트 워크스페이스와
       # core/build(esbuild를 자기 것으로 가진다).
