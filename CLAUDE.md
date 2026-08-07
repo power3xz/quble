@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Writing Style
 
 응답, 문서, 주석, 커밋 메시지 - 내가 쓰는 모든 글에 적용된다.
@@ -78,32 +76,3 @@ composition tree and produces a **fullname** event id by accumulating alias/type
 segments from the outside (use-site) inward. A handler catches that fullname. The
 motivation (vs. TypeScript types) is eliminating the manual path-accumulation boilerplate
 that explodes as the tree deepens (#1.4).
-
-## Architecture Concepts (from DESIGN.md)
-
-Load-bearing invariants any implementation must preserve:
-
-- **Two orthogonal axes - never mix them.** *Path* (who fired the event) accumulates
-  aliases/type-names into the fullname identifier. *Context* (`@with` blocks) injects
-  metadata delivered to handlers keyed by context name - it is **never** part of the path
-  (#1.2, #4.2). (Context delivery to handlers is implemented; see the `context` handler arg.)
-- **Fullnames only, no tail-matching.** Event ids always reflect the complete tree
-  position. Short-name matching was rejected because it makes the same handler name valid
-  in one tree state and invalid in another, breaking compile-time predictability (#4.1). DX
-  of long names is solved by tooling, not by language rules.
-- **Same fullname = intentional sharing.** Reusing the same un-aliased type as siblings
-  produces the same fullname on purpose. Adding an alias is the explicit act of separating;
-  omitting it is the explicit act of grouping (#1.3, #3.2).
-- **Handlers are a single entry point** for state change (`get`/`set`) and navigation
-  (`goTo`) - not plain callbacks (#2.5). What a handler may `set` is still being settled
-  (ISSUES.md, tied to the reactivity model).
-
-## Anticipated Change Points (quble)
-
-For the global *Anticipated Change Points* exception (in `~/.claude/CLAUDE.md`), DESIGN.md
-is this project's "committed design source": a change recorded there counts as committed,
-not hypothetical. The typical seam is the **bytecode contract** - opcodes and their
-operands (opcode.rs <-> runtime.js <-> disasm.js). When DESIGN.md commits to a feature whose
-only clean landing spot is a new opcode or operand, adding that opcode now - even before
-the feature fully lands - localizes the future edit and avoids re-touching the operand
-format and every decoder later. Speculative flexibility for undesigned features is not.
