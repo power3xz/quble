@@ -141,3 +141,31 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # 성공/실패 모두 Slack으로 알린다. always()라 앞 job이 죽어도 이 job은 돈다 - 안 그러면
+  # 정작 실패했을 때 알림이 안 온다. 취소(cancelled)는 결과에서 갈라 표시만 달리한다
+  # (배포 concurrency가 앞선 실행을 취소하므로 실패로 보이면 안 된다).
+  notify:
+    needs: [test, build, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack 알림
+        env:
+          WEBHOOK: ${{ secrets.QUBLE_CI_WEBHOOK_URL }}
+          # deploy까지 성공해야 success. 앞이 죽으면 뒤는 skipped라 deploy 결과만 봐선 안 된다.
+          RESULT: ${{ (needs.test.result == 'success' && needs.build.result == 'success' && needs.deploy.result == 'success') && 'success' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'failure') }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+          SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          case "$RESULT" in
+            success)   ICON=":white_check_mark:"; LABEL="배포 완료" ;;
+            cancelled) ICON=":black_square_for_stop:"; LABEL="취소됨" ;;
+            *)         ICON=":x:"; LABEL="실패" ;;
+          esac
+          # 커밋 제목 첫 줄만, JSON 문자열로 안전하게 감싼다(따옴표/줄바꿈이 들어와도 안 깨진다).
+          TEXT="$ICON quble CI $LABEL - $(printf '%s' "$SUBJECT" | head -1)"
+          jq -n --arg t "$TEXT" --arg url "$RUN_URL" --arg br "$BRANCH" \
+            '{text: $t, blocks: [{type:"section", text:{type:"mrkdwn", text: ($t + "\n<" + $url + "|실행 로그> | `" + $br + "`")}}]}' \
+            | curl -sS -X POST -H 'Content-type: application/json' --data @- "$WEBHOOK"
