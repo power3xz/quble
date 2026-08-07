@@ -57,6 +57,10 @@ jobs:
       - name: wasm 빌드 (test/typecheck가 읽는다)
         run: npm run build:wasm --prefix core/wasm-compiler
 
+      # npm test가 fixture를 이 바이너리로 컴파일한다(test-helpers/build.ts). 없으면 전 테스트가 훅에서 죽는다.
+      - name: quble 바이너리 빌드 (npm test가 fixture를 이걸로 컴파일한다)
+        run: cargo build --manifest-path core/Cargo.toml --bin quble
+
       - name: cargo test
         run: cargo test --manifest-path core/Cargo.toml --workspace
 
