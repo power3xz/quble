@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p editors/ts-plugin/tsconfig.src.json && tsc --noEmit -p editors/ts-plugin/tsconfig.test.json && node --experimental-strip-types editors/ts-plugin/typecheck-handlers.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.3"
+    "@biomejs/biome": "^2.5.3",
+    "@types/vscode": "^1.125.0"
   }
 }
