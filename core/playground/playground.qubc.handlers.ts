@@ -6,16 +6,17 @@
 //
 // 미리보기는 run을 눌러야 바뀐다 - 편집 중에는 오른쪽이 그대로다.
 //
-// 소스는 store에 산다(props의 files[i].source). 이름으로 찾을 때는 fileNames의 인덱스를 거친다.
+// 파일 목록도 소스도 store에 산다(props의 files[i]). 이름으로 찾을 때는 그 행을 찾아 간다(rowOf).
 
 import { lazyCompiler } from "quble-wasm-compiler/browser.ts";
 import { compile as decodeQubb, type THandlers } from "../web/runtime.ts";
 import { caretTarget } from "./caretkey.ts";
 import { entryOf, handlerBody, isKeySlot, usedKeys } from "./completion.ts";
 import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
-import { markError, tokenize } from "./tokenize.ts";
+import { lineCountOf, lineNumbersFor, markError, tokenize } from "./tokenize.ts";
 
-export { tokenize };
+// 진입 페이지가 초기 data를 만들 때 쓴다 - 해시 붙은 이 번들이 그것들이 실려 나가는 유일한 길이다.
+export { lineCountOf, lineNumbersFor, tokenize };
 
 // 헬퍼가 받는 ctx의 타입. 손으로 적지 않고 `handlers`에서 역산한다 - 그 선언에는 ts-plugin이
 // 짝 .qubc의 `Partial<Handlers>`를 표기로 붙이므로 주입된 것이 유일한 출처가 된다. 손으로 적으면
@@ -28,10 +29,6 @@ type TCtx = Parameters<NonNullable<(typeof handlers)[keyof typeof handlers]>>[1]
 // 미리보기를 눌러야 쓰이므로 첫 화면에서는 받지 않는다 - 처음 컴파일할 때 받는다.
 const getCompiler = lazyCompiler("./compiler_wasm.wasm");
 
-// 파일 이름 순서(트리와 같은 순서) - store.files의 인덱스와 같다. 부트스트랩이 채운다.
-// 소스 자체는 store.files[i].source에 산다.
-const fileNames: string[] = [];
-
 // 마지막 컴파일 에러의 위치. 편집기가 그 파일을 싣고 있을 때만 줄 표시가 뜬다 - 다른 파일에서
 // 난 에러는 표시할 자리가 없어 패널에만 남고, 그 패널을 누르면 그 파일로 이동한다.
 // 파일 목록의 에러 표시는 이 값과 파일 이름을 맞춰 켠다(에러가 난 파일이 편집 중이 아니어도 보인다).
@@ -41,7 +38,7 @@ let failure: TDiagnostic | null = null;
 // 필요한 칸만 set한다 - 목록째 갈아끼우면 안 바뀐 행의 DOM 텍스트까지 다시 쓴다.
 const refreshFiles = ({ store, set, get }: Pick<TCtx, "store" | "set" | "get">) => {
   const editing = get(store.editingName);
-  fileNames.forEach((name, i) => {
+  fileNamesOf({ store, get }).forEach((name, i) => {
     const row = store.files[i];
     set(row.isEditing, name === editing);
     set(row.isPreviewing, name === previewingName);
@@ -51,19 +48,6 @@ const refreshFiles = ({ store, set, get }: Pick<TCtx, "store" | "set" | "get">) 
 
 // 지금 미리보기 중인 파일 - 목록을 다시 그릴 때 표시를 되살리려면 이름으로 들고 있어야 한다.
 let previewingName: string | null = null;
-
-/** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
-export const lineCountOf = (text: string) => text.split("\n").length;
-
-/** 거터에 넣을 줄 번호 - 1부터 줄 수까지. */
-export const lineNumbersFor = (text: string) =>
-  Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
-
-/** 파일 이름 순서를 심는다. 부트스트랩이 mount 전에 부른다 - store.files의 인덱스와 맞아야
- * 이름으로 그 행의 소스를 찾는다(sourceOf). 소스 자체는 mount가 store에 심는다. */
-export const seed = (files: { name: string }[]) => {
-  fileNames.push(...files.map((f) => f.name));
-};
 
 // 지금 미리보기 중인 인스턴스와 그때 만든 Blob URL들 - 다시 컴파일할 때 정리한다.
 // 그중 스타일시트는 LOAD_RES가 document.head에 <link>로 달아 둔 것이라, URL만 revoke하면
@@ -183,12 +167,12 @@ const openFile = (name: string, ctx: TCtx, caretLine = 0) => {
 };
 
 // 파일 선택 - 몇 번째 파일인지는 회차 인덱스로 온다(부르는 쪽이 ctx.$0에서 꺼내 넘긴다).
-const selectFile = (at: number, ctx: TCtx) => openFile(fileNames[at], ctx);
+const selectFile = (at: number, ctx: TCtx) => openFile(ctx.get(ctx.store.files[at].name) as string, ctx);
 
 // 진단을 눌러 에러가 난 파일의 그 줄로 간다. 다른 파일에서 난 에러(use로 딸려온 파일)는
 // 편집기에 표시할 자리가 없어 이게 유일한 이동 수단이다.
 const jumpToError = (_data: unknown, ctx: TCtx) => {
-  if (!failure || !fileNames.includes(failure.path)) {
+  if (!failure || rowOf(failure.path, ctx) === -1) {
     return;
   }
   openFile(failure.path, ctx, failure.line);
@@ -202,7 +186,7 @@ const editSource = (_data: unknown, ctx: TCtx) => {
     return;
   }
   const area = ctx.event.target as HTMLTextAreaElement;
-  ctx.set(ctx.store.files[fileNames.indexOf(editing)].source, area.value);
+  ctx.set(ctx.store.files[rowOf(editing, ctx)].source, area.value);
   // 이 파일이 바뀌면 그 엔트리로 뽑아 둔 후보가 낡는다.
   if (editing.endsWith(".qubc")) {
     namesCache.delete(editing);
@@ -343,16 +327,23 @@ let completion: { slotStart: number; names: string[]; shown: string[]; selected:
 // 다시 뽑을 이유가 없다.
 const namesCache = new Map<string, string[]>();
 
+/** 파일 이름을 트리 순서대로. store.files의 인덱스가 곧 그 순서다. */
+const fileNamesOf = ({ store, get }: Pick<TCtx, "store" | "get">) =>
+  Array.from({ length: store.files.length }, (_, i) => get(store.files[i].name) as string);
+
+/** 이름 -> 몇 번째 행인지. 목록에 없으면 -1. */
+const rowOf = (name: string, ctx: Pick<TCtx, "store" | "get">) => fileNamesOf(ctx).indexOf(name);
+
 /** 이름 -> 소스. store가 유일한 출처다. 목록에 없는 이름이면 빈 문자열. */
-const sourceOf = (name: string, { store, get }: Pick<TCtx, "store" | "get">) => {
-  const at = fileNames.indexOf(name);
-  return at === -1 ? "" : ((get(store.files[at].source) as string) ?? "");
+const sourceOf = (name: string, ctx: Pick<TCtx, "store" | "get">) => {
+  const at = rowOf(name, ctx);
+  return at === -1 ? "" : ((ctx.get(ctx.store.files[at].source) as string) ?? "");
 };
 
 /** 컴파일러가 보는 파일만 모은다 - .qubc와 .css. */
 const compilerFiles = (ctx: Pick<TCtx, "store" | "get">) => {
   const files: Record<string, string> = {};
-  for (const name of fileNames) {
+  for (const name of fileNamesOf(ctx)) {
     if (name.endsWith(".qubc") || name.endsWith(".css")) {
       files[name] = sourceOf(name, ctx);
     }
@@ -521,7 +512,7 @@ const applyCompletion = (name: string, ctx: TCtx) => {
   closeCompletion(ctx);
   const editing = ctx.get(ctx.store.editingName) as string | null;
   if (editing) {
-    ctx.set(ctx.store.files[fileNames.indexOf(editing)].source, area.value);
+    ctx.set(ctx.store.files[rowOf(editing, ctx)].source, area.value);
   }
   showText(area.value, ctx);
   trackCaret(area, ctx);
@@ -590,7 +581,7 @@ const runPreview = async (at: number, ctx: TCtx) => {
   failure = null;
   selectFile(at, ctx);
 
-  const entry = fileNames[at];
+  const entry = get(store.files[at].name) as string;
   const stem = entry.replace(/\.qubc$/, "");
 
   const { compile } = await getCompiler();

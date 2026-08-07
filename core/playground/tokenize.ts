@@ -126,6 +126,13 @@ const lineOf = (tokens: TToken[]): TLine => ({
   error: "",
 });
 
+/** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
+export const lineCountOf = (text: string) => text.split("\n").length;
+
+/** 거터에 넣을 줄 번호 - 1부터 줄 수까지. */
+export const lineNumbersFor = (text: string) =>
+  Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
+
 /** 진단이 가리키는 줄(1부터)에 메시지를 얹은 새 목록을 만든다. 범위 밖이면 그대로 돌려준다. */
 export const markError = (lines: TLine[], line: number, message: string): TLine[] => {
   const i = line - 1;

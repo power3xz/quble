@@ -73,11 +73,10 @@
       })),
     );
 
-    // 핸들러가 컴파일에 쓸 소스 캐시를 채운다 - 편집 전에도 run이 동작해야 한다.
+    // 셸이 쓸 tokenize/줄번호를 여기서도 부른다 - 초기 data를 만드는 데 필요하다.
     // manifest의 handlers는 내용 해시가 붙은 경로라 읽어서 그대로 import한다.
     const manifest = await fetch("./playground.manifest.json").then((r) => r.json());
     const handlers = await import(`./${manifest.handlers}`);
-    handlers.seed(sources);
 
     const data = {
       files: sources.map((f) => ({
