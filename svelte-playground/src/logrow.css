@@ -1,0 +1,33 @@
+/* 콘솔의 한 줄. 콘솔 컨테이너(.pg__console)는 셸이 갖는다. */
+
+.logrow {
+  display: flex;
+  gap: 0.8rem;
+  padding: 0.3rem 1.2rem;
+  line-height: 1.5;
+}
+
+.logrow__level {
+  flex-shrink: 0;
+  width: 4.5rem;
+  text-transform: uppercase;
+  font-size: 1.2rem;
+}
+
+.logrow__level[data-level="log"] {
+  color: #6b7688;
+}
+
+.logrow__level[data-level="warn"] {
+  color: #d9a441;
+}
+
+.logrow__level[data-level="error"] {
+  color: #e06c6c;
+}
+
+.logrow__text {
+  color: #c8cdd6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

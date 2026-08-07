@@ -1,0 +1,19 @@
+/* 미리보기가 앉는 칸. 원본에서는 호스트 페이지(core/playground/index.html)가 셸 위에 #preview를
+ * 겹쳐 얹어 이 역할을 했다 - 여기서는 셸이 레이아웃을 다 갖고 있어 그 칸을 직접 만든다.
+ *
+ * 값은 playground.css의 .pg가 정한 트랙을 따른다 - 여기서 폭/높이를 다시 정하지 않는다. */
+
+.pg__preview-body {
+  grid-area: preview;
+  /* 헤더 아래로 내린다 - 헤더는 align-self: start로 칸 맨 위를 차지한다. */
+  margin-top: var(--head-h);
+  /* grid stretch만으로는 height가 auto라 자식의 %가 안 풀린다 - 트랙 높이를 명시로 받는다. */
+  height: calc(100% - var(--head-h));
+  overflow: auto;
+}
+
+/* 마운트 전에는 배경을 칠하지 않는다 - 흰 칸이 안내(.pg__guide)를 덮는다. */
+.pg__preview-body--live {
+  background: #fff;
+  color: #111;
+}

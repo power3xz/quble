@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>svelte playground</title>
+  <style>
+    /* 셸이 화면 전체를 차지한다. 미리보기 인스턴스가 없으므로 core/playground/index.html의
+     * .stack(겹치기) 구조는 필요 없다 - 셸 하나만 둔다. */
+    html, body { height: 100%; background: #0d1117; color: #e6e9ef; }
+    body { overflow: hidden; }
+    #app { height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

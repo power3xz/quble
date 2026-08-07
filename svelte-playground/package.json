@@ -1,0 +1,15 @@
+{
+  "name": "svelte-playground",
+  "private": true,
+  "type": "module",
+  "description": "playground 셸을 Svelte로 다시 그린 것 - elm-playground와 같은 자리(워크스페이스 밖, 독립 빌드). 편집까지 되고 컴파일/미리보기는 없다.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "svelte": "^5.19.0",
+    "vite": "^6.0.7"
+  }
+}
