@@ -34,6 +34,9 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 - **NEXT.md** - what is in flight, what to do next, and what is still undecided
   ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See *NEXT.md 갱신* below.
 - **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
+- **core/web/LEAF-STORE-LAYOUT.md** - 런타임 데이터 스토어 레이아웃 - 값이 store에 어떻게
+  놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
+  따라 고친다.
 - **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
 ### NEXT.md 갱신
