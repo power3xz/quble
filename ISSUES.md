@@ -159,3 +159,20 @@
 - **leaf free가 구독(subscribers)을 회수하지 않음** - leaf-store `free`는 값과 free list만
   만지고 `subscribers[leafIndex]`는 안 건드린다. 구독 회수는 `removeBranchAt`(region.ts)이
   한다.
+
+- **playground manifest 중복 로드** - 진입 페이지가 초기 data를 만들려고 manifest를 읽고
+  `mount`가 같은 것을 또 읽는다.
+
+- **playground가 `quble-web`을 선언 안 함** - `../web/runtime.ts`를 상대경로로 쓰면서
+  `dependencies`에 없다.
+
+- **wasm 크기 - dts를 feature로 가를지 미정** - `qb_handlers_dts`가 wasm을 42KB 늘렸는데
+  playground는 d.ts를 안 쓴다.
+
+- **browser.ts의 wasm URL 기본값 미정** - `node.ts`와 달리 URL을 항상 받아야 한다.
+  `new URL(..., import.meta.url)`이 esbuild에서 안 된다.
+
+- **quble-dts 바이너리를 지울지 미정** - 확장이 wasm으로 옮기면서 레포 안에서 부르는 곳이 없다.
+
+- **`compile_src`/`compile_file`의 접미사 미정** - dts 쪽은 `_from_path`로 바꿨는데 컴파일 쪽은
+  그대로다.
