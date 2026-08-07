@@ -54,6 +54,18 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
   통과는 그 근거가 되지 못한다 - CI에 넣었으면 CI에서, 브라우저용이면 브라우저에서 본다.
   확인이 남았으면 무엇이 남았는지 항목에 적고 그때까지 둔다.
 
+## 커맨드 실행 규칙
+
+논리적으로 나뉘는 작업은 커맨드도 따로 실행한다 - `&&`로 이어 붙이지 않는다. 이으면
+어디서 실패했는지 흐려지고 중간에 결과를 보고 판단할 여지가 사라진다.
+
+| O | X | 이유 |
+|---|---|---|
+| `git commit -m A` 실행 후 `git add x` `git commit -m B` | `git commit -m A && git add x && git commit -m B` | 나눈 커밋을 커맨드로 도로 묶음 |
+| `git checkout -b foo` 실행 후 `git add x` `git commit` | `git checkout -b foo && git add x && git commit` | 브랜치 생성과 커밋은 별개 판단 |
+| `cargo fmt` 결과 확인 후 `git add` | `cargo fmt && git add -A` | fmt가 무엇을 고쳤는지 안 보고 넘어감 |
+| `git status && git log --oneline -3` | - | 조회는 이어도 된다 |
+
 ## Project Status
 
 Past design-stage; implementation now lives in `core/`: a Rust compiler
