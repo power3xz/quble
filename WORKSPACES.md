@@ -29,6 +29,22 @@ workspaces: `core/web`, `core/playground`, `core/wasm-compiler`, `editors/ts-plu
 
 `core/build`는 워크스페이스 밖이다. 자기 `package.json`과 `node_modules`(esbuild)를 갖는다.
 
+`editors/vscode`도 워크스페이스 밖이다. 자기 `node_modules`를 갖지만 `npm install`이
+`quble-ts-plugin: 0.0.1`을 레지스트리에서 못 찾아 404다(ISSUES.md). 그래서 루트 `npm ci`로는
+그 의존이 안 깔린다 - 루트 tsconfig가 보는 `editors/vscode/src`용 `@types/vscode`만 루트
+`devDependencies`에 둔다.
+
+## lock 파일
+
+`package-lock.json`에는 **플랫폼별 네이티브 바이너리가 전부 들어 있어야 한다.** npm은 설치를
+돌린 플랫폼 것만 기록하는 버릇이 있어(npm/cli#8320), macOS에서 만든 lock으로 linux CI가
+`npm ci`를 하면 biome 바이너리를 못 찾는다. 지금 lock에는 `@biomejs/cli-*` 8종이 들어 있다 -
+의존을 바꾼 뒤 이 목록이 줄지 않았는지 본다.
+
+```
+grep -o '"node_modules/@biomejs/cli-[a-z0-9-]*"' package-lock.json | sort -u | wc -l   # 8
+```
+
 ## 빌드 산출물 의존
 
 gitignore(`*.wasm`, `target/`)라 레포에 없다.
@@ -46,5 +62,5 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 | `cargo test --workspace` | 없음 |
 | `npm test` | `npm ci`, `cargo build --bin quble` |
 | `npm run typecheck` | `npm ci`, `build:wasm` |
-| `npm run lint` | 없음 |
+| `npm run lint` | `npm ci` |
 | `node build/build-playground.mjs` (cwd `core`) | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |

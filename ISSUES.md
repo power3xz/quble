@@ -106,6 +106,10 @@
   `npm list`가 링크 너머 devDependencies를 훑다 실패한다(ts-plugin의 `@types/node`가 루트와
   버전이 달라 hoist되지 않고 자기 밑에 남는 것이 방아쇠). `file:`은 (2)를 만족하고 (3)에서
   걸리며, `0.0.1`은 그 반대다.
+  시도해 본 것(2026-08-07, 전부 막힘): `--no-dependencies`는 node_modules를 통째로 빼고
+  `.vscodeignore` negated glob으로도 안 되살아난다. 워크스페이스 멤버로 넣으면 vsce가
+  워크스페이스 루트를 패키지 루트로 봐서 레포 전체(7만여 파일)를 담으려 든다. 플러그인을
+  node_modules 밖에 두는 것도 안 된다 - tsserver가 node_modules 체인으로만 찾는다.
 
 - **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
   실패한다(`get_const`가 `&str` 대신 `&Const` 반환). renderer는 바이트코드로 렌더 가능한지 보는
