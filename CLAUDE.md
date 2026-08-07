@@ -33,6 +33,7 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 - **ISSUES.md** - known problems (symptom + repro; fix filled in once decided).
 - **NEXT.md** - what is in flight, what to do next, and what is still undecided
   ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See *NEXT.md 갱신* below.
+- **WORKSPACES.md** - cargo/npm 워크스페이스 멤버와 의존, 빌드 산출물, 명령별 선행 조건.
 - **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
 - **core/web/LEAF-STORE-LAYOUT.md** - 런타임 데이터 스토어 레이아웃 - 값이 store에 어떻게
   놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
