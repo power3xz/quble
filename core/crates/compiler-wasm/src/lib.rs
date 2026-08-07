@@ -366,7 +366,7 @@ mod tests {
 
     /// `./` 없이 쓴 use도 같은 탭을 가리킨다(loader가 접두어만 벗기므로 양쪽 다 맞는다).
     #[test]
-    fn use_without_dot_prefix_resolves() {
+    fn use_without_dot_prefix_loads() {
         reset();
         add_file(
             "main.qubc",

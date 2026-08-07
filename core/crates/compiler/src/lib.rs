@@ -1595,7 +1595,7 @@ mod tests {
 
     /// loader가 경로를 못 찾으면 NotFound.
     #[test]
-    fn use_unresolved_path_errors() {
+    fn use_missing_path_errors() {
         let entry = r#"
             use Label from "./missing.qubc"
             component Card { template { Label( /) } }
