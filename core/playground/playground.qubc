@@ -5,8 +5,9 @@ use LogRow from "./logrow.qubc"
 
 component Playground {
   props {
-    files: { name: string, isEntry: bool, isEditing: bool, isPreviewing: bool, hasError: bool }[],
+    files: { name: string, source: string, isEntry: bool, isEditing: bool, isPreviewing: bool, hasError: bool }[],
     editingName: string,
+    source: string,
     lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string }[],
     lineNumbers: string,
     lineCount: number,
@@ -64,7 +65,7 @@ component Playground {
             }
           }
             textarea(class="pg__area" spellcheck="false" rows={lineCount}
-              @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE /)
+              @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE) { {source} }
             @if (completion.isOpen) {
               div(class="completion" data-above={completion.isAbove} style={completion.style}) {
                 @for (c of completion.items) {

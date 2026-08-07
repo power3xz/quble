@@ -82,12 +82,14 @@
     const data = {
       files: sources.map((f) => ({
         name: f.name,
+        source: f.source,
         isEntry: f.name.endsWith(".qubc"),
-        isEditing: false,
+        isEditing: f.name === sources[0].name,
         isPreviewing: false,
         hasError: false,
       })),
       editingName: sources[0].name,
+      source: sources[0].source,
       lines: handlers.tokenize(sources[0].source, sources[0].name),
       lineNumbers: handlers.lineNumbersFor(sources[0].source),
       lineCount: handlers.lineCountOf(sources[0].source),
@@ -103,14 +105,6 @@
     };
 
     window.__quble = await mount("./playground.qubb", document.getElementById("editor"), data);
-
-    // textarea는 값을 quble이 바인딩하지 않는다(uncontrolled - ./playground.css 참고).
-    // 화면은 .pg__view가 그리므로 여기서는 입력용 textarea의 초기 value만 맞춰 준다.
-    document.querySelector(".pg__area").value = sources[0].source;
-
-    // 첫 파일을 고른 상태로 시작한다 - 클릭으로 돌려야 핸들러가 그 행의 leafIndex를 받아
-    // 강조를 켜고, 다음에 다른 파일을 고를 때 되돌릴 수 있다(부트스트랩은 leafIndex를 모른다).
-    document.querySelector(".filerow__name").click();
   </script>
 </body>
 </html>

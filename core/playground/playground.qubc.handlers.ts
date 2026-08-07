@@ -6,9 +6,7 @@
 //
 // 미리보기는 run을 눌러야 바뀐다 - 편집 중에는 오른쪽이 그대로다.
 //
-// 소스는 quble 상태가 아니라 여기 캐시(sources)에 둔다 - 타이핑마다 set하면 TEXT_VAR 구독이
-// 값 비교 없이 textContent를 덮어써 커서가 튄다. 그래서 편집 중에는 캐시만 갱신하고, 파일을
-// 바꿀 때만 lines를 set한다(그때는 갱신이 맞다). props의 files에 source 칸이 없는 것도 이 때문이다.
+// 소스는 store에 산다(props의 files[i].source). 이름으로 찾을 때는 fileNames의 인덱스를 거친다.
 
 import { lazyCompiler } from "quble-wasm-compiler/browser.ts";
 import { compile as decodeQubb, type THandlers } from "../web/runtime.ts";
@@ -30,14 +28,9 @@ type TCtx = Parameters<NonNullable<(typeof handlers)[keyof typeof handlers]>>[1]
 // 미리보기를 눌러야 쓰이므로 첫 화면에서는 받지 않는다 - 처음 컴파일할 때 받는다.
 const getCompiler = lazyCompiler("./compiler_wasm.wasm");
 
-// 파일 이름 순서(트리와 같은 순서)와 그 내용. 부트스트랩이 초기 data로 채운다.
+// 파일 이름 순서(트리와 같은 순서) - store.files의 인덱스와 같다. 부트스트랩이 채운다.
+// 소스 자체는 store.files[i].source에 산다.
 const fileNames: string[] = [];
-const sources = new Map<string, string>();
-
-// 지금 편집 중인 파일과 화면에 반영된 줄 수. 줄 수가 그대로면 갱신을 건너뛴다.
-let currentName: string | null = null;
-
-let shownLines = 0;
 
 // 마지막 컴파일 에러의 위치. 편집기가 그 파일을 싣고 있을 때만 줄 표시가 뜬다 - 다른 파일에서
 // 난 에러는 표시할 자리가 없어 패널에만 남고, 그 패널을 누르면 그 파일로 이동한다.
@@ -46,10 +39,11 @@ let failure: TDiagnostic | null = null;
 
 // 파일 목록의 표시(편집 중/미리보기 중/에러)를 지금 상태에 맞춘다. 개수는 안 바뀌므로 행마다
 // 필요한 칸만 set한다 - 목록째 갈아끼우면 안 바뀐 행의 DOM 텍스트까지 다시 쓴다.
-const refreshFiles = ({ store, set }: Pick<TCtx, "store" | "set">) => {
+const refreshFiles = ({ store, set, get }: Pick<TCtx, "store" | "set" | "get">) => {
+  const editing = get(store.editingName);
   fileNames.forEach((name, i) => {
     const row = store.files[i];
-    set(row.isEditing, name === currentName);
+    set(row.isEditing, name === editing);
     set(row.isPreviewing, name === previewingName);
     set(row.hasError, failure?.path === name);
   });
@@ -65,15 +59,10 @@ export const lineCountOf = (text: string) => text.split("\n").length;
 export const lineNumbersFor = (text: string) =>
   Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
 
-/** 초기 data를 캐시에 심는다. 부트스트랩이 mount 전에 부른다. 첫 파일이 편집기에 실린 채로
- * 시작하므로 그 파일을 지금 편집 중인 것으로 둔다. */
-export const seed = (files: { name: string; source: string }[]) => {
-  files.forEach((f) => {
-    fileNames.push(f.name);
-    sources.set(f.name, f.source);
-  });
-  currentName = files[0]?.name ?? null;
-  shownLines = lineCountOf(files[0]?.source ?? "");
+/** 파일 이름 순서를 심는다. 부트스트랩이 mount 전에 부른다 - store.files의 인덱스와 맞아야
+ * 이름으로 그 행의 소스를 찾는다(sourceOf). 소스 자체는 mount가 store에 심는다. */
+export const seed = (files: { name: string }[]) => {
+  fileNames.push(...files.map((f) => f.name));
 };
 
 // 지금 미리보기 중인 인스턴스와 그때 만든 Blob URL들 - 다시 컴파일할 때 정리한다.
@@ -159,29 +148,25 @@ const safeStringify = (value: unknown) => {
 
 installConsoleCapture();
 
-// 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, textarea의 value만
-// 여기서 직접 쓴다 - textarea는 uncontrolled라 quble이 값을 바인딩할 수 없다(playground.css).
-const showText = (text: string, { store, set, setArray }: Pick<TCtx, "store" | "set" | "setArray">) => {
-  const lines = tokenize(text, currentName ?? "");
+// 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, 파일을 바꿀 때
+// textarea의 value만 여기서 직접 쓴다 - 초기값은 quble이 넣지만(props의 source) 그 뒤로는
+// uncontrolled라 자식 텍스트를 고쳐도 value가 안 따라온다.
+const showText = (text: string, { store, set, get, setArray }: Pick<TCtx, "store" | "set" | "get" | "setArray">) => {
+  const editing = (get(store.editingName) as string) ?? "";
+  const lines = tokenize(text, editing);
   // 에러 줄 표시는 그 에러가 난 파일을 싣고 있을 때만.
-  setArray(
-    store.lines,
-    failure && failure.path === currentName ? markError(lines, failure.line, failure.message) : lines,
-  );
+  setArray(store.lines, failure && failure.path === editing ? markError(lines, failure.line, failure.message) : lines);
 
-  const count = lineCountOf(text);
-  if (count !== shownLines) {
-    shownLines = count;
-    set(store.lineNumbers, lineNumbersFor(text));
-    set(store.lineCount, count);
-  }
+  // 같은 값이면 set이 알아서 넘긴다(leaf-store).
+  set(store.lineNumbers, lineNumbersFor(text));
+  set(store.lineCount, lineCountOf(text));
 };
 
 // 편집기에 파일 하나를 싣는다. caretLine은 커서를 둘 줄(1부터), 0이면 맨 앞.
 const openFile = (name: string, ctx: TCtx, caretLine = 0) => {
   closeCompletion(ctx);
-  currentName = name;
-  const text = sources.get(name) ?? "";
+  const text = sourceOf(name, ctx);
+  // refreshFiles/showText가 store에서 읽으므로 먼저 쓴다.
   ctx.set(ctx.store.editingName, name);
   refreshFiles(ctx);
   showText(text, ctx);
@@ -212,14 +197,15 @@ const jumpToError = (_data: unknown, ctx: TCtx) => {
 
 // 편집 - textarea의 값이 원본이다. 화면과 캐시를 거기에 맞춘다(value는 이미 사용자가 쳤다).
 const editSource = (_data: unknown, ctx: TCtx) => {
-  if (!currentName) {
+  const editing = ctx.get(ctx.store.editingName) as string;
+  if (!editing) {
     return;
   }
   const area = ctx.event.target as HTMLTextAreaElement;
-  sources.set(currentName, area.value);
+  ctx.set(ctx.store.files[fileNames.indexOf(editing)].source, area.value);
   // 이 파일이 바뀌면 그 엔트리로 뽑아 둔 후보가 낡는다.
-  if (currentName.endsWith(".qubc")) {
-    namesCache.delete(currentName);
+  if (editing.endsWith(".qubc")) {
+    namesCache.delete(editing);
   }
   showText(area.value, ctx);
   trackCaret(area, ctx);
@@ -357,20 +343,31 @@ let completion: { slotStart: number; names: string[]; shown: string[]; selected:
 // 다시 뽑을 이유가 없다.
 const namesCache = new Map<string, string[]>();
 
+/** 이름 -> 소스. store가 유일한 출처다. 목록에 없는 이름이면 빈 문자열. */
+const sourceOf = (name: string, { store, get }: Pick<TCtx, "store" | "get">) => {
+  const at = fileNames.indexOf(name);
+  return at === -1 ? "" : ((get(store.files[at].source) as string) ?? "");
+};
+
+/** 컴파일러가 보는 파일만 모은다 - .qubc와 .css. */
+const compilerFiles = (ctx: Pick<TCtx, "store" | "get">) => {
+  const files: Record<string, string> = {};
+  for (const name of fileNames) {
+    if (name.endsWith(".qubc") || name.endsWith(".css")) {
+      files[name] = sourceOf(name, ctx);
+    }
+  }
+  return files;
+};
+
 /** 엔트리의 핸들러 fullname 후보. 처음 한 번만 wasm을 태우고 그 뒤로는 캐시를 쓴다. */
-const namesFor = async (entry: string) => {
+const namesFor = async (entry: string, ctx: Pick<TCtx, "store" | "get">) => {
   const cached = namesCache.get(entry);
   if (cached) {
     return cached;
   }
-  const files: Record<string, string> = {};
-  for (const name of fileNames) {
-    if (name.endsWith(".qubc") || name.endsWith(".css")) {
-      files[name] = sources.get(name) ?? "";
-    }
-  }
   const { handlerNames } = await getCompiler();
-  const names = handlerNames(files, entry);
+  const names = handlerNames(compilerFiles(ctx), entry);
   namesCache.set(entry, names);
   return names;
 };
@@ -470,11 +467,11 @@ const filterCompletion = (area: HTMLTextAreaElement, ctx: TCtx) => {
 
 // 여는 따옴표를 쳤다 - 키 자리면 후보를 뽑아 연다.
 const openCompletion = async (area: HTMLTextAreaElement, ctx: TCtx) => {
-  const entry = entryOf(currentName);
+  const entry = entryOf(ctx.get(ctx.store.editingName) as string | null);
   if (!entry || !isKeySlot(area.value, area.selectionStart - 1)) {
     return;
   }
-  const names = await namesFor(entry);
+  const names = await namesFor(entry, ctx);
   if (!names.length) {
     return;
   }
@@ -522,8 +519,9 @@ const applyCompletion = (name: string, ctx: TCtx) => {
   }
 
   closeCompletion(ctx);
-  if (currentName) {
-    sources.set(currentName, area.value);
+  const editing = ctx.get(ctx.store.editingName) as string | null;
+  if (editing) {
+    ctx.set(ctx.store.files[fileNames.indexOf(editing)].source, area.value);
   }
   showText(area.value, ctx);
   trackCaret(area, ctx);
@@ -578,14 +576,14 @@ const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
 // 편집기에도 그 파일을 싣는다 - 미리보기와 편집 대상이 다르면 어느 소스가 화면에 그려진
 // 것인지 알 수 없다.
 const runPreview = async (at: number, ctx: TCtx) => {
-  const { store, set } = ctx;
+  const { store, set, get } = ctx;
   // 진단을 기억해 두고 편집기와 파일 목록을 다시 그린다 - 에러가 이 파일에 있으면 그 줄이
   // 강조되고, 어느 파일이든 목록의 그 행에 표시가 붙는다.
   const fail = (message: string) => {
     set(store.diagnostic, message);
     set(store.hasError, true);
     failure = parseDiagnostic(message);
-    showText(sources.get(currentName ?? "") ?? "", ctx);
+    showText(sourceOf((get(store.editingName) as string) ?? "", ctx), ctx);
     refreshFiles(ctx);
   };
 
@@ -595,16 +593,8 @@ const runPreview = async (at: number, ctx: TCtx) => {
   const entry = fileNames[at];
   const stem = entry.replace(/\.qubc$/, "");
 
-  // wasm 등록은 컴파일러가 보는 파일만 - .qubc와 .css.
-  const files: Record<string, string> = {};
-  for (const name of fileNames) {
-    if (name.endsWith(".qubc") || name.endsWith(".css")) {
-      files[name] = sources.get(name) ?? "";
-    }
-  }
-
   const { compile } = await getCompiler();
-  const result = compile(files, entry);
+  const result = compile(compilerFiles(ctx), entry);
   if (!result.ok) {
     fail(result.diagnostic);
     return;
@@ -612,7 +602,7 @@ const runPreview = async (at: number, ctx: TCtx) => {
 
   // 사용자 핸들러는 브라우저에서 모듈로 평가한다(Blob URL + 동적 import).
   const handlersUrl = URL.createObjectURL(
-    new Blob([sources.get(`${stem}.qubc.handlers.js`) ?? "export const handlers = {}"], {
+    new Blob([sourceOf(`${stem}.qubc.handlers.js`, ctx) || "export const handlers = {}"], {
       type: "text/javascript",
     }),
   );
@@ -620,7 +610,7 @@ const runPreview = async (at: number, ctx: TCtx) => {
   let initialData: unknown = {};
   try {
     handlers = (await import(/* @vite-ignore */ handlersUrl)).handlers ?? {};
-    initialData = JSON.parse(sources.get(`${stem}.data.json`) || "{}");
+    initialData = JSON.parse(sourceOf(`${stem}.data.json`, ctx) || "{}");
   } catch (e) {
     URL.revokeObjectURL(handlersUrl);
     fail(`${(e as Error).message}`);
@@ -635,7 +625,7 @@ const runPreview = async (at: number, ctx: TCtx) => {
 
   // 리소스 경로(resId 순)를 그 내용의 Blob URL로 - LOAD_RES가 <link>로 단다.
   const resourceUrls = result.resources.map((path) => {
-    const url = URL.createObjectURL(new Blob([sources.get(path) ?? ""], { type: "text/css" }));
+    const url = URL.createObjectURL(new Blob([sourceOf(path, ctx)], { type: "text/css" }));
     previewUrls.push(url);
     previewLinkedUrls.push(url);
     return url;
