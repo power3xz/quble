@@ -25,6 +25,8 @@
   변하는지 그림으로 보인다. 지금은 leaf-store.ts 주석에만 있다(크기별 free list, 꼬리 회수
   vs 중간 반납, 재사용 경로). REACTIVITY #3.2는 배열 앵커의 정적 구조를 다루므로 그와
   경계를 그어야 하고, 파일명/위치도 정해야 한다.
+- **playground manifest 중복 로드 제거** - 진입 페이지(`core/playground/index.html`)가 초기 data를
+  만들려고 manifest를 읽고, `mount`가 같은 것을 또 읽는다.
 
 ## 정할 것
 
