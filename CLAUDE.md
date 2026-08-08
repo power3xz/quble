@@ -34,6 +34,8 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 - **WORKSPACES.md** - cargo/npm 워크스페이스 멤버와 의존, 빌드 산출물, 명령별 선행 조건.
 - **COMMIT-RULES.md** - 커밋 메시지 규칙(타이틀만, 명사형 종결, 대시 뒤) - O/X 예시 표.
   커밋하기 전에 읽는다.
+- **WRITING-CODE-RULES.md** - 코드 작성 순서(시그니처 합의, 확인 후 작성, 테스트까지가
+  한 스텝). 코드를 쓰기 전에 읽는다.
 - **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
 - **core/web/LEAF-STORE-LAYOUT.md** - 런타임 데이터 스토어 레이아웃 - 값이 store에 어떻게
   놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
