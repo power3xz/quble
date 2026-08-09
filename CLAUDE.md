@@ -2,21 +2,20 @@
 
 ## Communication Rules
 
-응답, 문서, 주석, 커밋 메시지 - 내가 쓰는 모든 글에 적용된다.
+응답, 문서, 주석, 커밋 메시지에 적용된다.
 
-**한국어로 한다.** 사용자가 영어로 물어도 한국어로 답한다. 도구를 부르기 전에 적는 한 줄
-설명, 생각, 작업 중간 보고도 한국어다 - 영어로 새지 않는다. 고유명사와 코드 식별자
-(`leafIndex`, `TLeafIndex<T>`, `@for`)는 원문 그대로 쓴다.
+**한국어로 한다.** 응답만이 아니라 도구를 부르기 전에 적는 한 줄 설명, 생각, 작업 중간
+보고까지 한국어다. 고유명사와 코드 식별자(`leafIndex`, `TLeafIndex<T>`, `@for`)는 원문
+그대로 쓴다.
 
-**핵심만 간략히.** 서론/중복/안 할 선택지 나열 금지.
+**핵심만 간략히.** 물은 것에 바로 답한다.
 
 | O | X | 이유 |
 |---|---|---|
-| `안 됩니다. 세대는 removeAt이 런타임에 올려 컴파일러가 모릅니다.` | 같은 답 + 방안 1/2/3 나열 후 "3을 권합니다" | 안 할 선택지 나열 |
-| 물음에 바로 답 | `두 가지로 읽힙니다 - (a)... (b)... (a)로 답하겠습니다` | 갈래를 갈라 답을 미룸 |
-| 답하고 끝 | 답 끝에 `## 정리` 절 덧붙이기 | 같은 내용 되풀이 |
-| 물은 것만 | 세대 질문에 Rust 소유권/선형 타입/ISSUES 등재까지 | 안 물은 것 |
-| `199개 통과, 실패 0.` | `테스트를 돌려 봤습니다. 결과를 정리하면...` | 서론 |
+| `안 됩니다. 세대는 removeAt이 런타임에 올려 컴파일러가 모릅니다.` | `안 됩니다. 방안이 셋 있습니다 - 1) 런타임 검사 2) 세대 필드 추가 3) 컴파일러 확장. 3을 권합니다.` | 고르지 않을 선택지까지 나열했다 |
+| `컴파일타임에 걸립니다.` | `두 가지로 읽힙니다 - (a) 컴파일타임 (b) 런타임. (a)로 답하겠습니다.` | 답할 것 하나만 정해서 답하지 않았다 |
+| `199개 통과, 실패 0.` | `테스트를 돌려 봤습니다. 결과를 정리하면 199개가 통과했고 실패는 없습니다.` | 답 앞에 서론을 붙였다 |
+| `세대는 removeAt이 런타임에 올립니다.` | `세대는 removeAt이 런타임에 올립니다. 참고로 Rust 소유권 모델에서는 이런 경우를 선형 타입으로 다루는데...` | 필요하지 않은 설명까지 했다 |
 
 **중의적으로 쓰지 않는다.** 한 문장이 두 가지로 읽히면 다시 쓴다.
 
@@ -42,7 +41,7 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 - **ROADMAP.md** - feature progress by domain (what is done / in-flight / not started).
 - **ISSUES.md** - known problems (symptom + repro; fix filled in once decided).
 - **NEXT.md** - what is in flight, what to do next, and what is still undecided
-  ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See *NEXT.md 갱신* below.
+  ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See _NEXT.md 갱신_ below.
 - **WORKSPACES.md** - cargo/npm 워크스페이스 멤버와 의존, 빌드 산출물, 명령별 선행 조건.
 - **COMMIT-RULES.md** - 커밋 메시지 규칙(타이틀만, 명사형 종결, 대시 뒤) - O/X 예시 표.
   커밋하기 전에 읽는다.
@@ -73,12 +72,12 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 논리적으로 나뉘는 작업은 커맨드도 따로 실행한다 - `&&`로 이어 붙이지 않는다. 이으면
 어디서 실패했는지 흐려지고 중간에 결과를 보고 판단할 여지가 사라진다.
 
-| O | X | 이유 |
-|---|---|---|
-| `git commit -m A` 실행 후 `git add x` `git commit -m B` | `git commit -m A && git add x && git commit -m B` | 나눈 커밋을 커맨드로 도로 묶음 |
-| `git checkout -b foo` 실행 후 `git add x` `git commit` | `git checkout -b foo && git add x && git commit` | 브랜치 생성과 커밋은 별개 판단 |
-| `cargo fmt` 결과 확인 후 `git add` | `cargo fmt && git add -A` | fmt가 무엇을 고쳤는지 안 보고 넘어감 |
-| `git status && git log --oneline -3` | - | 조회는 이어도 된다 |
+| O                                                       | X                                                 | 이유                                 |
+| ------------------------------------------------------- | ------------------------------------------------- | ------------------------------------ |
+| `git commit -m A` 실행 후 `git add x` `git commit -m B` | `git commit -m A && git add x && git commit -m B` | 나눈 커밋을 커맨드로 도로 묶음       |
+| `git checkout -b foo` 실행 후 `git add x` `git commit`  | `git checkout -b foo && git add x && git commit`  | 브랜치 생성과 커밋은 별개 판단       |
+| `cargo fmt` 결과 확인 후 `git add`                      | `cargo fmt && git add -A`                         | fmt가 무엇을 고쳤는지 안 보고 넘어감 |
+| `git status && git log --oneline -3`                    | -                                                 | 조회는 이어도 된다                   |
 
 ## Project Status
 
@@ -91,7 +90,7 @@ renderer (SSR) crate is parked (ISSUES.md).
 ## What This Project Is
 
 A **frontend compile-to-bytecode language** for declaring UI components where the compiler
-statically analyzes the *composition context* (where a component is used and under what
+statically analyzes the _composition context_ (where a component is used and under what
 alias) to auto-generate fully-qualified event identifiers.
 
 The core idea: a component declares abstract events without knowing its own name in the
