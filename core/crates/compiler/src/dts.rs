@@ -11,7 +11,7 @@
 //! 핸들러의 실패는 조용히 사라진다), 핸들러를 받아 감싸는 쪽이 그 Promise를 잡아 건질 수
 //! 있어야 하므로 타입에 드러낸다.
 
-use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type};
+use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type, VarRef};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::CompileError;
 
@@ -50,6 +50,14 @@ pub fn handlers_dts_from_path(path: &str) -> Result<String, CompileError> {
     handlers_dts(&entry.to_string_lossy(), &src, &crate::fs_loader)
 }
 
+/// 활성 @with 하나. props를 함께 싣는 이유: 컨텍스트 필드의 변수는 이벤트가 선언된 컴포넌트가
+/// 아니라 @with를 쓴 쪽 props를 가리킨다(컨텍스트는 컴포넌트 경계를 넘어 살아 있다).
+type ActiveContext = (
+    /* 컨텍스트명 */ String,
+    /* 필드들 */ Vec<(String, ArgValue)>,
+    /* @with를 쓴 컴포넌트의 props */ Vec<Prop>,
+);
+
 /// 한 fullname에 대응하는 핸들러 시그니처.
 struct Handler {
     fullname: String,
@@ -59,8 +67,8 @@ struct Handler {
     comp_name: String,
     /// 그 컴포넌트의 props(leafIndex 주소기). T는 선언 타입을 TS로 매핑한다.
     props: Vec<Prop>,
-    /// 발생 시점 활성 @with 컨텍스트: (컨텍스트명, 필드들). 안쪽 우선(뒤가 이김).
-    contexts: Vec<(String, Vec<(String, ArgValue)>)>,
+    /// 발생 시점 활성 @with 컨텍스트. 안쪽 우선(뒤가 이김).
+    contexts: Vec<ActiveContext>,
     /// 이 이벤트에 누적된 @for 깊이 = 핸들러가 받는 회차 인덱스 개수($0..$(loop_depth-1)).
     /// fullname의 [$n] 개수와 같다(Row[$0].Col[$1] -> 2).
     loop_depth: u16,
@@ -147,15 +155,15 @@ fn props_type(props: &[Prop]) -> String {
 /// TCtx는 `{}`, @for 밖이면 TLoopIndices는 `{}`. TStore는 루트 props라 핸들러마다 같은 이름이
 /// 들어간다.
 fn signature(h: &Handler, root_name: &str) -> String {
-    let data = format!("{{ {} }}", fields_type(&h.data, value_type));
+    let data = format!("{{ {} }}", fields_type(&h.data, &h.props));
     let props = props_type_name(&h.comp_name);
     let ctx = if h.contexts.is_empty() {
         "{}".to_string()
     } else {
-        let fields =
-            join(h.contexts.iter().map(|(name, fields)| {
-                format!("{name}: {{ {} }}", fields_type(fields, value_type))
-            }));
+        // 컨텍스트 필드의 변수는 @with를 쓴 쪽 props로 푼다(h.props가 아니다).
+        let fields = join(h.contexts.iter().map(|(name, fields, ctx_props)| {
+            format!("{name}: {{ {} }}", fields_type(fields, ctx_props))
+        }));
         format!("{{ {fields} }}")
     };
     // TLoopIndices: 회차 인덱스 $0..$(loop_depth-1). 전부 number(회차 번호). @for 밖이면 {}.
@@ -211,19 +219,47 @@ fn type_to_ts(ty: &Type) -> String {
 }
 
 /// 값 필드(payload/context)의 TS 타입. 리터럴은 그 값으로 좁히고(문자열은 "..", 숫자/불리언은
-/// 값 그대로), 변수는 string(소스에 타입 없음 - Var 타입은 다음 스텝).
-fn value_type(v: &ArgValue) -> String {
+/// 값 그대로), 변수는 참조하는 prop의 선언 타입으로 낸다. props는 그 변수가 속한 컴포넌트의 것이다.
+fn value_type(v: &ArgValue, props: &[Prop]) -> String {
     match v {
         ArgValue::Literal(LitValue::Str(s)) => format!("{s:?}"),
         ArgValue::Literal(LitValue::Number(n)) => n.to_string(),
         ArgValue::Literal(LitValue::Bool(b)) => b.to_string(),
-        ArgValue::Var(_) => "string".to_string(),
+        ArgValue::Var(r) => match var_ref_type(r, props) {
+            Some(ty) => type_to_ts(ty),
+            None => "unknown".to_string(),
+        },
     }
 }
 
-/// (필드명, 값) 목록 -> `a: T; b: U` 객체 본문.
-fn fields_type(fields: &[(String, ArgValue)], ty: fn(&ArgValue) -> String) -> String {
-    join(fields.iter().map(|(name, v)| format!("{name}: {}", ty(v))))
+/// prop 참조가 가리키는 선언 타입. root로 prop을 찾고 path를 객체 필드로 따라 내려간다.
+/// 못 찾으면 None - codegen이 UnknownProp/UnknownField로 거르는 몫이라 여기서 에러를 내지 않는다
+/// (d.ts는 편집기가 컴파일 실패 중에도 부른다).
+fn var_ref_type<'a>(var: &VarRef, props: &'a [Prop]) -> Option<&'a Type> {
+    let mut ty = props
+        .iter()
+        .find(|p| p.name == var.root)
+        .map(|p| &p.type_)?;
+    for key in &var.path {
+        let fields = match ty {
+            Type::Object(fields) => fields,
+            _ => return None,
+        };
+        ty = fields
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, t)| t)?;
+    }
+    Some(ty)
+}
+
+/// (필드명, 값) 목록 -> `a: T; b: U` 객체 본문. props는 변수 필드가 타입을 찾을 선언부다.
+fn fields_type(fields: &[(String, ArgValue)], props: &[Prop]) -> String {
+    join(
+        fields
+            .iter()
+            .map(|(name, v)| format!("{name}: {}", value_type(v, props))),
+    )
 }
 
 fn join(parts: impl Iterator<Item = String>) -> String {
@@ -248,7 +284,7 @@ fn walk(
     comps: &[FlatComp],
     comp_id: usize,
     path_prefix: &str,
-    context_stack: &[(String, Vec<(String, ArgValue)>)],
+    context_stack: &[ActiveContext],
     pending: &[u16],
     depth_base: u16,
     handlers: &mut Vec<Handler>,
@@ -275,7 +311,7 @@ fn walk_nodes(
     comp: &Component,
     nodes: &[Node],
     path_prefix: &str,
-    context_stack: &[(String, Vec<(String, ArgValue)>)],
+    context_stack: &[ActiveContext],
     pending: &[u16],
     depth_base: u16,
     handlers: &mut Vec<Handler>,
@@ -369,7 +405,9 @@ fn walk_nodes(
             Node::With { context, children } => {
                 let mut stack = context_stack.to_vec();
                 if let Some(def) = comp.contexts.iter().find(|c| c.name == context.name) {
-                    stack.push((def.name.clone(), def.fields.clone()));
+                    // 필드 값의 변수를 나중에 풀 수 있게 선언 시점 컴포넌트의 props를 함께 싣는다 -
+                    // 이 스택은 자식 컴포넌트로 그대로 넘어가 안에서는 comp가 달라진다.
+                    stack.push((def.name.clone(), def.fields.clone(), comp.props.clone()));
                 }
                 walk_nodes(
                     comps,
@@ -434,7 +472,7 @@ fn emit(
     comp: &Component,
     event_name: &str,
     path_prefix: &str,
-    context_stack: &[(String, Vec<(String, ArgValue)>)],
+    context_stack: &[ActiveContext],
     loop_depth: u16,
     handlers: &mut Vec<Handler>,
     seen: &mut Vec<String>,
@@ -455,9 +493,9 @@ fn emit(
         .unwrap_or_default();
 
     // 같은 이름 컨텍스트는 안쪽(뒤)이 이긴다 - 뒤에서부터 이름 기준 dedup.
-    let mut contexts: Vec<(String, Vec<(String, ArgValue)>)> = Vec::new();
+    let mut contexts: Vec<ActiveContext> = Vec::new();
     for ctx in context_stack.iter().rev() {
-        if !contexts.iter().any(|(n, _)| n == &ctx.0) {
+        if !contexts.iter().any(|(n, _, _)| n == &ctx.0) {
             contexts.push(ctx.clone());
         }
     }
@@ -571,7 +609,7 @@ mod tests {
     fn prelude_has_event_and_store() {
         let out = dts(r#"
             component Thumb {
-              props { avatar: string }
+              props { avatar: string, x: string }
               events { CLICK({ x }) }
               template { img(@click:CLICK /) }
             }
@@ -757,12 +795,12 @@ mod tests {
         );
     }
 
-    /// @with 활성 컨텍스트가 Ctx에 필드째 들어간다. 리터럴은 값으로 좁힌다.
+    /// @with 활성 컨텍스트가 Ctx에 필드째 들어간다. 리터럴은 값으로 좁히고, 변수는 선언 타입.
     #[test]
     fn with_context_and_literal_field() {
         let out = dts(r#"
             component C {
-              props { userId: string }
+              props { userId: number }
               contexts { Area { section: "actions", user: userId } }
               events { GO({ userId }) }
               template {
@@ -773,12 +811,38 @@ mod tests {
             }
         "#);
         assert!(
-            out.contains(r#", { Area: { section: "actions"; user: string } }, {}, TProps_C>"#),
+            out.contains(r#", { Area: { section: "actions"; user: number } }, {}, TProps_C>"#),
             "실제 출력:\n{out}"
         );
     }
 
-    /// 리터럴 payload 필드는 그 값으로 좁혀지고, 변수 필드는 string.
+    /// context 변수는 @with를 쓴 쪽 props에서 타입을 찾는다 - 이벤트가 선언된 컴포넌트가 아니다.
+    /// Outer의 `owner: number`를 봐야 하고, 이름이 겹치는 Inner의 `owner: string`을 보면 안 된다.
+    #[test]
+    fn context_var_uses_declaring_component_props() {
+        let out = dts(r#"
+            component Outer {
+              props { owner: number }
+              contexts { Area { holder: owner } }
+              template {
+                @with Area {
+                  Panel: Inner( /)
+                }
+              }
+            }
+            component Inner {
+              props { owner: string }
+              events { GO({ owner }) }
+              template { button(@click:GO /) }
+            }
+        "#);
+        assert!(
+            out.contains("THandler<{ owner: string }, TProps_Inner, { Area: { holder: number } }"),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// 리터럴 payload 필드는 그 값으로 좁혀지고, 변수 필드는 그 prop의 선언 타입으로 나온다.
     #[test]
     fn literal_payload_narrowed() {
         let out = dts(r#"
@@ -789,7 +853,72 @@ mod tests {
             }
         "#);
         assert!(
-            out.contains(r#"THandler<{ count: string; label: "clicks" }"#),
+            out.contains(r#"THandler<{ count: number; label: "clicks" }"#),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// payload 변수 필드는 원시 3종 각각 선언 타입대로 나온다 - 전부 string으로 뭉개지지 않는다.
+    #[test]
+    fn payload_var_uses_declared_type() {
+        let out = dts(r#"
+            component C {
+              props { n: number, b: bool, s: string }
+              events { E({ n, b, s }) }
+              template { button(@click:E /) }
+            }
+        "#);
+        assert!(
+            out.contains("THandler<{ n: number; b: boolean; s: string }"),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// payload 변수가 객체/배열 prop이면 그 구조가 통째로 나온다(원시로 납작해지지 않는다).
+    #[test]
+    fn payload_var_object_and_array_type() {
+        let out = dts(r#"
+            component C {
+              props { owner: { name: string, age: number }, tags: string[] }
+              events { E({ owner, tags }) }
+              template { button(@click:E /) }
+            }
+        "#);
+        assert!(
+            out.contains("THandler<{ owner: { name: string; age: number }; tags: string[] }"),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// payload 변수가 객체 필드 경로면 그 필드의 타입까지 내려가 찾는다.
+    #[test]
+    fn payload_var_field_path_type() {
+        let out = dts(r#"
+            component C {
+              props { owner: { name: string, age: number } }
+              events { E({ who: owner.name, age: owner.age }) }
+              template { button(@click:E /) }
+            }
+        "#);
+        assert!(
+            out.contains("THandler<{ who: string; age: number }"),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// props에 없는 root/path는 unknown - codegen이 UnknownProp/UnknownField로 따로 거르고,
+    /// d.ts는 컴파일 실패 중에도 나오므로 여기서 string이라고 거짓말하지 않는다.
+    #[test]
+    fn payload_var_unknown_prop_is_unknown() {
+        let out = dts(r#"
+            component C {
+              props { owner: { name: string } }
+              events { E({ ghost, deep: owner.missing }) }
+              template { button(@click:E /) }
+            }
+        "#);
+        assert!(
+            out.contains("THandler<{ ghost: unknown; deep: unknown }"),
             "실제 출력:\n{out}"
         );
     }
