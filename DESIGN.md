@@ -96,7 +96,16 @@ component ProfileCard {
 
 ```
 component TodoItem {
-  props { id, title, description, completed, priority, tags, dueDate, assignee }
+  props {
+    id: string,
+    title: string,
+    description: string,
+    completed: bool,
+    priority: number,
+    tags: string[],
+    dueDate: string,
+    assignee: string
+  }
 
   contexts {
     ActionArea  { section: "actions", tracking: "todo_action", userId: assignee }
@@ -108,7 +117,6 @@ component TodoItem {
     TOGGLE({ id, completed: !completed, timestamp: Date.now() })
     EDIT({ id, title })
     DELETE({ id, title, confirmRequired: true })
-    TAG_CLICK({ tagName, todoId: id })
   }
 
   template { ... }
@@ -247,13 +255,21 @@ DECISIONS.md "핸들러 선언 문법".
 ## 부록 A. 예시 - TodoItem.comp
 
 ```
-import Button from "./Button"
-import Icon from "./Icon"
-import Badge from "./Badge"
-import Card from "./Card"
+use Button from "./Button"
+use Icon from "./Icon"
+use Badge from "./Badge"
 
 component TodoItem {
-  props { id, title, description, completed, priority, tags, dueDate, assignee }
+  props {
+    id: string,
+    title: string,
+    description: string,
+    completed: bool,
+    priority: number,
+    tags: string[],
+    dueDate: string,
+    assignee: string
+  }
 
   contexts {
     ActionArea  { section: "actions", tracking: "todo_action", userId: assignee }
@@ -265,7 +281,6 @@ component TodoItem {
     TOGGLE({ id, completed: !completed, timestamp: Date.now() })
     EDIT({ id, title })
     DELETE({ id, title, confirmRequired: true })
-    TAG_CLICK({ tagName, todoId: id })
   }
 
   template {
@@ -276,8 +291,8 @@ component TodoItem {
           @if (description) { p() { {description} } }
           @if (tags.length > 0) {
             div(class="tags") {
-              @for (tag in tags) {
-                TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK)
+              @for (tag of tags) {
+                TagBadge: Badge(text={tag} variant="outline" /)
               }
             }
           }
@@ -287,7 +302,7 @@ component TodoItem {
       @with MetaArea {
         @if (dueDate) {
           div(class="due-date") {
-            DueDateIcon: Icon(name="calendar")
+            DueDateIcon: Icon(name="calendar" /)
             span() { {dueDate} }
           }
         }
@@ -299,11 +314,11 @@ component TodoItem {
       @with ActionArea {
         div(class="actions") {
           @if (completed) {
-            UndoButton: Button(text="되돌리기" variant="secondary" @click:TOGGLE)
+            UndoButton: Button(text="되돌리기" variant="secondary" @click:TOGGLE /)
           } @else {
-            CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE)
+            CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE /)
           }
-          DeleteButton: Button(text="삭제" variant="danger" @click:DELETE)
+          DeleteButton: Button(text="삭제" variant="danger" @click:DELETE /)
         }
       }
     }
@@ -311,19 +326,36 @@ component TodoItem {
 }
 ```
 
+`Badge`는 자기 이벤트를 스스로 선언하고 배선한다 - 태그 이름을 아는 쪽이 여기라서다. `TodoItem`은
+`Badge`를 놓기만 하고 `TAG_CLICK`을 모른다.
+
+```
+component Badge {
+  props { text: string, variant: string }
+
+  events {
+    TAG_CLICK({ text })
+  }
+
+  template {
+    span(class="badge" @click:TAG_CLICK) { {text} }
+  }
+}
+```
+
 ## 부록 B. 예시 - Card.comp (슬롯)
 
 ```
-import styles from "./Card.module.css"
+use "./Card.module.css"
 
 component Card {
-  props { title, variant, priority }
+  props { title: string, variant: string, priority: string }
 
   template {
-    div(class=["card", styles.variant, styles.priority]) {
+    div(class=["card", {variant}, {priority}]) {
       h2(class=["title"]) { {title} }
       div(class=["card-body"]) {
-        @slot   // 무기명 슬롯 - children이 들어온다
+        @slot()   // 무기명 슬롯 - children이 들어온다
       }
     }
   }
@@ -335,24 +367,23 @@ component Card {
 ```
 MyTodoCard: Card(title="할일 목록" variant="primary" priority="high") {
   p(class=["description"]) { "오늘 완료해야 할 작업들" }
-  TodoItem(id="1" title="문서 작성" completed=false)
+  TodoItem(id="1" title="문서 작성" completed=false /)
   div(class=["card-footer"]) { span() { "총 3개 항목" } }
 }
 ```
 
+짝 핸들러 파일(`.qubc.handlers.ts`). 이름이 `handlers`면 편집기 확장이 짝 `.qubc`에서 낸 타입을
+붙인다 - `import`를 적지 않고, fullname/payload/props가 타입으로 강제된다.
+
 ```ts
-const handlers: TEventHandlers<
-  | "MyTodoCard.TodoItem.CompleteButton.TOGGLE"
-  | "MyTodoCard.TodoItem.DeleteButton.DELETE"
-  | "MyTodoCard.TodoItem.TagBadge.TAG_CLICK",
-  TStore
-> = {
-  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { provided, set }) => {
-    // data: { id, completed, timestamp }  <- events 스키마에서 추론
-    set((s) => ({ todos: toggle(s.todos, data.id) }));
+export const handlers = {
+  // data: { id, completed, timestamp } <- events 스키마에서 추론
+  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { props, set }) => {
+    set(props.completed, !data.completed);
   },
-  "MyTodoCard.TodoItem.TagBadge.TAG_CLICK": (data, { provided }) => {
-    // provided: 어느 TagBadge 인스턴스인지 (인덱스/key)
+  // @for 안에서 난 이벤트는 회차 인덱스를 $0으로 받는다
+  "MyTodoCard.TodoItem.TagBadge[$0].TAG_CLICK": (data, { $0 }) => {
+    // data.text = 클릭한 태그 이름, $0 = 몇 번째 TagBadge인지
   },
 };
 ```
