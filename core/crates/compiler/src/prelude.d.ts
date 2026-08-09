@@ -5,7 +5,7 @@
 // 유효한 TS인지는 core/wasm-compiler/dts-types.test.ts가 실제 산출물을 tsc에 걸어 확인한다.
 
 // leaf 한 칸의 주소. 값이 아니라 주소기라 get(k)가 값을 내주고 set(k, v)가 받는다(REACTIVITY.md #7.1).
-type TLeafIndex<T> = number & { readonly __leaf: T };
+type TLeafIndex<T> = { readonly __leaf: T };
 
 // 객체 노드 - 여러 leaf의 묶음이라 leafIndex 한 칸으로 못 가리킨다. setObject의 대상이다.
 //

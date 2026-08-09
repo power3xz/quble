@@ -497,7 +497,7 @@ mod tests {
               template { img(@click:CLICK /) }
             }
         "#);
-        assert!(out.contains("type TLeafIndex<T> = number & { readonly __leaf: T };"));
+        assert!(out.contains("type TLeafIndex<T> = { readonly __leaf: T };"));
         assert!(out.contains("type THandler<TData, TProps, TCtx, TLoopIndices, TStore> = ("));
     }
 

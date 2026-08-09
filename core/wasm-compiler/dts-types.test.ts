@@ -232,6 +232,18 @@ test("leaf 값 타입이 다르면 set이 막는다", () => {
   assert.match(out ?? "", /TS2345/);
 });
 
+// leafIndex는 주소지 값이 아니라 number 자리에 못 들어간다 - `props.count`가 뜻하는 것은
+// get(props.count)다. 타입에 number를 실으면 아래 둘이 조용히 통과한다.
+test("leafIndex는 removeAt의 인덱스가 아니다", () => {
+  const out = typecheck(`removeAt(props.tags, props.count);`);
+  assert.match(out ?? "", /TS2345/);
+});
+
+test("leafIndex는 배열 인덱스가 아니다", () => {
+  const out = typecheck(`void props.tags[props.count];`);
+  assert.match(out ?? "", /TS2538|TS7015|TS2345/);
+});
+
 // store는 런타임이 루트(defs[0]) 기준 leafIndex 트리로 넘긴다. 여기서는 루트가 곧 이 컴포넌트라
 // store와 props가 같은 트리다 - props와 같은 규칙으로 걸리는지를 store 쪽으로 다시 본다.
 // `any`였을 때는 아래 셋이 모두 통과했다(검사가 아예 없었다).
