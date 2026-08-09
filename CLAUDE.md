@@ -41,7 +41,7 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 - **ROADMAP.md** - feature progress by domain (what is done / in-flight / not started).
 - **ISSUES.md** - known problems (symptom + repro; fix filled in once decided).
 - **NEXT.md** - what is in flight, what to do next, and what is still undecided
-  ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See _NEXT.md 갱신_ below.
+  ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See _코드 작업에 착수할 때_ below.
 - **WORKSPACES.md** - cargo/npm 워크스페이스 멤버와 의존, 빌드 산출물, 명령별 선행 조건.
 - **COMMIT-RULES.md** - 커밋 메시지 규칙(타이틀만, 명사형 종결, 대시 뒤) - O/X 예시 표.
   커밋하기 전에 읽는다.
@@ -53,12 +53,13 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
   따라 고친다.
 - **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
-### NEXT.md 갱신
+### 코드 작업에 착수할 때
 
-갱신은 내가(Claude) 먼저 챙긴다 - 사용자가 시켜야 하는 일이 아니다. 단 **고치기 전에
-무엇을 어떻게 바꿀지 말하고 승인을 받는다** - 알아서 고쳐 놓고 알리지 않는다.
+착수 전에 아래를 정한다. 브랜치 판단과 NEXT.md 교체 둘 다 내가(Claude) 먼저 챙긴다 -
+사용자가 시켜야 하는 일이 아니다. 단 **고치기 전에 무엇을 어떻게 바꿀지 말하고 승인을
+받는다** - 알아서 고쳐 놓고 알리지 않는다.
 
-- **작업에 착수할 때 브랜치를 딸지 main에서 작업할지 먼저 정한다.** 커밋이 3개 이상
+- **브랜치를 딸지 main에서 작업할지 먼저 정한다.** 커밋이 3개 이상
   나올 것으로 보이는 작업(여러 파일/레이어를 순차로 고치거나 중간 커밋이 미완결을
   거치는 것)은 브랜치를 딴다. NEXT.md "하는 중" 교체는 그 브랜치의 첫 커밋이다.
 - **NEXT.md는 단독으로 커밋한다.** 작업 커밋이나 다른 문서 정리에 묻어 보내지 않는다.
