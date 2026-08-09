@@ -85,6 +85,10 @@ remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inh
 | `cargo fmt` 결과 확인 후 `git add`                      | `cargo fmt && git add -A`                         | fmt가 무엇을 고쳤는지 안 보고 넘어감 |
 | `git status && git log --oneline -3`                    | -                                                 | 조회는 이어도 된다                   |
 
+## 메모리 저장할 때
+
+**스스로 저장하지 않는다.** 사용자가 저장하라고 할 때만 저장한다.
+
 ## Project Status
 
 Past design-stage; implementation now lives in `core/`: a Rust compiler
