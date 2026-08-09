@@ -8,4 +8,6 @@
 
 ## 하는 중
 
-없음.
+payload/context 변수 필드의 data 타입이 전부 `string`으로 나오는 문제(ISSUES.md) - `dts.rs`의
+`value_type`이 `ArgValue::Var`를 선언 타입으로 따라가게 고친다. context 값은 `@with`를 쓴 쪽
+컴포넌트의 props라 `context_stack`에 그 시점 props를 함께 싣는다.
