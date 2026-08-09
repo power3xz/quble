@@ -3,8 +3,8 @@
 > 컴포넌트를 선언하고, 컴파일러가 **합성 맥락(어디에 어떤 이름으로 쓰였는지)**을 정적 분석해
 > 이벤트 식별자를 자동 생성하는 프론트엔드 컴파일 언어.
 
-이 문서는 프로젝트 초기 합의 사항을 기록한다. 확정된 결정, 그 결정의 근거,
-그리고 **택하지 않은 대안과 그 이유**를 함께 남겨 이후 논의의 기준점으로 삼는다.
+이 문서는 **합의된 설계의 지금 상태**를 기록한다 - 무엇이 어떻게 동작하기로 되어 있는가.
+그렇게 정한 이유와 **택하지 않은 대안**은 DECISIONS.md에 있다.
 
 ---
 
@@ -96,7 +96,16 @@ component ProfileCard {
 
 ```
 component TodoItem {
-  props { id, title, description, completed, priority, tags, dueDate, assignee }
+  props {
+    id: string,
+    title: string,
+    description: string,
+    completed: bool,
+    priority: number,
+    tags: string[],
+    dueDate: string,
+    assignee: string
+  }
 
   contexts {
     ActionArea  { section: "actions", tracking: "todo_action", userId: assignee }
@@ -108,7 +117,6 @@ component TodoItem {
     TOGGLE({ id, completed: !completed, timestamp: Date.now() })
     EDIT({ id, title })
     DELETE({ id, title, confirmRequired: true })
-    TAG_CLICK({ tagName, todoId: id })
   }
 
   template { ... }
@@ -151,7 +159,7 @@ type TEventHandler<TStore> = (
   data: <events 스키마에서 추론된 페이로드>,
   params: {
     context: <@with로 주입된 컨텍스트 - 컨텍스트명별 메타데이터>,
-    $0, $1, ...: number,  // @for 회차 인덱스(바깥 $0, 안쪽 $1). 안정적 key는 미결 #5.1
+    $0, $1, ...: number,  // @for 회차 인덱스(바깥 $0, 안쪽 $1). 안정적 key는 미결
     get: () => TStore,
     set: (store: Partial<TStore> | ((s: TStore) => Partial<TStore>)) => void,
   }
@@ -198,149 +206,70 @@ type TEventHandler<TStore> = (
 예측가능성)을 지킨다. 컨텍스트 메타데이터(`context`)와는 성격이 달라 섞지 않는다.
 
 **남은 것 - 항목 식별자(key).** 인덱스는 리스트가 재정렬되면 딴 항목을 가리킨다. 위치가 아니라
-항목 정체로 짚으려면 항목에 붙는 안정적 식별자가 필요한데, 문법/필요 여부가 미결(#5.1).
+항목 정체로 짚으려면 항목에 붙는 안정적 식별자가 필요한데, 문법/필요 여부가 미결이다(#4).
 
 ---
 
-## 4. 의사결정 기록 - 택하지 않은 대안과 이유
+## 4. 미결 사항 (다음 논의)
 
-### 4.1 짧은 꼬리 이름 매칭 - 채택하지 않음
-
-**대안:** `CompleteButton.TOGGLE`처럼 풀네임의 꼬리만으로 핸들러를 등록하고, 모호할 때만
-더 긴 경로를 요구.
-
-**기각 이유:** 같은 짧은 이름이 트리의 다른 상태에 따라 유효해지거나 무효해진다.
-같은 핸들러 이름이 어떤 파일에선 되고 어떤 파일에선 안 되는 상황이 생겨 **예측 가능성을
-해친다.** 정적 컴파일로 이름을 만든다는 전제의 최대 장점(컴파일 타임 확정)을 스스로 깎는다.
--> **풀네임 강제**를 택했다. 유일성이 공짜로 보장되고, 이름이 곧 위치 정보이며,
-리팩토링 시 깨짐이 조용히 숨지 않고 컴파일 에러로 드러난다.
-
-> DX(긴 이름의 불편)는 언어 규칙이 아니라 **툴링**(자동완성, 이벤트 카탈로그, 미처리 이벤트 경고)으로
-> 해결한다. 이는 풀네임 강제와 충돌하지 않는다. 자동완성은 필수 기능으로 전제한다.
-
-### 4.2 컨텍스트를 경로 마디에 포함 - 채택하지 않음
-
-**대안:** `MyTodoCard.TodoItem.ActionArea.CompleteButton.TOGGLE`처럼 `@with` 컨텍스트도
-경로에 넣기.
-
-**기각 이유:** 경로(누가 쐈나)와 컨텍스트(어떤 맥락에서 쐈나)는 직교하는 두 축이다.
-이를 섞으면 이름이 불필요하게 길어지고 두 축의 독립성이 무너진다.
--> 컨텍스트는 경로에서 빼고, `context`에 **컨텍스트명을 키로** 주입한다(`context.ActionArea.userId`).
-컨텍스트는 각자 이름공간을 가진다. 같은 이름이 중첩되는 건 비정상이며(맥락은 중복이 없는 게 맞다),
-합성 경계 너머 중첩은 런타임이 안쪽 우선으로 덮고 경고한다(ISSUES.md).
-
-### 4.3 별칭 중복을 충돌 에러로 처리 - 채택하지 않음
-
-**대안:** 같은 풀네임이 두 번 생성되면 컴파일 에러, 또는 자동 인덱스(`TodoItem#0`) 부여.
-
-**기각 이유:** 자동 인덱스는 순서에 의존해 리팩토링에 취약하고, 에러 처리는 "같은 의도의
-컴포넌트를 함께 다루고 싶다"는 정당한 사용을 막는다.
--> 같은 풀네임을 **의도적 공유**로 재정의했다(#3.2). 분리는 별칭으로 명시한다.
-
-### 4.4 페이로드를 `any`로 방치 - 채택하지 않음(컴파일 언어로 해소)
-
-**대안:** 핸들러의 `data`/`provided`를 `any`로 둠.
-
-**기각 이유:** 풀네임은 강타입인데 페이로드가 `any`면 절반만 타입세이프하다.
--> `events` 블록의 페이로드 스키마가 이미 있으므로, 컴파일러가 이를 풀네임에 묶어
-각 이벤트의 `data` 타입을 자동 추론한다. 컴파일 언어로 통합되면 자연스레 해결되는 영역으로 본다.
-
-### 4.5 자기완결 요소(self-close) 표기 - `( /)`로 확정
-
-자식 없는 요소를 여는 태그 안 끝의 `/`로 닫는다(`img(src="a.png" /)`, `br( /)`). 괄호=여는
-태그이므로 `/`도 그 안에 둔다(HTML `<img />` 구조와 일치). 문법은 SYNTAX.md #3.1.1.
-
-**확정 규칙:**
-- **`/` 앞 공백 강제** - 처음엔 엄격하게(속성 없어도 `br( /)`). 필요가 생기면 나중에 완화.
-- **`()` 축약 없음** - 속성 없어도 `br( /)`(괄호 생략 불가).
-- **자식 없으면 self-close 필수** - 요소/컴포넌트 모두. 빈 블록(`div() {}`, `Comp() {}`)은
-  컴파일 에러. "자식 없음 <=> self-close" 한 가지 표기로 고정한다(처음엔 엄격하게, 필요가
-  생기면 나중에 완화). 왜: 같은 상태를 두 가지로 쓸 수 있으면 표기가 흔들린다.
-- **void 요소는 self-close 필수** - 자식 블록을 쓰면 컴파일 에러. 컴파일러가 void 집합을
-  알아 컴파일타임에 차단한다(런타임 방어 대신).
-
----
-
-## 5. 미결 사항 (다음 논의)
-
-### 5.1 배열 항목 식별자 (key)
+### 배열 항목 식별자 (key)
 
 핸들러가 같은 풀네임의 배열 요소를 구분하는 **인덱스**는 결정/구현됐다(#3.3 - `[$n]` 풀네임 +
 핸들러 `{ $0, $1 }`). 남은 건 **항목 식별자(key)** - 인덱스는 재정렬 시 딴 항목을 가리키므로,
 위치가 아니라 항목 정체로 짚는 식별자다(React `key`, Svelte `(id)`에 해당). `@for`에 지정 문법을
 둘지, 반응성의 리스트 갱신 추적과 어떻게 엮을지가 미결.
 
-### 5.4 핸들러 문법 (아이디어)
+### 핸들러 문법 (아이디어)
 
-핸들러는 컴포넌트와 분리된 선언이다(사용처에 묶이고, `get`/`set`/`goTo`가 부수효과라
-순수 컴포넌트의 위치 독립성을 깨므로). 수렴 중인 형태:
+핸들러는 컴포넌트와 분리된 선언이다(사용처에 묶이고, `get`/`set`이 부수효과라
+순수 컴포넌트의 위치 독립성을 깨므로).
+
+**지금:** 짝 TypeScript 파일에 객체 리터럴로 쓴다(`card.qubc` <-> `card.qubc.handlers.ts`).
+fullname은 따옴표 안 문자열 키다.
+
+    export const handlers = {
+      'MyTodoCard.TodoItem.CompleteButton.TOGGLE': (data, params) => { ... },
+    };
+
+문자열이라 언어 차원의 자동완성/검증이 안 되는 자리를, 편집기 확장이 타입을 주입해 메우고
+있다(짝 `.qubc`를 컴파일해 얻은 타입).
+
+**종착점(아이디어):** quble 자체 문법을 둔다. 수렴 중인 형태:
 
     handle MyTodoCard.TodoItem.CompleteButton.TOGGLE (data) {
       <본문 - JS 위임>
     }
 
-방향:
-
-- **fullname 통째 표기** - 한 핸들러에서 "트리 어디서 난 무슨 이벤트"가 한눈에
-  들어와야 한다.
-- **fullname은 경로 토큰** - 문자열 리터럴이 아니라 점으로 잇는 토큰. 점마다
-  컴파일러가 합성 트리에서 실재하는 다음 마디만 자동완성하고, 없는 경로는 컴파일
-  에러로 검증한다(문자열 키로는 불가능).
-- **열린 구조** - 각 `handle`은 독립 최상위 선언. 항목 추가가 늘 문법 완성 상태.
+- **fullname을 문자열이 아니라 코드로 쓴다** - 점으로 잇는 식별자다. 점마다 컴파일러가
+  합성 트리에서 실재하는 다음 마디만 자동완성하고, 없는 경로는 컴파일 에러로 잡는다.
+  편집기 확장 없이 언어가 직접 하는 것이 지금과 다른 점이다.
 - **본문은 JS 위임** - `{ }` 안은 JS 비슷한 표현식, quble는 깊이 파싱하지 않는다.
-  quble의 책임은 fullname 생성과 본문 진입 시 스코프 주입(`data`, `provided`, `get`,
-  `set`, `goTo`). 표현식 평가는 호스트에 위임.
+  quble의 책임은 fullname 생성과 본문 진입 시 스코프 주입(`data`, `params`, `get`, `set`).
+  위임의 경계는 아직 정하지 않았다 - 본문을 그대로 토해낼지, `set` 같은 키워드만 인식할지.
 
-### 5.5 이벤트 payload에 객체 전달 (아이디어)
-
-핸들러가 payload/context로 leaf 값 하나가 아니라 **객체를 통째로** 받게 하는 것
-(`SAVE({ user })`에서 `user`가 객체). 현재는 값 자리가 leaf-only라 스칼라만 담긴다.
-JS에서 핸들러에 객체를 넘기는 것이 일상적이므로 이를 지원하려는 방향.
-
-탐색한 접근과 그 근거/기각한 대안/POC는 [PAYLOAD-OBJECTS.md](PAYLOAD-OBJECTS.md)에.
-- **인자 바인딩** - `data`는 `events` 스키마에서, `provided`는 #5.1 구조에서. 둘 다
-  leafIndex 묶음(`data`=자기 offset, `provided`=조상 컨텍스트 offset).
-
-탈락한 대안:
-
-- **경로 블록 중첩** - prefix를 묶어 트리 모양과 일치시키지만, 한 핸들러에서
-  fullname이 조각나 한눈에 안 들어온다.
-
-      handlers {
-        MyTodoCard.TodoItem {
-          CompleteButton.TOGGLE (data) { ... }
-        }
-      }
-
-- **객체 리터럴** - 닫는 `}`까지 가야 문법이 완성돼 항목 추가 도중이 불안정하고,
-  fullname이 문자열 키라 "문자열 안" 자동완성/트리 검증이 약하다.
-
-      handlers = {
-        "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data) => { ... },
-      }
-
-관통 기준: 자동완성을 문법이 떠받쳐야 관련 도구(에디터 지원/이벤트 카탈로그/
-unhandled-event 경고) 개발이 쉬워진다(#4.1의 "DX는 도구로 푼다"와 직결).
-
-미결: 본문 위임의 정확한 경계(그대로 토해내기 vs `set`/`goTo` 같은 키워드만 인식).
-
-**중간 단계:** 전용 `handle` 문법은 종착점이고, 당분간은 모듈과 1:1로 묶인
-TypeScript 파일로 작성한다(`card.qubc` <-> `card.qubc.handler.ts`). 매개변수 타입과
-자동완성은 VSCode 확장이 제공하고, 컴파일 시 짝꿍 핸들러 파일은 CSS와 같은 부류로
-res에 포함한다.
+탈락한 대안(경로 블록 중첩, 객체 리터럴을 quble 문법으로 삼기)과 그 이유는
+DECISIONS.md "핸들러 선언 문법".
 
 ---
 
 ## 부록 A. 예시 - TodoItem.comp
 
 ```
-import Button from "./Button"
-import Icon from "./Icon"
-import Badge from "./Badge"
-import Card from "./Card"
+use Button from "./Button"
+use Icon from "./Icon"
+use Badge from "./Badge"
 
 component TodoItem {
-  props { id, title, description, completed, priority, tags, dueDate, assignee }
+  props {
+    id: string,
+    title: string,
+    description: string,
+    completed: bool,
+    priority: number,
+    tags: string[],
+    dueDate: string,
+    assignee: string
+  }
 
   contexts {
     ActionArea  { section: "actions", tracking: "todo_action", userId: assignee }
@@ -352,7 +281,6 @@ component TodoItem {
     TOGGLE({ id, completed: !completed, timestamp: Date.now() })
     EDIT({ id, title })
     DELETE({ id, title, confirmRequired: true })
-    TAG_CLICK({ tagName, todoId: id })
   }
 
   template {
@@ -363,8 +291,8 @@ component TodoItem {
           @if (description) { p() { {description} } }
           @if (tags.length > 0) {
             div(class="tags") {
-              @for (tag in tags) {
-                TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK)
+              @for (tag of tags) {
+                TagBadge: Badge(text={tag} variant="outline" /)
               }
             }
           }
@@ -374,7 +302,7 @@ component TodoItem {
       @with MetaArea {
         @if (dueDate) {
           div(class="due-date") {
-            DueDateIcon: Icon(name="calendar")
+            DueDateIcon: Icon(name="calendar" /)
             span() { {dueDate} }
           }
         }
@@ -386,11 +314,11 @@ component TodoItem {
       @with ActionArea {
         div(class="actions") {
           @if (completed) {
-            UndoButton: Button(text="되돌리기" variant="secondary" @click:TOGGLE)
+            UndoButton: Button(text="되돌리기" variant="secondary" @click:TOGGLE /)
           } @else {
-            CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE)
+            CompleteButton: Button(text="완료" variant="primary" @click:TOGGLE /)
           }
-          DeleteButton: Button(text="삭제" variant="danger" @click:DELETE)
+          DeleteButton: Button(text="삭제" variant="danger" @click:DELETE /)
         }
       }
     }
@@ -398,19 +326,36 @@ component TodoItem {
 }
 ```
 
+`Badge`는 자기 이벤트를 스스로 선언하고 배선한다 - 태그 이름을 아는 쪽이 여기라서다. `TodoItem`은
+`Badge`를 놓기만 하고 `TAG_CLICK`을 모른다.
+
+```
+component Badge {
+  props { text: string, variant: string }
+
+  events {
+    TAG_CLICK({ text })
+  }
+
+  template {
+    span(class="badge" @click:TAG_CLICK) { {text} }
+  }
+}
+```
+
 ## 부록 B. 예시 - Card.comp (슬롯)
 
 ```
-import styles from "./Card.module.css"
+use "./Card.module.css"
 
 component Card {
-  props { title, variant, priority }
+  props { title: string, variant: string, priority: string }
 
   template {
-    div(class=["card", styles.variant, styles.priority]) {
+    div(class=["card", {variant}, {priority}]) {
       h2(class=["title"]) { {title} }
       div(class=["card-body"]) {
-        @slot   // 무기명 슬롯 - children이 들어온다
+        @slot()   // 무기명 슬롯 - children이 들어온다
       }
     }
   }
@@ -422,24 +367,23 @@ component Card {
 ```
 MyTodoCard: Card(title="할일 목록" variant="primary" priority="high") {
   p(class=["description"]) { "오늘 완료해야 할 작업들" }
-  TodoItem(id="1" title="문서 작성" completed=false)
+  TodoItem(id="1" title="문서 작성" completed=false /)
   div(class=["card-footer"]) { span() { "총 3개 항목" } }
 }
 ```
 
+짝 핸들러 파일(`.qubc.handlers.ts`). 이름이 `handlers`면 편집기 확장이 짝 `.qubc`에서 낸 타입을
+붙인다 - `import`를 적지 않고, fullname/payload/props가 타입으로 강제된다.
+
 ```ts
-const handlers: TEventHandlers<
-  | "MyTodoCard.TodoItem.CompleteButton.TOGGLE"
-  | "MyTodoCard.TodoItem.DeleteButton.DELETE"
-  | "MyTodoCard.TodoItem.TagBadge.TAG_CLICK",
-  TStore
-> = {
-  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { provided, set }) => {
-    // data: { id, completed, timestamp }  <- events 스키마에서 추론
-    set((s) => ({ todos: toggle(s.todos, data.id) }));
+export const handlers = {
+  // data: { id, completed, timestamp } <- events 스키마에서 추론
+  "MyTodoCard.TodoItem.CompleteButton.TOGGLE": (data, { props, set }) => {
+    set(props.completed, !data.completed);
   },
-  "MyTodoCard.TodoItem.TagBadge.TAG_CLICK": (data, { provided }) => {
-    // provided: 어느 TagBadge 인스턴스인지 (인덱스/key)
+  // @for 안에서 난 이벤트는 회차 인덱스를 $0으로 받는다
+  "MyTodoCard.TodoItem.TagBadge[$0].TAG_CLICK": (data, { $0 }) => {
+    // data.text = 클릭한 태그 이름, $0 = 몇 번째 TagBadge인지
   },
 };
 ```

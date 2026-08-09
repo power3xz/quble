@@ -181,7 +181,8 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
   중첩/공유를 표현한다. field는
   `type_ref`로 이 테이블을 참조하고 값 출처(`ref`)만 따로 싣는다 - 구조는 전역에, 인스턴스는
   컴포넌트 field에. 슬롯을 펼치지 않으므로 객체 field도 ref 하나로 그 슬롯을 가리킨다(런타임이
-  type_ref 구조로 store에서 조립). 조립은 런타임 값 레이어 전용(PAYLOAD-OBJECTS.md).
+  type_ref 구조로 store에서 조립). 조립은 런타임 값 레이어 전용 - 왜 이렇게 나눴는지는
+  DECISIONS.md "이벤트 payload/context에 객체 전달".
 - **`elem_type_ref`/`type_ref`는 말단(Scalar)으로 내려가는 하위 참조만.** 자기/조상 인덱스를
   가리키는 재귀 타입(`type Tree = Tree[]`)은 미지원 - 컴파일러가 그런 엔트리를 내지 않는다
   (내면 순회가 무한). 필요해지면 사이클 검출을 그때 추가.
@@ -324,10 +325,10 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   - **발생 시 런타임**: 0번 이벤트 정의를 보고, 각 field의 ref를 현재값으로 읽어 `type_ref`
     구조대로 **조립**해 `data = { title: ... }`를 만들고, 핸들러(fullname으로 찾음)에 넘긴다.
     스칼라 field는 그 슬롯이 값이 되고, 객체 field는 슬롯의 store 위치부터 구조대로 중첩 객체로
-    조립된다(조립 절차는 런타임 전용, PAYLOAD-OBJECTS.md). 핸들러는 JS로 런타임에 주입된다.
+    조립된다(조립 절차는 런타임 전용 - `core/web/runtime.ts`). 핸들러는 JS로 런타임에 주입된다.
     같은 fullname = 같은 핸들러.
   - 핸들러 본문/`set`은 바이트코드에 없다 - 컴파일러는 "발생 배선"(`BIND_EVENT`)과 정의(테이블)만
-    낸다. 본문은 호스트 JS에 위임(DESIGN #5.4 방향).
+    낸다. 본문은 호스트 JS에 위임(DESIGN 미결 "핸들러 문법"의 방향).
 - **컨텍스트 - `ENTER_CONTEXT`/`EXIT_CONTEXT` + 컴포넌트 컨텍스트 테이블.** `@with`로 주입하는
   메타데이터. 이벤트와 같은 결로 정의와 활성화가 나뉜다.
   - **정의**는 컴포넌트 테이블(#4)에 둔다. `contexts { Area { userId: assignee } }`가 컨텍스트명/

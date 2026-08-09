@@ -29,12 +29,15 @@
 
 The docs below are authoritative and out-rank any conversation summary - when a summary and
 a doc disagree, the doc wins. After a compact, re-check the relevant doc before acting on a
-remembered claim (a past summary once mislabeled DESIGN #5.1 - verify, don't inherit).
+remembered claim (a past summary once mislabeled a DESIGN section - verify, don't inherit).
 
-- **DESIGN.md** (Korean) - the agreed design: decisions, rejected alternatives, and their
-  rationale (#4). Top authority. #5 is the live list of unresolved areas - read it there,
-  don't rely on a summary. Read before contradicting any recorded decision - surface the
-  tradeoff first.
+- **DESIGN.md** (Korean) - the agreed design as it stands now. Top authority. #4 is the live
+  list of unresolved areas (no section numbers - entries come and go; cite them by title, and
+  don't link to them from other docs). Read before contradicting any recorded decision -
+  surface the tradeoff first.
+- **DECISIONS.md** (Korean) - why each decision was made and what was rejected. No section
+  numbers; cite by title. Read before re-proposing an approach - it may already be there with
+  the reason it was dropped.
 - **SYNTAX.md** - surface-syntax reference. The single source for grammar/directives; do not
   re-document syntax elsewhere.
 - **REACTIVITY.md** - reactivity + handler model (store, `get`/`set`) - the settled conclusion.

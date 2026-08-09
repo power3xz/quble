@@ -39,7 +39,7 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 
 ## 데이터
 
-- [ ] 데이터 흐름 - provided/props, 반응성. 다른 피처의 전제. 모델: [REACTIVITY.md](REACTIVITY.md) (leafIndex/fullname으로 #5.1/#5.2/events를 꿴 결론).
+- [ ] 데이터 흐름 - provided/props, 반응성. 다른 피처의 전제. 모델: [REACTIVITY.md](REACTIVITY.md) (leafIndex/fullname으로 배열 요소 식별/반응성/events를 꿴 결론).
   - [x] props 변수 보간 - 텍스트(`{name}` -> `TEXT_VAR`)/속성(`class={x}` -> `ATTR_*_VAR`). 같은 scope offset 공간.
   - [x] 반응성 (값 변경 시 DOM 갱신) - pub/sub, `set(leafIndex, v)`, 구독자=함수, Proxy 없음. 텍스트/속성/공유 검증.
   - [ ] 타입 표기 - props/payload가 스칼라를 넘어 객체/배열을 담으려면 그 형태를 적을
