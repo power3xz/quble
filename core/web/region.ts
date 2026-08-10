@@ -55,7 +55,7 @@ export type TArrayInfo = {
   elemStartLeafIndices: number[];
   indexLeafIndices: number[]; // elemStartLeafIndices와 나란한 요소별 인덱스 leaf - [i]=i번째 요소의 회차 번호를 담은 store 칸. 몸체 {i}/$0가 이 leaf를 읽어, 중간 제거(removeAt) 시 뒤 칸을 set으로 당기면 자동 갱신된다(값 고정/위치 이동 설계의 인덱스 반응성). @for 순회될 때만 lazy로 채운다(sizeLeafIndex와 같은 결). count-for는 중간 제거가 없어(꼬리만) 이걸 안 쓴다.
   sizeLeafIndex: number | null; // 이 배열이 @for 순회 대상이 되면(그때만) 요소 수를 담는 store 칸을 lazy 확보 - 그 칸 구독이 grow/shrink 발화. @for에 안 쓰이면 null(길이 칸 낭비 없음).
-  forRegionIndex: number | null; // 이 배열을 순회하는 @for region. 요소 중간 제거(removeAt)가 이 region의 i번째 회차 DOM을 뗀다. @for에 안 쓰이면 null(뗄 DOM 없음).
+  forRegionIndices: number[]; // 이 배열을 순회하는 @for region들. 요소 중간 제거(removeAt)가 이들 각각의 i번째 회차 DOM을 뗀다 - 하나만 들면 나중 @for가 앞의 것을 덮어써 한쪽만 정확히 떨어지고 나머지는 길이 칸 구독이 꼬리를 잘라 다른 요소가 사라진다. @for에 안 쓰이면 빈 배열(뗄 DOM 없음). 인덱스 칸(indexLeafIndices)은 자리 번호라 @for가 여럿이어도 같은 값이므로 배열이 그대로 소유하고 회차들이 함께 구독한다.
 };
 
 export const THEN_INDEX = 0;
@@ -69,7 +69,7 @@ export const appendArrayInfo = (arrayPool: Pool<TArrayInfo>, elemSize: number, e
     elemStartLeafIndices: [],
     indexLeafIndices: [],
     sizeLeafIndex: null,
-    forRegionIndex: null,
+    forRegionIndices: [],
   });
 
 // arrayPool의 arrayInfo 칸을 반납한다 - 요소 제거(removeAt)가 중첩 배열을 재귀 회수할 때 그 배열의 arrayInfo를 반납.

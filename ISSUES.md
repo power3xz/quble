@@ -4,6 +4,16 @@
 
 ## 해결됨
 
+- **같은 배열을 두 `@for`가 순회하면 중간 제거가 한쪽에서 어긋났다** - 배열 하나를 두 곳에서
+  순회하면(`for_shared_array.fixture.qubc`) `removeAt(0)` 후 두 목록에서 사라진 요소가 달랐다.
+  개수는 양쪽 다 줄지만 한쪽은 지운 요소가, 다른 쪽은 마지막 요소가 빠졌다(`t0,t1,t2` -> 한쪽
+  `t1,t2` / 다른 쪽 `t0,t1`). `TArrayInfo.forRegionIndex`가 region을 하나만 들어 `reactiveArrayFor`가
+  순회할 때마다 덮어썼고, 등록된 그 하나만 `removeBranchAt`으로 지정 회차를 뗐다. 나머지 `@for`는
+  길이 칸(`sizeLeafIndex`) 구독의 `truncateFor`가 꼬리를 떼 개수만 우연히 맞았다. **해결:**
+  `forRegionIndices` 배열로 순회하는 `@for`를 전부 들고 `removeAt`/`setArrayInto`가 각각에 건다.
+  인덱스 칸(`indexLeafIndices`)은 배열이 그대로 소유한다 - 자리 번호라 `@for`가 여럿이어도 값이
+  같고, 회차들이 같은 칸을 함께 구독해 뒤 당김이 양쪽에 반영된다.
+
 - **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
   소스에 설명을 달 수 없었다(비ASCII를 쓰면 `unexpected character`로 터졌다). **해결:** `//`와
   `/* */`를 렉서가 건너뛴다(SYNTAX #1.1). 주석은 앞 공백 여부를 그대로 통과시킨다 - 공백을

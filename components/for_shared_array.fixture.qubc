@@ -1,0 +1,21 @@
+component SharedArray {
+  props { tags: string[] }
+  events {
+    DEL({ tags })
+  }
+  template {
+    div(class="shared") {
+      button(class="del" @click:DEL) { "x" }
+      ul(class="first") {
+        @for (tag of tags) {
+          li(class="a") { {tag} }
+        }
+      }
+      ul(class="second") {
+        @for (tag of tags) {
+          li(class="b") { {tag} }
+        }
+      }
+    }
+  }
+}
