@@ -10,4 +10,8 @@
 
 ## 하는 중
 
-없음.
+같은 배열을 두 `@for`가 순회할 때 중간 제거가 어긋나는 문제(ISSUES.md) - 표시 쪽 상태
+(`forRegionIndex`/`indexLeafIndices`)를 `arrayInfo`에서 region으로 옮긴다. `arrayInfo`는
+데이터(요소 위치/크기/타입)만 남는다.
+
+`@for` 요소 자리 맞바꾸기(swap)는 이 위에 얹혀야 해서 보류 - 브랜치 `for-swap`에 작업분이 있다.
