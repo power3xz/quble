@@ -20,6 +20,39 @@ const cardsOf = (cards, { get }) =>
     urgent: get(cards[i].urgent),
   }));
 
+const slots = (event) => [...event.target.closest(".board__columns").children];
+
+// 두 컬럼 사이의 화면 거리. 너비/gap을 상수로 박지 않는 이유 - CSS 쪽 값이 바뀌면 조용히 어긋난다.
+const columnGap = (event, from, to) => {
+  const at = slots(event);
+  return at[to].getBoundingClientRect().left - at[from].getBoundingClientRect().left;
+};
+
+// swapAt은 노드를 안 옮기고 값만 바꿔 맞바꾼 순간 화면이 이미 최종 상태다. 두 컬럼을 상대의 옛
+// 자리로 밀어 두었다가 지우면, .column의 transition이 제자리로 오는 길을 그린다.
+const swapWithSlide = ({ props, swapAt, set }, event, a, b) => {
+  const gap = columnGap(event, a, b);
+  const column = slots(event)[a].querySelector(".column");
+
+  const shift = (seat, by, shadow, layer) =>
+    set(
+      props.columns[seat].slideStyle,
+      `translate: ${by}px; box-shadow: ${shadow}; z-index: ${layer}; transition: none`,
+    );
+
+  // 부호가 뒤집혀 보이는 것은 slideStyle도 컬럼 요소의 필드라 아래 swapAt이 함께 맞바꾸기 때문이다.
+  shift(a, -gap, "0 14px 28px rgba(0,0,0,0.16)", 3);
+  shift(b, gap, "0 3px 8px rgba(0,0,0,0.06)", 2);
+  swapAt(props.columns, a, b);
+
+  // 밀린 자리를 브라우저가 계산하게 한다. 없으면 그 상태가 반영되지 않아 transition이 시작 지점을
+  // 잡지 못한다.
+  column.getBoundingClientRect();
+
+  set(props.columns[a].slideStyle, "");
+  set(props.columns[b].slideStyle, "");
+};
+
 // from번째 카드를 to번째 자리로 옮긴다. 제자리면 false.
 const reorder = (cards, from, to) => {
   const at = Math.min(to, cards.length);
@@ -69,6 +102,7 @@ export const handlers = {
     push(props.columns, {
       name: `새 컬럼 ${madeColumns}`,
       accent: "background: #eae6ff",
+      slideStyle: "",
       cards: [],
     });
     console.log("컬럼 추가:", data.title);
@@ -90,6 +124,26 @@ export const handlers = {
   "[$0].CLICK_REMOVE_COLUMN": (_data, { props, removeAt, $0 }) => {
     removeAt(props.columns, $0);
     console.log(`컬럼 제거: ${$0}번`);
+  },
+
+  // 컬럼 자리 맞바꾸기 - 이웃과 값을 교환한다. 컬럼 요소가 cards 배열을 품으므로 안쪽 @for의
+  // 회차 수까지 따라온다(카드 수가 다른 두 컬럼을 바꿔 보면 보인다). 양끝에서는 상대가 없어 만다.
+  "[$0].CLICK_MOVE_LEFT": (_data, ctx) => {
+    const { event, $0 } = ctx;
+    if ($0 === 0) {
+      return;
+    }
+    swapWithSlide(ctx, event, $0, $0 - 1);
+    console.log(`컬럼 이동: ${$0}번 <- ${$0 - 1}번 자리`);
+  },
+
+  "[$0].CLICK_MOVE_RIGHT": (_data, ctx) => {
+    const { props, event, $0 } = ctx;
+    if ($0 === props.columns.length - 1) {
+      return;
+    }
+    swapWithSlide(ctx, event, $0, $0 + 1);
+    console.log(`컬럼 이동: ${$0}번 -> ${$0 + 1}번 자리`);
   },
 
   "Lane[$0].[$1].CLICK_REMOVE_CARD": (data, { props, removeAt, $1 }) => {

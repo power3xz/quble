@@ -22,6 +22,8 @@ component Board {
   events {
     CLICK_ADD_COLUMN({ title })
     CLICK_REMOVE_COLUMN({ title })
+    CLICK_MOVE_LEFT({ title })
+    CLICK_MOVE_RIGHT({ title })
   }
   template {
     section(class="board") {
@@ -37,11 +39,16 @@ component Board {
         div(class="board__columns") {
           @for (column, index of columns) {
             div(class="board__slot") {
-              button(class="board__remove" @click:CLICK_REMOVE_COLUMN) { "컬럼 삭제" }
+              div(class="board__slotbar") {
+                button(class="board__move" @click:CLICK_MOVE_LEFT) { "<" }
+                button(class="board__move" @click:CLICK_MOVE_RIGHT) { ">" }
+                button(class="board__remove" @click:CLICK_REMOVE_COLUMN) { "컬럼 삭제" }
+              }
               Lane: Column(
                 name={column.name}
                 accent={column.accent}
                 position={index}
+                slideStyle={column.slideStyle}
                 cards={column.cards}
               /)
             }

@@ -6,6 +6,7 @@ component Column {
     name: string,
     accent: string,
     position: number,
+    slideStyle: string,
     cards: Omit<Card, 'seat'>[]
   }
   contexts {
@@ -19,7 +20,7 @@ component Column {
     DROP_AT_END({ lane: name })
   }
   template {
-    div(class="column") {
+    div(class="column" style={slideStyle}) {
       header(class="column__head" style={accent}) {
         h2(class="column__name" @click:CLICK_HEADING) { {name} }
       }

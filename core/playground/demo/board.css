@@ -70,8 +70,33 @@
   gap: 4px;
 }
 
+/* 컬럼 하나를 다루는 버튼 줄 - 좌우 이동은 왼쪽에, 삭제는 오른쪽 끝에 민다. */
+.board__slotbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 좌우 이동 - 자리를 맞바꾼다(swapAt). 양끝 컬럼에서는 상대가 없어 아무 일도 없다. */
+.board__move {
+  width: 20px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #b9bbc6;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.board__move:hover {
+  background: #f4f4f6;
+  color: #1c2024;
+}
+
 .board__remove {
-  justify-self: end;
+  margin-left: auto;
   padding: 2px 6px;
   border: 0;
   border-radius: 4px;

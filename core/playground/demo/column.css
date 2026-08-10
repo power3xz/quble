@@ -1,5 +1,6 @@
 /* 주어진 높이를 다 쓴다 - 카드가 적어도 아래 여백이 드롭 자리로 남는다(.column__cards가 flex: 1). */
 .column {
+  position: relative; /* 미끄러질 때 z-index로 겹침 순서를 정한다 */
   width: 232px;
   height: 100%;
   display: flex;
@@ -9,6 +10,9 @@
   border: 1px solid #e8e8ec;
   border-radius: 8px;
   background: #fff;
+  transition:
+    translate 380ms ease-out,
+    box-shadow 380ms ease-out;
 }
 
 /* 컬럼 색은 data의 accent가 style로 준다(배경). 옅은 색이라 제목 띠 정도로만 읽힌다. */
