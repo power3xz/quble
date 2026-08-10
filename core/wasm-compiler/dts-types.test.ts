@@ -60,7 +60,7 @@ after(() => {
 const typecheck = (body: string): string | null => {
   const source = `import type { THandlers } from "./handlers";
 export default {
-  EDIT: (_data, { props, store, get, set, setObject, push, removeAt, setArray }) => {
+  EDIT: (_data, { props, store, get, set, setObject, push, removeAt, swapAt, setArray }) => {
 ${body}
   },
 } satisfies Partial<THandlers>;
@@ -86,6 +86,7 @@ test("배열 leaf에 요소 타입이 맞으면 통과한다", () => {
     push(props.cards, { title: "t", done: false });
     setArray(props.tags, ["a", "b"]);
     removeAt(props.cards, 0);
+    swapAt(props.cards, 0, 1);
   `),
     null,
   );
@@ -239,6 +240,12 @@ test("leafIndex는 removeAt의 인덱스가 아니다", () => {
   assert.match(out ?? "", /TS2345/);
 });
 
+// swapAt은 인덱스가 둘이라 양쪽 다 막혀야 한다 - 한쪽만 number로 두면 나머지가 샌다.
+test("leafIndex는 swapAt의 인덱스가 아니다(양쪽 다)", () => {
+  assert.match(typecheck(`swapAt(props.tags, props.count, 1);`) ?? "", /TS2345/);
+  assert.match(typecheck(`swapAt(props.tags, 0, props.count);`) ?? "", /TS2345/);
+});
+
 test("leafIndex는 배열 인덱스가 아니다", () => {
   const out = typecheck(`void props.tags[props.count];`);
   assert.match(out ?? "", /TS2538|TS7015|TS2345/);
@@ -313,6 +320,7 @@ test("객체 노드 안 배열도 leaf 한 칸이다", () => {
     typecheck(`
     push(props.ghost.marks, "m");
     removeAt(props.ghost.marks, 0);
+    swapAt(props.ghost.marks, 0, 1);
     setArray(props.ghost.marks, ["a"]);
   `),
     null,

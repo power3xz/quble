@@ -5,6 +5,7 @@
     {
       "name": "할 일",
       "accent": "background: #fdf0ee",
+      "slideStyle": "",
       "cards": [
         {
           "title": "로그인 세션 만료 처리",
@@ -29,6 +30,7 @@
     {
       "name": "진행 중",
       "accent": "background: #eef2fb",
+      "slideStyle": "",
       "cards": [
         {
           "title": "결제 실패 재시도 로직",
@@ -47,6 +49,7 @@
     {
       "name": "리뷰",
       "accent": "background: #faf6ea",
+      "slideStyle": "",
       "cards": [
         {
           "title": "알림 설정 화면",
@@ -59,6 +62,7 @@
     {
       "name": "완료",
       "accent": "background: #eef5f0",
+      "slideStyle": "",
       "cards": [
         {
           "title": "다크 모드 토글",

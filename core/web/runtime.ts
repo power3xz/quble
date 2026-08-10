@@ -1114,6 +1114,7 @@ class Interpreter {
       setArray: this.setArrayElements,
       push: this.pushArrayElement,
       removeAt: this.removeArrayElementAt,
+      swapAt: this.swapArrayElementsAt,
       props: binding.props,
       store: this.rootStore(),
       context,
@@ -1217,6 +1218,95 @@ class Interpreter {
     }
     if (info.sizeLeafIndex !== null) {
       this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
+    }
+  };
+
+  // 배열 요소 자리 맞바꾸기 - i번째와 j번째 요소의 고정 블록 값을 칸마다 서로 set한다. 노드를 옮기지
+  // 않는 것이 요점이다(DECISIONS.md _배열 항목 식별자(key) - 도입 안 함_의 재정렬 절) - 회차 DOM과
+  // 구독은 자리에 그대로 있고, 각 회차가 보던 leaf의 값이 바뀌어 구독 발화로 화면이 따라온다.
+  //
+  // 그래서 안 건드리는 것들: elemStartLeafIndices(요소 자리는 그대로), indexLeafIndices(자리 번호라
+  // [i]의 값은 늘 i), forRegionIndices(순회하는 region은 자리에 그대로), sizeLeafIndex(길이 불변).
+  // removeAt과 정반대다 - 그쪽은 목록을 당기고 값을 안 옮긴다.
+  //
+  // 요소가 중첩 배열을 품으면 그 두 배열끼리 다시 이 규칙을 적용한다(swapArrayContents).
+  swapArrayElementsAt = (array: TLeafObject, i: number, j: number): void => {
+    const info = this.arrayInfoOf(array[NODE_BASE]);
+    this.swapFixedBlocks(info.elemStartLeafIndices[i], info.elemStartLeafIndices[j], info.elemTypeRef);
+  };
+
+  // 같은 타입인 두 고정 블록(a, b)의 값을 칸마다 서로 맞바꾼다. freeArrayElement의 walk를 본뜬다 -
+  // 고정부를 타입대로 훑어 칸을 하나씩 소비한다(cursor는 블록 시작 기준 offset이라 둘에 그대로 쓴다).
+  //
+  // 배열 칸은 값이 arrayInfoIndex인데 그 번호를 맞바꾸지 않는다 - reactiveArrayFor가 build 때 읽은
+  // arrayInfo를 클로저로 붙들어 칸을 다시 안 읽어, 바꿔도 안쪽 @for가 따라오지 않는다. 대신 두
+  // arrayInfo의 내용끼리 맞바꾼다(배열 실물마다 arrayInfo가 하나씩이라 둘은 다른 객체다).
+  swapFixedBlocks = (a: number, b: number, typeRef: number): void => {
+    let cursor = 0;
+    const walk = (ref: number): void => {
+      const t = this.module.types[ref];
+      if (t.tag === "object") {
+        for (const [, childTypeRef] of t.fields) {
+          walk(childTypeRef);
+        }
+        return;
+      }
+      if (t.tag === "array") {
+        this.swapArrayContents(
+          this.arrayPool.entries[Number(this.store.get(a + cursor))],
+          this.arrayPool.entries[Number(this.store.get(b + cursor))],
+        );
+      } else {
+        const av = this.store.get(a + cursor);
+        this.store.set(a + cursor, this.store.get(b + cursor));
+        this.store.set(b + cursor, av);
+      }
+      cursor += 1; // 스칼라/배열 칸 하나 소비
+    };
+    walk(typeRef);
+  };
+
+  // 두 배열의 내용을 통째로 맞바꾼다. arrayInfo 객체 자체는 제자리에 둔다 - 칸 값(arrayInfoIndex)도,
+  // 목록(elemStartLeafIndices)도 통째로는 바꾸지 않는다. 둘 다 이미 지어진 회차에 안 닿기 때문이다:
+  // 회차는 build 때 실은 요소 leaf 주소를 계속 보고, reactiveArrayFor는 그때 읽은 arrayInfo를 붙든다.
+  //
+  // 그래서 바깥 요소와 같은 방식이다 - 겹치는 앞자리는 요소 값을 서로 맞바꾸고, 길이 차이가 나는
+  // 꼬리만 긴 쪽에서 짧은 쪽으로 실제로 옮긴다. 자리를 유지하니 겹치는 구간의 회차 DOM은 그대로 두고
+  // 바뀐 값만 구독 발화로 움직인다(setArrayInto의 자리 유지 전략과 같다).
+  swapArrayContents = (x: TArrayInfo, y: TArrayInfo): void => {
+    const kept = Math.min(x.elemStartLeafIndices.length, y.elemStartLeafIndices.length);
+    for (let k = 0; k < kept; k++) {
+      this.swapFixedBlocks(x.elemStartLeafIndices[k], y.elemStartLeafIndices[k], x.elemTypeRef);
+    }
+    if (x.elemStartLeafIndices.length === y.elemStartLeafIndices.length) {
+      return; // 길이가 같아 옮길 꼬리가 없다
+    }
+    const [longer, shorter] = x.elemStartLeafIndices.length > kept ? [x, y] : [y, x];
+
+    // 긴 쪽의 꼬리를 짧은 쪽으로 넘긴다 - 요소 leaf는 store에서 안 움직이고 목록만 옮겨 탄다.
+    shorter.elemStartLeafIndices.push(...longer.elemStartLeafIndices.splice(kept));
+
+    // 인덱스 칸을 먼저 맞춘다 - 아래 길이 칸 set이 내는 grow 발화가 addIterationBranch(i)를 부르고
+    // 그게 indexLeafIndices[i]를 읽는다(reactiveArrayFor). 순서가 뒤집히면 없는 칸을 읽는다.
+    // 자리 번호라 옮기지 않고 각자 자기 길이에 맞춰 늘리고 줄인다. 순회 중일 때만 다룬다
+    // (forRegionIndices 기준) - push/removeAt과 같은 규칙.
+    if (shorter.forRegionIndices.length > 0) {
+      for (let k = kept; k < shorter.elemStartLeafIndices.length; k++) {
+        shorter.indexLeafIndices[k] = this.store.alloc([k]);
+      }
+    }
+    if (longer.forRegionIndices.length > 0) {
+      for (const indexLeafIndex of longer.indexLeafIndices.splice(kept)) {
+        this.store.free(indexLeafIndex, 1);
+      }
+    }
+
+    // 길이 칸을 진실과 맞춘다 - 이 발화가 각 @for의 꼬리 회차를 늘리고 줄인다.
+    if (longer.sizeLeafIndex !== null) {
+      this.store.set(longer.sizeLeafIndex, longer.elemStartLeafIndices.length);
+    }
+    if (shorter.sizeLeafIndex !== null) {
+      this.store.set(shorter.sizeLeafIndex, shorter.elemStartLeafIndices.length);
     }
   };
 
