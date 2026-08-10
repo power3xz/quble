@@ -312,6 +312,7 @@ const handlers = {
   - `setObject(objectNode, values)` - 객체 노드 통째 교체(안 준 필드는 `undefined`).
   - `setArray(arrayNode, elems)` - 배열 내용 통째 교체(겹치는 앞자리는 회차 DOM을 유지).
   - `push(...)` / `removeAt(...)` - 배열 요소 추가/제거.
+  - `swapAt(arrayNode, i, j)` - 두 요소의 자리 맞바꾸기(회차 DOM은 자리에 그대로, 값만 교환).
   - `props` - 발화한 컴포넌트 기준 상대 props. `store` - 루트 기준 절대 상태 트리.
     스칼라는 leafIndex, 객체/배열은 노드다 - 필드(`props.ghost.style`)와 인덱스
     (`props.items[2].title`, `props.items.length`)로 내려간다.
