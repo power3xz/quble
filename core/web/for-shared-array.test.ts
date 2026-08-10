@@ -1,11 +1,12 @@
 // 같은 배열을 두 @for가 순회할 때 - arrayInfo는 하나인데 @for region은 둘이다.
 //
-// TArrayInfo.forRegionIndex가 region을 하나만 들어(region.ts), 나중에 순회한 @for가 앞의 것을
-// 덮어쓴다(reactiveArrayFor). 중간 제거(removeAt)는 그 하나에만 removeBranchAt으로 지정 회차를
-// 떼고, 나머지 @for는 길이 칸 구독(onSize)의 truncateFor가 꼬리를 뗀다. 개수는 같아지지만 사라진
-// 요소가 서로 다르다 - 한쪽은 지운 요소가, 다른 쪽은 마지막 요소가 빠진다.
+// arrayInfo가 region을 하나만 들면(옛 forRegionIndex) 나중 @for가 앞의 것을 덮어써, 중간 제거가
+// 등록된 쪽에서만 지정 회차를 떼고 나머지는 길이 칸 구독(onSize)의 truncateFor가 꼬리를 뗐다.
+// 개수는 같아지는데 사라진 요소가 서로 달라 조용히 어긋난다(t0,t1,t2 -> 한쪽 t1,t2 / 다른 쪽 t0,t1).
+// 그래서 forRegionIndices로 순회하는 @for를 전부 들고 각각에 removeBranchAt을 건다.
 //
-// 이 테스트는 그 결함을 못박는다. 고쳐지면 두 목록이 같아지므로 단언을 바꿔야 한다.
+// 인덱스 칸(indexLeafIndices)은 배열이 그대로 소유한다 - 자리 번호라 @for가 여럿이어도 값이 같고,
+// 두 회차가 같은 칸을 함께 구독해 뒤 당김이 양쪽에 함께 반영된다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
@@ -42,14 +43,11 @@ test("같은 배열을 두 @for가 순회하면 양쪽 다 그려진다", () => 
   assert.deepEqual(secondList(host), ["t0", "t1", "t2"], "둘째 목록");
 });
 
-test("[결함] 요소를 제거하면 한쪽 회차 DOM만 떨어진다", () => {
+test("요소를 제거하면 두 목록에서 같은 요소가 빠진다", () => {
   const { host, button } = instantiate();
 
   button.click(); // removeAt(tags, 0)
 
-  // forRegionIndex를 가진 쪽(나중 @for)만 removeBranchAt으로 0번 회차를 정확히 뗀다.
-  assert.deepEqual(secondList(host), ["t1", "t2"], "나중 @for는 지정한 요소가 빠진다");
-  // 먼저 @for는 그 호출을 못 받고 길이 칸 구독(onSize)의 truncateFor가 꼬리를 뗀다 - 개수는 맞지만
-  // 남은 회차가 t0/t1을 그대로 봐 t2가 사라진 것처럼 나온다. 지운 요소가 양쪽에서 다르다.
-  assert.deepEqual(firstList(host), ["t0", "t1"], "[결함] 먼저 @for는 꼬리가 잘려 다른 요소가 사라진다");
+  assert.deepEqual(firstList(host), ["t1", "t2"], "먼저 @for도 0번이 빠진다");
+  assert.deepEqual(secondList(host), ["t1", "t2"], "나중 @for도 같은 결과");
 });

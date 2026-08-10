@@ -1137,12 +1137,12 @@ class Interpreter {
   pushArrayElement = (array: TLeafObject, elem: unknown): void => {
     const info = this.arrayInfoOf(array[NODE_BASE]);
     this.plantArrayElement(elem, info);
-    // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
-    // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
+    // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndices). 순회 전이면
+    // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndices지 indexLeafIndices.length가
     // 아니다 - 요소가 전부 제거돼 빈 배열(length 0)이어도 순회는 진행 중이라, length로 판단하면 이 채움을
     // 건너뛰어 인덱스 없는 요소가 쌓이고 region과 어긋난다. 새 요소는 꼬리라 인덱스 = 마지막 자리.
     const tail = info.elemStartLeafIndices.length - 1;
-    if (info.forRegionIndex !== null) {
+    if (info.forRegionIndices.length > 0) {
       info.indexLeafIndices[tail] = this.store.alloc([tail]);
     }
     if (info.sizeLeafIndex !== null) {
@@ -1193,22 +1193,23 @@ class Interpreter {
     this.store.free(start, leafCountOf(this.module, typeRef));
   };
 
-  // 배열 요소 제거 - i번째 요소를 재귀 회수(freeElem)하고 목록(elemStartLeafIndices)에서 뺀다. @for에 쓰였으면
-  // (forRegionIndex) 그 region의 i번째 회차 DOM만 뗀다 - 나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상
+  // 배열 요소 제거 - i번째 요소를 재귀 회수(freeElem)하고 목록(elemStartLeafIndices)에서 뺀다. 이 배열을
+  // 순회하는 @for마다(forRegionIndices) 그 region의 i번째 회차 DOM만 뗀다 - 나머지 회차는 자기 요소 leaf를 그대로 보므로 무손상
   // (재빌드/재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
   // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
   // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
   removeArrayElementAt = (array: TLeafObject, i: number): void => {
     const info = this.arrayInfoOf(array[NODE_BASE]);
-    if (info.forRegionIndex !== null) {
-      removeBranchAt(this.store, this.regionPool, this.branchPool, info.forRegionIndex, i);
+    for (const forRegionIndex of info.forRegionIndices) {
+      removeBranchAt(this.store, this.regionPool, this.branchPool, forRegionIndex, i);
     }
     this.freeArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef);
     info.elemStartLeafIndices.splice(i, 1);
-    // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndex 기준) - i번째 인덱스 칸을 회수하고
+    // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndices 기준) - i번째 인덱스 칸을 회수하고
     // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고
     // $n이 발화 시 읽으므로, 중간 제거로 뒤가 당겨져도 표시/이벤트 인덱스가 자동 정합한다(값 고정/위치 이동 설계).
-    if (info.forRegionIndex !== null) {
+    // 칸은 배열이 소유한다 - 자리 번호라 순회하는 @for가 여럿이어도 값이 같아, 회차들이 같은 칸을 함께 구독한다.
+    if (info.forRegionIndices.length > 0) {
       this.store.free(info.indexLeafIndices[i], 1);
       info.indexLeafIndices.splice(i, 1);
       for (let k = i; k < info.indexLeafIndices.length; k++) {
@@ -1242,8 +1243,10 @@ class Interpreter {
     // 꼬리 제거 - 회차 DOM(truncateFor)을 먼저 떼고 요소 leaf를 회수해야 한다. 반대로 하면 떼는 도중
     // 회차가 이미 반납된 leaf를 읽는다.
     if (elems.length < info.elemStartLeafIndices.length) {
-      if (info.forRegionIndex !== null) {
-        truncateFor(this.store, this.regionPool, this.branchPool, info.forRegionIndex, kept);
+      if (info.forRegionIndices.length > 0) {
+        for (const forRegionIndex of info.forRegionIndices) {
+          truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, kept);
+        }
         for (const indexLeafIndex of info.indexLeafIndices.splice(kept)) {
           this.store.free(indexLeafIndex, 1);
         }
@@ -1254,10 +1257,10 @@ class Interpreter {
     }
 
     // 꼬리 추가 - push와 같은 순서(요소를 심고 인덱스 leaf를 잇는다). 인덱스 leaf는 순회 중일 때만
-    // 채운다(forRegionIndex 기준) - 순회 전이면 reactiveArrayFor의 lazy 채움에 맡긴다.
+    // 채운다(forRegionIndices 기준) - 순회 전이면 reactiveArrayFor의 lazy 채움에 맡긴다.
     for (let i = kept; i < elems.length; i++) {
       this.plantArrayElement(elems[i], info);
-      if (info.forRegionIndex !== null) {
+      if (info.forRegionIndices.length > 0) {
         info.indexLeafIndices[i] = this.store.alloc([i]);
       }
     }
@@ -1518,7 +1521,7 @@ class Interpreter {
     }
 
     const forRegionIndex = appendForRegion(this.regionPool, sizeLeafIndex);
-    info.forRegionIndex = forRegionIndex; // removeAt이 이 region의 회차 DOM을 뗀다
+    info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
     const region = this.regionPool.entries[forRegionIndex];
     branch.childRegionIndices.push(forRegionIndex);
     parent.appendChild(region.anchor);

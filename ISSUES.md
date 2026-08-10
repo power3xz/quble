@@ -4,6 +4,16 @@
 
 ## 해결됨
 
+- **같은 배열을 두 `@for`가 순회하면 중간 제거가 한쪽에서 어긋났다** - 배열 하나를 두 곳에서
+  순회하면(`for_shared_array.fixture.qubc`) `removeAt(0)` 후 두 목록에서 사라진 요소가 달랐다.
+  개수는 양쪽 다 줄지만 한쪽은 지운 요소가, 다른 쪽은 마지막 요소가 빠졌다(`t0,t1,t2` -> 한쪽
+  `t1,t2` / 다른 쪽 `t0,t1`). `TArrayInfo.forRegionIndex`가 region을 하나만 들어 `reactiveArrayFor`가
+  순회할 때마다 덮어썼고, 등록된 그 하나만 `removeBranchAt`으로 지정 회차를 뗐다. 나머지 `@for`는
+  길이 칸(`sizeLeafIndex`) 구독의 `truncateFor`가 꼬리를 떼 개수만 우연히 맞았다. **해결:**
+  `forRegionIndices` 배열로 순회하는 `@for`를 전부 들고 `removeAt`/`setArrayInto`가 각각에 건다.
+  인덱스 칸(`indexLeafIndices`)은 배열이 그대로 소유한다 - 자리 번호라 `@for`가 여럿이어도 값이
+  같고, 회차들이 같은 칸을 함께 구독해 뒤 당김이 양쪽에 반영된다.
+
 - **주석 문법 없음** - 렉서가 `/`를 self-close 토큰으로만 보고 주석을 건너뛰지 않아 `.qubc`
   소스에 설명을 달 수 없었다(비ASCII를 쓰면 `unexpected character`로 터졌다). **해결:** `//`와
   `/* */`를 렉서가 건너뛴다(SYNTAX #1.1). 주석은 앞 공백 여부를 그대로 통과시킨다 - 공백을
@@ -85,19 +95,6 @@
   타입은 없앴다 - `handlers` 리터럴이 주입된 표기를 문맥으로 받아 키마다 ctx가 추론된다.
 
 ## 미해결
-
-- **같은 배열을 두 `@for`가 순회하면 중간 제거가 한쪽에서 어긋난다** - 배열 하나를 두 곳에서
-  순회하면(`for_shared_array.fixture.qubc`) `removeAt(0)` 후 두 목록에서 사라진 요소가 다르다.
-  개수는 양쪽 다 줄지만, 한쪽은 지운 요소가 빠지고 다른 쪽은 마지막 요소가 빠진다(`t0,t1,t2` ->
-  한쪽 `t1,t2` / 다른 쪽 `t0,t1`). **원인:** `TArrayInfo`가 표시 쪽 상태를 하나씩만 든다 -
-  `forRegionIndex`는 `reactiveArrayFor`가 순회할 때마다 덮어써서 마지막 `@for`만 남고,
-  `indexLeafIndices`도 `arrayInfo`에 하나뿐이라 소유가 불분명하다. `removeAt`은 등록된 그 하나에만
-  `removeBranchAt`으로 지정 회차를 떼고, 나머지 `@for`는 길이 칸(`sizeLeafIndex`) 구독의
-  `truncateFor`가 꼬리를 뗀다. 길이 칸은 배열의 성질이라 하나로 맞아 개수만 우연히 일치한다.
-  **방향:** 표시 쪽 상태를 `arrayInfo`에서 `@for` region으로 옮긴다 - 배열 하나에 하나여야 하는
-  것(요소 위치/크기/타입/길이 칸)과 `@for`마다 하나여야 하는 것(회차 DOM/회차 번호 칸)이 지금
-  한 구조체에 섞여 있다. 재현 테스트는 `core/web/for-shared-array.test.ts`(지금은 결함을 못박아
-  통과 - 고치면 단언을 바꿔야 한다).
 
 - **여러 칸을 쓰는 조작이 중간 상태를 통지한다** - `leaf-store.ts`의 `set`은 칸 하나를 쓰고
   구독자 콜백을 그 자리에서 동기로 부른다(통지 큐 없음). 그래서 한 번의 조작이 여러 칸을 쓰면
