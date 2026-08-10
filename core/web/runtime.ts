@@ -1067,12 +1067,10 @@ class Interpreter {
     });
   };
 
-  // 배열 노드/칸에서 arrayInfo를 얻는다 - 핸들러가 넘긴 노드든 내부 경로의 leafIndex든 같은 자리로
-  // 모은다(노드는 NODE_BASE에 그 칸을 싣고 있다).
-  arrayInfoOf = (k: unknown): TArrayInfo => {
-    const arrayLeafIndex = typeof k === "number" ? k : (k as TLeafObject)[NODE_BASE];
-    return this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
-  };
+  // 배열 칸에서 arrayInfo를 얻는다 - 그 칸 값이 arrayInfoIndex다. 핸들러가 넘긴 배열 노드는
+  // 호출부가 NODE_BASE로 칸을 꺼내 넘긴다(노드가 그 칸을 싣고 있다).
+  arrayInfoOf = (arrayLeafIndex: number): TArrayInfo =>
+    this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
 
   // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
   dispatch = (binding: TBinding, domEventObject: Event) => {
@@ -1136,8 +1134,8 @@ class Interpreter {
   // (plantFixed로 로컬에 펴 store.alloc으로 삽입, 요소 안 중첩 배열은 plantRoot처럼 레벨별로 마저 심음),
   // 그 시작 leaf를 elemStartLeafIndices에 잇고 길이 칸(sizeLeafIndex)을 set해 @for grow를 깨운다. sizeLeafIndex가
   // null이면 이 배열은 아직 @for에 안 쓰여 grow 대상이 없다(목록만 갱신).
-  pushArrayElement = (k: unknown, elem: unknown): void => {
-    const info = this.arrayInfoOf(k);
+  pushArrayElement = (array: TLeafObject, elem: unknown): void => {
+    const info = this.arrayInfoOf(array[NODE_BASE]);
     this.plantArrayElement(elem, info);
     // 인덱스 leaf도 동기로 하나 잇는다 - 단 이 배열이 @for로 순회 중일 때만(forRegionIndex). 순회 전이면
     // reactiveArrayFor의 lazy 채움에 맡긴다. "@for 순회 중"의 신호는 forRegionIndex지 indexLeafIndices.length가
@@ -1200,8 +1198,8 @@ class Interpreter {
   // (재빌드/재바인딩 없음). 중간 제거라 뒤 목록이 당겨지지만 store의 요소 leaf는 안 움직인다. 길이 칸
   // (sizeLeafIndex)을 새 개수로 set해 둔다 - DOM과 목록을 이미 손수 줄여 놨으니 그 발화(onSize)는 next===cur라
   // no-op이고(이중 제거 없음), 목적은 값을 진실과 맞춰 다음 push의 grow 발화가 동등성에 안 막히게 하는 것이다.
-  removeArrayElementAt = (k: unknown, i: number): void => {
-    const info = this.arrayInfoOf(k);
+  removeArrayElementAt = (array: TLeafObject, i: number): void => {
+    const info = this.arrayInfoOf(array[NODE_BASE]);
     if (info.forRegionIndex !== null) {
       removeBranchAt(this.store, this.regionPool, this.branchPool, info.forRegionIndex, i);
     }
@@ -1229,8 +1227,8 @@ class Interpreter {
   //
   // 자리를 유지한다는 건 i번째 요소 leaf가 다른 값을 갖게 된다는 뜻이다 - push/removeAt의 "값 고정,
   // 위치 이동"과 반대 방향이지만, 전량 교체는 이전 요소와의 대응 자체가 없으므로 이쪽이 맞다.
-  setArrayElements = (k: unknown, elems: unknown[]): void => {
-    this.setArrayInto(this.arrayInfoOf(k), elems);
+  setArrayElements = (array: TLeafObject, elems: unknown[]): void => {
+    this.setArrayInto(this.arrayInfoOf(array[NODE_BASE]), elems);
   };
 
   // setArray의 본체 - arrayInfo를 직접 받는다(요소 안 중첩 배열은 칸 값이 arrayInfoIndex라
