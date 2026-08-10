@@ -1114,6 +1114,7 @@ class Interpreter {
       setArray: this.setArrayElements,
       push: this.pushArrayElement,
       removeAt: this.removeArrayElementAt,
+      swapAt: this.swapArrayElementsAt,
       props: binding.props,
       store: this.rootStore(),
       context,
@@ -1218,6 +1219,43 @@ class Interpreter {
     if (info.sizeLeafIndex !== null) {
       this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
     }
+  };
+
+  // 배열 요소 자리 맞바꾸기 - i번째와 j번째 요소의 고정 블록 값을 칸마다 서로 set한다. 노드를 옮기지
+  // 않는 것이 요점이다(DECISIONS.md _배열 항목 식별자(key) - 도입 안 함_의 재정렬 절) - 회차 DOM과
+  // 구독은 자리에 그대로 있고, 각 회차가 보던 leaf의 값이 바뀌어 구독 발화로 화면이 따라온다.
+  //
+  // 그래서 안 건드리는 것들: elemStartLeafIndices(요소 자리는 그대로), indexLeafIndices(자리 번호라
+  // [i]의 값은 늘 i), forRegionIndices(순회하는 region은 자리에 그대로), sizeLeafIndex(길이 불변).
+  // removeAt과 정반대다 - 그쪽은 목록을 당기고 값을 안 옮긴다.
+  //
+  // 요소가 중첩 배열을 품으면 막는다. 배열 칸 값은 arrayInfoIndex인데, 그것만 맞바꿔도 안쪽 @for는
+  // 따라오지 않는다 - reactiveArrayFor가 build 때 읽은 arrayInfo를 클로저로 붙들어 칸을 다시 안 읽는다.
+  // 조용히 어긋난 화면을 내느니 여기서 멈춘다.
+  swapArrayElementsAt = (array: TLeafObject, i: number, j: number): void => {
+    const info = this.arrayInfoOf(array[NODE_BASE]);
+    const a = info.elemStartLeafIndices[i];
+    const b = info.elemStartLeafIndices[j];
+    // freeArrayElement와 같은 걷기 - 고정부를 타입대로 걸어 칸을 하나씩 소비한다(cursor는 요소 시작
+    // 기준 offset이라 두 요소에 그대로 쓴다).
+    let cursor = 0;
+    const walk = (ref: number): void => {
+      const t = this.module.types[ref];
+      if (t.tag === "object") {
+        for (const [, childTypeRef] of t.fields) {
+          walk(childTypeRef);
+        }
+        return;
+      }
+      if (t.tag === "array") {
+        throw new Error("중첩 배열을 품은 요소는 swapAt으로 맞바꿀 수 없음");
+      }
+      const av = this.store.get(a + cursor);
+      this.store.set(a + cursor, this.store.get(b + cursor));
+      this.store.set(b + cursor, av);
+      cursor += 1;
+    };
+    walk(info.elemTypeRef);
   };
 
   // 배열 내용을 통째로 새 값들로 바꾼다 - 겹치는 앞자리는 값만 덮어쓰고(overwriteFixedBlock) 꼬리만
