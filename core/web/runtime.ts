@@ -1069,8 +1069,7 @@ class Interpreter {
 
   // 배열 칸에서 arrayInfo를 얻는다 - 그 칸 값이 arrayInfoIndex다. 핸들러가 넘긴 배열 노드는
   // 호출부가 NODE_BASE로 칸을 꺼내 넘긴다(노드가 그 칸을 싣고 있다).
-  arrayInfoOf = (arrayLeafIndex: number): TArrayInfo =>
-    this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
+  arrayInfoOf = (arrayLeafIndex: number): TArrayInfo => this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
 
   // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
   dispatch = (binding: TBinding, domEventObject: Event) => {
