@@ -21,7 +21,7 @@ type TLeafObject<T> = { readonly __obj: T } & {
       : TLeafIndex<T[K]>;
 };
 
-// 배열 노드 - 인덱스로 요소에 내려간다(`props.items[2].title`). push/removeAt/setArray의 대상이다.
+// 배열 노드 - 인덱스로 요소에 내려간다(`props.items[2].title`). push/removeAt/swapAt/setArray의 대상이다.
 //
 // 요소 주소는 컴파일타임 offset이 아니라 런타임이 발급하고(alloc/free) push/removeAt으로 계속
 // 바뀌므로, 런타임은 인덱싱하는 그 순간에 요소 노드를 만든다. 여기 타입은 그 접근이 무엇을
@@ -43,17 +43,17 @@ type TLeafArray<TElement> = { readonly __arr: TElement } & {
 // 안 보인다.
 //
 // set 계열은 "그 자리에 이 값을 넣는다"로 묶이고 대상 종류가 접미사로 갈린다 - set은 leaf 한 칸,
-// setObject는 객체 노드, setArray는 배열 노드. push/removeAt만 요소 단위 조작이다.
+// setObject는 객체 노드, setArray는 배열 노드. push/removeAt/swapAt만 요소 단위 조작이다.
 //
 // setObject/setArray를 오버로드하지 않고 이름을 나눈 이유 - 대상이 leafIndex 한 칸이 아니라
 // (객체는 여러 leaf의 묶음, 배열은 요소 뭉치) 호출부에서 무엇을 갈아끼우는지가 이름에 드러나야
 // 한다. setObject의 값은 Partial<T>인데도 병합이 아니라 교체다 - 안 준 필드는 undefined가 된다
 // (obj = {..} 대입과 같은 뜻).
 //
-// 배열 조작(push/removeAt/setArray)은 대상이 TLeafArray여야 한다 - leaf나 객체 노드를 넘기면
-// 타입에서 걸리고, 요소 타입도 그 배열에 묶인다. removeAt은 요소 타입을 안 쓰지만 그래도 제네릭을
-// 받는다 - TLeafArray<unknown>으로 두면 인덱스 시그니처가 TLeafIndex<unknown>으로 굳어 객체 요소
-// 배열이 안 들어간다(TLeafArray는 요소 타입에 따라 인덱싱 결과가 갈리는 매핑이다).
+// 배열 조작(push/removeAt/swapAt/setArray)은 대상이 TLeafArray여야 한다 - leaf나 객체 노드를 넘기면
+// 타입에서 걸리고, 요소 타입도 그 배열에 묶인다. removeAt/swapAt은 요소 타입을 안 쓰지만 그래도
+// 제네릭을 받는다 - TLeafArray<unknown>으로 두면 인덱스 시그니처가 TLeafIndex<unknown>으로 굳어 객체
+// 요소 배열이 안 들어간다(TLeafArray는 요소 타입에 따라 인덱싱 결과가 갈리는 매핑이다).
 //
 // 제네릭 이름을 자리별로 나눈 이유 - get의 것은 leaf가 담은 값(TValue)이고 push의 것은 그 배열의
 // 요소(TElement)라 뜻이 다르다. 한 이름으로 두면 나란히 놓였을 때 같은 것으로 읽힌다.
@@ -73,5 +73,6 @@ type THandler<TData, TProps, TCtx, TLoopIndices, TStore> = (
     setArray: <TElement>(k: TLeafArray<TElement>, v: TElement[]) => void;
     push: <TElement>(k: TLeafArray<TElement>, v: TElement) => void;
     removeAt: <TElement>(k: TLeafArray<TElement>, i: number) => void;
+    swapAt: <TElement>(k: TLeafArray<TElement>, i: number, j: number) => void;
   } & TLoopIndices,
 ) => void | Promise<void>;

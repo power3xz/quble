@@ -539,7 +539,7 @@ mod tests {
         assert!(out.contains("type THandler<TData, TProps, TCtx, TLoopIndices, TStore> = ("));
     }
 
-    /// 핸들러 params에 배열 조작 3종이 있다. 대상을 `TLeafIndex<TElement[]>`로 받아야 배열 아닌
+    /// 핸들러 params에 배열 조작 4종이 있다. 대상을 `TLeafIndex<TElement[]>`로 받아야 배열 아닌
     /// leaf가 걸리고 요소 타입도 그 배열에 묶인다 - 제약이 실제로 서는지는 dts-types.test.ts.
     #[test]
     fn prelude_has_array_ops() {
@@ -551,6 +551,9 @@ mod tests {
         "#);
         assert!(out.contains("push: <TElement>(k: TLeafArray<TElement>, v: TElement) => void;"));
         assert!(out.contains("removeAt: <TElement>(k: TLeafArray<TElement>, i: number) => void;"));
+        assert!(out.contains(
+            "swapAt: <TElement>(k: TLeafArray<TElement>, i: number, j: number) => void;"
+        ));
         assert!(
             out.contains("setArray: <TElement>(k: TLeafArray<TElement>, v: TElement[]) => void;")
         );
