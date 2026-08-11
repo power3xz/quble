@@ -56,6 +56,7 @@
     "@types/node": "^26.1.2",
     "@types/vscode": "^1.125.0",
     "@vscode/vsce": "^3.9.2",
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "quble-wasm-compiler": "*"
   }
 }

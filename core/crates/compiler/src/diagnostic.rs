@@ -58,6 +58,37 @@ pub fn format(path: &str, src: &str, range: Option<SrcRange>, message: &str) -> 
     )
 }
 
+/// 에디터가 쓰는 위치. 라인/컬럼 모두 **0부터** 세고 컬럼은 **UTF-16 code unit** 수다 -
+/// LSP와 VSCode `Position`의 기준이다.
+///
+/// `SrcLocation`과 기준이 셋 다 달라 따로 둔다. 이모지(BMP 밖)는 UTF-16으로 2, 문자로 1이다.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Utf16Location {
+    pub line: u32,
+    pub column: u32,
+}
+
+/// 바이트 오프셋을 에디터 기준 위치로 환산한다(0-based, 컬럼은 UTF-16 code unit).
+/// offset이 소스 길이면(EOF) 마지막 줄의 끝을 가리킨다.
+pub fn locate_utf16(src: &str, offset: u32) -> Utf16Location {
+    let offset = offset as usize;
+    let mut line = 0;
+    let mut column = 0;
+    for (i, c) in src.char_indices() {
+        if i >= offset {
+            break;
+        }
+        match c {
+            '\n' => {
+                line += 1;
+                column = 0;
+            }
+            _ => column += c.len_utf16() as u32,
+        }
+    }
+    Utf16Location { line, column }
+}
+
 /// 바이트 오프셋을 라인/컬럼(1-based, 컬럼은 문자 수)으로 환산한다.
 /// offset이 소스 길이면(EOF) 마지막 줄의 끝을 가리킨다.
 fn locate(src: &str, offset: u32) -> SrcLocation {
@@ -198,6 +229,41 @@ mod tests {
         // 캐럿은 소스 끝 자리에 한 칸. 빈 구간이라 폭이 0이 될 수 있는데 최소 1로 올린다.
         assert!(out.ends_with('^') && !out.ends_with("^^"), "{out}");
         assert_eq!(out.lines().next().unwrap(), "a.qubc:1:14: error: 끝났다");
+    }
+
+    /// 에디터 기준은 0부터 센다 - CLI(1-based)와 한 칸씩 어긋난다.
+    #[test]
+    fn utf16_location_is_zero_based() {
+        let src = "ab\ncdef\ng";
+        assert_eq!(locate_utf16(src, 0), Utf16Location { line: 0, column: 0 });
+        assert_eq!(locate_utf16(src, 3), Utf16Location { line: 1, column: 0 });
+        assert_eq!(locate_utf16(src, 5), Utf16Location { line: 1, column: 2 });
+        assert_eq!(locate_utf16(src, 8), Utf16Location { line: 2, column: 0 });
+    }
+
+    /// 한글은 UTF-8로 3바이트지만 UTF-16으로는 1이다 - 바이트로 세면 3배로 튄다.
+    #[test]
+    fn utf16_column_counts_code_units_not_bytes() {
+        let src = r#"a "가나" b"#;
+        let b = src.find('b').unwrap();
+        assert_eq!(b, 11);
+        assert_eq!(
+            locate_utf16(src, b as u32),
+            Utf16Location { line: 0, column: 7 }
+        );
+    }
+
+    /// BMP 밖 문자(이모지)는 UTF-16으로 2칸이다 - 여기서 문자 수 기준과 갈린다.
+    #[test]
+    fn utf16_column_counts_surrogate_pair_as_two() {
+        let src = "a😀b";
+        let b = src.find('b').unwrap();
+        // 문자로는 2번째지만 UTF-16으로는 3번째다(이모지가 2칸).
+        assert_eq!(locate(src, b as u32), SrcLocation { line: 1, column: 3 });
+        assert_eq!(
+            locate_utf16(src, b as u32),
+            Utf16Location { line: 0, column: 3 }
+        );
     }
 
     /// 위치를 모르는 에러(codegen range None)는 파일명과 메시지만.

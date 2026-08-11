@@ -7,8 +7,9 @@ use crate::src_range::NodeRange;
 pub struct SourceFile {
     pub uses: Vec<Use>,
     /// `use './x.css'` - 이 파일이 참조하는 외부 리소스 경로(등장 순서). 이 파일의 모든
-    /// 컴포넌트가 공유한다(lazy build에서 컴포넌트가 그려질 때 로드).
-    pub resources: Vec<String>,
+    /// 컴포넌트가 공유한다(lazy build에서 컴포넌트가 그려질 때 로드). 못 찾으면 그 경로
+    /// 자리를 탓하므로 위치를 함께 든다.
+    pub resources: Vec<Ident>,
     pub comps: Vec<Component>,
 }
 
@@ -26,10 +27,21 @@ pub struct Ident {
 }
 
 /// `use A, B from "path"` - path 소스에서 이름 A/B를 현재 스코프로 가져온다.
+///
+/// 세 자리가 각각 다른 에러를 탓한다.
+///
+/// ```text
+/// use Card, Tag from "./card.qubc"
+///     ^^^^                            MissingExport - 그 파일에 없는 이름
+///                     ^^^^^^^^^^^^^   NotFound - 못 찾은 경로
+/// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^    Cycle - 이 use 자체가 순환을 만듦
+/// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct Use {
-    pub names: Vec<String>,
-    pub path: String,
+    pub names: Vec<Ident>,
+    pub path: Ident,
+    /// `use`부터 경로 끝까지.
+    pub range: NodeRange,
 }
 
 #[derive(Debug, PartialEq)]
@@ -64,12 +76,20 @@ pub enum Type {
     Object(Vec<(String, Type)>), // 필드 선언 순서 보존(d.ts 방출 안정성)
     /// `general: Section` - 다른 컴포넌트(대문자명)의 props를 타입으로 참조. expand가
     /// 평탄화 후 그 컴포넌트 props를 Object로 환원해 치환한다(codegen엔 Ref가 안 남는다).
-    Ref(String),
+    /// 이름이 자기 자리를 든다 - 그런 컴포넌트가 없거나(UnknownType) 순환하면(TypeCycle)
+    /// 여기를 탓한다.
+    Ref(Ident),
     /// `Omit<Section, 'title'>` - 안쪽 타입(Object로 환원됨)의 필드에서 나열한 키를 뺀다.
     /// expand가 안쪽을 먼저 풀고 필터해 Object로 치환한다. 유틸 타입은 Ref처럼 codegen 전에 사라진다.
-    Omit(Box<Type>, Vec<String>),
+    ///
+    /// ```text
+    /// Omit<Section, 'title'>
+    ///               ^^^^^^^   UnknownKey - 안쪽에 없는 키
+    /// ^^^^^^^^^^^^^^^^^^^^^   NonObjectUtil - 안쪽이 객체가 아니라 표기가 성립 안 함
+    /// ```
+    Omit(Box<Type>, Vec<Ident>, NodeRange),
     /// `Pick<Section, 'title'>` - 안쪽 타입 필드에서 나열한 키만 고른다(Omit의 반대).
-    Pick(Box<Type>, Vec<String>),
+    Pick(Box<Type>, Vec<Ident>, NodeRange),
 }
 
 /// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.
@@ -106,12 +126,13 @@ pub enum Node {
     Var(VarRef),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
+    /// prop명이 자기 자리를 든다 - 자식에 없는 이름을 넘기면(UnknownArg) 그 이름을 탓한다.
     /// alias = use-site 별칭(`Alias: Comp(...)`). 있으면 이게 fullname path 세그먼트가 되고,
     /// 없으면 type-name을 그대로 쓴다(#1.3 - alias 없는 동일 type-name은 의도적 공유).
     Component {
         alias: Option<String>,
         name: Ident,
-        args: Vec<(String, ArgValue)>,
+        args: Vec<(Ident, ArgValue)>,
         /// 자식 블록으로 넘긴 슬롯 콘텐츠. 빈 벡터면 self-close(`Comp( /)`) - 슬롯 안 채움.
         /// 무기명은 `SlotPlaceholderContent { name: None }` 하나, 기명은 이름별로 여럿.
         /// 채우는 순서는 무관 - codegen이 자식 선언 순서로 정규화한다.
@@ -122,6 +143,9 @@ pub enum Node {
     /// 선언 순서가 slot_placeholder_index(컴포넌트-로컬)이고, 사용쪽 SlotPlaceholderContent가 같은 공간을 쓴다.
     SlotPlaceholderDef {
         name: Option<Ident>,
+        /// `@slot(...)` 전체. 같은 자리를 두 번 선언했을 때 탓하는 곳으로, 무기명이라
+        /// 이름이 없어도 짚을 수 있게 노드가 자기 자리를 든다.
+        range: NodeRange,
     },
     /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop 참조(경로 허용,
     /// `gen.open`)이고 leaf여야 한다(표현식은 이후 단계). else_가 비어 있으면 else 없는 if.

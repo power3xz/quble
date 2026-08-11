@@ -127,6 +127,11 @@
   워크스페이스 members에서 빼고 exclude로 뒀다(크레이트 파일은 복구용으로 남김). quble 크레이트의
   render_source/render_with와 tests/end_to_end.rs(SSR 통합 테스트)도 제거했다.
 
+- **props가 전부 필수** - 자식이 선언한 prop을 하나라도 안 넘기면 `MissingArg`다(슬롯은 안
+  채워도 된다 - SYNTAX #3.3). 기본값이 있거나 없으면 안 그리는 prop을 표현할 방법이 없어
+  호출부가 매번 다 넘겨야 한다. 선택적 prop을 들이려면 문법(`tone?: string`), 타입 표기,
+  안 넘어온 값의 런타임 표현, d.ts 매핑이 함께 정해져야 한다.
+
 - **안 쓰는 `use`가 트리셰이킹 안 됨** - `use`로 import했지만 template에서 합성(RENDER)하지
   않는 컴포넌트가 qubb에 def로 포함된다. (재현: `components/profilecard.qubc`의 `Tag`는
   use만 하고 미사용인데, 컴파일 결과 qubb에 def로 들어간다.) 컴파일러가 도달성 분석 없이 use된

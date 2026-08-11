@@ -1,6 +1,9 @@
 // wasm 컴파일러(compiler-wasm 크레이트)의 JS 래퍼. extern "C" ABI를 감싸 문자열/바이트를 오간다.
 // 여기는 환경 중립 - .wasm을 얻는 방법만 갈리므로 그쪽은 browser.ts / node.ts가 맡는다.
 //
+// 인자/결과 타입(T*)의 원본이라 exports에 열어 둔다 - 소비자는 로더를 자기 환경에서 고르고
+// 타입은 여기서 가져온다. 로더가 타입을 재수출하면 진입점마다 목록을 맞춰야 해 어긋난다.
+//
 // 메모리 주의: 힙이 자라면(memory.grow) 기존 ArrayBuffer가 detach되고 새것으로 바뀐다. 뷰를
 // 캐싱하면 그 뒤로 빈 배열이 되므로 매번 새로 만든다. 특히 결과 읽기는 컴파일이 끝난 뒤에 떠야 한다.
 
@@ -12,6 +15,7 @@ type TWasmExports = {
   qb_reset: () => void;
   qb_add_file: (pathPtr: number, pathLen: number, srcPtr: number, srcLen: number) => void;
   qb_compile: (entryPtr: number, entryLen: number) => number;
+  qb_diagnose: (entryPtr: number, entryLen: number) => number;
   qb_handler_names: (entryPtr: number, entryLen: number) => number;
   qb_handlers_dts: (entryPtr: number, entryLen: number) => number;
   qb_out_ptr: () => number;
@@ -30,6 +34,20 @@ export type TCompileResult =
 
 /** 성공이면 d.ts 텍스트, 실패면 진단 텍스트. */
 export type TDtsResult = { ok: true; dts: string } | { ok: false; diagnostic: string };
+
+/** 소스 안 한 지점. line/column 모두 0부터 세고 column은 UTF-16 code unit이다(VSCode 기준). */
+export type TPosition = { line: number; column: number };
+
+/**
+ * 컴파일 에러 하나. path는 에러가 난 파일로, 엔트리가 아니라 `use`로 딸려 온 파일일 수 있다
+ * (files의 키와 같은 이름).
+ */
+export type TDiagnostic = {
+  path: string;
+  message: string;
+  start: TPosition;
+  end: TPosition;
+};
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -104,6 +122,20 @@ export const makeCompiler = (instance: WebAssembly.Instance) => {
   };
 
   /**
+   * entry를 컴파일해 진단을 낸다. 성공이면 null - 에디터가 밑줄을 지우는 신호다.
+   *
+   * 컴파일러가 첫 에러에서 멈추므로 진단은 하나뿐이다(여러 개는 에러 복구가 전제).
+   * 산출물은 버리므로 편집 중에 반복해 불러도 된다.
+   *
+   * @param files  경로 -> 소스 (.qubc/.css)
+   * @param entry  엔트리 경로(files의 키)
+   */
+  const diagnose = (files: TSourceFiles, entry: string): TDiagnostic | null => {
+    const { status, out } = run(wasm.qb_diagnose, files, entry);
+    return status === 0 ? null : (JSON.parse(decoder.decode(out)) as TDiagnostic);
+  };
+
+  /**
    * entry를 마운트 진입점으로 봤을 때 핸들러가 가질 수 있는 fullname 목록(트리 순서).
    * 컴파일(codegen)까지 가지 않고 합성 트리만 걸으므로 편집 중에 반복해 불러도 된다.
    * 소스가 깨져 이름을 못 내면 빈 배열 - 진단은 컴파일 쪽이 낸다.
@@ -133,7 +165,7 @@ export const makeCompiler = (instance: WebAssembly.Instance) => {
     return status === 0 ? { ok: true, dts: text } : { ok: false, diagnostic: text };
   };
 
-  return { compile, handlerNames, handlersDts };
+  return { compile, diagnose, handlerNames, handlersDts };
 };
 
 /** 컴파일러 핸들 - 환경별 로더가 돌려주는 것. */

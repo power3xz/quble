@@ -11,8 +11,10 @@ mod lexer;
 mod parse;
 mod src_range;
 
+pub use diagnostic::{locate_utf16, Utf16Location};
 pub use dts::{handler_names, handlers_dts, handlers_dts_from_path};
-pub use flatten::{FlattenError, SourceLoader};
+pub use flatten::{FlattenError, SourceLoader, TypeError, TypeErrorKind, UseError, UseErrorKind};
+pub use src_range::SrcRange;
 
 use std::path::Path;
 
@@ -22,6 +24,9 @@ pub enum CompileError {
     /// codegen 에러도 어느 파일에서 났는지를 들고 온다(Sourced) - range는 에러가 난 그 파일의
     /// 바이트 오프셋이라, 엔트리 소스에 대고 세면 use한 파일의 에러가 엉뚱한 줄을 짚는다.
     Codegen(flatten::Sourced<codegen::CodegenError>),
+    /// 엔트리 파일을 못 읽음. 파일을 읽는 건 여기(compile_file/handlers_dts_from_path)라
+    /// flatten이 아니라 이 층의 에러다 - 소스가 없어 탓할 자리도 없다.
+    EntryNotFound(String),
 }
 
 /// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 - 빌드 파이프라인이 사이드맵으로
@@ -69,6 +74,25 @@ pub fn format_error(
     entry_src: &str,
     err: &CompileError,
 ) -> String {
+    let blamed = blame(entry_path, entry_src, err);
+    let shown = base_dir
+        .and_then(|dir| relative_to(dir, blamed.path))
+        .unwrap_or(blamed.path);
+    diagnostic::format(shown, blamed.src, blamed.range, &blamed.message)
+}
+
+/// 에러가 가리키는 파일과 그 안의 자리. `format_error`(CLI 텍스트)와 `diagnose`(에디터)가
+/// 공유한다 - 어느 파일을 탓하느냐는 출력 형태와 무관하다.
+struct Blamed<'a> {
+    path: &'a str,
+    src: &'a str,
+    /// None이면 소스에 탓할 자리가 없다. 엔트리 파일을 못 읽은 경우(소스 자체가 없다)와
+    /// 아직 위치를 안 붙인 flatten 에러(ISSUES.md)가 그렇다.
+    range: Option<SrcRange>,
+    message: String,
+}
+
+fn blame<'a>(entry_path: &'a str, entry_src: &'a str, err: &'a CompileError) -> Blamed<'a> {
     let (path, src, range) = match err {
         CompileError::Flatten(FlattenError::Lex(e)) => {
             (e.path.as_str(), e.src.as_str(), Some(e.err.range))
@@ -76,18 +100,61 @@ pub fn format_error(
         CompileError::Flatten(FlattenError::Parse(e)) => {
             (e.path.as_str(), e.src.as_str(), Some(e.err.range))
         }
-        // 나머지 flatten 에러는 소스 안 위치라는 개념이 없다(use 그래프/타입 참조 단위).
-        CompileError::Flatten(_) => (entry_path, entry_src, None),
-        CompileError::Codegen(e) => (e.path.as_str(), e.src.as_str(), e.err.range),
+        // use 줄 안의 자리를 안다 - 못 찾은 경로, 없는 이름, use 줄 전체(ast.rs `Use` 그림).
+        CompileError::Flatten(FlattenError::Use(e)) => {
+            (e.path.as_str(), e.src.as_str(), Some(e.err.range))
+        }
+        // prop 타입 표기 안의 자리를 안다 - 참조 이름, 키, 유틸 표기(ast.rs `Type` 그림).
+        CompileError::Flatten(FlattenError::Type(e)) => {
+            (e.path.as_str(), e.src.as_str(), Some(e.err.range))
+        }
+        // 아직 위치를 안 붙인 에러(ISSUES.md). 팔을 다 적어 두면 FlattenError에 variant를
+        // 더할 때 여기가 컴파일 에러로 잡힌다 - `_`로 받으면 조용히 첫 줄로 떨어진다.
+        CompileError::Flatten(FlattenError::DuplicateComponent(_)) => (entry_path, entry_src, None),
+        // codegen 에러는 전부 자리를 안다(codegen.rs CodegenError).
+        CompileError::Codegen(e) => (e.path.as_str(), e.src.as_str(), Some(e.err.range)),
+        // 엔트리를 못 읽었으니 소스가 없다 - 인자로 온 것도 빈 문자열이다.
+        CompileError::EntryNotFound(_) => (entry_path, entry_src, None),
     };
     let message = match err {
         CompileError::Flatten(e) => e.to_string(),
         CompileError::Codegen(e) => e.err.kind.to_string(),
+        CompileError::EntryNotFound(path) => format!("cannot read entry file `{path}`"),
     };
-    let shown = base_dir
-        .and_then(|dir| relative_to(dir, path))
-        .unwrap_or(path);
-    diagnostic::format(shown, src, range, &message)
+    Blamed {
+        path,
+        src,
+        range,
+        message,
+    }
+}
+
+/// 에디터가 밑줄을 그으려고 받는 진단. 위치는 **바이트 오프셋**(SrcRange)으로 둔다 -
+/// 라인/컬럼 환산은 기준이 소비처마다 갈려(src_range.rs) 여기서 정하지 않는다.
+/// `src`를 함께 내는 건 환산에 원본이 필요해서다.
+pub struct Diagnostic<'a> {
+    /// 에러가 난 파일. 엔트리가 아니라 `use`로 딸려 온 파일일 수 있다.
+    pub path: &'a str,
+    pub src: &'a str,
+    pub message: String,
+    /// None이면 탓할 자리를 모르는 에러(use 그래프/타입 참조 단위).
+    pub range: Option<SrcRange>,
+}
+
+/// 컴파일 에러를 에디터가 쓸 진단으로 만든다. `format_error`의 구조화 판으로, 같은 자리를
+/// 가리킨다 - 다른 건 사람이 읽는 텍스트로 합치느냐뿐이다.
+pub fn diagnose<'a>(
+    entry_path: &'a str,
+    entry_src: &'a str,
+    err: &'a CompileError,
+) -> Diagnostic<'a> {
+    let blamed = blame(entry_path, entry_src, err);
+    Diagnostic {
+        path: blamed.path,
+        src: blamed.src,
+        message: blamed.message,
+        range: blamed.range,
+    }
 }
 
 /// dir 아래에 있는 path를 dir 기준 상대경로로. 아래가 아니면 None(줄일 수 없으니 원본을 쓴다).
@@ -100,12 +167,7 @@ fn relative_to<'a>(dir: &str, path: &'a str) -> Option<&'a str> {
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
 /// 정규화한 절대경로로 해소한다(파일시스템 loader).
 pub fn compile_file(path: &str) -> Result<CompileOutput, CompileError> {
-    let not_found = || {
-        CompileError::Flatten(FlattenError::NotFound {
-            base: String::new(),
-            target: path.to_string(),
-        })
-    };
+    let not_found = || CompileError::EntryNotFound(path.to_string());
     let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
     let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
     compile_src(&entry.to_string_lossy(), &src, &fs_loader)
@@ -1131,7 +1193,7 @@ mod tests {
                         push_leaf_paths(&format!("{prefix}.{name}"), field_ty, out);
                     }
                 }
-                ast::Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+                ast::Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),
                 ast::Type::Omit(..) | ast::Type::Pick(..) => {
                     unreachable!("expand가 유틸 타입을 안 풀었다")
                 }
@@ -1219,41 +1281,72 @@ mod tests {
             "#,
             &(|_: &str, _: &str| None),
         );
+        let err = err.map(|_| ()).expect_err("실패해야 한다");
         assert!(matches!(
             err,
-            Err(CompileError::Flatten(FlattenError::UnknownKey(k))) if k == "nope"
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if matches!(&e.err.kind, TypeErrorKind::UnknownKey(k) if k == "nope")
         ));
+        // 탓할 자리는 그 키다 - 표기 전체가 아니라.
+        assert_eq!(type_error_span(&err), "'nope'");
     }
 
-    /// 없는 타입을 참조하면 UnknownType.
+    /// 유틸 타입의 안쪽이 객체가 아니면 NonObjectUtil - 표기 전체를 탓한다.
+    #[test]
+    fn prop_type_util_on_non_object_errors() {
+        let err = compile_src(
+            "entry",
+            r#"component C { props { s: Omit<string, 'nope'> } template { div( /) } }"#,
+            &(|_: &str, _: &str| None),
+        )
+        .map(|_| ())
+        .expect_err("실패해야 한다");
+        assert!(matches!(
+            err,
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if e.err.kind == TypeErrorKind::NonObjectUtil
+        ));
+        // 안쪽(string)만이 아니라 표기 전체 - 성립하지 않는 건 조합이다.
+        assert_eq!(type_error_span(&err), "Omit<string, 'nope'>");
+    }
+
+    /// 없는 타입을 참조하면 UnknownType - 그 이름을 탓한다.
     #[test]
     fn prop_type_ref_unknown_errors() {
         let err = compile_src(
             "entry",
             r#"component C { props { x: Nope } template { div( /) } }"#,
             &(|_: &str, _: &str| None),
-        );
+        )
+        .map(|_| ())
+        .expect_err("실패해야 한다");
         assert!(matches!(
             err,
-            Err(CompileError::Flatten(FlattenError::UnknownType(n))) if n == "Nope"
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if matches!(&e.err.kind, TypeErrorKind::UnknownType(n) if n == "Nope")
         ));
+        assert_eq!(type_error_span(&err), "Nope");
     }
 
-    /// 타입 참조가 순환하면 TypeCycle - 무한 전개를 막는다.
+    /// 타입 참조가 순환하면 TypeCycle - 무한 전개를 막는다. 고리를 닫은 참조를 탓한다.
     #[test]
     fn prop_type_ref_cycle_errors() {
-        let err = compile_src(
-            "entry",
-            r#"
-                component A { props { b: B } template { div( /) } }
-                component B { props { a: A } template { div( /) } }
-            "#,
-            &(|_: &str, _: &str| None),
-        );
+        let entry = r#"component A { props { b: B } template { div( /) } }
+component B { props { a: A } template { div( /) } }"#;
+        let err = compile_src("entry", entry, &(|_: &str, _: &str| None))
+            .map(|_| ())
+            .expect_err("실패해야 한다");
         assert!(matches!(
             err,
-            Err(CompileError::Flatten(FlattenError::TypeCycle(_)))
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if matches!(e.err.kind, TypeErrorKind::TypeCycle(_))
         ));
+        // A(b: B) -> B(a: A) -> A로 돌아와 b: B를 다시 만나 닫힌다 - 그 B를 짚는다.
+        assert_eq!(type_error_span(&err), "B");
+        assert_eq!(
+            type_error_range(&err).start as usize,
+            entry.find("b: B").expect("A의 b: B") + "b: ".len()
+        );
     }
 
     #[test]
@@ -1593,31 +1686,85 @@ mod tests {
         );
     }
 
-    /// loader가 경로를 못 찾으면 NotFound.
+    /// use 에러가 밑줄 칠 구간(테스트용). use 에러가 아니면 패닉.
+    fn use_error_range(err: &CompileError) -> SrcRange {
+        match err {
+            CompileError::Flatten(FlattenError::Use(e)) => e.err.range,
+            _ => panic!("use 에러여야 한다"),
+        }
+    }
+
+    /// 그 구간의 소스 텍스트. 소스는 에러가 들고 온 것을 쓴다 - 탓하는 파일이 엔트리가
+    /// 아닐 수 있어(use한 쪽) 엔트리에 대고 자르면 엉뚱한 데를 짚는다.
+    fn use_error_span(err: &CompileError) -> &str {
+        match err {
+            CompileError::Flatten(FlattenError::Use(e)) => {
+                &e.src[e.err.range.start as usize..e.err.range.end as usize]
+            }
+            _ => panic!("use 에러여야 한다"),
+        }
+    }
+
+    /// prop 타입 에러가 밑줄 칠 구간(테스트용). 타입 에러가 아니면 패닉.
+    fn type_error_range(err: &CompileError) -> SrcRange {
+        match err {
+            CompileError::Flatten(FlattenError::Type(e)) => e.err.range,
+            _ => panic!("타입 에러여야 한다"),
+        }
+    }
+
+    fn type_error_span(err: &CompileError) -> &str {
+        match err {
+            CompileError::Flatten(FlattenError::Type(e)) => {
+                &e.src[e.err.range.start as usize..e.err.range.end as usize]
+            }
+            _ => panic!("타입 에러여야 한다"),
+        }
+    }
+
+    /// loader가 경로를 못 찾으면 NotFound - 탓할 자리는 그 경로다.
     #[test]
     fn use_missing_path_errors() {
         let entry = r#"
             use Label from "./missing.qubc"
             component Card { template { Label( /) } }
         "#;
+        let err = compile_map(entry, &[]).expect_err("실패해야 한다");
         assert!(matches!(
-            compile_map(entry, &[]),
-            Err(CompileError::Flatten(FlattenError::NotFound { .. }))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::NotFound { .. })
         ));
+        assert_eq!(use_error_span(&err), r#""./missing.qubc""#);
     }
 
-    /// use 한 이름이 대상 소스에 없으면 MissingExport.
+    /// 리소스(css)를 못 찾아도 그 경로를 짚는다 - 컴포넌트 import와 같은 자리 규칙.
+    #[test]
+    fn missing_resource_blames_the_path() {
+        let entry = r#"
+            use "./gone.css"
+            component Card { template { div( /) } }
+        "#;
+        let err = compile_map(entry, &[]).expect_err("실패해야 한다");
+        assert_eq!(use_error_span(&err), r#""./gone.css""#);
+    }
+
+    /// use 한 이름이 대상 소스에 없으면 MissingExport. 에러는 대상 파일을 판 뒤 나지만
+    /// 탓할 자리는 use한 쪽의 그 이름이다 - 이름이 여럿이면 없는 그것만 짚는다.
     #[test]
     fn use_missing_export_errors() {
         let entry = r#"
-            use Nope from "./parts.qubc"
-            component Card { template { div( /) } }
+            use Label, Nope from "./parts.qubc"
+            component Card { template { Label( /) } }
         "#;
         let parts = r#"component Label { template { span( /) } }"#;
+        let err = compile_map(entry, &[("./parts.qubc", parts)]).expect_err("실패해야 한다");
         assert!(matches!(
-            compile_map(entry, &[("./parts.qubc", parts)]),
-            Err(CompileError::Flatten(FlattenError::MissingExport { .. }))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::MissingExport { .. })
         ));
+        assert_eq!(use_error_span(&err), "Nope");
     }
 
     /// 서로 다른 소스에 같은 이름의 컴포넌트가 있으면 DuplicateComponent.
@@ -1628,10 +1775,19 @@ mod tests {
             component Card { template { div( /) } }
         "#;
         let other = r#"component Card { template { span( /) } }"#;
+        let err = compile_map(entry, &[("./other.qubc", other)]).expect_err("실패해야 한다");
         assert!(matches!(
-            compile_map(entry, &[("./other.qubc", other)]),
-            Err(CompileError::Flatten(FlattenError::DuplicateComponent(_)))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::DuplicateComponent(_))
         ));
+        // 탓할 자리는 그 이름을 끌어온 use다 - 이 파일의 component 선언이 아니라.
+        // 둘 다 "Card"라 슬라이스로는 안 갈린다 - 시작 오프셋으로 못박는다.
+        assert_eq!(use_error_span(&err), "Card");
+        assert_eq!(
+            use_error_range(&err).start as usize,
+            entry.find("Card").expect("use의 Card가 먼저 나온다")
+        );
     }
 
     /// use 그래프에 순환이 있으면 Cycle. entry -> a -> entry.
@@ -1651,10 +1807,18 @@ mod tests {
             "./entry.qubc" => Some(("entry".to_string(), String::new())),
             _ => None,
         };
+        // CompileOutput은 Debug가 없어 expect_err에 못 쓴다 - 성공분은 버린다.
+        let err = compile_src("entry", entry, &loader)
+            .map(|_| ())
+            .expect_err("실패해야 한다");
         assert!(matches!(
-            compile_src("entry", entry, &loader),
-            Err(CompileError::Flatten(FlattenError::Cycle(_)))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::Cycle(_))
         ));
+        // 순환은 이 use 자체가 원인이라 줄 전체를 짚는다 - 경로만이 아니라. 탓하는 곳은
+        // 고리를 닫은 use(a.qubc가 entry를 도로 부르는 자리)지 엔트리의 use가 아니다.
+        assert_eq!(use_error_span(&err), r#"use Entry from "./entry.qubc""#);
     }
 
     /// 모듈의 컴포넌트 이름들을 정의 순서대로 뽑는다(테스트용).
@@ -2372,13 +2536,12 @@ mod tests {
         src[range.start as usize..range.end as usize].to_string()
     }
 
-    /// codegen 에러가 가리키는 소스 조각. 위치를 못 주는 에러(range None)면 None을 돌려준다.
-    fn codegen_error_snippet(src: &str) -> Option<String> {
+    /// codegen 에러가 가리키는 소스 조각. codegen 에러는 전부 자리를 안다.
+    fn codegen_error_snippet(src: &str) -> String {
         match compile(src) {
-            Err(CompileError::Codegen(e)) => e
-                .err
-                .range
-                .map(|r| src[r.start as usize..r.end as usize].to_string()),
+            Err(CompileError::Codegen(e)) => {
+                src[e.err.range.start as usize..e.err.range.end as usize].to_string()
+            }
             other => panic!("codegen 에러를 기대했다: {:?}", other.map(|_| ())),
         }
     }
@@ -2524,7 +2687,7 @@ mod tests {
     fn codegen_error_points_at_unknown_prop() {
         // props에 없는 `nope`를 보간했다 - 그 참조를 가리켜야 한다.
         let src = r#"component C { props { title: string } template { div() { {nope} } } }"#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
+        assert_eq!(codegen_error_snippet(src), "nope");
     }
 
     /// 경로 참조는 root부터 끝까지 통째로 - `user`만 가리키면 어느 필드가 문제인지 안 보인다.
@@ -2536,7 +2699,7 @@ mod tests {
               template { div() { {user.nope} } }
             }
         "#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("user.nope"));
+        assert_eq!(codegen_error_snippet(src), "user.nope");
     }
 
     /// 값 자리에 객체가 오면(NotLeaf) 그 참조를 가리킨다.
@@ -2548,7 +2711,7 @@ mod tests {
               template { div() { {user} } }
             }
         "#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("user"));
+        assert_eq!(codegen_error_snippet(src), "user");
     }
 
     /// 단축형 payload(`{ title }`)도 그 이름이 곧 참조라 자리를 가리킨다.
@@ -2560,18 +2723,28 @@ mod tests {
               template { div(@click:PICK /) }
             }
         "#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
+        assert_eq!(codegen_error_snippet(src), "nope");
     }
 
-    /// 구간이 없는 자리는 None - 가짜 위치로 꾸미지 않는다. 안 넘긴 prop이 그렇다
-    /// (없는 것은 소스에 자리가 없다).
+    /// 무기명 슬롯도 자리를 안다 - 탓할 이름이 없으면 `@slot()` 노드 전체를 짚는다.
     #[test]
-    fn codegen_error_without_range_is_none() {
+    fn duplicate_anonymous_slot_placeholder_points_at_the_node() {
         let src = r#"
-            component C { props { a: string } template { div() { "x" } } }
+            component C { template { @slot() @slot() } }
             component D { template { C( /) } }
         "#;
-        assert_eq!(codegen_error_snippet(src), None);
+        assert_eq!(codegen_error_snippet(src), "@slot()");
+    }
+
+    /// 자식에 없는 슬롯을 무기명으로 채우면 합성 호출을 짚는다 - "이 컴포넌트는 자식 블록을
+    /// 받지 않는다"가 곧 그 에러다.
+    #[test]
+    fn unknown_anonymous_slot_placeholder_points_at_the_composition() {
+        let src = r#"
+            component C { template { p() { "x" } } }
+            component D { template { C() { span() { "y" } } } }
+        "#;
+        assert_eq!(codegen_error_snippet(src), "C");
     }
 
     // -- 진단 텍스트(format_error) --------------------------------------
@@ -2607,6 +2780,106 @@ mod tests {
     fn diagnostic_uses_file_the_error_carries() {
         let out = diagnostic_of("component C { oops { } }");
         assert!(out.starts_with("entry:1:15: error: "), "{out}");
+    }
+
+    /// diagnose는 텍스트로 합치기 전의 것을 그대로 낸다 - range는 바이트 오프셋이고,
+    /// 소스에서 잘라내면 밑줄 칠 구간이 나온다.
+    #[test]
+    fn diagnose_gives_byte_range_into_the_source() {
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}";
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let d = diagnose("entry", src, &err);
+
+        assert_eq!(d.path, "entry");
+        assert_eq!(d.message, "no field `nope` on prop `user`");
+        let range = d.range.expect("자리를 알아야 한다");
+        assert_eq!(
+            &d.src[range.start as usize..range.end as usize],
+            "user.nope"
+        );
+    }
+
+    /// use한 파일의 에러는 그 파일의 경로/소스를 낸다 - 환산할 원본이 엔트리가 아니어야
+    /// 에디터가 맞는 파일에 밑줄을 긋는다.
+    #[test]
+    fn diagnose_carries_the_used_file_source() {
+        let entry = "use Column from \"./column.qubc\"\ncomponent Board {\n  props { t: { label: string } }\n  template { Lane: Column(name={t} /) }\n}";
+        let used = "component Column {\n  props { name: { label: string } }\n  template { p() { {name.nope} } }\n}";
+
+        let err = compile_map(entry, &[("./column.qubc", used)]).expect_err("실패해야 한다");
+        let d = diagnose("entry", entry, &err);
+
+        assert_eq!(d.path, "./column.qubc");
+        assert_eq!(d.src, used);
+        // range는 그 파일 기준이라 엔트리가 아니라 used에서 잘라야 맞는다.
+        let range = d.range.expect("자리를 알아야 한다");
+        assert_eq!(&used[range.start as usize..range.end as usize], "name.nope");
+    }
+
+    /// 위치를 아는 에러는 종류를 가리지 않고 diagnose가 range를 실어야 한다.
+    ///
+    /// 회귀: blame이 `CompileError::Flatten(_)` 와일드카드로 받고 있어, 컴파일러가 위치를
+    /// 붙인 뒤에도 타입 에러만 조용히 첫 줄로 떨어졌다(단위 테스트는 FlattenError를 직접 봐서
+    /// 안 걸렸다). 종류마다 밑줄 칠 텍스트를 확인한다.
+    #[test]
+    fn diagnose_carries_range_for_every_located_error() {
+        let cases: &[(&str, &str)] = &[
+            // lex/parse
+            ("component C { oops { } }", "oops"),
+            // use 줄
+            (
+                "use Nope from \"./x.qubc\"\ncomponent C { template { div( /) } }",
+                "\"./x.qubc\"",
+            ),
+            // prop 타입 표기
+            (
+                "component C {\n  props { x: Nope }\n  template { div( /) }\n}",
+                "Nope",
+            ),
+            (
+                "component C {\n  props { s: Omit<string, 'a'> }\n  template { div( /) }\n}",
+                "Omit<string, 'a'>",
+            ),
+            // codegen
+            (
+                "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}",
+                "user.nope",
+            ),
+        ];
+
+        for (src, want) in cases {
+            let err = compile_map(src, &[]).expect_err("실패해야 한다");
+            let d = diagnose("entry", src, &err);
+            let range = d
+                .range
+                .unwrap_or_else(|| panic!("자리를 알아야 한다: {}", d.message));
+            assert_eq!(
+                &d.src[range.start as usize..range.end as usize],
+                *want,
+                "{}",
+                d.message
+            );
+        }
+    }
+
+    /// 진단의 range를 에디터 기준으로 환산하면 그 자리가 나온다 - 0-based/UTF-16.
+    /// 한글이 앞선 줄이라 바이트로 셌다면 컬럼이 튄다.
+    #[test]
+    fn diagnose_range_converts_to_editor_position() {
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { \"가나다\" {user.nope} } }\n}";
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let d = diagnose("entry", src, &err);
+        let range = d.range.expect("자리를 알아야 한다");
+
+        let start = locate_utf16(d.src, range.start);
+        // 3번째 줄(0-based로 2). 한글 3자는 UTF-16으로 3칸이라 바이트(9칸)와 다르다.
+        assert_eq!(start.line, 2);
+        let line = d.src.lines().nth(2).unwrap();
+        let expected: u32 = line[..line.find("user.nope").unwrap()]
+            .chars()
+            .map(|c| c.len_utf16() as u32)
+            .sum();
+        assert_eq!(start.column, expected);
     }
 
     /// use한 파일에서 난 codegen 에러는 엔트리가 아니라 그 파일을 가리킨다.
@@ -2650,14 +2923,37 @@ mod tests {
         assert!(out.starts_with("./c.qubc:43:"), "{out}");
     }
 
-    /// 위치를 모르는 에러(range None)는 첫 줄만 - 소스 줄과 캐럿이 안 붙는다.
+    /// 자식이 선언 안 한 prop을 넘기면 그 이름을 가리킨다. 넘긴 것 검사가 빠진 것보다
+    /// 먼저다 - 오타를 냈으면 "title이 빠졌다"보다 그 오타를 짚는 게 낫다.
     #[test]
-    fn diagnostic_without_range_has_no_snippet() {
-        // 안 넘긴 prop은 소스에 자리가 없다 - 없는 것의 위치는 가리킬 수 없어 첫 줄만 난다.
+    fn diagnostic_points_at_the_unknown_arg_name() {
+        let src = "component Card { props { title: string } template { p() { {title} } } }\ncomponent D { props { x: string } template { Card(nope={x} /) } }";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "entry:2:51: error: `Card` has no prop `nope`",
+                " 2 | component D { props { x: string } template { Card(nope={x} /) } }",
+                "   |                                                   ^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 안 넘긴 prop은 빠진 것이라 소스에 자리가 없다 - 대신 그 합성 호출을 가리킨다.
+    #[test]
+    fn diagnostic_points_at_the_composition_missing_a_prop() {
         let out = diagnostic_of(
             "component C { props { a: string } template { div() { \"x\" } } }\ncomponent D { template { C( /) } }",
         );
-        assert_eq!(out, "entry: error: `C` has no prop `a`");
+        assert_eq!(
+            out,
+            [
+                "entry:2:26: error: `C` requires prop `a`",
+                " 2 | component D { template { C( /) } }",
+                "   |                          ^",
+            ]
+            .join("\n")
+        );
     }
 
     /// prop을 가리는 @for 회차변수는 그 변수 이름을 가리킨다.
@@ -2741,11 +3037,45 @@ mod tests {
         assert_eq!(
             diagnostic_of(src),
             [
-                "entry:2:24: error: `Inner` declares no slot `Sidebar` (`@slot(Sidebar)`)",
+                "entry:2:24: error: `Inner` only takes named slots: `Header`",
                 " 2 |   template { Inner() { Sidebar << p( /) } }",
                 "   |                        ^^^^^^^",
             ]
             .join("\n")
+        );
+    }
+
+    /// 슬롯 에러 메시지는 없는 것이 아니라 **쓸 수 있는 것**을 말한다 - 고칠 방법이 문장
+    /// 안에 있어야 한다. 자식이 무엇을 선언했느냐로 셋이 갈린다.
+    #[test]
+    fn unknown_slot_placeholder_message_says_what_is_taken() {
+        let message = |src: &str| {
+            diagnostic_of(src)
+                .lines()
+                .next()
+                .unwrap()
+                .split_once("error: ")
+                .unwrap()
+                .1
+                .to_string()
+        };
+
+        // 슬롯이 아예 없다 - 대안이 없으니 할 일을 알려준다.
+        assert_eq!(
+            message(
+                "component O { template { I() { p( /) } } }\ncomponent I { template { span( /) } }"
+            ),
+            "`I` has no slot: use self-close (`I( /)`)"
+        );
+        // 선언한 게 무기명뿐인데 기명으로 채웠다.
+        assert_eq!(
+            message("component O { template { I() { H << p( /) } } }\ncomponent I { template { @slot() } }"),
+            "`I` only takes unnamed slot content"
+        );
+        // 기명이 있는데 무기명으로 채웠다 - 이름을 보여줘야 그걸로 고친다.
+        assert_eq!(
+            message("component O { template { I() { p( /) } } }\ncomponent I { template { @slot(H) @slot(F) } }"),
+            "`I` only takes named slots: `H`, `F`"
         );
     }
 

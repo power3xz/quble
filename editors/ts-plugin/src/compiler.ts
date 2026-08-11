@@ -4,7 +4,8 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { loadCompilerSync, type TSourceFiles } from "quble-wasm-compiler/node-sync.ts";
+import { loadCompilerSync } from "quble-wasm-compiler/node-sync.ts";
+import type { TSourceFiles } from "quble-wasm-compiler/wasm-compiler.ts";
 
 // `use "./x.css"` / `use Name from "./x.qubc"` - 둘 다 등록해야 한다(css도 loader를 탄다).
 const USE = /^\s*use\s+(?:\w+\s+from\s+)?"([^"]+)"/gm;

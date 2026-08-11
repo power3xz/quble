@@ -4,6 +4,7 @@
   "type": "module",
   "description": "wasm 컴파일러(compiler-wasm)의 JS 래퍼 - ABI 래핑은 환경 중립(wasm-compiler.ts), .wasm을 얻는 방법만 browser.ts/node.ts로 갈린다.",
   "exports": {
+    "./wasm-compiler.ts": "./wasm-compiler.ts",
     "./browser.ts": "./browser.ts",
     "./node.ts": "./node.ts",
     "./node-sync.ts": "./node-sync.ts"

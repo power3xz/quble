@@ -83,7 +83,7 @@ fn shown(token: Option<&Token>) -> String {
 /// 같은 키워드로 시작하지만 다른 곳에 모인다(전자는 use 그래프, 후자는 SourceFile.resources).
 enum UseDecl {
     Component(Use),
-    Resource(String),
+    Resource(Ident),
 }
 
 /// 한 소스를 파싱. 최상위 use 문(있으면 component 앞)과 컴포넌트 정의들을 모은다.
@@ -331,31 +331,47 @@ impl<'a> Parser<'a> {
     // 컴포넌트 import:  use IDENT (, IDENT)* from STRING
     // 리소스:           use STRING
     fn use_decl(&mut self) -> Result<UseDecl, ParseError> {
+        // `use`부터 경로 끝까지 걸치게 - 순환(Cycle)은 이 use 자체가 원인이라 줄 전체를 탓한다.
+        let start = self.here();
         self.keyword("use")?;
         // `use` 다음이 문자열이면 리소스(컴포넌트명/from 없음).
-        if let Some(Token::Str(path)) = self.peek() {
-            let path = path.clone();
-            self.next()?;
-            return Ok(UseDecl::Resource(path));
+        if matches!(self.peek(), Some(Token::Str(_))) {
+            return Ok(UseDecl::Resource(self.str_at()?));
         }
         let mut names = Vec::new();
-        names.push(self.ident()?);
+        names.push(self.ident_at()?);
         while matches!(self.peek(), Some(Token::Comma)) {
             self.next()?;
-            names.push(self.ident()?);
+            names.push(self.ident_at()?);
         }
         self.keyword("from")?;
-        let path = match self.next()? {
-            Token::Str(s) => s.clone(),
+        let path = self.str_at()?;
+        // 끝은 경로 토큰의 끝 - just_read()를 다시 부르면 그 사이에 무엇이 읽혔느냐에 매인다.
+        let range = NodeRange(SrcRange {
+            start: start.start,
+            end: path.range.0.end,
+        });
+        Ok(UseDecl::Component(Use { names, path, range }))
+    }
+
+    /// 문자열 리터럴과 그 자리를 함께. 경로가 곧 탓할 대상이라(NotFound) 위치가 필요하다.
+    fn str_at(&mut self) -> Result<Ident, ParseError> {
+        match self.next()? {
+            Token::Str(s) => {
+                let name = s.clone();
+                Ok(Ident {
+                    name,
+                    range: NodeRange(self.just_read()),
+                })
+            }
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "string path".into(),
                     got: format!("{got}"),
                 };
-                return Err(self.err_read(kind));
+                Err(self.err_read(kind))
             }
-        };
-        Ok(UseDecl::Component(Use { names, path }))
+        }
     }
 
     // component IDENT { [props { ... }] template { NODE* } }
@@ -437,22 +453,28 @@ impl<'a> Parser<'a> {
             }
             // 유틸 타입 `Omit<T, 'a' | 'b'>` / `Pick<T, ...>` - 안쪽 타입 필드를 가감.
             Some(Token::Ident(n)) if n == "Omit" || n == "Pick" => {
+                // `Omit`부터 `>`까지 걸치게 - 안쪽이 객체가 아니면(NonObjectUtil) 표기 전체를
+                // 탓한다. 안쪽 타입만 짚으려면 Type이 저마다 위치를 들어야 해 과하다.
+                let start = self.here();
                 let util = self.ident()?;
                 self.expect(&Token::Lt)?;
                 let inner = Box::new(self.type_expr()?);
                 self.expect(&Token::Comma)?;
                 let keys = self.type_keys()?;
                 self.expect(&Token::Gt)?;
+                let range = NodeRange(SrcRange {
+                    start: start.start,
+                    end: self.just_read().end,
+                });
                 if util == "Omit" {
-                    Type::Omit(inner, keys)
+                    Type::Omit(inner, keys, range)
                 } else {
-                    Type::Pick(inner, keys)
+                    Type::Pick(inner, keys, range)
                 }
             }
             // 대문자로 시작하는 식별자 = 다른 컴포넌트를 타입으로 참조(`general: Section`).
             Some(Token::Ident(n)) if n.starts_with(char::is_uppercase) => {
-                let name = self.ident()?;
-                Type::Ref(name)
+                Type::Ref(self.ident_at()?)
             }
             other => {
                 let kind = ParseErrorKind::Expected {
@@ -473,7 +495,7 @@ impl<'a> Parser<'a> {
 
     // KEYS = TYPEKEY ("|" TYPEKEY)*  - 유틸 타입의 키 목록(`'a'` 또는 `'a' | 'b'`).
     // 키는 작은따옴표 타입 키(Token::TypeKey) - 큰따옴표 값 리터럴과 구분한다.
-    fn type_keys(&mut self) -> Result<Vec<String>, ParseError> {
+    fn type_keys(&mut self) -> Result<Vec<Ident>, ParseError> {
         let mut keys = vec![self.type_key()?];
         while matches!(self.peek(), Some(Token::Pipe)) {
             self.next()?;
@@ -482,10 +504,17 @@ impl<'a> Parser<'a> {
         Ok(keys)
     }
 
-    // 타입 키(작은따옴표) 하나를 소비해 그 값을 돌려준다.
-    fn type_key(&mut self) -> Result<String, ParseError> {
+    // 타입 키(작은따옴표) 하나를 소비해 그 값과 자리를 돌려준다. 안쪽에 없는 키면(UnknownKey)
+    // 그 자리를 탓한다.
+    fn type_key(&mut self) -> Result<Ident, ParseError> {
         match self.next()? {
-            Token::TypeKey(s) => Ok(s.clone()),
+            Token::TypeKey(s) => {
+                let name = s.clone();
+                Ok(Ident {
+                    name,
+                    range: NodeRange(self.just_read()),
+                })
+            }
             other => {
                 let kind = ParseErrorKind::Expected {
                     want: "type key (`'...'`)".into(),
@@ -692,6 +721,8 @@ impl<'a> Parser<'a> {
     // 괄호는 필수다: 렉서가 줄바꿈을 안 넘겨 `@slot` 뒤 Ident가 슬롯명인지 다음 형제 노드인지
     // (`@slot` 다음 줄의 `p()`) 가릴 수 없다. 괄호가 그 경계를 준다(@if/@for와 같은 축).
     fn slot_node(&mut self) -> Result<Node, ParseError> {
+        // `@slot`부터 `)`까지 - 무기명은 탓할 이름이 없어 이 자리를 쓴다.
+        let start = self.here();
         self.expect(&Token::At(Directive::Slot))?;
         self.expect(&Token::LParen)?;
         let name = match self.peek() {
@@ -699,7 +730,13 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         self.expect(&Token::RParen)?;
-        Ok(Node::SlotPlaceholderDef { name })
+        Ok(Node::SlotPlaceholderDef {
+            name,
+            range: NodeRange(SrcRange {
+                start: start.start,
+                end: self.just_read().end,
+            }),
+        })
     }
 
     // @if ( IDENT ) { NODE* } [ @else { NODE* } ]
@@ -914,14 +951,14 @@ impl<'a> Parser<'a> {
 
     // RParen 전까지 `prop = {var}`(부모 변수) 또는 `prop = "lit"`(리터럴) 인자를 모은다.
     // 공백 구분(콤마 없음).
-    fn component_args(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
+    fn component_args(&mut self) -> Result<Vec<(Ident, ArgValue)>, ParseError> {
         let mut args = Vec::new();
         loop {
             match self.peek() {
                 // Slash = self-close 마커(args 끝). 여기서 멈춰 component_call이 처리한다.
                 Some(Token::RParen | Token::Slash(_)) | None => break,
                 Some(Token::Ident(_)) => {
-                    let prop = self.ident()?;
+                    let prop = self.ident_at()?;
                     self.expect(&Token::Eq)?;
                     // 값은 `{var}`(부모 변수, 슬롯 공유) 또는 리터럴(`"str"`, `42`, `true` - 독립 값).
                     let value = match self.peek() {

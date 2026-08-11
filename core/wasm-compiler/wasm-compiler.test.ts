@@ -130,3 +130,50 @@ component A {
   };
   assert.deepEqual(compiler.handlerNames(files, ENTRY), ["Kid.TAP"]);
 });
+
+test("컴파일이 되면 진단이 없다", () => {
+  assert.equal(compiler.diagnose(SIMPLE, ENTRY), null);
+});
+
+// 한글이 앞선 줄에서 컬럼을 본다 - JS 문자열 인덱스가 곧 UTF-16이라, indexOf가 준 자리와
+// 맞으면 에디터가 짚을 자리와 같다. 컴파일러가 바이트로 셌다면 한글 2자만큼 4칸 더 나간다.
+test("진단이 구간을 0-based/UTF-16으로 낸다", () => {
+  const line = `  template { p() { "가나" {nope} } }`;
+  const files = {
+    [ENTRY]: `component A {
+${line}
+}`,
+  };
+  const d = compiler.diagnose(files, ENTRY);
+
+  assert.equal(d?.path, ENTRY);
+  assert.match(d?.message ?? "", /nope/);
+  assert.deepEqual(d?.start, { line: 1, column: line.indexOf("nope") });
+  assert.deepEqual(d?.end, { line: 1, column: line.indexOf("nope") + "nope".length });
+});
+
+// 에디터가 밑줄을 그을 파일이 엔트리가 아닐 수 있다 - 그 이름으로 문서를 되찾는다.
+test("use한 파일의 에러는 그 파일을 가리킨다", () => {
+  const files = {
+    "child.qubc": `component Child {
+  template { p() { {nope} } }
+}`,
+    [ENTRY]: `use Child from "./child.qubc"
+component A { template { Child( /) } }`,
+  };
+  const d = compiler.diagnose(files, ENTRY);
+
+  assert.equal(d?.path, "child.qubc");
+  assert.equal(d?.start.line, 1);
+});
+
+// use 대상을 못 찾으면 그 경로를 짚는다 - 파일 첫 줄로 밀리지 않는다.
+test("못 찾은 use 경로에 밑줄이 걸린다", () => {
+  const line = `use B from "./nope.qubc"`;
+  const files = { [ENTRY]: `${line}\n${SIMPLE[ENTRY]}` };
+  const d = compiler.diagnose(files, ENTRY);
+
+  assert.deepEqual(d?.start, { line: 0, column: line.indexOf('"') });
+  assert.deepEqual(d?.end, { line: 0, column: line.length });
+  assert.match(d?.message ?? "", /nope\.qubc/);
+});
