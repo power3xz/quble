@@ -9,9 +9,10 @@
 //!   5. 성공이면 `qb_res_ptr()`/`qb_res_len()`으로 리소스 경로 목록(개행 구분, resId 순)을
 //!      읽는다. JS가 그 순서대로 Blob URL을 만들어 런타임 `compile(bytes, resources)`에 넘긴다.
 //!
-//! `qb_handler_names(entry)`(개행으로 이은 fullname)와 `qb_handlers_dts(entry)`(핸들러 타입
-//! .d.ts 텍스트)도 2번까지는 같은 순서를 쓰고 결과를 out 슬롯에 놓는다. 셋 다 슬롯을
-//! 공유하므로 번갈아 부르면 앞의 결과가 지워진다 - 읽고 나서 다음을 부른다.
+//! `qb_handler_names(entry)`(개행으로 이은 fullname), `qb_handlers_dts(entry)`(핸들러 타입
+//! .d.ts 텍스트), `qb_diagnose(entry)`(진단 JSON)도 2번까지는 같은 순서를 쓰고 결과를 out
+//! 슬롯에 놓는다. 넷 다 슬롯을 공유하므로 번갈아 부르면 앞의 결과가 지워진다 - 읽고 나서
+//! 다음을 부른다.
 //!
 //! 경로 의미론은 컴파일러가 모른다(flatten.rs 머리주석) - loader가 정규화 책임을 진다.
 //! playground의 파일 이름 공간은 평탄해서(탭 목록) `./` 접두어만 벗기면 등록된 이름과 맞는다.
@@ -151,6 +152,103 @@ pub unsafe extern "C" fn qb_compile(entry_ptr: *const u8, entry_len: usize) -> u
         state.res = res;
         status
     })
+}
+
+/// 등록된 파일 중 entry를 컴파일해 **진단만** 낸다. 0=성공(out 빔), 1=진단 있음(out=JSON).
+/// 산출물(qubb/리소스)은 버린다 - 에디터는 밑줄만 필요하고 편집 중에 반복해 부른다.
+///
+/// ```text
+/// {"path":"card.qubc","message":"...","start":{"line":2,"column":21},"end":{"line":2,"column":30}}
+/// ```
+///
+/// 라인/컬럼은 0-based, 컬럼은 UTF-16 code unit이다(VSCode `Position` 기준). 자리를 모르는
+/// 에러는 start/end 둘 다 0:0이라 파일 첫 줄에 걸린다.
+///
+/// # Safety
+/// entry_ptr은 entry_len 바이트만큼 읽을 수 있어야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn qb_diagnose(entry_ptr: *const u8, entry_len: usize) -> u32 {
+    let entry = match str_from(entry_ptr, entry_len) {
+        Some(path) => path.to_string(),
+        None => {
+            set_out(br#"{"path":"","message":"entry path is not valid UTF-8","start":{"line":0,"column":0},"end":{"line":0,"column":0}}"#.to_vec());
+            return 1;
+        }
+    };
+    STATE.with(|s| {
+        let files = s.borrow().files.clone();
+        let entry_src = match files.iter().find(|(p, _)| *p == entry) {
+            Some((_, src)) => src.clone(),
+            None => {
+                set_out(
+                    diagnostic_json(&entry, &format!("no such file: {entry}"), None, "")
+                        .into_bytes(),
+                );
+                return 1;
+            }
+        };
+        let loader = RegisteredFiles(&files);
+        match compiler::compile_src(&entry, &entry_src, &loader) {
+            Ok(_) => {
+                set_out(Vec::new());
+                0
+            }
+            Err(err) => {
+                let d = compiler::diagnose(&entry, &entry_src, &err);
+                set_out(diagnostic_json(d.path, &d.message, d.range, d.src).into_bytes());
+                1
+            }
+        }
+    })
+}
+
+/// 진단 하나를 JSON 객체 한 줄로. range가 None이면 파일 첫 줄(0:0)을 가리킨다 - 에디터는
+/// 걸 자리가 있어야 진단을 띄운다.
+///
+/// serde를 안 쓰는 건 필드가 넷뿐이라서다 - wasm 크기에 의존을 더할 값이 없다.
+fn diagnostic_json(
+    path: &str,
+    message: &str,
+    range: Option<compiler::SrcRange>,
+    src: &str,
+) -> String {
+    let (start, end) = match range {
+        Some(r) => (
+            compiler::locate_utf16(src, r.start),
+            compiler::locate_utf16(src, r.end),
+        ),
+        None => (
+            compiler::Utf16Location { line: 0, column: 0 },
+            compiler::Utf16Location { line: 0, column: 0 },
+        ),
+    };
+    format!(
+        r#"{{"path":"{}","message":"{}","start":{{"line":{},"column":{}}},"end":{{"line":{},"column":{}}}}}"#,
+        escape_json(path),
+        escape_json(message),
+        start.line,
+        start.column,
+        end.line,
+        end.column,
+    )
+}
+
+/// JSON 문자열 값에 넣을 수 있게 이스케이프한다. 에러 메시지에 따옴표가 들어간다
+/// (`unexpected "x"`). 제어문자는 \u 형식이 필수라 그것까지 덮는다.
+fn escape_json(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// 등록된 파일 중 entry의 핸들러 fullname 목록을 낸다. 0=성공(out=개행으로 이은 이름들),
@@ -393,6 +491,110 @@ mod tests {
         let text = String::from_utf8(out).expect("진단은 UTF-8이어야");
         assert!(text.contains("main.qubc"), "파일명이 있어야: {text}");
         assert!(text.contains("error:"), "error: 가 있어야: {text}");
+    }
+
+    /// 진단을 뽑고 (상태, JSON 텍스트)를 돌려준다. out 슬롯을 JS와 같은 방식으로 읽는다.
+    fn diagnose(entry: &str) -> (u32, String) {
+        let status = unsafe { qb_diagnose(entry.as_ptr(), entry.len()) };
+        let out = unsafe { std::slice::from_raw_parts(qb_out_ptr(), qb_out_len()) };
+        (
+            status,
+            String::from_utf8(out.to_vec()).expect("UTF-8이어야"),
+        )
+    }
+
+    /// 성공하면 진단이 없다 - 슬롯이 비고 상태가 0이다.
+    #[test]
+    fn diagnose_is_empty_on_success() {
+        reset();
+        add_file("main.qubc", HELLO);
+        let (status, out) = diagnose("main.qubc");
+        assert_eq!(status, 0);
+        assert_eq!(out, "");
+    }
+
+    /// 실패하면 JSON으로 파일/메시지/구간이 나온다. 구간은 0-based 라인/컬럼이다.
+    #[test]
+    fn diagnose_reports_position_as_json() {
+        reset();
+        add_file(
+            "main.qubc",
+            "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}",
+        );
+        let (status, out) = diagnose("main.qubc");
+        assert_eq!(status, 1);
+        assert_eq!(
+            out,
+            r#"{"path":"main.qubc","message":"no field `nope` on prop `user`","start":{"line":2,"column":22},"end":{"line":2,"column":31}}"#
+        );
+    }
+
+    /// use한 파일에서 난 에러는 그 파일을 가리킨다 - 엔트리가 아니라. 컬럼도 그 파일 기준이다.
+    #[test]
+    fn diagnose_points_at_the_used_file() {
+        reset();
+        add_file(
+            "main.qubc",
+            "use Column from \"./column.qubc\"\ncomponent Board {\n  props { t: { label: string } }\n  template { Lane: Column(name={t} /) }\n}",
+        );
+        add_file(
+            "column.qubc",
+            "component Column {\n  props { name: { label: string } }\n  template { p() { {name.nope} } }\n}",
+        );
+        let (status, out) = diagnose("main.qubc");
+        assert_eq!(status, 1);
+        // loader가 `./`를 벗겨 등록된 이름으로 맞추므로 진단도 그 이름을 쓴다 - 확장이
+        // 이 이름으로 파일을 되찾는다.
+        assert!(out.contains(r#""path":"column.qubc""#), "{out}");
+        assert!(out.contains(r#""start":{"line":2,"column":20}"#), "{out}");
+    }
+
+    /// 컬럼은 UTF-16이라 한글이 앞서도 안 튄다 - 바이트로 셌다면 3배가 된다.
+    #[test]
+    fn diagnose_column_counts_utf16() {
+        reset();
+        let line = r#"  template { div() { "가나다" {user.nope} } }"#;
+        add_file(
+            "main.qubc",
+            &format!("component C {{\n  props {{ user: {{ name: string }} }}\n{line}\n}}"),
+        );
+        let (status, out) = diagnose("main.qubc");
+        assert_eq!(status, 1);
+        // 밑줄은 `user.nope`에 걸린다. 그 앞을 UTF-16으로 세면 컬럼이 나온다 - 바이트로
+        // 셌다면 한글 3자 때문에 6칸 더 나간다.
+        let column: usize = line[..line.find("user.nope").unwrap()]
+            .chars()
+            .map(char::len_utf16)
+            .sum();
+        assert_eq!(column, 28);
+        assert!(
+            out.contains(&format!(r#""start":{{"line":2,"column":{column}}}"#)),
+            "{out}"
+        );
+    }
+
+    /// 자리를 모르는 에러(use 그래프 단위)도 걸 자리는 있어야 한다 - 파일 첫 줄.
+    #[test]
+    fn diagnose_falls_back_to_first_line() {
+        reset();
+        add_file(
+            "main.qubc",
+            "use Card from \"./nope.qubc\"\ncomponent Main { template { Card( /) } }",
+        );
+        let (status, out) = diagnose("main.qubc");
+        assert_eq!(status, 1);
+        assert!(out.contains(r#""start":{"line":0,"column":0}"#), "{out}");
+        assert!(out.contains(r#""end":{"line":0,"column":0}"#), "{out}");
+        assert!(out.contains("nope.qubc"), "못 찾은 대상이 나와야: {out}");
+    }
+
+    /// 메시지에 든 따옴표가 JSON을 깨지 않는다 - 이스케이프가 걸린다.
+    #[test]
+    fn diagnose_escapes_quotes_in_message() {
+        assert_eq!(
+            diagnostic_json("a\"b.qubc", "say \"hi\"\nnow", None, ""),
+            r#"{"path":"a\"b.qubc","message":"say \"hi\"\nnow","start":{"line":0,"column":0},"end":{"line":0,"column":0}}"#
+        );
     }
 
     /// use가 등록 안 된 파일을 가리키면 실패하고 그 사실이 진단에 나온다.
