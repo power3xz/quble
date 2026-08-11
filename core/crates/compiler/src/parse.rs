@@ -943,14 +943,14 @@ impl<'a> Parser<'a> {
 
     // RParen 전까지 `prop = {var}`(부모 변수) 또는 `prop = "lit"`(리터럴) 인자를 모은다.
     // 공백 구분(콤마 없음).
-    fn component_args(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
+    fn component_args(&mut self) -> Result<Vec<(Ident, ArgValue)>, ParseError> {
         let mut args = Vec::new();
         loop {
             match self.peek() {
                 // Slash = self-close 마커(args 끝). 여기서 멈춰 component_call이 처리한다.
                 Some(Token::RParen | Token::Slash(_)) | None => break,
                 Some(Token::Ident(_)) => {
-                    let prop = self.ident()?;
+                    let prop = self.ident_at()?;
                     self.expect(&Token::Eq)?;
                     // 값은 `{var}`(부모 변수, 슬롯 공유) 또는 리터럴(`"str"`, `42`, `true` - 독립 값).
                     let value = match self.peek() {

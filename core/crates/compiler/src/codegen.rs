@@ -21,6 +21,10 @@ pub enum CodegenErrorKind {
     UnknownComponent(String),
     /// 자식 prop명이 자식 props 선언에 없음 (use-site 바인딩 오류).
     UnknownArg { comp: String, prop: String },
+    /// 자식이 선언한 prop을 안 넘겼다. 지금은 props가 전부 필수라(SYNTAX #3.3 - 슬롯과 다르다)
+    /// 하나라도 빠지면 에러다. 선택적 prop이 생기면 그 표시가 없는 것에만 걸린다.
+    /// 빠진 것의 자리는 소스에 없어 합성 호출을 탓한다.
+    MissingArg { comp: String, prop: String },
     /// `@click:EVENT`이 이 컴포넌트 events에 없는 이벤트명을 가리킴.
     UnknownEvent(String),
     /// `@with Context`가 이 컴포넌트 contexts에 없는 컨텍스트명을 가리킴.
@@ -67,6 +71,9 @@ impl std::fmt::Display for CodegenErrorKind {
             }
             CodegenErrorKind::UnknownArg { comp, prop } => {
                 write!(f, "`{comp}` has no prop `{prop}`")
+            }
+            CodegenErrorKind::MissingArg { comp, prop } => {
+                write!(f, "`{comp}` requires prop `{prop}`")
             }
             CodegenErrorKind::UnknownEvent(name) => {
                 write!(f, "`{name}` is not declared in events")
@@ -762,21 +769,33 @@ fn emit_node(
                     CodegenErrorKind::UnknownComponent(name.name.clone()).at(name.range.0)
                 })?;
 
+            // 자식이 선언 안 한 prop을 넘겼으면 에러 - 오타가 조용히 사라지지 않게(슬롯과 같은 규칙).
+            // 빠진 것보다 먼저 본다 - 오타를 냈으면 빠졌다는 말보다 그 이름을 짚는 게 낫다.
+            for (arg_name, _) in args {
+                if !child_props.iter().any(|p| p.name == arg_name.name) {
+                    return Err(CodegenErrorKind::UnknownArg {
+                        comp: name.name.clone(),
+                        prop: arg_name.name.clone(),
+                    }
+                    .at(arg_name.range.0));
+                }
+            }
+
             // 자식 props 선언 순서대로 인자를 낸다. 변수 바인딩(`prop={x}`)은 부모 scope index을 싣는
             // PUSH_ARG, 리터럴(`prop="lit"`)은 상수풀 인덱스를 싣는 PUSH_ARG_LIT.
             // (지금은 전부 바인딩 가정 - 순서만으로 매핑.)
             for child_prop in child_props {
                 let arg_value = args
                     .iter()
-                    .find(|(p, _)| *p == child_prop.name)
+                    .find(|(p, _)| p.name == child_prop.name)
                     .map(|(_, v)| v)
-                    // 안 넘긴 인자라 가리킬 자리가 없다(빠진 것의 위치는 소스에 없다).
+                    // 빠진 것의 자리는 소스에 없다 - 합성 호출을 탓한다.
                     .ok_or_else(|| {
-                        CodegenErrorKind::UnknownArg {
+                        CodegenErrorKind::MissingArg {
                             comp: name.name.clone(),
                             prop: child_prop.name.clone(),
                         }
-                        .no_range()
+                        .at(name.range.0)
                     })?;
                 match arg_value {
                     ArgValue::Var(parent_var) => {

@@ -126,12 +126,13 @@ pub enum Node {
     Var(VarRef),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
+    /// prop명이 자기 자리를 든다 - 자식에 없는 이름을 넘기면(UnknownArg) 그 이름을 탓한다.
     /// alias = use-site 별칭(`Alias: Comp(...)`). 있으면 이게 fullname path 세그먼트가 되고,
     /// 없으면 type-name을 그대로 쓴다(#1.3 - alias 없는 동일 type-name은 의도적 공유).
     Component {
         alias: Option<String>,
         name: Ident,
-        args: Vec<(String, ArgValue)>,
+        args: Vec<(Ident, ArgValue)>,
         /// 자식 블록으로 넘긴 슬롯 콘텐츠. 빈 벡터면 self-close(`Comp( /)`) - 슬롯 안 채움.
         /// 무기명은 `SlotPlaceholderContent { name: None }` 하나, 기명은 이름별로 여럿.
         /// 채우는 순서는 무관 - codegen이 자식 선언 순서로 정규화한다.

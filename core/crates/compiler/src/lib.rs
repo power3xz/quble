@@ -2724,12 +2724,12 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
     }
 
-    /// 구간이 없는 자리는 None - 가짜 위치로 꾸미지 않는다. 안 넘긴 prop이 그렇다
-    /// (없는 것은 소스에 자리가 없다).
+    /// 구간이 없는 자리는 None - 가짜 위치로 꾸미지 않는다. 무기명 슬롯이 그렇다.
+    /// 이름이 곧 탓할 대상인데 무기명은 그 이름이 없다(ISSUES.md - `@slot()` 노드를 짚으면 된다).
     #[test]
     fn codegen_error_without_range_is_none() {
         let src = r#"
-            component C { props { a: string } template { div() { "x" } } }
+            component C { template { @slot() @slot() } }
             component D { template { C( /) } }
         "#;
         assert_eq!(codegen_error_snippet(src), None);
@@ -2911,14 +2911,37 @@ component B { props { a: A } template { div( /) } }"#;
         assert!(out.starts_with("./c.qubc:43:"), "{out}");
     }
 
-    /// 위치를 모르는 에러(range None)는 첫 줄만 - 소스 줄과 캐럿이 안 붙는다.
+    /// 자식이 선언 안 한 prop을 넘기면 그 이름을 가리킨다. 넘긴 것 검사가 빠진 것보다
+    /// 먼저다 - 오타를 냈으면 "title이 빠졌다"보다 그 오타를 짚는 게 낫다.
     #[test]
-    fn diagnostic_without_range_has_no_snippet() {
-        // 안 넘긴 prop은 소스에 자리가 없다 - 없는 것의 위치는 가리킬 수 없어 첫 줄만 난다.
+    fn diagnostic_points_at_the_unknown_arg_name() {
+        let src = "component Card { props { title: string } template { p() { {title} } } }\ncomponent D { props { x: string } template { Card(nope={x} /) } }";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "entry:2:51: error: `Card` has no prop `nope`",
+                " 2 | component D { props { x: string } template { Card(nope={x} /) } }",
+                "   |                                                   ^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 안 넘긴 prop은 빠진 것이라 소스에 자리가 없다 - 대신 그 합성 호출을 가리킨다.
+    #[test]
+    fn diagnostic_points_at_the_composition_missing_a_prop() {
         let out = diagnostic_of(
             "component C { props { a: string } template { div() { \"x\" } } }\ncomponent D { template { C( /) } }",
         );
-        assert_eq!(out, "entry: error: `C` has no prop `a`");
+        assert_eq!(
+            out,
+            [
+                "entry:2:26: error: `C` requires prop `a`",
+                " 2 | component D { template { C( /) } }",
+                "   |                          ^",
+            ]
+            .join("\n")
+        );
     }
 
     /// prop을 가리는 @for 회차변수는 그 변수 이름을 가리킨다.
