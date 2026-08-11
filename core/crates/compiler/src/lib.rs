@@ -1647,8 +1647,16 @@ mod tests {
         );
     }
 
-    /// use 에러가 밑줄 칠 구간(테스트용). 소스는 에러가 들고 온 것을 쓴다 - 탓하는 파일이
-    /// 엔트리가 아닐 수 있어(use한 쪽) 엔트리에 대고 자르면 엉뚱한 데를 짚는다.
+    /// use 에러가 밑줄 칠 구간(테스트용). use 에러가 아니면 패닉.
+    fn use_error_range(err: &CompileError) -> SrcRange {
+        match err {
+            CompileError::Flatten(FlattenError::Use(e)) => e.err.range,
+            _ => panic!("use 에러여야 한다"),
+        }
+    }
+
+    /// 그 구간의 소스 텍스트. 소스는 에러가 들고 온 것을 쓴다 - 탓하는 파일이 엔트리가
+    /// 아닐 수 있어(use한 쪽) 엔트리에 대고 자르면 엉뚱한 데를 짚는다.
     fn use_error_span(err: &CompileError) -> &str {
         match err {
             CompileError::Flatten(FlattenError::Use(e)) => {
@@ -1711,10 +1719,19 @@ mod tests {
             component Card { template { div( /) } }
         "#;
         let other = r#"component Card { template { span( /) } }"#;
+        let err = compile_map(entry, &[("./other.qubc", other)]).expect_err("실패해야 한다");
         assert!(matches!(
-            compile_map(entry, &[("./other.qubc", other)]),
-            Err(CompileError::Flatten(FlattenError::DuplicateComponent(_)))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::DuplicateComponent(_))
         ));
+        // 탓할 자리는 그 이름을 끌어온 use다 - 이 파일의 component 선언이 아니라.
+        // 둘 다 "Card"라 슬라이스로는 안 갈린다 - 시작 오프셋으로 못박는다.
+        assert_eq!(use_error_span(&err), "Card");
+        assert_eq!(
+            use_error_range(&err).start as usize,
+            entry.find("Card").expect("use의 Card가 먼저 나온다")
+        );
     }
 
     /// use 그래프에 순환이 있으면 Cycle. entry -> a -> entry.

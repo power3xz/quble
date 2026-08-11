@@ -90,6 +90,8 @@ pub enum UseErrorKind {
     NotFound { base: String, target: String },
     /// use 한 이름이 대상 소스에 정의돼 있지 않음.
     MissingExport { path: String, name: String },
+    /// 끌어온 이름이 이미 다른 파일에서 온 같은 이름과 부딪힘.
+    DuplicateComponent(String),
     /// use 그래프에 순환이 있음.
     Cycle(String),
 }
@@ -102,6 +104,9 @@ impl std::fmt::Display for UseErrorKind {
             }
             UseErrorKind::MissingExport { path, name } => {
                 write!(f, "`{path}` does not define `{name}`")
+            }
+            UseErrorKind::DuplicateComponent(name) => {
+                write!(f, "component `{name}` is defined in more than one file")
             }
             UseErrorKind::Cycle(path) => write!(f, "cycle in the use graph at `{path}`"),
         }
@@ -311,6 +316,16 @@ fn collect(
             .map_or(true, |w| w.names.iter().any(|n| n.name == name))
     };
 
+    // 이 이름을 끌어온 use 자리 - 충돌을 탓할 곳이다. 엔트리(want=None)는 use가 없어 None.
+    let pulled_in = |name: &str| {
+        want.as_ref().and_then(|w| {
+            w.names
+                .iter()
+                .find(|n| n.name == name)
+                .map(|n| (w.origin, n))
+        })
+    };
+
     // 나열한 이름이 이 파일에 실제로 있는지(오타 방지). 탓할 자리는 use한 쪽의 그 이름이다.
     if let Some(w) = &want {
         for wanted in w.names {
@@ -364,7 +379,19 @@ fn collect(
         }
         if let Some((_, origin)) = ctx.origin.iter().find(|(n, _)| n == &comp.name) {
             if origin != path {
-                return Err(FlattenError::DuplicateComponent(comp.name.clone()));
+                // 충돌은 이 파일을 끌어온 use의 그 이름을 탓한다 - 이름을 나른 자리다.
+                let kind = UseErrorKind::DuplicateComponent(comp.name.clone());
+                return Err(match pulled_in(&comp.name) {
+                    Some((origin, name)) => FlattenError::Use(Sourced::from_origin(
+                        origin,
+                        UseError {
+                            kind,
+                            range: name.range.0,
+                        },
+                    )),
+                    // 엔트리는 use가 없다. ctx.origin이 비어 시작하므로 실제로는 안 온다.
+                    None => FlattenError::DuplicateComponent(comp.name.clone()),
+                });
             }
             continue; // 같은 파일 같은 컴포넌트 - 이미 들어감.
         }
