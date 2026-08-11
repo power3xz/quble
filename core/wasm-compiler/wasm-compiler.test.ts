@@ -167,12 +167,13 @@ component A { template { Child( /) } }`,
   assert.equal(d?.start.line, 1);
 });
 
-// 위치를 모르는 에러도 걸 자리는 있어야 진단이 뜬다.
-test("자리를 모르는 에러는 첫 줄에 걸린다", () => {
-  const files = { [ENTRY]: `use B from "./nope.qubc"\n${SIMPLE[ENTRY]}` };
+// use 대상을 못 찾으면 그 경로를 짚는다 - 파일 첫 줄로 밀리지 않는다.
+test("못 찾은 use 경로에 밑줄이 걸린다", () => {
+  const line = `use B from "./nope.qubc"`;
+  const files = { [ENTRY]: `${line}\n${SIMPLE[ENTRY]}` };
   const d = compiler.diagnose(files, ENTRY);
 
-  assert.deepEqual(d?.start, { line: 0, column: 0 });
-  assert.deepEqual(d?.end, { line: 0, column: 0 });
+  assert.deepEqual(d?.start, { line: 0, column: line.indexOf('"') });
+  assert.deepEqual(d?.end, { line: 0, column: line.length });
   assert.match(d?.message ?? "", /nope\.qubc/);
 });

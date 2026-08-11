@@ -203,7 +203,8 @@ pub unsafe extern "C" fn qb_diagnose(entry_ptr: *const u8, entry_len: usize) -> 
 }
 
 /// 진단 하나를 JSON 객체 한 줄로. range가 None이면 파일 첫 줄(0:0)을 가리킨다 - 에디터는
-/// 걸 자리가 있어야 진단을 띄운다.
+/// 걸 자리가 있어야 진단을 띄운다. 위치를 아직 안 붙인 에러들(ISSUES.md)을 받는 방어라,
+/// 다 붙이면 이 분기는 사라진다.
 ///
 /// serde를 안 쓰는 건 필드가 넷뿐이라서다 - wasm 크기에 의존을 더할 값이 없다.
 fn diagnostic_json(
@@ -573,18 +574,26 @@ mod tests {
         );
     }
 
-    /// 자리를 모르는 에러(use 그래프 단위)도 걸 자리는 있어야 한다 - 파일 첫 줄.
+    /// use 대상을 못 찾으면 그 경로에 밑줄이 걸린다 - 첫 줄로 밀리지 않는다.
     #[test]
-    fn diagnose_falls_back_to_first_line() {
+    fn diagnose_blames_the_use_path() {
         reset();
+        let line = "use Card from \"./nope.qubc\"";
         add_file(
             "main.qubc",
-            "use Card from \"./nope.qubc\"\ncomponent Main { template { Card( /) } }",
+            &format!("{line}\ncomponent Main {{ template {{ Card( /) }} }}"),
         );
         let (status, out) = diagnose("main.qubc");
         assert_eq!(status, 1);
-        assert!(out.contains(r#""start":{"line":0,"column":0}"#), "{out}");
-        assert!(out.contains(r#""end":{"line":0,"column":0}"#), "{out}");
+        let start = line.find('"').unwrap();
+        assert!(
+            out.contains(&format!(r#""start":{{"line":0,"column":{start}}}"#)),
+            "{out}"
+        );
+        assert!(
+            out.contains(&format!(r#""end":{{"line":0,"column":{}}}"#, line.len())),
+            "{out}"
+        );
         assert!(out.contains("nope.qubc"), "못 찾은 대상이 나와야: {out}");
     }
 
