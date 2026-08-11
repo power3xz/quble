@@ -13,7 +13,7 @@ mod src_range;
 
 pub use diagnostic::{locate_utf16, Utf16Location};
 pub use dts::{handler_names, handlers_dts, handlers_dts_from_path};
-pub use flatten::{FlattenError, SourceLoader};
+pub use flatten::{FlattenError, SourceLoader, UseError, UseErrorKind};
 pub use src_range::SrcRange;
 
 use std::path::Path;
@@ -24,6 +24,9 @@ pub enum CompileError {
     /// codegen 에러도 어느 파일에서 났는지를 들고 온다(Sourced) - range는 에러가 난 그 파일의
     /// 바이트 오프셋이라, 엔트리 소스에 대고 세면 use한 파일의 에러가 엉뚱한 줄을 짚는다.
     Codegen(flatten::Sourced<codegen::CodegenError>),
+    /// 엔트리 파일을 못 읽음. 파일을 읽는 건 여기(compile_file/handlers_dts_from_path)라
+    /// flatten이 아니라 이 층의 에러다 - 소스가 없어 탓할 자리도 없다.
+    EntryNotFound(String),
 }
 
 /// 컴파일 산출물. 바이트코드와 리소스 사이드맵을 함께 낸다 - 빌드 파이프라인이 사이드맵으로
@@ -95,13 +98,20 @@ fn blame<'a>(entry_path: &'a str, entry_src: &'a str, err: &'a CompileError) -> 
         CompileError::Flatten(FlattenError::Parse(e)) => {
             (e.path.as_str(), e.src.as_str(), Some(e.err.range))
         }
-        // 나머지 flatten 에러는 소스 안 위치라는 개념이 없다(use 그래프/타입 참조 단위).
+        // use 줄 안의 자리를 안다 - 못 찾은 경로, 없는 이름, use 줄 전체(ast.rs `Use` 그림).
+        CompileError::Flatten(FlattenError::Use(e)) => {
+            (e.path.as_str(), e.src.as_str(), Some(e.err.range))
+        }
+        // 나머지 flatten 에러는 소스 안 위치라는 개념이 없다(타입 참조/중복 정의 단위).
         CompileError::Flatten(_) => (entry_path, entry_src, None),
         CompileError::Codegen(e) => (e.path.as_str(), e.src.as_str(), e.err.range),
+        // 엔트리를 못 읽었으니 소스가 없다 - 인자로 온 것도 빈 문자열이다.
+        CompileError::EntryNotFound(_) => (entry_path, entry_src, None),
     };
     let message = match err {
         CompileError::Flatten(e) => e.to_string(),
         CompileError::Codegen(e) => e.err.kind.to_string(),
+        CompileError::EntryNotFound(path) => format!("cannot read entry file `{path}`"),
     };
     Blamed {
         path,
@@ -149,12 +159,7 @@ fn relative_to<'a>(dir: &str, path: &'a str) -> Option<&'a str> {
 /// 파일 경로로 컴파일. 엔트리 파일을 읽고, use는 importer 파일 기준 상대경로를
 /// 정규화한 절대경로로 해소한다(파일시스템 loader).
 pub fn compile_file(path: &str) -> Result<CompileOutput, CompileError> {
-    let not_found = || {
-        CompileError::Flatten(FlattenError::NotFound {
-            base: String::new(),
-            target: path.to_string(),
-        })
-    };
+    let not_found = || CompileError::EntryNotFound(path.to_string());
     let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
     let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
     compile_src(&entry.to_string_lossy(), &src, &fs_loader)
@@ -1642,31 +1647,60 @@ mod tests {
         );
     }
 
-    /// loader가 경로를 못 찾으면 NotFound.
+    /// use 에러가 밑줄 칠 구간(테스트용). 소스는 에러가 들고 온 것을 쓴다 - 탓하는 파일이
+    /// 엔트리가 아닐 수 있어(use한 쪽) 엔트리에 대고 자르면 엉뚱한 데를 짚는다.
+    fn use_error_span(err: &CompileError) -> &str {
+        match err {
+            CompileError::Flatten(FlattenError::Use(e)) => {
+                &e.src[e.err.range.start as usize..e.err.range.end as usize]
+            }
+            _ => panic!("use 에러여야 한다"),
+        }
+    }
+
+    /// loader가 경로를 못 찾으면 NotFound - 탓할 자리는 그 경로다.
     #[test]
     fn use_missing_path_errors() {
         let entry = r#"
             use Label from "./missing.qubc"
             component Card { template { Label( /) } }
         "#;
+        let err = compile_map(entry, &[]).expect_err("실패해야 한다");
         assert!(matches!(
-            compile_map(entry, &[]),
-            Err(CompileError::Flatten(FlattenError::NotFound { .. }))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::NotFound { .. })
         ));
+        assert_eq!(use_error_span(&err), r#""./missing.qubc""#);
     }
 
-    /// use 한 이름이 대상 소스에 없으면 MissingExport.
+    /// 리소스(css)를 못 찾아도 그 경로를 짚는다 - 컴포넌트 import와 같은 자리 규칙.
+    #[test]
+    fn missing_resource_blames_the_path() {
+        let entry = r#"
+            use "./gone.css"
+            component Card { template { div( /) } }
+        "#;
+        let err = compile_map(entry, &[]).expect_err("실패해야 한다");
+        assert_eq!(use_error_span(&err), r#""./gone.css""#);
+    }
+
+    /// use 한 이름이 대상 소스에 없으면 MissingExport. 에러는 대상 파일을 판 뒤 나지만
+    /// 탓할 자리는 use한 쪽의 그 이름이다 - 이름이 여럿이면 없는 그것만 짚는다.
     #[test]
     fn use_missing_export_errors() {
         let entry = r#"
-            use Nope from "./parts.qubc"
-            component Card { template { div( /) } }
+            use Label, Nope from "./parts.qubc"
+            component Card { template { Label( /) } }
         "#;
         let parts = r#"component Label { template { span( /) } }"#;
+        let err = compile_map(entry, &[("./parts.qubc", parts)]).expect_err("실패해야 한다");
         assert!(matches!(
-            compile_map(entry, &[("./parts.qubc", parts)]),
-            Err(CompileError::Flatten(FlattenError::MissingExport { .. }))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::MissingExport { .. })
         ));
+        assert_eq!(use_error_span(&err), "Nope");
     }
 
     /// 서로 다른 소스에 같은 이름의 컴포넌트가 있으면 DuplicateComponent.
@@ -1700,10 +1734,18 @@ mod tests {
             "./entry.qubc" => Some(("entry".to_string(), String::new())),
             _ => None,
         };
+        // CompileOutput은 Debug가 없어 expect_err에 못 쓴다 - 성공분은 버린다.
+        let err = compile_src("entry", entry, &loader)
+            .map(|_| ())
+            .expect_err("실패해야 한다");
         assert!(matches!(
-            compile_src("entry", entry, &loader),
-            Err(CompileError::Flatten(FlattenError::Cycle(_)))
+            err,
+            CompileError::Flatten(FlattenError::Use(ref e))
+                if matches!(e.err.kind, UseErrorKind::Cycle(_))
         ));
+        // 순환은 이 use 자체가 원인이라 줄 전체를 짚는다 - 경로만이 아니라. 탓하는 곳은
+        // 고리를 닫은 use(a.qubc가 entry를 도로 부르는 자리)지 엔트리의 use가 아니다.
+        assert_eq!(use_error_span(&err), r#"use Entry from "./entry.qubc""#);
     }
 
     /// 모듈의 컴포넌트 이름들을 정의 순서대로 뽑는다(테스트용).
@@ -2690,17 +2732,6 @@ mod tests {
         // range는 그 파일 기준이라 엔트리가 아니라 used에서 잘라야 맞는다.
         let range = d.range.expect("자리를 알아야 한다");
         assert_eq!(&used[range.start as usize..range.end as usize], "name.nope");
-    }
-
-    /// 자리를 모르는 에러(use 그래프 단위)는 range가 없다 - 에디터는 파일 첫 줄에 건다.
-    #[test]
-    fn diagnose_has_no_range_when_location_is_unknown() {
-        let entry = "use Missing from \"./nope.qubc\"\ncomponent C {\n  template { div( /) }\n}";
-        let err = compile_map(entry, &[]).expect_err("실패해야 한다");
-        let d = diagnose("entry", entry, &err);
-
-        assert_eq!(d.range, None);
-        assert_eq!(d.path, "entry");
     }
 
     /// 진단의 range를 에디터 기준으로 환산하면 그 자리가 나온다 - 0-based/UTF-16.

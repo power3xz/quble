@@ -39,12 +39,7 @@ pub fn handler_names(
 
 /// 파일 경로로 d.ts를 낸다. 엔트리를 읽고 fs loader로 use를 해소한다.
 pub fn handlers_dts_from_path(path: &str) -> Result<String, CompileError> {
-    let not_found = || {
-        CompileError::Flatten(crate::FlattenError::NotFound {
-            base: String::new(),
-            target: path.to_string(),
-        })
-    };
+    let not_found = || CompileError::EntryNotFound(path.to_string());
     let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
     let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
     handlers_dts(&entry.to_string_lossy(), &src, &crate::fs_loader)

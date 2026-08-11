@@ -83,7 +83,7 @@ fn shown(token: Option<&Token>) -> String {
 /// 같은 키워드로 시작하지만 다른 곳에 모인다(전자는 use 그래프, 후자는 SourceFile.resources).
 enum UseDecl {
     Component(Use),
-    Resource(String),
+    Resource(Ident),
 }
 
 /// 한 소스를 파싱. 최상위 use 문(있으면 component 앞)과 컴포넌트 정의들을 모은다.
@@ -331,31 +331,47 @@ impl<'a> Parser<'a> {
     // 컴포넌트 import:  use IDENT (, IDENT)* from STRING
     // 리소스:           use STRING
     fn use_decl(&mut self) -> Result<UseDecl, ParseError> {
+        // `use`부터 경로 끝까지 걸치게 - 순환(Cycle)은 이 use 자체가 원인이라 줄 전체를 탓한다.
+        let start = self.here();
         self.keyword("use")?;
         // `use` 다음이 문자열이면 리소스(컴포넌트명/from 없음).
-        if let Some(Token::Str(path)) = self.peek() {
-            let path = path.clone();
-            self.next()?;
-            return Ok(UseDecl::Resource(path));
+        if matches!(self.peek(), Some(Token::Str(_))) {
+            return Ok(UseDecl::Resource(self.str_at()?));
         }
         let mut names = Vec::new();
-        names.push(self.ident()?);
+        names.push(self.ident_at()?);
         while matches!(self.peek(), Some(Token::Comma)) {
             self.next()?;
-            names.push(self.ident()?);
+            names.push(self.ident_at()?);
         }
         self.keyword("from")?;
-        let path = match self.next()? {
-            Token::Str(s) => s.clone(),
+        let path = self.str_at()?;
+        // 끝은 경로 토큰의 끝 - just_read()를 다시 부르면 그 사이에 무엇이 읽혔느냐에 매인다.
+        let range = NodeRange(SrcRange {
+            start: start.start,
+            end: path.range.0.end,
+        });
+        Ok(UseDecl::Component(Use { names, path, range }))
+    }
+
+    /// 문자열 리터럴과 그 자리를 함께. 경로가 곧 탓할 대상이라(NotFound) 위치가 필요하다.
+    fn str_at(&mut self) -> Result<Ident, ParseError> {
+        match self.next()? {
+            Token::Str(s) => {
+                let name = s.clone();
+                Ok(Ident {
+                    name,
+                    range: NodeRange(self.just_read()),
+                })
+            }
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "string path".into(),
                     got: format!("{got}"),
                 };
-                return Err(self.err_read(kind));
+                Err(self.err_read(kind))
             }
-        };
-        Ok(UseDecl::Component(Use { names, path }))
+        }
     }
 
     // component IDENT { [props { ... }] template { NODE* } }

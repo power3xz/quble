@@ -7,8 +7,9 @@ use crate::src_range::NodeRange;
 pub struct SourceFile {
     pub uses: Vec<Use>,
     /// `use './x.css'` - 이 파일이 참조하는 외부 리소스 경로(등장 순서). 이 파일의 모든
-    /// 컴포넌트가 공유한다(lazy build에서 컴포넌트가 그려질 때 로드).
-    pub resources: Vec<String>,
+    /// 컴포넌트가 공유한다(lazy build에서 컴포넌트가 그려질 때 로드). 못 찾으면 그 경로
+    /// 자리를 탓하므로 위치를 함께 든다.
+    pub resources: Vec<Ident>,
     pub comps: Vec<Component>,
 }
 
@@ -26,10 +27,21 @@ pub struct Ident {
 }
 
 /// `use A, B from "path"` - path 소스에서 이름 A/B를 현재 스코프로 가져온다.
+///
+/// 세 자리가 각각 다른 에러를 탓한다.
+///
+/// ```text
+/// use Card, Tag from "./card.qubc"
+///     ^^^^                            MissingExport - 그 파일에 없는 이름
+///                     ^^^^^^^^^^^^^   NotFound - 못 찾은 경로
+/// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^    Cycle - 이 use 자체가 순환을 만듦
+/// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct Use {
-    pub names: Vec<String>,
-    pub path: String,
+    pub names: Vec<Ident>,
+    pub path: Ident,
+    /// `use`부터 경로 끝까지.
+    pub range: NodeRange,
 }
 
 #[derive(Debug, PartialEq)]
