@@ -340,9 +340,17 @@ test("빈 문자열도 한 줄을 낸다", () => {
 });
 
 // 에러 표시 - 토크나이저가 아니라 진단이 얹는다. 줄 요소의 화면 표현이라 여기 있다.
+// 진단의 line/column은 0부터 세고 column은 UTF-16 code unit이다. 밑줄의 from/to는 표시 폭(ch)이다.
+
+// 한 줄 안의 범위. 진단이 대개 이 모양이라 짧게 쓴다.
+const at = (line: number, from: number, to: number) => [
+  { line, column: from },
+  { line, column: to },
+] as const;
 
 test("에러가 그 줄에만 붙는다", () => {
-  const lines = markError(tokenize("a\nb\nc", "a.qubc"), 2, "무언가 잘못됐다");
+  const [start, end] = at(1, 0, 1);
+  const lines = markError(tokenize("a\nb\nc", "a.qubc"), start, end, "무언가 잘못됐다");
 
   assert.deepEqual(
     lines.map((l) => l.hasError),
@@ -354,22 +362,86 @@ test("에러가 그 줄에만 붙는다", () => {
 test("에러를 얹어도 원문은 그대로다", () => {
   // 표시가 토큰을 건드리면 화면이 textarea와 어긋난다.
   const source = "use x\ncomponent A {\n}";
+  const [start, end] = at(1, 0, 9);
 
-  assert.equal(rejoin(markError(tokenize(source, "a.qubc"), 2, "err")), source);
+  assert.equal(rejoin(markError(tokenize(source, "a.qubc"), start, end, "err")), source);
 });
 
 test("범위 밖 줄 번호는 무시한다", () => {
   const lines = tokenize("a\nb", "a.qubc");
+  const [tooBig, tooBigEnd] = at(9, 0, 1);
+  const [negative, negativeEnd] = at(-1, 0, 1);
 
-  assert.deepEqual(markError(lines, 9, "err"), lines, "너무 큼");
-  assert.deepEqual(markError(lines, 0, "err"), lines, "0은 1부터 세는 규칙 밖");
+  assert.deepEqual(markError(lines, tooBig, tooBigEnd, "err"), lines, "너무 큼");
+  assert.deepEqual(markError(lines, negative, negativeEnd, "err"), lines, "0부터 세는 규칙 밖");
 });
 
 test("표시 없는 줄은 hasError가 꺼져 있다", () => {
   for (const line of tokenize("a\nb", "a.qubc")) {
     assert.equal(line.hasError, false);
     assert.equal(line.error, "");
+    assert.equal(line.underline, null);
   }
+});
+
+test("밑줄이 진단 범위를 덮는다", () => {
+  // "  p() { {user.nope} }" - user.nope에 밑줄.
+  const source = "  p() { {user.nope} }";
+  const [start, end] = at(0, 9, 18);
+  const lines = markError(tokenize(source, "a.qubc"), start, end, "err");
+
+  assert.deepEqual(lines[0].underline, { from: 9, to: 18 });
+  assert.equal(source.slice(9, 18), "user.nope", "표시할 자리가 그 식이다");
+});
+
+test("한글 앞 밑줄은 표시 폭으로 밀린다", () => {
+  // 한글은 monospace에서 2ch다 - UTF-16 열을 그대로 쓰면 밑줄이 글자보다 왼쪽에 선다.
+  // 열 3은 `"가나`까지(1 + 2x2 = 5ch), 열 4는 `"가나다`까지(1 + 3x2 = 7ch)다.
+  const [start, end] = at(0, 3, 4);
+  const lines = markError(tokenize('"가나다" x', "a.qubc"), start, end, "err");
+
+  assert.deepEqual(lines[0].underline, { from: 5, to: 7 }, "`다` 한 글자가 2ch를 차지한다");
+});
+
+test("빈 구간도 최소 한 칸을 차지한다", () => {
+  // 소스 끝에서 난 에러는 start == end다. 폭이 0이면 밑줄이 안 보인다.
+  const [start, end] = at(0, 3, 3);
+  const lines = markError(tokenize("abc", "a.qubc"), start, end, "err");
+
+  assert.deepEqual(lines[0].underline, { from: 3, to: 4 });
+});
+
+test("여러 줄 범위는 줄마다 잘린다", () => {
+  // 닫히지 않은 문자열이 이렇게 온다 - 시작 줄은 start부터 줄 끝까지, 끝 줄은 줄머리부터 end까지.
+  const lines = markError(
+    tokenize('a "열림\nbbbb\ncc', "a.qubc"),
+    { line: 0, column: 2 },
+    { line: 2, column: 1 },
+    "unterminated string",
+  );
+
+  assert.deepEqual(lines[0].underline, { from: 2, to: 7 }, '따옴표 1 + 한글 2자 x 2ch');
+  assert.deepEqual(lines[1].underline, { from: 0, to: 4 }, "중간 줄은 전체");
+  assert.deepEqual(lines[2].underline, { from: 0, to: 1 }, "끝 줄은 end까지");
+});
+
+test("여러 줄 범위에서 메시지는 시작 줄에만 붙는다", () => {
+  const lines = markError(tokenize("aa\nbb\ncc", "a.qubc"), { line: 0, column: 0 }, { line: 1, column: 2 }, "err");
+
+  assert.deepEqual(
+    lines.map((l) => l.hasError),
+    [true, false, false],
+    "줄 배경/막대는 시작 줄만 - 여러 줄이 다 물들면 어디가 원인인지 흐려진다",
+  );
+  assert.equal(lines[1].error, "");
+  assert.notEqual(lines[1].underline, null, "밑줄은 걸친 줄마다 있다");
+});
+
+test("범위 끝이 줄 목록을 넘으면 마지막 줄에서 멎는다", () => {
+  const lines = markError(tokenize("aa\nbb", "a.qubc"), { line: 0, column: 0 }, { line: 9, column: 0 }, "err");
+
+  assert.equal(lines.length, 2);
+  assert.notEqual(lines[1].underline, null);
 });
 
 test("끝이 개행이면 마지막 빈 줄이 남는다", () => {

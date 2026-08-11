@@ -8,9 +8,13 @@
 // 어떤 입력에도 원문이 그대로 복원돼야 한다(토큰 text를 이으면 원본).
 
 export type TToken = { text: string; cls: string };
-// hasError/error는 토크나이저가 아니라 진단이 채운다(markError) - 문법 오류는 렉서가 아는 것이
-// 아니라 컴파일러가 말해 주는 것이다. 여기 두는 건 줄 하나의 화면 표현이 이 타입이기 때문이다.
-export type TLine = { tokens: TToken[]; hasError: boolean; error: string };
+// 줄 안 밑줄 구간. 단위는 **표시 폭**(monospace 1ch)이고 to는 끝 배타다 - 화면이 이걸
+// 그대로 left/width로 쓴다. 진단이 주는 UTF-16 열과 다르다(한글은 2ch, markError가 환산한다).
+export type TUnderline = { from: number; to: number };
+// hasError/error/underline은 토크나이저가 아니라 진단이 채운다(markError) - 문법 오류는 렉서가
+// 아는 것이 아니라 컴파일러가 말해 주는 것이다. 여기 두는 건 줄 하나의 화면 표현이 이
+// 타입이기 때문이다.
+export type TLine = { tokens: TToken[]; hasError: boolean; error: string; underline: TUnderline | null };
 
 // qubc 예약어는 SYNTAX.md 전체를 따른다 - 선언 블록(#1), 디렉티브(#4), 타입(#2.1).
 // 다른 언어는 화면에서 눈에 띄어야 하는 것만 고른다(완전한 목록이 목적이 아니다).
@@ -124,6 +128,7 @@ const lineOf = (tokens: TToken[]): TLine => ({
   tokens: tokens.length ? tokens : [{ text: " ", cls: cls() }],
   hasError: false,
   error: "",
+  underline: null,
 });
 
 /** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
@@ -133,14 +138,76 @@ export const lineCountOf = (text: string) => text.split("\n").length;
 export const lineNumbersFor = (text: string) =>
   Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
 
-/** 진단이 가리키는 줄(1부터)에 메시지를 얹은 새 목록을 만든다. 범위 밖이면 그대로 돌려준다. */
-export const markError = (lines: TLine[], line: number, message: string): TLine[] => {
-  const i = line - 1;
-  if (i < 0 || i >= lines.length) {
+// 화면에서 한 글자가 차지하는 칸 수. 폰트가 monospace라 라틴은 1ch, 한글/한자/가나/전각은
+// 2ch다. 컴파일러의 display_width와 같은 목적이지만 기준이 터미널이 아니라 이 편집기다 -
+// 탭은 CSS `tab-size: 2`를 따른다(playground.css의 .pg__view).
+//
+// 완전한 East Asian Width 표가 아니라 `.qubc`에 실제로 나오는 범위만 덮는다. 여기서 빠진
+// 문자가 줄에 있으면 그 뒤 밑줄이 그만큼 밀린다.
+const charWidth = (c: string) => {
+  if (c === "\t") {
+    return 2;
+  }
+  const code = c.codePointAt(0) ?? 0;
+  const wide =
+    (code >= 0x1100 && code <= 0x115f) || // 한글 자모 초성
+    (code >= 0x2e80 && code <= 0x303e) || // CJK 부호, 가나 부호
+    (code >= 0x3041 && code <= 0x33ff) || // 가나, 한글 호환 자모, CJK 기호
+    (code >= 0x3400 && code <= 0x4dbf) || // CJK 확장 A
+    (code >= 0x4e00 && code <= 0x9fff) || // CJK 통합 한자
+    (code >= 0xac00 && code <= 0xd7a3) || // 한글 음절
+    (code >= 0xf900 && code <= 0xfaff) || // CJK 호환 한자
+    (code >= 0xff00 && code <= 0xff60) || // 전각 영숫자/기호
+    (code >= 0xffe0 && code <= 0xffe6); // 전각 통화 기호
+  return wide ? 2 : 1;
+};
+
+// UTF-16 열을 표시 폭으로 환산한다. 진단은 UTF-16 code unit으로 열을 세지만(에디터 규약)
+// 화면은 ch로 배치하므로, 그 열까지의 글자들이 실제로 차지하는 칸을 세야 밑줄이 글자에 맞는다.
+//
+// 열이 줄보다 길면(진단이 줄 끝을 가리키는 경우) 줄 전체 폭을 준다.
+const widthUpTo = (text: string, column: number) => {
+  let unit = 0;
+  let width = 0;
+  for (const c of text) {
+    if (unit >= column) {
+      break;
+    }
+    unit += c.length; // 서로게이트 페어는 UTF-16으로 2
+    width += charWidth(c);
+  }
+  return width;
+};
+
+/** 진단이 가리키는 지점. line/column 모두 0부터 세고 column은 UTF-16 code unit이다. */
+export type TPosition = { line: number; column: number };
+
+/**
+ * 진단 범위에 걸친 줄들에 밑줄을 얹고, 시작 줄에 메시지를 붙인 새 목록을 만든다.
+ * 범위가 줄 목록을 벗어나면 그대로 돌려준다.
+ *
+ * 여러 줄에 걸친 범위(닫히지 않은 문자열)는 줄마다 자른다 - 시작 줄은 start부터 줄 끝까지,
+ * 중간 줄은 전체, 끝 줄은 줄머리부터 end까지다.
+ *
+ * 빈 구간(소스 끝에서 난 에러)도 가리킬 자리가 있어야 해 최소 1ch를 준다.
+ */
+export const markError = (lines: TLine[], start: TPosition, end: TPosition, message: string): TLine[] => {
+  if (start.line < 0 || start.line >= lines.length) {
     return lines;
   }
+  const lastLine = Math.min(end.line, lines.length - 1);
   const marked = lines.slice();
-  marked[i] = { ...marked[i], hasError: true, error: message };
+  for (let i = start.line; i <= lastLine; i++) {
+    const text = marked[i].tokens.map((t) => t.text).join("");
+    const from = i === start.line ? widthUpTo(text, start.column) : 0;
+    const to = i === end.line ? widthUpTo(text, end.column) : widthUpTo(text, text.length);
+    marked[i] = {
+      ...marked[i],
+      hasError: i === start.line,
+      error: i === start.line ? message : "",
+      underline: { from, to: Math.max(to, from + 1) },
+    };
+  }
   return marked;
 };
 
