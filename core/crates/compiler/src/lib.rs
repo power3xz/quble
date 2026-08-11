@@ -102,8 +102,13 @@ fn blame<'a>(entry_path: &'a str, entry_src: &'a str, err: &'a CompileError) -> 
         CompileError::Flatten(FlattenError::Use(e)) => {
             (e.path.as_str(), e.src.as_str(), Some(e.err.range))
         }
-        // 나머지 flatten 에러는 소스 안 위치라는 개념이 없다(타입 참조/중복 정의 단위).
-        CompileError::Flatten(_) => (entry_path, entry_src, None),
+        // prop 타입 표기 안의 자리를 안다 - 참조 이름, 키, 유틸 표기(ast.rs `Type` 그림).
+        CompileError::Flatten(FlattenError::Type(e)) => {
+            (e.path.as_str(), e.src.as_str(), Some(e.err.range))
+        }
+        // 아직 위치를 안 붙인 에러(ISSUES.md). 팔을 다 적어 두면 FlattenError에 variant를
+        // 더할 때 여기가 컴파일 에러로 잡힌다 - `_`로 받으면 조용히 첫 줄로 떨어진다.
+        CompileError::Flatten(FlattenError::DuplicateComponent(_)) => (entry_path, entry_src, None),
         CompileError::Codegen(e) => (e.path.as_str(), e.src.as_str(), e.err.range),
         // 엔트리를 못 읽었으니 소스가 없다 - 인자로 온 것도 빈 문자열이다.
         CompileError::EntryNotFound(_) => (entry_path, entry_src, None),
@@ -2797,6 +2802,52 @@ component B { props { a: A } template { div( /) } }"#;
         // range는 그 파일 기준이라 엔트리가 아니라 used에서 잘라야 맞는다.
         let range = d.range.expect("자리를 알아야 한다");
         assert_eq!(&used[range.start as usize..range.end as usize], "name.nope");
+    }
+
+    /// 위치를 아는 에러는 종류를 가리지 않고 diagnose가 range를 실어야 한다.
+    ///
+    /// 회귀: blame이 `CompileError::Flatten(_)` 와일드카드로 받고 있어, 컴파일러가 위치를
+    /// 붙인 뒤에도 타입 에러만 조용히 첫 줄로 떨어졌다(단위 테스트는 FlattenError를 직접 봐서
+    /// 안 걸렸다). 종류마다 밑줄 칠 텍스트를 확인한다.
+    #[test]
+    fn diagnose_carries_range_for_every_located_error() {
+        let cases: &[(&str, &str)] = &[
+            // lex/parse
+            ("component C { oops { } }", "oops"),
+            // use 줄
+            (
+                "use Nope from \"./x.qubc\"\ncomponent C { template { div( /) } }",
+                "\"./x.qubc\"",
+            ),
+            // prop 타입 표기
+            (
+                "component C {\n  props { x: Nope }\n  template { div( /) }\n}",
+                "Nope",
+            ),
+            (
+                "component C {\n  props { s: Omit<string, 'a'> }\n  template { div( /) }\n}",
+                "Omit<string, 'a'>",
+            ),
+            // codegen
+            (
+                "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}",
+                "user.nope",
+            ),
+        ];
+
+        for (src, want) in cases {
+            let err = compile_map(src, &[]).expect_err("실패해야 한다");
+            let d = diagnose("entry", src, &err);
+            let range = d
+                .range
+                .unwrap_or_else(|| panic!("자리를 알아야 한다: {}", d.message));
+            assert_eq!(
+                &d.src[range.start as usize..range.end as usize],
+                *want,
+                "{}",
+                d.message
+            );
+        }
     }
 
     /// 진단의 range를 에디터 기준으로 환산하면 그 자리가 나온다 - 0-based/UTF-16.
