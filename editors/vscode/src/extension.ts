@@ -98,12 +98,7 @@ const refreshDiagnostics = (doc: vscode.TextDocument, collection: vscode.Diagnos
     return;
   }
 
-  const range = new vscode.Range(
-    found.start.line,
-    found.start.column,
-    found.end.line,
-    found.end.column,
-  );
+  const range = new vscode.Range(found.start.line, found.start.column, found.end.line, found.end.column);
   const diagnostic = new vscode.Diagnostic(range, found.message, vscode.DiagnosticSeverity.Error);
   diagnostic.source = "quble";
   collection.set(uriFor(doc.uri, found.path), [diagnostic]);
