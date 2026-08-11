@@ -199,7 +199,9 @@ const jumpToError = (_data: unknown, ctx: TCtx) => {
 
 // 타이핑이 멎고 이만큼 지나면 컴파일한다. 매 입력마다 부르면 큰 파일에서 타이핑이 밀리고,
 // 편집 중간 상태는 대개 문법이 깨져 있어 결과도 버려진다.
-const DIAGNOSE_DELAY = 250;
+//
+// 1초는 손이 멈춘 뒤로 잡은 값이다 - 더 짧으면 아직 치는 중에 밑줄이 떠 노이즈가 된다.
+const DIAGNOSE_DELAY = 1000;
 let diagnoseTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 편집 중인 파일을 엔트리로 컴파일해 진단을 얻는다 - 미리보기가 무엇이든 지금 보는 파일의
