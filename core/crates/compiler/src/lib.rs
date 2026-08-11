@@ -11,8 +11,10 @@ mod lexer;
 mod parse;
 mod src_range;
 
+pub use diagnostic::{locate_utf16, Utf16Location};
 pub use dts::{handler_names, handlers_dts, handlers_dts_from_path};
 pub use flatten::{FlattenError, SourceLoader};
+pub use src_range::SrcRange;
 
 use std::path::Path;
 
@@ -69,6 +71,23 @@ pub fn format_error(
     entry_src: &str,
     err: &CompileError,
 ) -> String {
+    let blamed = blame(entry_path, entry_src, err);
+    let shown = base_dir
+        .and_then(|dir| relative_to(dir, blamed.path))
+        .unwrap_or(blamed.path);
+    diagnostic::format(shown, blamed.src, blamed.range, &blamed.message)
+}
+
+/// 에러가 가리키는 파일과 그 안의 자리. `format_error`(CLI 텍스트)와 `diagnose`(에디터)가
+/// 공유한다 - 어느 파일을 탓하느냐는 출력 형태와 무관하다.
+struct Blamed<'a> {
+    path: &'a str,
+    src: &'a str,
+    range: Option<SrcRange>,
+    message: String,
+}
+
+fn blame<'a>(entry_path: &'a str, entry_src: &'a str, err: &'a CompileError) -> Blamed<'a> {
     let (path, src, range) = match err {
         CompileError::Flatten(FlattenError::Lex(e)) => {
             (e.path.as_str(), e.src.as_str(), Some(e.err.range))
@@ -84,10 +103,40 @@ pub fn format_error(
         CompileError::Flatten(e) => e.to_string(),
         CompileError::Codegen(e) => e.err.kind.to_string(),
     };
-    let shown = base_dir
-        .and_then(|dir| relative_to(dir, path))
-        .unwrap_or(path);
-    diagnostic::format(shown, src, range, &message)
+    Blamed {
+        path,
+        src,
+        range,
+        message,
+    }
+}
+
+/// 에디터가 밑줄을 그으려고 받는 진단. 위치는 **바이트 오프셋**(SrcRange)으로 둔다 -
+/// 라인/컬럼 환산은 기준이 소비처마다 갈려(src_range.rs) 여기서 정하지 않는다.
+/// `src`를 함께 내는 건 환산에 원본이 필요해서다.
+pub struct Diagnostic<'a> {
+    /// 에러가 난 파일. 엔트리가 아니라 `use`로 딸려 온 파일일 수 있다.
+    pub path: &'a str,
+    pub src: &'a str,
+    pub message: String,
+    /// None이면 탓할 자리를 모르는 에러(use 그래프/타입 참조 단위).
+    pub range: Option<SrcRange>,
+}
+
+/// 컴파일 에러를 에디터가 쓸 진단으로 만든다. `format_error`의 구조화 판으로, 같은 자리를
+/// 가리킨다 - 다른 건 사람이 읽는 텍스트로 합치느냐뿐이다.
+pub fn diagnose<'a>(
+    entry_path: &'a str,
+    entry_src: &'a str,
+    err: &'a CompileError,
+) -> Diagnostic<'a> {
+    let blamed = blame(entry_path, entry_src, err);
+    Diagnostic {
+        path: blamed.path,
+        src: blamed.src,
+        message: blamed.message,
+        range: blamed.range,
+    }
 }
 
 /// dir 아래에 있는 path를 dir 기준 상대경로로. 아래가 아니면 None(줄일 수 없으니 원본을 쓴다).
@@ -2607,6 +2656,71 @@ mod tests {
     fn diagnostic_uses_file_the_error_carries() {
         let out = diagnostic_of("component C { oops { } }");
         assert!(out.starts_with("entry:1:15: error: "), "{out}");
+    }
+
+    /// diagnose는 텍스트로 합치기 전의 것을 그대로 낸다 - range는 바이트 오프셋이고,
+    /// 소스에서 잘라내면 밑줄 칠 구간이 나온다.
+    #[test]
+    fn diagnose_gives_byte_range_into_the_source() {
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}";
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let d = diagnose("entry", src, &err);
+
+        assert_eq!(d.path, "entry");
+        assert_eq!(d.message, "no field `nope` on prop `user`");
+        let range = d.range.expect("자리를 알아야 한다");
+        assert_eq!(
+            &d.src[range.start as usize..range.end as usize],
+            "user.nope"
+        );
+    }
+
+    /// use한 파일의 에러는 그 파일의 경로/소스를 낸다 - 환산할 원본이 엔트리가 아니어야
+    /// 에디터가 맞는 파일에 밑줄을 긋는다.
+    #[test]
+    fn diagnose_carries_the_used_file_source() {
+        let entry = "use Column from \"./column.qubc\"\ncomponent Board {\n  props { t: { label: string } }\n  template { Lane: Column(name={t} /) }\n}";
+        let used = "component Column {\n  props { name: { label: string } }\n  template { p() { {name.nope} } }\n}";
+
+        let err = compile_map(entry, &[("./column.qubc", used)]).expect_err("실패해야 한다");
+        let d = diagnose("entry", entry, &err);
+
+        assert_eq!(d.path, "./column.qubc");
+        assert_eq!(d.src, used);
+        // range는 그 파일 기준이라 엔트리가 아니라 used에서 잘라야 맞는다.
+        let range = d.range.expect("자리를 알아야 한다");
+        assert_eq!(&used[range.start as usize..range.end as usize], "name.nope");
+    }
+
+    /// 자리를 모르는 에러(use 그래프 단위)는 range가 없다 - 에디터는 파일 첫 줄에 건다.
+    #[test]
+    fn diagnose_has_no_range_when_location_is_unknown() {
+        let entry = "use Missing from \"./nope.qubc\"\ncomponent C {\n  template { div( /) }\n}";
+        let err = compile_map(entry, &[]).expect_err("실패해야 한다");
+        let d = diagnose("entry", entry, &err);
+
+        assert_eq!(d.range, None);
+        assert_eq!(d.path, "entry");
+    }
+
+    /// 진단의 range를 에디터 기준으로 환산하면 그 자리가 나온다 - 0-based/UTF-16.
+    /// 한글이 앞선 줄이라 바이트로 셌다면 컬럼이 튄다.
+    #[test]
+    fn diagnose_range_converts_to_editor_position() {
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { \"가나다\" {user.nope} } }\n}";
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let d = diagnose("entry", src, &err);
+        let range = d.range.expect("자리를 알아야 한다");
+
+        let start = locate_utf16(d.src, range.start);
+        // 3번째 줄(0-based로 2). 한글 3자는 UTF-16으로 3칸이라 바이트(9칸)와 다르다.
+        assert_eq!(start.line, 2);
+        let line = d.src.lines().nth(2).unwrap();
+        let expected: u32 = line[..line.find("user.nope").unwrap()]
+            .chars()
+            .map(|c| c.len_utf16() as u32)
+            .sum();
+        assert_eq!(start.column, expected);
     }
 
     /// use한 파일에서 난 codegen 에러는 엔트리가 아니라 그 파일을 가리킨다.
