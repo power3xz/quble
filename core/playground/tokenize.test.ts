@@ -343,10 +343,11 @@ test("빈 문자열도 한 줄을 낸다", () => {
 // 진단의 line/column은 0부터 세고 column은 UTF-16 code unit이다. 밑줄의 from/to는 표시 폭(ch)이다.
 
 // 한 줄 안의 범위. 진단이 대개 이 모양이라 짧게 쓴다.
-const at = (line: number, from: number, to: number) => [
-  { line, column: from },
-  { line, column: to },
-] as const;
+const at = (line: number, from: number, to: number) =>
+  [
+    { line, column: from },
+    { line, column: to },
+  ] as const;
 
 test("에러가 그 줄에만 붙는다", () => {
   const [start, end] = at(1, 0, 1);
@@ -420,7 +421,7 @@ test("여러 줄 범위는 줄마다 잘린다", () => {
     "unterminated string",
   );
 
-  assert.deepEqual(lines[0].underline, { from: 2, to: 7 }, '따옴표 1 + 한글 2자 x 2ch');
+  assert.deepEqual(lines[0].underline, { from: 2, to: 7 }, "따옴표 1 + 한글 2자 x 2ch");
   assert.deepEqual(lines[1].underline, { from: 0, to: 4 }, "중간 줄은 전체");
   assert.deepEqual(lines[2].underline, { from: 0, to: 1 }, "끝 줄은 end까지");
 });
