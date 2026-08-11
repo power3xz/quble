@@ -5,8 +5,6 @@
 import { readFileSync } from "node:fs";
 import { makeCompiler } from "./wasm-compiler.ts";
 
-export type { TCompileResult, TDtsResult, TSourceFiles } from "./wasm-compiler.ts";
-
 /**
  * .wasm을 읽어 동기로 인스턴스화한다.
  * @param path  compiler_wasm.wasm 파일 경로(필수 - 이 진입점은 기본 경로를 계산하지 않는다).

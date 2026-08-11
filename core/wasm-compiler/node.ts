@@ -9,10 +9,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeCompiler } from "./wasm-compiler.ts";
 
-// 부르는 쪽이 인자/결과 타입을 쓰려면 필요하다 - 본체(wasm-compiler.ts)는 exports에 없어
-// 패키지 밖에서 직접 못 가져온다.
-export type { TCompileResult, TDtsResult, TSourceFiles } from "./wasm-compiler.ts";
-
 /**
  * .wasm의 자리 - 패키지 바로 옆이다. cargo 산출물 경로(core/target/..)를 짚으면 레포 안에서만
  * 맞고 확장에 포장했을 때 깨지므로, build:wasm이 여기로 복사해 두 환경을 같게 만든다.
