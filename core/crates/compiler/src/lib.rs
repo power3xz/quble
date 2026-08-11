@@ -3037,11 +3037,45 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(
             diagnostic_of(src),
             [
-                "entry:2:24: error: `Inner` declares no slot `Sidebar` (`@slot(Sidebar)`)",
+                "entry:2:24: error: `Inner` only takes named slots: `Header`",
                 " 2 |   template { Inner() { Sidebar << p( /) } }",
                 "   |                        ^^^^^^^",
             ]
             .join("\n")
+        );
+    }
+
+    /// 슬롯 에러 메시지는 없는 것이 아니라 **쓸 수 있는 것**을 말한다 - 고칠 방법이 문장
+    /// 안에 있어야 한다. 자식이 무엇을 선언했느냐로 셋이 갈린다.
+    #[test]
+    fn unknown_slot_placeholder_message_says_what_is_taken() {
+        let message = |src: &str| {
+            diagnostic_of(src)
+                .lines()
+                .next()
+                .unwrap()
+                .split_once("error: ")
+                .unwrap()
+                .1
+                .to_string()
+        };
+
+        // 슬롯이 아예 없다 - 대안이 없으니 할 일을 알려준다.
+        assert_eq!(
+            message(
+                "component O { template { I() { p( /) } } }\ncomponent I { template { span( /) } }"
+            ),
+            "`I` has no slot: use self-close (`I( /)`)"
+        );
+        // 선언한 게 무기명뿐인데 기명으로 채웠다.
+        assert_eq!(
+            message("component O { template { I() { H << p( /) } } }\ncomponent I { template { @slot() } }"),
+            "`I` only takes unnamed slot content"
+        );
+        // 기명이 있는데 무기명으로 채웠다 - 이름을 보여줘야 그걸로 고친다.
+        assert_eq!(
+            message("component O { template { I() { p( /) } } }\ncomponent I { template { @slot(H) @slot(F) } }"),
+            "`I` only takes named slots: `H`, `F`"
         );
     }
 

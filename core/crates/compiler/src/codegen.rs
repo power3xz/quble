@@ -45,11 +45,14 @@ pub enum CodegenErrorKind {
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
     ForCountNotIterable(String),
-    /// 자식이 정의하지 않은 슬롯을 채웠다(`Header << ...`인데 자식에 `@slot(Header)` 없음).
-    /// 무기명(None)이면 자식이 `@slot()`을 안 뒀는데 자식 블록을 준 경우.
+    /// 자식이 정의하지 않은 슬롯을 채웠다(`Header << ...`인데 자식에 `@slot(Header)` 없음,
+    /// 또는 자식이 `@slot()`을 안 뒀는데 자식 블록을 준 경우).
+    ///
+    /// 무엇을 채웠는지는 안 담는다 - 밑줄이 이미 그 자리를 짚고, 답은 자식이 무엇을 받느냐다.
+    /// declared가 자식이 선언한 슬롯들(선언 순서, 무기명은 None)이다.
     UnknownSlotPlaceholder {
         comp: String,
-        slot_placeholder: Option<String>,
+        declared: Vec<Option<String>>,
     },
     /// 한 컴포넌트가 같은 슬롯 자리를 두 번 선언했다(`@slot()` 둘, 또는 같은 이름 `@slot(H)` 둘).
     /// 콘텐츠는 한 덩이라 어느 자리로 갈지 정할 수 없다 - 복제하지 않고 막는다.
@@ -103,13 +106,18 @@ impl std::fmt::Display for CodegenErrorKind {
                 f,
                 "`{path}` is neither an array nor a number: it cannot drive @for"
             ),
-            CodegenErrorKind::UnknownSlotPlaceholder {
-                comp,
-                slot_placeholder,
-            } => match slot_placeholder {
-                Some(slot) => write!(f, "`{comp}` declares no slot `{slot}` (`@slot({slot})`)"),
-                None => write!(f, "`{comp}` declares no unnamed slot (`@slot()`)"),
-            },
+            // 없는 것보다 쓸 수 있는 것을 말한다 - 고칠 방법이 문장 안에 있어야 한다.
+            CodegenErrorKind::UnknownSlotPlaceholder { comp, declared } => {
+                let named: Vec<String> =
+                    declared.iter().flatten().map(|n| format!("`{n}`")).collect();
+                match (declared.is_empty(), named.is_empty()) {
+                    // 슬롯이 아예 없다 - 대안이 없으니 할 일을 알려준다.
+                    (true, _) => write!(f, "`{comp}` has no slot: use self-close (`{comp}( /)`)"),
+                    // 선언한 게 무기명뿐이다.
+                    (_, true) => write!(f, "`{comp}` only takes unnamed slot content"),
+                    _ => write!(f, "`{comp}` only takes named slots: {}", named.join(", ")),
+                }
+            }
             CodegenErrorKind::DuplicateSlotPlaceholderDef {
                 comp,
                 slot_placeholder,
@@ -875,7 +883,11 @@ fn emit_node(
                 {
                     let kind = CodegenErrorKind::UnknownSlotPlaceholder {
                         comp: name.name.clone(),
-                        slot_placeholder: slot_name(content).map(str::to_string),
+                        // 쓸 수 있는 것을 메시지에 실어 준다.
+                        declared: child_slot_placeholders
+                            .iter()
+                            .map(|s| s.map(str::to_string))
+                            .collect(),
                     };
                     // 기명은 그 이름을, 무기명은 이름이 없어 합성 호출을 짚는다 - "이 컴포넌트는
                     // 자식 블록을 받지 않는다"가 곧 그 에러다.
