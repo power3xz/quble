@@ -13,7 +13,7 @@ mod src_range;
 
 pub use diagnostic::{locate_utf16, Utf16Location};
 pub use dts::{handler_names, handlers_dts, handlers_dts_from_path};
-pub use flatten::{FlattenError, SourceLoader, UseError, UseErrorKind};
+pub use flatten::{FlattenError, SourceLoader, TypeError, TypeErrorKind, UseError, UseErrorKind};
 pub use src_range::SrcRange;
 
 use std::path::Path;
@@ -1185,7 +1185,7 @@ mod tests {
                         push_leaf_paths(&format!("{prefix}.{name}"), field_ty, out);
                     }
                 }
-                ast::Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+                ast::Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),
                 ast::Type::Omit(..) | ast::Type::Pick(..) => {
                     unreachable!("expand가 유틸 타입을 안 풀었다")
                 }
@@ -1273,41 +1273,72 @@ mod tests {
             "#,
             &(|_: &str, _: &str| None),
         );
+        let err = err.map(|_| ()).expect_err("실패해야 한다");
         assert!(matches!(
             err,
-            Err(CompileError::Flatten(FlattenError::UnknownKey(k))) if k == "nope"
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if matches!(&e.err.kind, TypeErrorKind::UnknownKey(k) if k == "nope")
         ));
+        // 탓할 자리는 그 키다 - 표기 전체가 아니라.
+        assert_eq!(type_error_span(&err), "'nope'");
     }
 
-    /// 없는 타입을 참조하면 UnknownType.
+    /// 유틸 타입의 안쪽이 객체가 아니면 NonObjectUtil - 표기 전체를 탓한다.
+    #[test]
+    fn prop_type_util_on_non_object_errors() {
+        let err = compile_src(
+            "entry",
+            r#"component C { props { s: Omit<string, 'nope'> } template { div( /) } }"#,
+            &(|_: &str, _: &str| None),
+        )
+        .map(|_| ())
+        .expect_err("실패해야 한다");
+        assert!(matches!(
+            err,
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if e.err.kind == TypeErrorKind::NonObjectUtil
+        ));
+        // 안쪽(string)만이 아니라 표기 전체 - 성립하지 않는 건 조합이다.
+        assert_eq!(type_error_span(&err), "Omit<string, 'nope'>");
+    }
+
+    /// 없는 타입을 참조하면 UnknownType - 그 이름을 탓한다.
     #[test]
     fn prop_type_ref_unknown_errors() {
         let err = compile_src(
             "entry",
             r#"component C { props { x: Nope } template { div( /) } }"#,
             &(|_: &str, _: &str| None),
-        );
+        )
+        .map(|_| ())
+        .expect_err("실패해야 한다");
         assert!(matches!(
             err,
-            Err(CompileError::Flatten(FlattenError::UnknownType(n))) if n == "Nope"
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if matches!(&e.err.kind, TypeErrorKind::UnknownType(n) if n == "Nope")
         ));
+        assert_eq!(type_error_span(&err), "Nope");
     }
 
-    /// 타입 참조가 순환하면 TypeCycle - 무한 전개를 막는다.
+    /// 타입 참조가 순환하면 TypeCycle - 무한 전개를 막는다. 고리를 닫은 참조를 탓한다.
     #[test]
     fn prop_type_ref_cycle_errors() {
-        let err = compile_src(
-            "entry",
-            r#"
-                component A { props { b: B } template { div( /) } }
-                component B { props { a: A } template { div( /) } }
-            "#,
-            &(|_: &str, _: &str| None),
-        );
+        let entry = r#"component A { props { b: B } template { div( /) } }
+component B { props { a: A } template { div( /) } }"#;
+        let err = compile_src("entry", entry, &(|_: &str, _: &str| None))
+            .map(|_| ())
+            .expect_err("실패해야 한다");
         assert!(matches!(
             err,
-            Err(CompileError::Flatten(FlattenError::TypeCycle(_)))
+            CompileError::Flatten(FlattenError::Type(ref e))
+                if matches!(e.err.kind, TypeErrorKind::TypeCycle(_))
         ));
+        // A(b: B) -> B(a: A) -> A로 돌아와 b: B를 다시 만나 닫힌다 - 그 B를 짚는다.
+        assert_eq!(type_error_span(&err), "B");
+        assert_eq!(
+            type_error_range(&err).start as usize,
+            entry.find("b: B").expect("A의 b: B") + "b: ".len()
+        );
     }
 
     #[test]
@@ -1663,6 +1694,23 @@ mod tests {
                 &e.src[e.err.range.start as usize..e.err.range.end as usize]
             }
             _ => panic!("use 에러여야 한다"),
+        }
+    }
+
+    /// prop 타입 에러가 밑줄 칠 구간(테스트용). 타입 에러가 아니면 패닉.
+    fn type_error_range(err: &CompileError) -> SrcRange {
+        match err {
+            CompileError::Flatten(FlattenError::Type(e)) => e.err.range,
+            _ => panic!("타입 에러여야 한다"),
+        }
+    }
+
+    fn type_error_span(err: &CompileError) -> &str {
+        match err {
+            CompileError::Flatten(FlattenError::Type(e)) => {
+                &e.src[e.err.range.start as usize..e.err.range.end as usize]
+            }
+            _ => panic!("타입 에러여야 한다"),
         }
     }
 

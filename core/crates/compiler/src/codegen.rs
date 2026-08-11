@@ -389,7 +389,7 @@ fn store_size(ty: &Type) -> u16 {
         Type::Bool | Type::Number | Type::String => 1,
         Type::Array(_) => 1,
         Type::Object(fields) => fields.iter().map(|(_, t)| store_size(t)).sum(),
-        Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+        Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),
         Type::Omit(..) | Type::Pick(..) => unreachable!("expand가 유틸 타입을 안 풀었다"),
     }
 }
@@ -538,7 +538,7 @@ impl TypeTable {
                     .collect();
                 TypeEntry::Object(fields)
             }
-            Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+            Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),
             Type::Omit(..) | Type::Pick(..) => unreachable!("expand가 유틸 타입을 안 풀었다"),
         };
         if let Some(&idx) = self.cache.get(&entry) {

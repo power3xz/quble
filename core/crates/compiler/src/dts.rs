@@ -208,7 +208,7 @@ fn type_to_ts(ty: &Type) -> String {
             );
             format!("{{ {body} }}")
         }
-        Type::Ref(n) => unreachable!("expand가 Type::Ref({n})를 안 풀었다"),
+        Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),
         Type::Omit(..) | Type::Pick(..) => unreachable!("expand가 유틸 타입을 안 풀었다"),
     }
 }

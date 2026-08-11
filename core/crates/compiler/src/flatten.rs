@@ -121,14 +121,52 @@ pub enum FlattenError {
     Use(Sourced<UseError>),
     /// 같은 이름의 컴포넌트가 서로 다른 소스에 정의됨.
     DuplicateComponent(String),
-    /// prop 타입 참조(`x: Foo`)의 Foo가 평탄화된 컴포넌트에 없음.
+    /// prop 타입 표기 안에 탓할 자리가 있는 에러. 자리는 kind마다 다르다(TypeErrorKind).
+    Type(Sourced<TypeError>),
+}
+
+/// prop 타입 표기에서 난 에러와 그 안의 탓할 자리(ast.rs `Type` 그림).
+#[derive(Debug, PartialEq, Eq)]
+pub struct TypeError {
+    pub kind: TypeErrorKind,
+    pub range: SrcRange,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TypeErrorKind {
+    /// prop 타입 참조(`x: Foo`)의 Foo가 평탄화된 컴포넌트에 없음. 그 이름을 탓한다.
     UnknownType(String),
-    /// 타입 참조가 순환한다(A의 prop 타입이 B, B가 A).
+    /// 타입 참조가 순환한다(A의 prop 타입이 B, B가 A). 고리를 닫은 참조를 탓한다.
     TypeCycle(String),
-    /// Omit/Pick의 안쪽이 객체(로 환원되는 타입)가 아님.
+    /// Omit/Pick의 안쪽이 객체(로 환원되는 타입)가 아님. 표기 전체를 탓한다.
     NonObjectUtil,
-    /// Omit/Pick이 나열한 키가 안쪽 타입에 없음.
+    /// Omit/Pick이 나열한 키가 안쪽 타입에 없음. 그 키를 탓한다.
     UnknownKey(String),
+}
+
+impl std::fmt::Display for TypeErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            TypeErrorKind::UnknownType(name) => {
+                write!(
+                    f,
+                    "cannot find component `{name}` referenced by a prop type"
+                )
+            }
+            TypeErrorKind::TypeCycle(name) => {
+                write!(f, "cycle in prop type references at `{name}`")
+            }
+            TypeErrorKind::NonObjectUtil => {
+                write!(f, "Omit/Pick requires an object type")
+            }
+            TypeErrorKind::UnknownKey(key) => {
+                write!(
+                    f,
+                    "key `{key}` listed in Omit/Pick is not in the target type"
+                )
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for FlattenError {
@@ -139,24 +177,9 @@ impl std::fmt::Display for FlattenError {
             FlattenError::Lex(e) => write!(f, "{}", e.err.kind),
             FlattenError::Parse(e) => write!(f, "{}", e.err.kind),
             FlattenError::Use(e) => write!(f, "{}", e.err.kind),
+            FlattenError::Type(e) => write!(f, "{}", e.err.kind),
             FlattenError::DuplicateComponent(name) => {
                 write!(f, "component `{name}` is defined in more than one file")
-            }
-            FlattenError::UnknownType(name) => {
-                write!(
-                    f,
-                    "cannot find component `{name}` referenced by a prop type"
-                )
-            }
-            FlattenError::TypeCycle(name) => write!(f, "cycle in prop type references at `{name}`"),
-            FlattenError::NonObjectUtil => {
-                write!(f, "the target of Omit/Pick is not an object type")
-            }
-            FlattenError::UnknownKey(key) => {
-                write!(
-                    f,
-                    "key `{key}` listed in Omit/Pick is not in the target type"
-                )
             }
         }
     }
@@ -194,7 +217,10 @@ fn expand_type_refs(comps: &mut [FlatComp]) -> Result<(), FlattenError> {
 
     for c in comps.iter_mut() {
         for p in &mut c.comp.props {
-            expand_type(&mut p.type_, &props_of, &mut Vec::new())?;
+            // 재귀는 출처를 안 들고 다닌다 - 타입 트리는 그 컴포넌트 파일 안에 있으니
+            // 여기서 한 번 감싼다.
+            expand_type(&mut p.type_, &props_of, &mut Vec::new())
+                .map_err(|e| FlattenError::Type(Sourced::from_origin(&c.origin, e)))?;
         }
     }
     Ok(())
@@ -206,7 +232,7 @@ fn expand_type(
     ty: &mut Type,
     props_of: &[(String, Vec<Prop>)],
     visiting: &mut Vec<String>,
-) -> Result<(), FlattenError> {
+) -> Result<(), TypeError> {
     match ty {
         Type::Bool | Type::Number | Type::String => Ok(()),
         Type::Array(inner) => expand_type(inner, props_of, visiting),
@@ -217,15 +243,21 @@ fn expand_type(
             Ok(())
         }
         Type::Ref(name) => {
-            if visiting.iter().any(|v| v == name) {
-                return Err(FlattenError::TypeCycle(name.clone()));
+            if visiting.iter().any(|v| v == &name.name) {
+                return Err(TypeError {
+                    kind: TypeErrorKind::TypeCycle(name.name.clone()),
+                    range: name.range.0,
+                });
             }
             let props = props_of
                 .iter()
-                .find(|(n, _)| n == name)
+                .find(|(n, _)| n == &name.name)
                 .map(|(_, p)| p)
-                .ok_or_else(|| FlattenError::UnknownType(name.clone()))?;
-            visiting.push(name.clone());
+                .ok_or_else(|| TypeError {
+                    kind: TypeErrorKind::UnknownType(name.name.clone()),
+                    range: name.range.0,
+                })?;
+            visiting.push(name.name.clone());
             // 대상 props를 Object 필드로 펼치고, 그 안의 Ref도 재귀로 푼다.
             let mut fields = Vec::with_capacity(props.len());
             for p in props {
@@ -238,20 +270,20 @@ fn expand_type(
             Ok(())
         }
         // 유틸 타입: 안쪽을 Object로 풀고 키로 필터한다. 팔은 필터 방향만 다르다(Omit=제거, Pick=선택).
-        Type::Omit(inner, keys) => {
-            let fields = util_fields(inner, keys, props_of, visiting)?;
+        Type::Omit(inner, keys, at) => {
+            let fields = util_fields(inner, keys, at.0, props_of, visiting)?;
             let kept = fields
                 .into_iter()
-                .filter(|(n, _)| !keys.contains(n))
+                .filter(|(n, _)| !keys.iter().any(|k| &k.name == n))
                 .collect();
             *ty = Type::Object(kept);
             Ok(())
         }
-        Type::Pick(inner, keys) => {
-            let fields = util_fields(inner, keys, props_of, visiting)?;
+        Type::Pick(inner, keys, at) => {
+            let fields = util_fields(inner, keys, at.0, props_of, visiting)?;
             let kept = fields
                 .into_iter()
-                .filter(|(n, _)| keys.contains(n))
+                .filter(|(n, _)| keys.iter().any(|k| &k.name == n))
                 .collect();
             *ty = Type::Object(kept);
             Ok(())
@@ -261,20 +293,32 @@ fn expand_type(
 
 /// 유틸 타입(Omit/Pick)의 안쪽을 Object로 풀어 그 필드를 돌려준다. 나열한 키가 안쪽에
 /// 실재하는지 검증한다(오타 방지). 필터 방향은 호출부가 정한다.
+///
+/// `util_at`은 `Omit<...>` 표기 전체의 구간 - 안쪽이 객체가 아닐 때 탓할 자리다. 안쪽 타입만
+/// 짚지 않는 건 Type이 저마다 위치를 들어야 해서다(ast.rs `Type`).
 fn util_fields(
     inner: &mut Type,
-    keys: &[String],
+    keys: &[Ident],
+    util_at: SrcRange,
     props_of: &[(String, Vec<Prop>)],
     visiting: &mut Vec<String>,
-) -> Result<Vec<(String, Type)>, FlattenError> {
+) -> Result<Vec<(String, Type)>, TypeError> {
     expand_type(inner, props_of, visiting)?;
     let fields = match std::mem::replace(inner, Type::Bool) {
         Type::Object(fields) => fields,
-        _ => return Err(FlattenError::NonObjectUtil),
+        _ => {
+            return Err(TypeError {
+                kind: TypeErrorKind::NonObjectUtil,
+                range: util_at,
+            })
+        }
     };
     for k in keys {
-        if !fields.iter().any(|(n, _)| n == k) {
-            return Err(FlattenError::UnknownKey(k.clone()));
+        if !fields.iter().any(|(n, _)| n == &k.name) {
+            return Err(TypeError {
+                kind: TypeErrorKind::UnknownKey(k.name.clone()),
+                range: k.range.0,
+            });
         }
     }
     Ok(fields)

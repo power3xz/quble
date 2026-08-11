@@ -76,12 +76,20 @@ pub enum Type {
     Object(Vec<(String, Type)>), // 필드 선언 순서 보존(d.ts 방출 안정성)
     /// `general: Section` - 다른 컴포넌트(대문자명)의 props를 타입으로 참조. expand가
     /// 평탄화 후 그 컴포넌트 props를 Object로 환원해 치환한다(codegen엔 Ref가 안 남는다).
-    Ref(String),
+    /// 이름이 자기 자리를 든다 - 그런 컴포넌트가 없거나(UnknownType) 순환하면(TypeCycle)
+    /// 여기를 탓한다.
+    Ref(Ident),
     /// `Omit<Section, 'title'>` - 안쪽 타입(Object로 환원됨)의 필드에서 나열한 키를 뺀다.
     /// expand가 안쪽을 먼저 풀고 필터해 Object로 치환한다. 유틸 타입은 Ref처럼 codegen 전에 사라진다.
-    Omit(Box<Type>, Vec<String>),
+    ///
+    /// ```text
+    /// Omit<Section, 'title'>
+    ///               ^^^^^^^   UnknownKey - 안쪽에 없는 키
+    /// ^^^^^^^^^^^^^^^^^^^^^   NonObjectUtil - 안쪽이 객체가 아니라 표기가 성립 안 함
+    /// ```
+    Omit(Box<Type>, Vec<Ident>, NodeRange),
     /// `Pick<Section, 'title'>` - 안쪽 타입 필드에서 나열한 키만 고른다(Omit의 반대).
-    Pick(Box<Type>, Vec<String>),
+    Pick(Box<Type>, Vec<Ident>, NodeRange),
 }
 
 /// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.

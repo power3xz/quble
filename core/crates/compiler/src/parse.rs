@@ -453,22 +453,28 @@ impl<'a> Parser<'a> {
             }
             // 유틸 타입 `Omit<T, 'a' | 'b'>` / `Pick<T, ...>` - 안쪽 타입 필드를 가감.
             Some(Token::Ident(n)) if n == "Omit" || n == "Pick" => {
+                // `Omit`부터 `>`까지 걸치게 - 안쪽이 객체가 아니면(NonObjectUtil) 표기 전체를
+                // 탓한다. 안쪽 타입만 짚으려면 Type이 저마다 위치를 들어야 해 과하다.
+                let start = self.here();
                 let util = self.ident()?;
                 self.expect(&Token::Lt)?;
                 let inner = Box::new(self.type_expr()?);
                 self.expect(&Token::Comma)?;
                 let keys = self.type_keys()?;
                 self.expect(&Token::Gt)?;
+                let range = NodeRange(SrcRange {
+                    start: start.start,
+                    end: self.just_read().end,
+                });
                 if util == "Omit" {
-                    Type::Omit(inner, keys)
+                    Type::Omit(inner, keys, range)
                 } else {
-                    Type::Pick(inner, keys)
+                    Type::Pick(inner, keys, range)
                 }
             }
             // 대문자로 시작하는 식별자 = 다른 컴포넌트를 타입으로 참조(`general: Section`).
             Some(Token::Ident(n)) if n.starts_with(char::is_uppercase) => {
-                let name = self.ident()?;
-                Type::Ref(name)
+                Type::Ref(self.ident_at()?)
             }
             other => {
                 let kind = ParseErrorKind::Expected {
@@ -489,7 +495,7 @@ impl<'a> Parser<'a> {
 
     // KEYS = TYPEKEY ("|" TYPEKEY)*  - 유틸 타입의 키 목록(`'a'` 또는 `'a' | 'b'`).
     // 키는 작은따옴표 타입 키(Token::TypeKey) - 큰따옴표 값 리터럴과 구분한다.
-    fn type_keys(&mut self) -> Result<Vec<String>, ParseError> {
+    fn type_keys(&mut self) -> Result<Vec<Ident>, ParseError> {
         let mut keys = vec![self.type_key()?];
         while matches!(self.peek(), Some(Token::Pipe)) {
             self.next()?;
@@ -498,10 +504,17 @@ impl<'a> Parser<'a> {
         Ok(keys)
     }
 
-    // 타입 키(작은따옴표) 하나를 소비해 그 값을 돌려준다.
-    fn type_key(&mut self) -> Result<String, ParseError> {
+    // 타입 키(작은따옴표) 하나를 소비해 그 값과 자리를 돌려준다. 안쪽에 없는 키면(UnknownKey)
+    // 그 자리를 탓한다.
+    fn type_key(&mut self) -> Result<Ident, ParseError> {
         match self.next()? {
-            Token::TypeKey(s) => Ok(s.clone()),
+            Token::TypeKey(s) => {
+                let name = s.clone();
+                Ok(Ident {
+                    name,
+                    range: NodeRange(self.just_read()),
+                })
+            }
             other => {
                 let kind = ParseErrorKind::Expected {
                     want: "type key (`'...'`)".into(),
