@@ -8,7 +8,8 @@ component Playground {
     files: { name: string, source: string, isEntry: bool, isEditing: bool, isPreviewing: bool, hasError: bool }[],
     editingName: string,
     source: string,
-    lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string }[],
+    lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string,
+             hasUnderline: bool, underlineStyle: string }[],
     lineNumbers: string,
     lineCount: number,
     caretLine: string,
@@ -57,6 +58,9 @@ component Playground {
               div(class="pg__line" data-error={line.hasError}) {
                 @for (t of line.tokens) {
                   span(class={t.cls}) { {t.text} }
+                }
+                @if (line.hasUnderline) {
+                  span(class="pg__squiggle" style={line.underlineStyle} /)
                 }
                 @if (line.hasError) {
                   span(class="pg__line-error") { {line.error} }

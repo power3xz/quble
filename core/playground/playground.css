@@ -142,9 +142,26 @@
 }
 
 /* 한 줄 = 정확히 한 줄 높이. 토크나이저가 빈 줄에도 공백 한 칸을 넣지만, 줄 높이를 여기서
- * 못 박아 두어야 textarea의 줄과 어긋나지 않는다. */
+ * 못 박아 두어야 textarea의 줄과 어긋나지 않는다.
+ *
+ * position은 밑줄(absolute)의 기준을 이 줄로 두기 위한 것이다. */
 .pg__line {
+  position: relative;
   height: 1.5em;
+}
+
+/* 진단 범위 밑줄. 줄 안에 절대 배치해 토큰을 건드리지 않는다 - 토큰을 쪼개 클래스를 붙이면
+ * 토크나이저가 진단을 알아야 하고(그 분리가 tokenize.ts의 전제다) 범위가 토큰 경계에
+ * 걸칠 때마다 나눠야 한다.
+ *
+ * 위치는 핸들러가 style로 준다(폰트가 monospace라 1ch = 한 칸). 흐름 밖이라 줄 높이에
+ * 영향을 주지 않는다 - 높이가 늘면 아래 줄들이 밀려 textarea와 어긋난다. */
+.pg__squiggle {
+  position: absolute;
+  bottom: 0.15em;
+  height: 0;
+  border-bottom: 2px dashed #e06c75;
+  pointer-events: none;
 }
 
 /* 컴파일 에러가 난 줄. 배경으로 줄 전체를 표시하고 왼쪽에 막대를 세운다 - 거터가 sticky로
