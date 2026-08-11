@@ -345,14 +345,31 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                 toks.push(Token::At(kw));
             }
             // 큰따옴표 = 값 리터럴(속성값 `class="x"`, payload 리터럴).
+            //
+            // 한 줄에서 닫혀야 한다. 개행을 허용하면 따옴표 하나를 빠뜨렸을 때 그 뒤 소스
+            // 전부가 문자열로 먹혀, 진단이 파일 끝을 가리키고 편집기 밑줄도 거기까지 뻗는다.
+            // 여러 줄 문자열이 필요해지면 그때 전용 리터럴을 넣는다.
             '"' => {
                 chars.next(); // 여는 따옴표
                 let mut s = String::new();
                 loop {
-                    match chars.next() {
-                        Some((_, '"')) => break,
-                        Some((_, ch)) => s.push(ch),
-                        // 여는 따옴표부터 소스 끝까지 - 닫는 짝이 없으니 그 뒤 전부가 문자열로 먹혔다.
+                    match chars.peek() {
+                        Some(&(_, '"')) => {
+                            chars.next();
+                            break;
+                        }
+                        // 개행은 먹지 않는다 - 에러 구간을 이 줄에 가둬야 밑줄이 그 줄에만 걸린다.
+                        Some(&(at, '\n')) => {
+                            return Err(LexError {
+                                kind: LexErrorKind::UnterminatedString,
+                                range: SrcRange::new(start, at),
+                            })
+                        }
+                        Some(&(_, ch)) => {
+                            chars.next();
+                            s.push(ch);
+                        }
+                        // 여는 따옴표부터 소스 끝까지 - 닫는 짝 없이 파일이 끝났다.
                         None => {
                             return Err(LexError {
                                 kind: LexErrorKind::UnterminatedString,
@@ -364,13 +381,27 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                 toks.push(Token::Str(s));
             }
             // 작은따옴표 = 타입 키(TS 유틸 타입 `Omit<T, 'title'>`). 값 리터럴과 자리가 달라 구분한다.
+            // 큰따옴표와 같이 한 줄에서 닫는다 - 타입 키가 줄을 넘을 이유가 없고, 넘기면 같은
+            // 이유로 에러 구간이 파일 끝까지 뻗는다.
             '\'' => {
                 chars.next(); // 여는 따옴표
                 let mut s = String::new();
                 loop {
-                    match chars.next() {
-                        Some((_, '\'')) => break,
-                        Some((_, ch)) => s.push(ch),
+                    match chars.peek() {
+                        Some(&(_, '\'')) => {
+                            chars.next();
+                            break;
+                        }
+                        Some(&(at, '\n')) => {
+                            return Err(LexError {
+                                kind: LexErrorKind::UnterminatedString,
+                                range: SrcRange::new(start, at),
+                            })
+                        }
+                        Some(&(_, ch)) => {
+                            chars.next();
+                            s.push(ch);
+                        }
                         None => {
                             return Err(LexError {
                                 kind: LexErrorKind::UnterminatedString,

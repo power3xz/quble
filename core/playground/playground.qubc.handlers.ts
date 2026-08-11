@@ -9,11 +9,11 @@
 // 파일 목록도 소스도 store에 산다(props의 files[i]). 이름으로 찾을 때는 그 행을 찾아 간다(rowOf).
 
 import { lazyCompiler } from "quble-wasm-compiler/browser.ts";
+import type { TDiagnostic } from "quble-wasm-compiler/wasm-compiler.ts";
 import { compile as decodeQubb, type THandlers } from "../web/runtime.ts";
 import { caretTarget } from "./caretkey.ts";
 import { entryOf, handlerBody, isKeySlot, usedKeys } from "./completion.ts";
-import { parseDiagnostic, type TDiagnostic } from "./diagnostic.ts";
-import { lineCountOf, lineNumbersFor, markError, tokenize } from "./tokenize.ts";
+import { lineCountOf, lineNumbersFor, markError, type TLine, tokenize } from "./tokenize.ts";
 
 // 진입 페이지가 초기 data를 만들 때 쓴다 - 해시 붙은 이 번들이 그것들이 실려 나가는 유일한 길이다.
 export { lineCountOf, lineNumbersFor, tokenize };
@@ -132,6 +132,21 @@ const safeStringify = (value: unknown) => {
 
 installConsoleCapture();
 
+// 줄 하나를 store가 받는 모양으로. 밑줄 구간을 style 문자열로 바꾼다 - quble 템플릿에는
+// 표현식이 없어 위치 계산을 여기서 해야 한다(.pg__caretline도 같은 방식이다).
+//
+// 단위가 ch인 것은 폰트가 monospace라서다. markError가 이미 표시 폭으로 환산해 줬으므로
+// 여기서는 그대로 쓴다.
+const forScreen = (line: TLine) => ({
+  tokens: line.tokens,
+  hasError: line.hasError,
+  error: line.error,
+  hasUnderline: line.underline !== null,
+  underlineStyle: line.underline
+    ? `left:${line.underline.from}ch;width:${line.underline.to - line.underline.from}ch`
+    : "",
+});
+
 // 편집기에 텍스트를 싣는다. 화면(.pg__view)/거터/rows는 quble이 그리고, 파일을 바꿀 때
 // textarea의 value만 여기서 직접 쓴다 - 초기값은 quble이 넣지만(props의 source) 그 뒤로는
 // uncontrolled라 자식 텍스트를 고쳐도 value가 안 따라온다.
@@ -139,7 +154,9 @@ const showText = (text: string, { store, set, get, setArray }: Pick<TCtx, "store
   const editing = (get(store.editingName) as string) ?? "";
   const lines = tokenize(text, editing);
   // 에러 줄 표시는 그 에러가 난 파일을 싣고 있을 때만.
-  setArray(store.lines, failure && failure.path === editing ? markError(lines, failure.line, failure.message) : lines);
+  const marked =
+    failure && failure.path === editing ? markError(lines, failure.start, failure.end, failure.message) : lines;
+  setArray(store.lines, marked.map(forScreen));
 
   // 같은 값이면 set이 알아서 넘긴다(leaf-store).
   set(store.lineNumbers, lineNumbersFor(text));
@@ -175,8 +192,50 @@ const jumpToError = (_data: unknown, ctx: TCtx) => {
   if (!failure || rowOf(failure.path, ctx) === -1) {
     return;
   }
-  openFile(failure.path, ctx, failure.line);
+  // 진단은 0부터, openFile의 caretLine은 1부터 센다.
+  openFile(failure.path, ctx, failure.start.line + 1);
   document.querySelector<HTMLTextAreaElement>(".pg__area")?.focus();
+};
+
+// 타이핑이 멎고 이만큼 지나면 컴파일한다. 매 입력마다 부르면 큰 파일에서 타이핑이 밀리고,
+// 편집 중간 상태는 대개 문법이 깨져 있어 결과도 버려진다.
+//
+// 1초는 손이 멈춘 뒤로 잡은 값이다 - 더 짧으면 아직 치는 중에 밑줄이 떠 노이즈가 된다.
+const DIAGNOSE_DELAY = 1000;
+let diagnoseTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 편집 중인 파일을 엔트리로 컴파일해 진단을 얻는다 - 미리보기가 무엇이든 지금 보는 파일의
+// 에러가 뜬다. 진단만 필요하므로 qb_diagnose를 쓴다(산출물을 만들지 않는다).
+//
+// .qubc가 아닌 파일(핸들러 .js, .css, .data.json)은 엔트리가 될 수 없어 건너뛴다 - 그 파일을
+// 편집하는 동안은 앞서 난 진단을 그대로 둔다.
+const scheduleDiagnose = (ctx: TCtx) => {
+  if (diagnoseTimer !== null) {
+    clearTimeout(diagnoseTimer);
+  }
+  diagnoseTimer = setTimeout(() => {
+    diagnoseTimer = null;
+    runDiagnose(ctx).catch(report);
+  }, DIAGNOSE_DELAY);
+};
+
+const runDiagnose = async (ctx: TCtx) => {
+  const editing = ctx.get(ctx.store.editingName) as string;
+  if (!editing?.endsWith(".qubc")) {
+    return;
+  }
+  const { diagnose } = await getCompiler();
+  const found = diagnose(compilerFiles(ctx), editing);
+
+  // 기다리는 동안 사용자가 다른 파일로 갔으면 이 결과는 버린다 - 그 파일에 남의 진단이 붙는다.
+  if ((ctx.get(ctx.store.editingName) as string) !== editing) {
+    return;
+  }
+  failure = found;
+  ctx.set(ctx.store.diagnostic, found ? `${found.path}:${found.start.line + 1}: ${found.message}` : "");
+  ctx.set(ctx.store.hasError, found !== null);
+  showText(sourceOf(editing, ctx), ctx);
+  refreshFiles(ctx);
 };
 
 // 편집 - textarea의 값이 원본이다. 화면과 캐시를 거기에 맞춘다(value는 이미 사용자가 쳤다).
@@ -193,6 +252,8 @@ const editSource = (_data: unknown, ctx: TCtx) => {
   }
   showText(area.value, ctx);
   trackCaret(area, ctx);
+
+  scheduleDiagnose(ctx);
 
   // 여는 따옴표가 자동완성을 연다. 그 외 입력은 이미 떠 있는 목록을 거른다.
   if ((ctx.event as InputEvent).data === '"') {
@@ -568,14 +629,11 @@ const clearLogs = (_data: unknown, { store, removeAt }: TCtx) => {
 // 것인지 알 수 없다.
 const runPreview = async (at: number, ctx: TCtx) => {
   const { store, set, get } = ctx;
-  // 진단을 기억해 두고 편집기와 파일 목록을 다시 그린다 - 에러가 이 파일에 있으면 그 줄이
-  // 강조되고, 어느 파일이든 목록의 그 행에 표시가 붙는다.
+  // 소스에 탓할 자리가 없는 실패(핸들러 평가, 마운트)를 패널에만 띄운다. 밑줄은 걸 데가
+  // 없으므로 failure는 건드리지 않는다 - 컴파일 진단은 아래에서 diagnose가 채운다.
   const fail = (message: string) => {
     set(store.diagnostic, message);
     set(store.hasError, true);
-    failure = parseDiagnostic(message);
-    showText(sourceOf((get(store.editingName) as string) ?? "", ctx), ctx);
-    refreshFiles(ctx);
   };
 
   failure = null;
@@ -584,10 +642,15 @@ const runPreview = async (at: number, ctx: TCtx) => {
   const entry = get(store.files[at].name) as string;
   const stem = entry.replace(/\.qubc$/, "");
 
-  const { compile } = await getCompiler();
+  const { compile, diagnose } = await getCompiler();
   const result = compile(compilerFiles(ctx), entry);
   if (!result.ok) {
+    // 컴파일 진단은 위치까지 있어야 밑줄이 뜬다 - compile은 텍스트만 주므로 한 번 더 묻는다.
+    // 편집 중에 이미 도는 경로와 같은 것이라, 여기서만 쓰는 갈래를 따로 두지 않는다.
+    failure = diagnose(compilerFiles(ctx), entry);
     fail(result.diagnostic);
+    showText(sourceOf((get(store.editingName) as string) ?? "", ctx), ctx);
+    refreshFiles(ctx);
     return;
   }
 

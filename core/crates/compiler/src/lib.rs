@@ -2566,6 +2566,31 @@ component B { props { a: A } template { div( /) } }"#;
     }
 
     #[test]
+    fn string_literal_stops_at_newline() {
+        // 문자열은 한 줄에서 닫혀야 한다. 개행을 넘기면 따옴표 하나를 빠뜨렸을 때 그 뒤 소스
+        // 전부가 문자열로 먹혀, 에러가 파일 끝을 가리킨다(편집기 밑줄도 거기까지 뻗는다).
+        let src = "component C {\n  template { div(class=\"x /) }\n}\n";
+        assert_eq!(error_snippet(src), "\"x /) }", "그 줄에서 멎는다");
+    }
+
+    #[test]
+    fn type_key_stops_at_newline() {
+        // 타입 키(작은따옴표)도 같은 규칙이다 - 줄을 넘을 이유가 없다.
+        let src = "component C {\n  props { rows: Omit<Card, 'id>[] }\n  template { hr( /) }\n}\n";
+        assert_eq!(error_snippet(src), "'id>[] }");
+    }
+
+    #[test]
+    fn string_literal_error_does_not_eat_next_lines() {
+        // 여러 줄이 남아 있어도 구간은 첫 줄 안이다 - 뒤 줄들은 멀쩡하다고 봐야 한다.
+        let src = "component C {\n  template { p() { \"열림 } }\n  // 뒤에 더 있다\n}\n";
+        let snippet = error_snippet(src);
+
+        assert!(!snippet.contains('\n'), "개행을 먹었다: {snippet:?}");
+        assert_eq!(snippet, "\"열림 } }");
+    }
+
+    #[test]
     fn lex_error_points_at_unterminated_comment() {
         // 닫는 `*/`가 없으면 여는 `/*`부터 소스 끝까지다(문자열과 같은 규칙).
         let src = "component C { /* 설명 template { div( /) } }";
