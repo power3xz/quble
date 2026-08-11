@@ -721,6 +721,8 @@ impl<'a> Parser<'a> {
     // 괄호는 필수다: 렉서가 줄바꿈을 안 넘겨 `@slot` 뒤 Ident가 슬롯명인지 다음 형제 노드인지
     // (`@slot` 다음 줄의 `p()`) 가릴 수 없다. 괄호가 그 경계를 준다(@if/@for와 같은 축).
     fn slot_node(&mut self) -> Result<Node, ParseError> {
+        // `@slot`부터 `)`까지 - 무기명은 탓할 이름이 없어 이 자리를 쓴다.
+        let start = self.here();
         self.expect(&Token::At(Directive::Slot))?;
         self.expect(&Token::LParen)?;
         let name = match self.peek() {
@@ -728,7 +730,13 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         self.expect(&Token::RParen)?;
-        Ok(Node::SlotPlaceholderDef { name })
+        Ok(Node::SlotPlaceholderDef {
+            name,
+            range: NodeRange(SrcRange {
+                start: start.start,
+                end: self.just_read().end,
+            }),
+        })
     }
 
     // @if ( IDENT ) { NODE* } [ @else { NODE* } ]

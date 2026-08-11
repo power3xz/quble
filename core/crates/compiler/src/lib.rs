@@ -86,6 +86,8 @@ pub fn format_error(
 struct Blamed<'a> {
     path: &'a str,
     src: &'a str,
+    /// None이면 소스에 탓할 자리가 없다. 엔트리 파일을 못 읽은 경우(소스 자체가 없다)와
+    /// 아직 위치를 안 붙인 flatten 에러(ISSUES.md)가 그렇다.
     range: Option<SrcRange>,
     message: String,
 }
@@ -109,7 +111,8 @@ fn blame<'a>(entry_path: &'a str, entry_src: &'a str, err: &'a CompileError) -> 
         // 아직 위치를 안 붙인 에러(ISSUES.md). 팔을 다 적어 두면 FlattenError에 variant를
         // 더할 때 여기가 컴파일 에러로 잡힌다 - `_`로 받으면 조용히 첫 줄로 떨어진다.
         CompileError::Flatten(FlattenError::DuplicateComponent(_)) => (entry_path, entry_src, None),
-        CompileError::Codegen(e) => (e.path.as_str(), e.src.as_str(), e.err.range),
+        // codegen 에러는 전부 자리를 안다(codegen.rs CodegenError).
+        CompileError::Codegen(e) => (e.path.as_str(), e.src.as_str(), Some(e.err.range)),
         // 엔트리를 못 읽었으니 소스가 없다 - 인자로 온 것도 빈 문자열이다.
         CompileError::EntryNotFound(_) => (entry_path, entry_src, None),
     };
@@ -2533,13 +2536,12 @@ component B { props { a: A } template { div( /) } }"#;
         src[range.start as usize..range.end as usize].to_string()
     }
 
-    /// codegen 에러가 가리키는 소스 조각. 위치를 못 주는 에러(range None)면 None을 돌려준다.
-    fn codegen_error_snippet(src: &str) -> Option<String> {
+    /// codegen 에러가 가리키는 소스 조각. codegen 에러는 전부 자리를 안다.
+    fn codegen_error_snippet(src: &str) -> String {
         match compile(src) {
-            Err(CompileError::Codegen(e)) => e
-                .err
-                .range
-                .map(|r| src[r.start as usize..r.end as usize].to_string()),
+            Err(CompileError::Codegen(e)) => {
+                src[e.err.range.start as usize..e.err.range.end as usize].to_string()
+            }
             other => panic!("codegen 에러를 기대했다: {:?}", other.map(|_| ())),
         }
     }
@@ -2685,7 +2687,7 @@ component B { props { a: A } template { div( /) } }"#;
     fn codegen_error_points_at_unknown_prop() {
         // props에 없는 `nope`를 보간했다 - 그 참조를 가리켜야 한다.
         let src = r#"component C { props { title: string } template { div() { {nope} } } }"#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
+        assert_eq!(codegen_error_snippet(src), "nope");
     }
 
     /// 경로 참조는 root부터 끝까지 통째로 - `user`만 가리키면 어느 필드가 문제인지 안 보인다.
@@ -2697,7 +2699,7 @@ component B { props { a: A } template { div( /) } }"#;
               template { div() { {user.nope} } }
             }
         "#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("user.nope"));
+        assert_eq!(codegen_error_snippet(src), "user.nope");
     }
 
     /// 값 자리에 객체가 오면(NotLeaf) 그 참조를 가리킨다.
@@ -2709,7 +2711,7 @@ component B { props { a: A } template { div( /) } }"#;
               template { div() { {user} } }
             }
         "#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("user"));
+        assert_eq!(codegen_error_snippet(src), "user");
     }
 
     /// 단축형 payload(`{ title }`)도 그 이름이 곧 참조라 자리를 가리킨다.
@@ -2721,18 +2723,28 @@ component B { props { a: A } template { div( /) } }"#;
               template { div(@click:PICK /) }
             }
         "#;
-        assert_eq!(codegen_error_snippet(src).as_deref(), Some("nope"));
+        assert_eq!(codegen_error_snippet(src), "nope");
     }
 
-    /// 구간이 없는 자리는 None - 가짜 위치로 꾸미지 않는다. 무기명 슬롯이 그렇다.
-    /// 이름이 곧 탓할 대상인데 무기명은 그 이름이 없다(ISSUES.md - `@slot()` 노드를 짚으면 된다).
+    /// 무기명 슬롯도 자리를 안다 - 탓할 이름이 없으면 `@slot()` 노드 전체를 짚는다.
     #[test]
-    fn codegen_error_without_range_is_none() {
+    fn duplicate_anonymous_slot_placeholder_points_at_the_node() {
         let src = r#"
             component C { template { @slot() @slot() } }
             component D { template { C( /) } }
         "#;
-        assert_eq!(codegen_error_snippet(src), None);
+        assert_eq!(codegen_error_snippet(src), "@slot()");
+    }
+
+    /// 자식에 없는 슬롯을 무기명으로 채우면 합성 호출을 짚는다 - "이 컴포넌트는 자식 블록을
+    /// 받지 않는다"가 곧 그 에러다.
+    #[test]
+    fn unknown_anonymous_slot_placeholder_points_at_the_composition() {
+        let src = r#"
+            component C { template { p() { "x" } } }
+            component D { template { C() { span() { "y" } } } }
+        "#;
+        assert_eq!(codegen_error_snippet(src), "C");
     }
 
     // -- 진단 텍스트(format_error) --------------------------------------

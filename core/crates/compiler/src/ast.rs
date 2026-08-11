@@ -143,6 +143,9 @@ pub enum Node {
     /// 선언 순서가 slot_placeholder_index(컴포넌트-로컬)이고, 사용쪽 SlotPlaceholderContent가 같은 공간을 쓴다.
     SlotPlaceholderDef {
         name: Option<Ident>,
+        /// `@slot(...)` 전체. 같은 자리를 두 번 선언했을 때 탓하는 곳으로, 무기명이라
+        /// 이름이 없어도 짚을 수 있게 노드가 자기 자리를 든다.
+        range: NodeRange,
     },
     /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop 참조(경로 허용,
     /// `gen.open`)이고 leaf여야 한다(표현식은 이후 단계). else_가 비어 있으면 else 없는 if.

@@ -360,7 +360,7 @@ fn collect(
             .map_or(true, |w| w.names.iter().any(|n| n.name == name))
     };
 
-    // 이 이름을 끌어온 use 자리 - 충돌을 탓할 곳이다. 엔트리(want=None)는 use가 없어 None.
+    // 이 이름을 끌어온 use 자리 - 동명 충돌을 탓할 곳이다. 엔트리(want=None)는 use가 없어 None.
     let pulled_in = |name: &str| {
         want.as_ref().and_then(|w| {
             w.names

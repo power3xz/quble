@@ -129,30 +129,17 @@ impl std::fmt::Display for CodegenErrorKind {
 
 /// codegen 실패 - 무엇이(kind) 어디서(range) 틀렸나.
 ///
-/// range가 Option인 건 탓할 자리가 아예 없는 에러가 있어서다 - 없는 것은 소스에 자리가 없다.
-/// 안 넘긴 prop(UnknownArg)과 무기명 슬롯(`@slot()`) 관련 둘이 그렇다. 그런 자리를 0..0 같은
-/// 가짜 값으로 꾸미지 않고 None으로 정직하게 둔다.
+/// range는 Option이 아니다 - 모든 codegen 에러가 탓할 자리를 안다. 소스에 없는 것을 탓하는
+/// 에러(안 넘긴 prop, 무기명 슬롯)도 그것을 감싼 노드를 짚는다(합성 호출, `@slot()`).
 #[derive(Debug, PartialEq, Eq)]
 pub struct CodegenError {
     pub kind: CodegenErrorKind,
-    pub range: Option<SrcRange>,
+    pub range: SrcRange,
 }
 
 impl CodegenErrorKind {
-    /// 위치를 아는 에러(AST 노드가 구간을 든 경우).
     fn at(self, range: SrcRange) -> CodegenError {
-        CodegenError {
-            kind: self,
-            range: Some(range),
-        }
-    }
-
-    /// 위치를 모르는 에러 - 탓할 AST 노드가 아직 구간을 안 든다.
-    fn no_range(self) -> CodegenError {
-        CodegenError {
-            kind: self,
-            range: None,
-        }
+        CodegenError { kind: self, range }
     }
 }
 
@@ -193,11 +180,13 @@ fn slot_name(content: &SlotPlaceholderContent) -> Option<&str> {
     content.name.as_ref().map(|n| n.name.as_str())
 }
 
+/// 한 `@slot` 선언 - 이름(무기명이면 None)과 그 선언의 자리.
+/// 중복 선언 에러가 기명이면 이름을, 무기명이면 `@slot()` 노드를 가리킨다.
+type SlotDef<'a> = (Option<&'a Ident>, SrcRange);
+
 /// template을 훑어 `@slot` 선언을 등장 순서로 모은다(무기명이면 None). 이 순서가 slot_placeholder_index다.
 /// 중첩 노드(요소 자식/@if/@for/@with) 안의 슬롯도 같은 순서 공간에 들어간다.
-///
-/// 이름만이 아니라 Ident째로 모은다 - 중복 선언 에러가 그 이름 자리를 가리켜야 한다.
-fn collect_slot_placeholders(nodes: &[Node]) -> Vec<Option<&Ident>> {
+fn collect_slot_placeholders(nodes: &[Node]) -> Vec<SlotDef<'_>> {
     let mut slot_placeholders = Vec::new();
     walk_slot_placeholders(nodes, &mut slot_placeholders);
     slot_placeholders
@@ -205,17 +194,19 @@ fn collect_slot_placeholders(nodes: &[Node]) -> Vec<Option<&Ident>> {
 
 /// 슬롯 선언 목록에서 이름만 뽑는다(무기명이면 None). 자리 찾기는 이름으로만 하므로
 /// 위치를 안 쓰는 소비처(CompLookup, 사용쪽 매칭)는 이 형태를 쓴다.
-fn slot_def_names<'a>(slot_placeholders: &[Option<&'a Ident>]) -> Vec<Option<&'a str>> {
+fn slot_def_names<'a>(slot_placeholders: &[SlotDef<'a>]) -> Vec<Option<&'a str>> {
     slot_placeholders
         .iter()
-        .map(|s| s.map(|i| i.name.as_str()))
+        .map(|(name, _)| name.map(|i| i.name.as_str()))
         .collect()
 }
 
-fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Option<&'a Ident>>) {
+fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<SlotDef<'a>>) {
     for node in nodes {
         match node {
-            Node::SlotPlaceholderDef { name } => slot_placeholders.push(name.as_ref()),
+            Node::SlotPlaceholderDef { name, range } => {
+                slot_placeholders.push((name.as_ref(), range.0))
+            }
             Node::Element { children, .. } => walk_slot_placeholders(children, slot_placeholders),
             Node::If { then, else_, .. } => {
                 walk_slot_placeholders(then, slot_placeholders);
@@ -233,20 +224,21 @@ fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Opt
 /// 자리를 찾으므로 같은 이름이 둘이면 한 덩이를 두 자리에 복제하게 된다 - 선언 단계에서 막는다.
 fn check_slot_placeholder_defs(
     comp: &str,
-    slot_placeholders: &[Option<&Ident>],
+    slot_placeholders: &[SlotDef],
 ) -> Result<(), CodegenError> {
     let names = slot_def_names(slot_placeholders);
-    for (i, slot_placeholder) in slot_placeholders.iter().enumerate() {
+    for (i, (slot_placeholder, at)) in slot_placeholders.iter().enumerate() {
         let name = slot_placeholder.map(|s| s.name.as_str());
         if names[..i].contains(&name) {
             let kind = CodegenErrorKind::DuplicateSlotPlaceholderDef {
                 comp: comp.to_string(),
                 slot_placeholder: name.map(str::to_string),
             };
-            // 뒤에 온 중복 선언을 가리킨다(먼저 온 것이 자리를 차지했다). 무기명은 탓할 이름이 없다.
+            // 뒤에 온 중복 선언을 가리킨다(먼저 온 것이 자리를 차지했다). 기명은 그 이름을,
+            // 무기명은 이름이 없어 `@slot()` 노드 전체를 짚는다.
             return Err(match slot_placeholder {
                 Some(slot) => kind.at(slot.range.0),
-                None => kind.no_range(),
+                None => kind.at(*at),
             });
         }
     }
@@ -885,10 +877,11 @@ fn emit_node(
                         comp: name.name.clone(),
                         slot_placeholder: slot_name(content).map(str::to_string),
                     };
-                    // 무기명은 탓할 이름이 없다 - 그때만 위치가 빈다.
+                    // 기명은 그 이름을, 무기명은 이름이 없어 합성 호출을 짚는다 - "이 컴포넌트는
+                    // 자식 블록을 받지 않는다"가 곧 그 에러다.
                     return Err(match &content.name {
                         Some(slot) => kind.at(slot.range.0),
-                        None => kind.no_range(),
+                        None => kind.at(name.range.0),
                     });
                 }
             }
