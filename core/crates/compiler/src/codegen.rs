@@ -1,7 +1,7 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    ArgValue, AttrValue, Context, Event, ForCount, Ident, LitValue, Node, Prop,
+    ArgValue, AttrValue, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
     SlotPlaceholderContent, Type, VarRef,
 };
 use crate::flatten::{FlatComp, Sourced};
@@ -909,11 +909,17 @@ fn emit_node(
             *next_slot_placeholder_index += 1;
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop 참조 - (scope_index, offset)으로. leaf여야 한다. (표현식은 이후 단계)
-            let (scope_index, offset) = var_ref_to_leaf_slot(cond, props, for_scope.for_vars)?;
-            code.push(Op::If as u8);
-            code.push(scope_index);
-            code.push(offset);
+            // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
+            // 연산자가 붙은 식은 표현식 테이블을 거치는 별도 opcode로 간다(이후 단계).
+            match cond {
+                Expr::Var(var) => {
+                    let (scope_index, offset) =
+                        var_ref_to_leaf_slot(var, props, for_scope.for_vars)?;
+                    code.push(Op::If as u8);
+                    code.push(scope_index);
+                    code.push(offset);
+                }
+            }
 
             for node in then {
                 emit_node(

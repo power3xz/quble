@@ -10,7 +10,7 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, ForCount, Ident, LitValue, Node, Prop,
+    ArgValue, AttrValue, Component, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
     SlotPlaceholderContent, SourceFile, Type, Use, VarRef,
 };
 use crate::lexer::{Directive, Lexed, Token};
@@ -261,6 +261,11 @@ impl<'a> Parser<'a> {
             end: self.just_read().end,
         });
         Ok(VarRef { root, path, range })
+    }
+
+    /// 값 자리의 식 하나. 지금은 잎(슬롯 참조)만 - 연산자는 이후 단계.
+    fn expr(&mut self) -> Result<Expr, ParseError> {
+        Ok(Expr::Var(self.var_ref()?))
     }
 
     /// 값 자리(payload/context/합성 인자)의 값 하나: Ident면 prop 참조(Var), 그 외 리터럴 토큰
@@ -739,12 +744,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // @if ( IDENT ) { NODE* } [ @else { NODE* } ]
-    // cond는 불리언 prop 참조(경로 허용, `gen.open`). 표현식은 이후 단계.
+    // @if ( EXPR ) { NODE* } [ @else { NODE* } ]
     fn if_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::If))?;
         self.expect(&Token::LParen)?;
-        let cond = self.var_ref()?;
+        let cond = self.expr()?;
         self.expect(&Token::RParen)?;
         self.expect(&Token::LBrace)?;
         let then = self.nodes()?;

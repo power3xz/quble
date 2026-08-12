@@ -147,10 +147,9 @@ pub enum Node {
         /// 이름이 없어도 짚을 수 있게 노드가 자기 자리를 든다.
         range: NodeRange,
     },
-    /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop 참조(경로 허용,
-    /// `gen.open`)이고 leaf여야 한다(표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
+    /// `@if (cond) { then } @else { else_ }` - 조건 분기. else_가 비어 있으면 else 없는 if.
     If {
-        cond: VarRef,
+        cond: Expr,
         then: Vec<Node>,
         else_: Vec<Node>,
     },
@@ -210,6 +209,13 @@ pub struct VarRef {
     /// 이 참조가 쓰인 자리(`root`부터 경로 끝까지). codegen이 prop/필드를 못 찾았을 때
     /// 탓할 대상이다. 비교에서 빠진다(NodeRange).
     pub range: NodeRange,
+}
+
+/// 값 자리에 오는 식. 지금은 잎(슬롯 참조) 하나뿐이라 `@if (done)` 같은 단일 참조만 표현한다
+/// - 연산자 가지는 이후 단계. 잎 하나짜리 식은 codegen이 기존 슬롯 인코딩으로 그대로 낮춘다.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Expr {
+    Var(VarRef),
 }
 
 /// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`, `prop=42`, `prop=true`).
