@@ -22,10 +22,23 @@ pub enum Token {
     Comma,           // ,
     Colon,           // :
     Dot,             // . (객체 필드 접근 `assignee.name`)
-    Lt,              // < (제네릭 타입 `Omit<Section, 'a'>`)
+    Lt,              // < (제네릭 타입 `Omit<Section, 'a'>`, 값 자리에선 비교)
     LtLt,            // << (슬롯 채움 `Header << 노드`)
     Gt,              // >
     Pipe,            // | (유니온 키 리스트 `'a' | 'b'`)
+    // 값 자리 표현식 연산자. 나눗셈은 Slash가 겸한다 - self-close와 같은 글자라 렉서는
+    // 한 토큰으로 내고 파서가 자리로 가른다(`{` 안이면 나눗셈, 합성 인자 끝이면 self-close).
+    Plus,     // +
+    Minus,    // - (이항 뺄셈 / 단항 부호)
+    Star,     // *
+    Percent,  // %
+    EqEq,     // ==
+    BangEq,   // !=
+    Le,       // <=
+    Ge,       // >=
+    AmpAmp,   // &&
+    PipePipe, // ||
+    Bang,     // !
     /// `/` - self-close 표기(`tag(attrs /)`). bool = 직전에 공백이 있었나. 확정 문법이
     /// `/` 앞 공백을 강제하므로(SYNTAX #3.1.1) 렉서가 공백 유무를 실어 파서가 검증한다.
     Slash(bool),
@@ -61,6 +74,17 @@ impl std::fmt::Display for Token {
             Token::LtLt => write!(f, "`<<`"),
             Token::Gt => write!(f, "`>`"),
             Token::Pipe => write!(f, "`|`"),
+            Token::Plus => write!(f, "`+`"),
+            Token::Minus => write!(f, "`-`"),
+            Token::Star => write!(f, "`*`"),
+            Token::Percent => write!(f, "`%`"),
+            Token::EqEq => write!(f, "`==`"),
+            Token::BangEq => write!(f, "`!=`"),
+            Token::Le => write!(f, "`<=`"),
+            Token::Ge => write!(f, "`>=`"),
+            Token::AmpAmp => write!(f, "`&&`"),
+            Token::PipePipe => write!(f, "`||`"),
+            Token::Bang => write!(f, "`!`"),
             // 앞 공백 여부(self-close 검증용)는 표기에 안 싣는다 - 보이는 건 `/` 하나다.
             Token::Slash(_) => write!(f, "`/`"),
             Token::At(d) => write!(f, "{d}"),
@@ -268,9 +292,58 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                 chars.next();
                 toks.push(Token::RBracket);
             }
+            // 두 글자 연산자는 한 글자 짝보다 먼저 본다 - `==`가 `=` 둘로 쪼개지면 안 된다.
             '=' => {
                 chars.next();
-                toks.push(Token::Eq);
+                match chars.peek().map(|&(_, ch)| ch) {
+                    Some('=') => {
+                        chars.next();
+                        toks.push(Token::EqEq);
+                    }
+                    _ => toks.push(Token::Eq),
+                }
+            }
+            '!' => {
+                chars.next();
+                match chars.peek().map(|&(_, ch)| ch) {
+                    Some('=') => {
+                        chars.next();
+                        toks.push(Token::BangEq);
+                    }
+                    _ => toks.push(Token::Bang),
+                }
+            }
+            // `&`는 `&&`로만 쓴다 - 홀로 오는 자리가 문법에 없어 갈래가 아니라 에러다.
+            '&' => {
+                chars.next();
+                match chars.peek().map(|&(_, ch)| ch) {
+                    Some('&') => {
+                        chars.next();
+                        toks.push(Token::AmpAmp);
+                    }
+                    _ => {
+                        return Err(LexError {
+                            kind: LexErrorKind::UnexpectedChar('&'),
+                            range: SrcRange::new(start, start + '&'.len_utf8()),
+                        })
+                    }
+                }
+            }
+            '+' => {
+                chars.next();
+                toks.push(Token::Plus);
+            }
+            '-' => {
+                chars.next();
+                toks.push(Token::Minus);
+            }
+            '*' => {
+                chars.next();
+                toks.push(Token::Star);
+            }
+            '%' => {
+                chars.next();
+                toks.push(Token::Percent);
             }
             ',' => {
                 chars.next();
@@ -286,22 +359,39 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
             }
             '<' => {
                 chars.next();
-                // `<<`(슬롯 채움)와 `<`(제네릭 타입)를 가른다 - template과 타입으로 문맥이 갈려 충돌하지 않는다.
+                // `<<`(슬롯 채움), `<=`(비교), `<`(제네릭 타입/비교)를 가른다 - 한 글자로 남는
+                // `<`는 타입 자리와 값 자리에 다 오지만 파서 문맥이 갈려 충돌하지 않는다.
                 match chars.peek().map(|&(_, ch)| ch) {
                     Some('<') => {
                         chars.next();
                         toks.push(Token::LtLt);
+                    }
+                    Some('=') => {
+                        chars.next();
+                        toks.push(Token::Le);
                     }
                     _ => toks.push(Token::Lt),
                 }
             }
             '>' => {
                 chars.next();
-                toks.push(Token::Gt);
+                match chars.peek().map(|&(_, ch)| ch) {
+                    Some('=') => {
+                        chars.next();
+                        toks.push(Token::Ge);
+                    }
+                    _ => toks.push(Token::Gt),
+                }
             }
             '|' => {
                 chars.next();
-                toks.push(Token::Pipe);
+                match chars.peek().map(|&(_, ch)| ch) {
+                    Some('|') => {
+                        chars.next();
+                        toks.push(Token::PipePipe);
+                    }
+                    _ => toks.push(Token::Pipe),
+                }
             }
             '@' => {
                 chars.next(); // @

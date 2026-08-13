@@ -273,6 +273,85 @@ mod tests {
     }
 
     #[test]
+    fn lex_operators() {
+        use lexer::Token;
+        // 산술/비교/논리 연산자가 각각 한 토큰으로 나온다.
+        let lexed = lexer::lex("+ - * % == != < <= > >= && || !").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::Plus,
+                Token::Minus,
+                Token::Star,
+                Token::Percent,
+                Token::EqEq,
+                Token::BangEq,
+                Token::Lt,
+                Token::Le,
+                Token::Gt,
+                Token::Ge,
+                Token::AmpAmp,
+                Token::PipePipe,
+                Token::Bang,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_longest_match_wins_over_prefix() {
+        use lexer::Token;
+        // 두 글자 연산자가 한 글자 짝보다 먼저 잡힌다 - `==`가 `=` 둘로 쪼개지지 않는다.
+        // `<`/`>`는 제네릭 타입에도 쓰여(Omit<T, 'a'>) 한 글자로 남아야 한다.
+        let lexed = lexer::lex("== = <= < >= > && | || !=").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::EqEq,
+                Token::Eq,
+                Token::Le,
+                Token::Lt,
+                Token::Ge,
+                Token::Gt,
+                Token::AmpAmp,
+                Token::Pipe,
+                Token::PipePipe,
+                Token::BangEq,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_slot_fill_still_beats_less_than() {
+        use lexer::Token;
+        // `<<`(슬롯 채움)는 `<=`/`<`보다 먼저 잡힌다 - 비교 연산자가 끼어들지 않는다.
+        let lexed = lexer::lex("Header << h1").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::Ident("Header".to_string()),
+                Token::LtLt,
+                Token::Ident("h1".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_division_is_slash_token() {
+        use lexer::Token;
+        // 나눗셈과 self-close가 같은 `/` 토큰이다 - 렉서는 문맥을 모르고, 파서가 자리로 가른다.
+        // Slash가 실은 앞 공백 여부를 싣는다(self-close 검증용).
+        let lexed = lexer::lex("a / b").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::Slash(true),
+                Token::Ident("b".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn lex_number_dot_is_decimal_not_dot() {
         use lexer::Token;
         // 숫자 안의 `.`은 소수점으로 먹어 Dot 토큰이 생기지 않는다(숫자 분기가 먼저 소비).
