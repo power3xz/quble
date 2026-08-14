@@ -10,8 +10,8 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, Component, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
-    SlotPlaceholderContent, SourceFile, Type, Use, VarRef,
+    ArgValue, AttrValue, BinaryOp, Component, Context, Event, Expr, ForCount, Ident, LitValue,
+    Node, Prop, SlotPlaceholderContent, SourceFile, Type, UnaryOp, Use, VarRef,
 };
 use crate::lexer::{Directive, Lexed, Token};
 use crate::src_range::{NodeRange, SrcRange};
@@ -263,9 +263,130 @@ impl<'a> Parser<'a> {
         Ok(VarRef { root, path, range })
     }
 
-    /// 값 자리의 식 하나. 지금은 잎(슬롯 참조)만 - 연산자는 이후 단계.
+    /// 값 자리의 식 하나. 1 = peek_binary_op 표의 최저 우선순위라 모든 연산자를 받는다.
     fn expr(&mut self) -> Result<Expr, ParseError> {
-        Ok(Expr::Var(self.var_ref()?))
+        self.expr_binary(1)
+    }
+
+    /// 이항 연산자를 우선순위대로 묶는다. `min`보다 낮은 연산자는 안 먹고 남겨 둔다 - 그걸
+    /// 바깥 호출이 자기 왼쪽으로 받아 묶는다.
+    ///
+    /// `a + b * c`: `+`(5)를 먹고 오른쪽을 min=6으로 파싱해 `b * c`(6)가 먼저 묶인다.
+    /// `a * b + c`: `*`(6)를 먹고 오른쪽을 min=7로 파싱하니 `+`(5)는 안 먹혀 `(a*b)`가 닫히고,
+    /// 바깥 회차가 그걸 왼쪽 삼아 `+`로 묶는다.
+    ///
+    /// 오른쪽을 `prec + 1`로 부르는 것이 좌결합이다 - 같은 우선순위가 오른쪽에 안 붙고
+    /// while이 왼쪽에 쌓는다(`a - b - c` -> `(a-b)-c`). `prec`으로 부르면 우결합이 된다.
+    fn expr_binary(&mut self, min: u8) -> Result<Expr, ParseError> {
+        // 피연산자 앞에서 시작해, 묶을 때마다 오른쪽 끝에서 닫는다.
+        let start = self.here();
+        // node는 지금까지 묶은 트리 전체다 - 첫 회차만 피연산자 하나이고, 이후 회차가 그걸
+        // 통째로 왼쪽 자식에 밀어 넣는다. 왼쪽이 깊어지는 것이 곧 좌결합이다.
+        let mut node = self.expr_operand()?;
+        while let Some((op, prec)) = self.peek_binary_op() {
+            if prec < min {
+                break;
+            }
+            self.next()?;
+            let right = self.expr_binary(prec + 1)?;
+            let range = NodeRange(SrcRange {
+                start: start.start,
+                end: self.just_read().end,
+            });
+            node = Expr::Binary(op, Box::new(node), Box::new(right), range);
+        }
+        Ok(node)
+    }
+
+    /// 다음 토큰이 이항 연산자면 그 종류와 우선순위. 숫자가 클수록 먼저 묶인다(JS와 같은 순서).
+    fn peek_binary_op(&self) -> Option<(BinaryOp, u8)> {
+        Some(match self.peek()? {
+            Token::PipePipe => (BinaryOp::Or, 1),
+            Token::AmpAmp => (BinaryOp::And, 2),
+            Token::EqEq => (BinaryOp::Eq, 3),
+            Token::BangEq => (BinaryOp::Ne, 3),
+            Token::Lt => (BinaryOp::Lt, 4),
+            Token::Le => (BinaryOp::Le, 4),
+            Token::Gt => (BinaryOp::Gt, 4),
+            Token::Ge => (BinaryOp::Ge, 4),
+            Token::Plus => (BinaryOp::Add, 5),
+            Token::Minus => (BinaryOp::Sub, 5),
+            Token::Star => (BinaryOp::Mul, 6),
+            // 나눗셈과 self-close가 같은 토큰이다 - 값 자리로 내려온 `/`는 나눗셈이다.
+            Token::Slash(_) => (BinaryOp::Div, 6),
+            Token::Percent => (BinaryOp::Rem, 6),
+            _ => return None,
+        })
+    }
+
+    /// 다음 토큰이 단항 연산자면 그 종류. `-`는 이항에도 있어(peek_binary_op) 같은 토큰이
+    /// 자리로 갈린다 - 피연산자 앞이면 부호, 뒤면 뺄셈이다.
+    fn peek_unary_op(&self) -> Option<UnaryOp> {
+        Some(match self.peek()? {
+            Token::Bang => UnaryOp::Not,
+            Token::Minus => UnaryOp::Neg,
+            _ => return None,
+        })
+    }
+
+    /// 피연산자 하나를 읽는다. expr_binary의 좌우도, 단항이 씌워지는 대상도 다 이것이다.
+    ///
+    /// 단항이 앞에 붙어 있으면 벗겨내고 안쪽을 자기를 다시 불러 읽는다 - 그래서 우결합이다
+    /// (`!!a` -> `!(!a)`). 단항은 피연산자에 씌우는 것이라 이항보다 먼저 묶인다.
+    ///
+    /// 괄호도 피연산자다 - 안에 트리가 통째로 들어 있어도 바깥은 그걸 피연산자 하나로만
+    /// 본다(`(a + b) * c`에서 `*`의 왼쪽이 `(a + b)` 통째다). 안쪽을 채울 때만 `expr`로
+    /// 되올라가고, 그 순간 우선순위가 초기화된다.
+    fn expr_operand(&mut self) -> Result<Expr, ParseError> {
+        let start = self.here();
+        if let Some(op) = self.peek_unary_op() {
+            self.next()?;
+            let operand = self.expr_operand()?;
+            let range = NodeRange(SrcRange {
+                start: start.start,
+                end: self.just_read().end,
+            });
+            return Ok(Expr::Unary(op, Box::new(operand), range));
+        }
+        match self.peek() {
+            Some(Token::LParen) => {
+                self.next()?;
+                let inner = self.expr()?;
+                self.expect(&Token::RParen)?;
+                Ok(inner)
+            }
+            Some(Token::Ident(_)) => {
+                let var = self.var_ref()?;
+                // 노드가 걸친 자리는 경로 전체(`tags.length`)다.
+                let range = var.range;
+                // 경로 끝이 `length`면 배열 길이다. 같은 이름의 객체 필드와 겹치므로 어느
+                // 쪽인지는 codegen이 타입을 보고 가른다.
+                match var.path.last().map(String::as_str) {
+                    Some("length") => {
+                        let mut base = var;
+                        base.path.pop();
+                        // 참조가 짚을 자리는 `tags`로 좁힌다 - 그 이름을 못 찾으면 거기에 밑줄이 간다.
+                        base.range = NodeRange(SrcRange {
+                            start: range.0.start,
+                            end: range.0.start + base.root.len() as u32,
+                        });
+                        Ok(Expr::Length(base, range))
+                    }
+                    _ => Ok(Expr::Var(var, range)),
+                }
+            }
+            Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
+                let lit = self.lit_value()?;
+                Ok(Expr::Lit(lit, NodeRange(self.just_read())))
+            }
+            got => {
+                let kind = ParseErrorKind::Expected {
+                    want: "expression (prop, \"str\", 42, true, `(`)".into(),
+                    got: shown(got),
+                };
+                Err(self.err_here(kind))
+            }
+        }
     }
 
     /// 값 자리(payload/context/합성 인자)의 값 하나: Ident면 prop 참조(Var), 그 외 리터럴 토큰

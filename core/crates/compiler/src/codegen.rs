@@ -45,6 +45,9 @@ pub enum CodegenErrorKind {
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
     ForCountNotIterable(String),
+    /// 파서는 식을 받았지만 codegen이 아직 못 낸다 - 표현식 테이블/opcode가 붙기 전까지.
+    /// 문법만 열리고 컴파일이 조용히 틀린 코드를 내는 상태를 막는다.
+    ExprNotSupported,
     /// 자식이 정의하지 않은 슬롯을 채웠다(`Header << ...`인데 자식에 `@slot(Header)` 없음,
     /// 또는 자식이 `@slot()`을 안 뒀는데 자식 블록을 준 경우).
     ///
@@ -106,6 +109,9 @@ impl std::fmt::Display for CodegenErrorKind {
                 f,
                 "`{path}` is neither an array nor a number: it cannot drive @for"
             ),
+            CodegenErrorKind::ExprNotSupported => {
+                write!(f, "operators in a value position are not compiled yet")
+            }
             // 없는 것보다 쓸 수 있는 것을 말한다 - 고칠 방법이 문장 안에 있어야 한다.
             CodegenErrorKind::UnknownSlotPlaceholder { comp, declared } => {
                 let named: Vec<String> =
@@ -912,12 +918,15 @@ fn emit_node(
             // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
             // 연산자가 붙은 식은 표현식 테이블을 거치는 별도 opcode로 간다(이후 단계).
             match cond {
-                Expr::Var(var) => {
+                Expr::Var(var, _) => {
                     let (scope_index, offset) =
                         var_ref_to_leaf_slot(var, props, for_scope.for_vars)?;
                     code.push(Op::If as u8);
                     code.push(scope_index);
                     code.push(offset);
+                }
+                other => {
+                    return Err(CodegenErrorKind::ExprNotSupported.at(other.range().0));
                 }
             }
 

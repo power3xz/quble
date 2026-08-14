@@ -272,6 +272,126 @@ mod tests {
         );
     }
 
+    /// `@if (COND)`의 조건식만 파싱해 꺼낸다 - 우선순위/결합이 어떻게 묶였는지 보려는 것.
+    fn if_cond(cond: &str) -> ast::Expr {
+        let src = format!("component C {{ template {{ @if ({cond}) {{ p( /) }} }} }}");
+        let lexed = lexer::lex(&src).unwrap();
+        let mut source = parse::parse(&lexed, src.len()).unwrap();
+        match source.comps.remove(0).template.remove(0) {
+            Node::If { cond, .. } => cond,
+            other => panic!("@if를 기대했다: {other:?}"),
+        }
+    }
+
+    /// 식의 묶인 모양을 괄호 표기로 편다 - `(a - b) - c`처럼 눈으로 결합을 확인한다.
+    fn shape(e: &ast::Expr) -> String {
+        use ast::Expr;
+        match e {
+            Expr::Var(v, _) => {
+                if v.path.is_empty() {
+                    v.root.clone()
+                } else {
+                    format!("{}.{}", v.root, v.path.join("."))
+                }
+            }
+            Expr::Length(v, _) => format!("{}.length", v.root),
+            Expr::Lit(ast::LitValue::Number(n), _) => format!("{n}"),
+            Expr::Lit(ast::LitValue::Bool(b), _) => format!("{b}"),
+            Expr::Lit(ast::LitValue::Str(s), _) => format!("\"{s}\""),
+            Expr::Unary(op, x, _) => format!("({}{})", unary_sym(op), shape(x)),
+            Expr::Binary(op, l, r, _) => {
+                format!("({} {} {})", shape(l), binary_sym(op), shape(r))
+            }
+        }
+    }
+
+    fn unary_sym(op: &ast::UnaryOp) -> &'static str {
+        match op {
+            ast::UnaryOp::Not => "!",
+            ast::UnaryOp::Neg => "-",
+        }
+    }
+
+    fn binary_sym(op: &ast::BinaryOp) -> &'static str {
+        use ast::BinaryOp as B;
+        match op {
+            B::Add => "+",
+            B::Sub => "-",
+            B::Mul => "*",
+            B::Div => "/",
+            B::Rem => "%",
+            B::Eq => "==",
+            B::Ne => "!=",
+            B::Lt => "<",
+            B::Le => "<=",
+            B::Gt => ">",
+            B::Ge => ">=",
+            B::And => "&&",
+            B::Or => "||",
+        }
+    }
+
+    #[test]
+    fn parse_expr_single_ref_stays_leaf() {
+        // 연산자가 없는 식은 잎 하나 그대로 - codegen이 이걸 기존 슬롯 인코딩으로 낮춘다.
+        assert_eq!(shape(&if_cond("done")), "done");
+        assert_eq!(shape(&if_cond("gen.open")), "gen.open");
+    }
+
+    #[test]
+    fn parse_expr_precedence_follows_js() {
+        // 곱셈이 덧셈보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a + b * c")), "(a + (b * c))");
+        // 비교가 산술보다 나중에 묶인다.
+        assert_eq!(shape(&if_cond("a + b > c")), "((a + b) > c)");
+        // &&가 ||보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a || b && c")), "(a || (b && c))");
+        // 비교가 &&보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a > 0 && b")), "((a > 0) && b)");
+        // == 는 비교보다 나중에 묶인다.
+        assert_eq!(shape(&if_cond("a < b == c")), "((a < b) == c)");
+    }
+
+    #[test]
+    fn parse_expr_binary_is_left_associative() {
+        // 같은 우선순위는 왼쪽부터 - `a - b - c`가 `(a-b)-c`여야 10-3-2=5가 된다.
+        assert_eq!(shape(&if_cond("a - b - c")), "((a - b) - c)");
+        assert_eq!(shape(&if_cond("a / b / c")), "((a / b) / c)");
+        assert_eq!(shape(&if_cond("a && b && c")), "((a && b) && c)");
+    }
+
+    #[test]
+    fn parse_expr_unary_is_right_associative() {
+        // 단항은 안쪽부터 - 바깥 !가 안쪽 !의 결과를 받는다.
+        assert_eq!(shape(&if_cond("!!done")), "(!(!done))");
+        // 단항이 이항보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("!a && b")), "((!a) && b)");
+        assert_eq!(shape(&if_cond("-a + b")), "((-a) + b)");
+    }
+
+    #[test]
+    fn parse_expr_paren_overrides_precedence() {
+        // 괄호 안은 우선순위가 초기화되고 그 결과가 피연산자 하나처럼 묶인다.
+        // 괄호 자체는 AST에 안 남는다 - 묶는 순서를 바꿀 뿐이라 노드가 필요 없다.
+        assert_eq!(shape(&if_cond("(a + b) * c")), "((a + b) * c)");
+        assert_eq!(shape(&if_cond("!(a && b)")), "(!(a && b))");
+    }
+
+    #[test]
+    fn parse_expr_literals_and_length() {
+        assert_eq!(shape(&if_cond("count > 0")), "(count > 0)");
+        assert_eq!(shape(&if_cond("name == \"a\"")), "(name == \"a\")");
+        assert_eq!(shape(&if_cond("done == true")), "(done == true)");
+        // `.length`는 배열 길이 - 대상이 배열이어야 한다(타입은 codegen이 본다).
+        assert_eq!(shape(&if_cond("tags.length > 0")), "(tags.length > 0)");
+    }
+
+    #[test]
+    fn parse_expr_division_in_condition_is_not_self_close() {
+        // `/`는 self-close와 같은 토큰이지만 조건 자리에선 나눗셈이다 - 파서가 자리로 가른다.
+        assert_eq!(shape(&if_cond("a / b > 1")), "((a / b) > 1)");
+    }
+
     #[test]
     fn lex_operators() {
         use lexer::Token;
