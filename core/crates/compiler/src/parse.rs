@@ -356,24 +356,11 @@ impl<'a> Parser<'a> {
                 Ok(inner)
             }
             Some(Token::Ident(_)) => {
+                // `tags.length`도 그냥 참조다 - 길이인지 같은 이름의 필드인지는 타입이 갈라서
+                // expr_type이 정한다. 파서는 타입을 몰라 그 판단을 할 수 없다.
                 let var = self.var_ref()?;
-                // 노드가 걸친 자리는 경로 전체(`tags.length`)다.
                 let range = var.range;
-                // 경로 끝이 `length`면 배열 길이다. 같은 이름의 객체 필드와 겹치므로 어느
-                // 쪽인지는 codegen이 타입을 보고 가른다.
-                match var.path.last().map(String::as_str) {
-                    Some("length") => {
-                        let mut base = var;
-                        base.path.pop();
-                        // 참조가 짚을 자리는 `tags`로 좁힌다 - 그 이름을 못 찾으면 거기에 밑줄이 간다.
-                        base.range = NodeRange(SrcRange {
-                            start: range.0.start,
-                            end: range.0.start + base.root.len() as u32,
-                        });
-                        Ok(Expr::Length(base, range))
-                    }
-                    _ => Ok(Expr::Var(var, range)),
-                }
+                Ok(Expr::Var(var, range))
             }
             Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
                 let lit = self.lit_value()?;

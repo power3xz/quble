@@ -6,6 +6,7 @@ mod ast;
 mod codegen;
 mod diagnostic;
 mod dts;
+mod expr_type;
 mod flatten;
 mod lexer;
 mod parse;
@@ -295,40 +296,13 @@ mod tests {
                     format!("{}.{}", v.root, v.path.join("."))
                 }
             }
-            Expr::Length(v, _) => format!("{}.length", v.root),
             Expr::Lit(ast::LitValue::Number(n), _) => format!("{n}"),
             Expr::Lit(ast::LitValue::Bool(b), _) => format!("{b}"),
             Expr::Lit(ast::LitValue::Str(s), _) => format!("\"{s}\""),
-            Expr::Unary(op, x, _) => format!("({}{})", unary_sym(op), shape(x)),
+            Expr::Unary(op, x, _) => format!("({}{})", op.sym(), shape(x)),
             Expr::Binary(op, l, r, _) => {
-                format!("({} {} {})", shape(l), binary_sym(op), shape(r))
+                format!("({} {} {})", shape(l), op.sym(), shape(r))
             }
-        }
-    }
-
-    fn unary_sym(op: &ast::UnaryOp) -> &'static str {
-        match op {
-            ast::UnaryOp::Not => "!",
-            ast::UnaryOp::Neg => "-",
-        }
-    }
-
-    fn binary_sym(op: &ast::BinaryOp) -> &'static str {
-        use ast::BinaryOp as B;
-        match op {
-            B::Add => "+",
-            B::Sub => "-",
-            B::Mul => "*",
-            B::Div => "/",
-            B::Rem => "%",
-            B::Eq => "==",
-            B::Ne => "!=",
-            B::Lt => "<",
-            B::Le => "<=",
-            B::Gt => ">",
-            B::Ge => ">=",
-            B::And => "&&",
-            B::Or => "||",
         }
     }
 
@@ -379,12 +353,127 @@ mod tests {
     }
 
     #[test]
-    fn parse_expr_literals_and_length() {
+    fn parse_expr_literals_and_paths() {
         assert_eq!(shape(&if_cond("count > 0")), "(count > 0)");
         assert_eq!(shape(&if_cond("name == \"a\"")), "(name == \"a\")");
         assert_eq!(shape(&if_cond("done == true")), "(done == true)");
-        // `.length`는 배열 길이 - 대상이 배열이어야 한다(타입은 codegen이 본다).
+        // 파서에겐 `.length`도 그냥 경로 조각이다 - 길이인지 필드인지는 expr_type이 가른다.
         assert_eq!(shape(&if_cond("tags.length > 0")), "(tags.length > 0)");
+    }
+
+    /// `@if` 조건 하나를 컴파일해 진단(메시지 + 밑줄)의 뒤 두 줄만 꺼낸다. 표현식 진단은
+    /// 식의 어느 조각을 짚느냐가 핵심이라 밑줄까지 봐야 한다. 조건만 제 줄에 두어 밑줄이
+    /// 짧게 나오게 한다.
+    fn if_cond_diagnostic(props: &str, cond: &str) -> String {
+        let src = format!("component C {{ {props} template {{\n@if ({cond}) {{ p( /) }}\n}} }}");
+        let err = compile(&src).expect_err("컴파일이 실패해야 한다");
+        let out = format_error(None, "entry", &src, &err);
+        out.split_once("error: ").expect("진단 첫 줄").1.to_string()
+    }
+
+    /// `@if` 조건은 bool이어야 한다 - number를 넣으면 표현식 전체를 탓한다.
+    #[test]
+    fn if_cond_must_be_bool() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number }", "count"),
+            [
+                "expected bool, found number",
+                " 2 | @if (count) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 산술 피연산자는 number - 연산자가 타입을 못 박으므로 어긋난 피연산자를 탓한다.
+    #[test]
+    fn if_arith_operand_must_be_number() {
+        assert_eq!(
+            if_cond_diagnostic("props { title: string }", "title - 1 > 0"),
+            [
+                "`-` expects number, found string",
+                " 2 | @if (title - 1 > 0) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 논리 피연산자는 bool - number를 `&&`에 넣으면 그 피연산자를 탓한다.
+    #[test]
+    fn if_logical_operand_must_be_bool() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, done: bool }", "count && done"),
+            [
+                "`&&` expects bool, found number",
+                " 2 | @if (count && done) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// `==`는 타입을 못 박고 양쪽이 같기만 하면 된다 - 어느 한쪽을 탓할 수 없어 식 전체를 짚는다.
+    #[test]
+    fn if_eq_operands_must_match() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, title: string }", "count == title"),
+            [
+                "`==` needs both sides to be the same type, found number and string",
+                " 2 | @if (count == title) { p( /) }",
+                "   |      ^^^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// `.length`는 배열/문자열에만. 밑줄은 참조 전체를 덮는다 - 조각 하나를 뗀 자리는
+    /// 소스에서 셀 수 없고(`count . length`도 파싱된다), 무엇이 문제인지는 메시지가 말한다.
+    #[test]
+    fn if_length_needs_array_or_string() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number }", "count.length > 0"),
+            [
+                "`count` has no length",
+                " 2 | @if (count.length > 0) { p( /) }",
+                "   |      ^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 실제 `length` 필드라도 객체면 값 자리에 못 온다 - 길이로 새지 않고 leaf 검사에 걸린다.
+    #[test]
+    fn if_length_field_still_needs_leaf() {
+        assert_eq!(
+            if_cond_diagnostic("props { user: { length: { x: number } } }", "user.length"),
+            [
+                "`user.length` is an object or array: only primitive values go in value position",
+                " 2 | @if (user.length) { p( /) }",
+                "   |      ^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 타입이 맞는 조건은 검사를 지나 방출까지 간다(방출은 아직 미구현).
+    #[test]
+    fn if_typed_cond_reaches_codegen() {
+        for (props, cond) in [
+            ("props { count: number }", "count > 0"),
+            ("props { a: bool, b: bool }", "a && !b"),
+            ("props { tags: string[] }", "tags.length > 0"),
+            // 문자열도 길이를 갖는다.
+            ("props { title: string }", "title.length > 0"),
+            // 실제 필드 `length`가 있으면 길이가 아니라 그 필드다.
+            ("props { user: { length: number } }", "user.length > 0"),
+        ] {
+            let msg = if_cond_diagnostic(props, cond);
+            assert!(
+                msg.starts_with("operators in a value position are not compiled yet"),
+                "{cond} - 타입 검사를 지나야 한다: {msg}"
+            );
+        }
     }
 
     #[test]

@@ -4,6 +4,7 @@ use crate::ast::{
     ArgValue, AttrValue, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
     SlotPlaceholderContent, Type,
 };
+use crate::expr_type::{require_expr_type, ExprTypeError, ExprTypeErrorKind};
 use crate::flatten::{FlatComp, Sourced};
 use crate::scope::{
     lookup_var_ref, require_leaf_var_ref, var_ref_display, ForVar, ScopeError, ScopeErrorKind,
@@ -18,6 +19,9 @@ use bytecode::{
 pub enum CodegenErrorKind {
     /// 스코프 조회가 낸 실패(없는 이름/필드, leaf 아님, 슬롯 초과) - scope.rs가 정의한다.
     Scope(ScopeErrorKind),
+    /// 표현식 타입 검사가 낸 실패 - expr_type.rs가 정의한다. 조회 실패와 갈래를 나누는 건
+    /// 경로가 달라서다(여긴 식을 거쳐 왔고, Scope는 codegen이 참조를 직접 조회한 것).
+    ExprType(ExprTypeErrorKind),
     /// 내장 태그 테이블에 없는 태그.
     UnknownTag(String),
     /// 호출했지만 파일에 정의가 없는 컴포넌트.
@@ -64,6 +68,7 @@ impl std::fmt::Display for CodegenErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             CodegenErrorKind::Scope(e) => e.fmt(f),
+            CodegenErrorKind::ExprType(e) => e.fmt(f),
             CodegenErrorKind::UnknownTag(tag) => write!(f, "unknown builtin tag `{tag}`"),
             CodegenErrorKind::UnknownComponent(name) => {
                 write!(f, "cannot find component `{name}`")
@@ -145,6 +150,13 @@ impl CodegenErrorKind {
 impl From<ScopeError> for CodegenError {
     fn from(e: ScopeError) -> Self {
         CodegenErrorKind::Scope(e.kind).at(e.range)
+    }
+}
+
+/// 표현식 타입 검사 실패도 같은 축으로 싣는다.
+impl From<ExprTypeError> for CodegenError {
+    fn from(e: ExprTypeError) -> Self {
+        CodegenErrorKind::ExprType(e.kind).at(e.range)
     }
 }
 
@@ -807,6 +819,9 @@ fn emit_node(
             *next_slot_placeholder_index += 1;
         }
         Node::If { cond, then, else_ } => {
+            // 조건은 bool이어야 한다 - number가 참/거짓으로 새는 걸 막는다(`@if (count > 0)`으로 쓴다).
+            require_expr_type(cond, &Type::Bool, props, for_scope.for_vars)?;
+
             // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
             // 연산자가 붙은 식은 표현식 테이블을 거치는 별도 opcode로 간다(이후 단계).
             match cond {

@@ -158,6 +158,17 @@ pub fn lookup_var_ref<'a>(
     Ok((scope_index, offset, ty))
 }
 
+/// prop 참조가 도달한 타입만. 슬롯 위치가 필요 없는 곳(타입 검사)이 쓴다.
+/// `lookup_var_ref` 위 타입-only 래퍼.
+pub fn var_ref_type<'a>(
+    var: &VarRef,
+    props: &'a [Prop],
+    for_vars: &'a [ForVar],
+) -> Result<&'a Type, ScopeError> {
+    let (_, _, ty) = lookup_var_ref(var, props, for_vars)?;
+    Ok(ty)
+}
+
 /// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. 값/반응성 자리(보간/속성/@if 조건)엔
 /// leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `lookup_var_ref` 위 leaf-only 래퍼.
 pub fn require_leaf_var_ref(
