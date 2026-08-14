@@ -415,7 +415,7 @@ fn store_size(ty: &Type) -> u16 {
 ///   {tag}        root=tag(for_var)   path=[]       -> (for_var 슬롯, 0)
 ///   {item.title} root=item(for_var)  path=[title]  -> (for_var 슬롯, title 거리)
 ///   {user.name}  root=user(prop)     path=[name]   -> (prop 순번, name 거리)
-fn var_ref_to_slot<'a>(
+fn lookup_var_ref<'a>(
     var: &VarRef,
     props: &'a [Prop],
     for_vars: &'a [ForVar],
@@ -480,13 +480,13 @@ fn var_ref_to_slot<'a>(
 }
 
 /// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. 값/반응성 자리(보간/속성/@if 조건)엔
-/// leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `var_ref_to_slot` 위 leaf-only 래퍼.
-fn var_ref_to_leaf_slot(
+/// leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `lookup_var_ref` 위 leaf-only 래퍼.
+fn require_leaf_var_ref(
     var: &VarRef,
     props: &[Prop],
     for_vars: &[ForVar],
 ) -> Result<(u8, u8), CodegenError> {
-    let (scope_index, offset, ty) = var_ref_to_slot(var, props, for_vars)?;
+    let (scope_index, offset, ty) = lookup_var_ref(var, props, for_vars)?;
     match ty {
         Type::Bool | Type::Number | Type::String => Ok((scope_index, offset)),
         _ => Err(CodegenErrorKind::NotLeaf(var_ref_display(var)).at(var.range.0)),
@@ -581,7 +581,7 @@ fn arg_to_field(
     let (type_ref, ref_value) = match value {
         ArgValue::Var(var) => {
             // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
-            let (scope_index, offset, ty) = var_ref_to_slot(var, props, &[])?;
+            let (scope_index, offset, ty) = lookup_var_ref(var, props, &[])?;
             let type_ref = types.intern(ty, pool);
             (type_ref, FieldValue::Scope(scope_index, offset))
         }
@@ -668,7 +668,7 @@ fn emit_node(
             code.extend_from_slice(&index.to_le_bytes());
         }
         Node::Var(var) => {
-            let (scope_index, offset) = var_ref_to_leaf_slot(var, props, for_scope.for_vars)?;
+            let (scope_index, offset) = require_leaf_var_ref(var, props, for_scope.for_vars)?;
             code.push(Op::TextVar as u8);
             code.push(scope_index);
             code.push(offset);
@@ -735,7 +735,7 @@ fn emit_node(
                     // 변수 값은 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
                     AttrValue::Var(v) => {
                         let (scope_index, offset) =
-                            var_ref_to_leaf_slot(v, props, for_scope.for_vars)?;
+                            require_leaf_var_ref(v, props, for_scope.for_vars)?;
                         code.push(scope_index);
                         code.push(offset);
                     }
@@ -807,7 +807,7 @@ fn emit_node(
                     ArgValue::Var(parent_var) => {
                         // 도달 타입이 자식 prop 타입과 구조가 같아야 한다.
                         let (scope_index, offset, reached_ty) =
-                            var_ref_to_slot(parent_var, props, for_scope.for_vars)?;
+                            lookup_var_ref(parent_var, props, for_scope.for_vars)?;
                         if !types_match(reached_ty, &child_prop.type_) {
                             // 타입이 안 맞는 건 넘긴 그 참조다 - 그 자리를 가리킨다.
                             return Err(CodegenErrorKind::PropTypeMismatch {
@@ -920,7 +920,7 @@ fn emit_node(
             match cond {
                 Expr::Var(var, _) => {
                     let (scope_index, offset) =
-                        var_ref_to_leaf_slot(var, props, for_scope.for_vars)?;
+                        require_leaf_var_ref(var, props, for_scope.for_vars)?;
                     code.push(Op::If as u8);
                     code.push(scope_index);
                     code.push(offset);
@@ -1002,7 +1002,7 @@ fn emit_node(
                 }
                 ForCount::Var(var) => {
                     let (scope_index, offset, ty) =
-                        var_ref_to_slot(var, props, for_scope.for_vars)?;
+                        lookup_var_ref(var, props, for_scope.for_vars)?;
                     match ty {
                         Type::Number => {
                             code.push(Op::ForCountVar as u8);
