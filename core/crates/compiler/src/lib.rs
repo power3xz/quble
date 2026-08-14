@@ -9,6 +9,7 @@ mod dts;
 mod flatten;
 mod lexer;
 mod parse;
+mod scope;
 mod src_range;
 
 pub use diagnostic::{locate_utf16, Utf16Location};
@@ -1344,7 +1345,7 @@ mod tests {
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::UnknownProp(_),
+                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::UnknownProp(_)),
                     ..
                 },
                 ..
@@ -1670,7 +1671,7 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::NotLeaf(_),
+                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::NotLeaf(_)),
                     ..
                 },
                 ..
@@ -2295,7 +2296,7 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::NotLeaf(_),
+                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::NotLeaf(_)),
                     ..
                 },
                 ..
@@ -2316,7 +2317,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::UnknownField { .. },
+                    kind: codegen::CodegenErrorKind::Scope(
+                        scope::ScopeErrorKind::UnknownField { .. }
+                    ),
                     ..
                 },
                 ..
@@ -2337,7 +2340,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::UnknownField { .. },
+                    kind: codegen::CodegenErrorKind::Scope(
+                        scope::ScopeErrorKind::UnknownField { .. }
+                    ),
                     ..
                 },
                 ..
