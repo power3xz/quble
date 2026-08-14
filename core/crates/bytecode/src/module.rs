@@ -7,6 +7,7 @@ use crate::pool::ConstPool;
 ///   - 부모가 그 슬롯을 어디서 받았느냐에 달려 컴파일이 못 박는다. object/array면 base+offset.
 /// - Const: 컴포넌트 상수풀 인덱스. 리터럴 값(payload에 직접 박힘).
 /// - Raw: @for 등이 런타임에 만든 원시값. 지금은 number only(@for 인덱스). 실사용은 @for 착수 때.
+///
 /// 직렬화는 태그 1바이트 + payload(serialize.rs). variant가 곧 태그라 enum엔 태그 필드가 없다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldValue {

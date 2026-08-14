@@ -357,7 +357,7 @@ fn collect(
     // want로 가져올 컴포넌트를 고른다. None이면 전부.
     let take = |name: &str| {
         want.as_ref()
-            .map_or(true, |w| w.names.iter().any(|n| n.name == name))
+            .is_none_or(|w| w.names.iter().any(|n| n.name == name))
     };
 
     // 이 이름을 끌어온 use 자리 - 동명 충돌을 탓할 곳이다. 엔트리(want=None)는 use가 없어 None.

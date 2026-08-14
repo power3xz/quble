@@ -148,11 +148,25 @@ impl From<ScopeError> for CodegenError {
     }
 }
 
+/// 컴포넌트 하나의 선언. 맵이 슬롯 선언을 소유한다.
+type CompEntry<'a> = (
+    u16,                  /* 컴포넌트 ID(정의 순서) - RENDER에 박는다 */
+    &'a [Prop],           /* 자식 props 선언 - PUSH_ARG를 이 순서로 정렬 */
+    Vec<Option<&'a str>>, /* 자식 슬롯 선언(무기명 None) - 슬롯 콘텐츠를 이 순서로 정렬 */
+);
+
+/// `get`이 돌려주는 `CompEntry` - 슬롯 선언은 맵이 계속 소유하고 슬라이스로만 빌려준다.
+type CompEntryBorrowed<'a, 'e> = (
+    u16,                   /* 컴포넌트 ID(정의 순서) */
+    &'a [Prop],            /* 자식 props 선언 */
+    &'e [Option<&'a str>], /* 자식 슬롯 선언(무기명 None) */
+);
+
 /// 컴포넌트 이름 -> (ID, props 선언, 슬롯 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에
 /// 박을 ID를 찾고, PUSH_ARG를 자식 props 순서로, 슬롯 콘텐츠를 자식 슬롯 순서로 정렬하려고
 /// 선언도 같이 돌려준다. 컴포넌트 ID = 정의 순서.
 struct CompLookup<'a> {
-    by_name: std::collections::HashMap<&'a str, (u16, &'a [Prop], Vec<Option<&'a str>>)>,
+    by_name: std::collections::HashMap<&'a str, CompEntry<'a>>,
 }
 
 impl<'a> CompLookup<'a> {
@@ -173,7 +187,7 @@ impl<'a> CompLookup<'a> {
     }
 
     /// 이름으로 (컴포넌트 ID, 자식 props 선언, 자식 슬롯 선언)을 찾는다.
-    fn get(&self, name: &str) -> Option<(u16, &'a [Prop], &[Option<&'a str>])> {
+    fn get(&self, name: &str) -> Option<CompEntryBorrowed<'a, '_>> {
         self.by_name
             .get(name)
             .map(|(id, props, slot_placeholders)| (*id, *props, slot_placeholders.as_slice()))
@@ -250,13 +264,19 @@ fn check_slot_placeholder_defs(
     Ok(())
 }
 
+/// generate 산출물.
+type Emitted = (
+    Box<[u8]>,   /* qubb 바이트코드 */
+    Vec<String>, /* 정규화 리소스 경로 - 등장 순서가 곧 resId */
+);
+
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
 /// 두 번째 반환값은 리소스 사이드맵 - 인덱스가 모듈 전역 resId, 값이 정규화 경로.
 /// 빌드 단계가 이걸 받아 내용 해시/복사/URL화를 한다(BYTECODE.md #5 LOAD_RES 메모).
 ///
 /// 에러의 range는 그 컴포넌트가 정의된 파일의 오프셋이라, 어느 파일인지를 함께 실어 보낸다
 /// (Sourced) - 엔트리 소스에 대고 세면 use한 파일의 에러가 엉뚱한 줄을 짚는다.
-pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), Sourced<CodegenError>> {
+pub fn generate(comps: &[FlatComp]) -> Result<Emitted, Sourced<CodegenError>> {
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
     let mut types = TypeTable::new();
