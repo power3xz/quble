@@ -159,7 +159,7 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
                                          //   표현할 수 있는 255는 나오지 않는다
                  exprs      : expr_count x (
                    len  : u8             // code 바이트 수(최대 255)
-                   code : [u8; len]      // 후위 표기 - 아래 <EXPR> 태그들
+                   code : [u8; len]      // 후위 표기 - 아래 <EXPR> opcode들
                  )
                )
 
@@ -168,7 +168,7 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
   //   스택에는 **값만** 올라간다. 칸 번호(leafIndex)는 안 올라간다 - 주소와 값이 섞이면 연산자가
   //   무엇을 계산하는지 알 수 없어진다. Load*가 이미 값을 꺼내 올린다.
   //   타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 런타임은 타입을 안 본다.
-  <EXPR> = 태그 1바이트 + 태그별 operand
+  <EXPR> = opcode 1바이트 + opcode별 operand   // 코드의 opcode(#5)와 다른 이름공간 - 값이 겹친다
            0x00 LoadVar          : scope_index:u8, offset:u8  // 그 칸의 값
            0x01 LoadConst        : const_index:u16            // 컴포넌트 상수풀
            0x02 LoadArrayLength  : scope_index:u8, offset:u8  // 배열 길이
@@ -428,8 +428,9 @@ IF_EXPR expr_index  [then]  ELSE  [else]  IF_END
 그때그때 잡고 푸는 이상 컴파일타임에 못 박는다(DECISIONS.md "이벤트 payload/context에 객체
 전달"의 "컴파일타임 leafIndex 고정"). `IF_EXPR`의 operand가 `expr_index` 하나뿐인 이유다.
 
-**길이 태그를 배열과 문자열로 나눈 것은 구독 대상이 달라서다.** 배열은 길이를 담은 칸을
-구독하고, 문자열은 값 칸을 구독해 바뀔 때마다 길이를 다시 잰다.
+**길이 opcode를 배열과 문자열로 나눈 것은 구독 대상이 달라서다.** 배열은 길이를 담은
+칸(`sizeLeafIndex` - `@for`가 쓰는 그 칸)을 구독하고, 문자열은 값 칸을 구독해 바뀔 때마다
+길이를 다시 잰다.
 
 **점프도 단락 평가(short-circuit)도 없다.** 값 자리에는 부수효과가 없어 `&&`의 오른쪽을 늘
 세어도 결과가 같다. #5.1의 "왜 점프가 없어야 하는가"와 같은 이유다.

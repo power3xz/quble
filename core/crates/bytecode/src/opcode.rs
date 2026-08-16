@@ -125,7 +125,7 @@ impl Op {
     }
 }
 
-/// 표현식 바이트 하나의 태그. `Op`와 다른 이름공간이다 - 표현식 테이블 안에서만 쓴다.
+/// 표현식 opcode. `Op`와 다른 이름공간이다 - 표현식 테이블 안에서만 쓴다.
 /// 값은 BYTECODE.md #4의 `<EXPR>`와 일치해야 한다.
 ///
 /// 식은 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다. 스택에는 값만 올라간다 - 칸 번호는
@@ -138,7 +138,7 @@ pub enum ExprOp {
     /// 컴포넌트 상수풀 값을 올린다. operand: const_index u16.
     LoadConst = 0x01,
     /// 배열 길이를 올린다. operand: scope_index u8, offset u8.
-    /// 문자열과 태그를 나눈 건 구독 대상이 달라서다 - 배열은 길이를 담은 칸을 구독한다.
+    /// 문자열과 opcode를 나눈 건 구독 대상이 달라서다 - 배열은 길이를 담은 칸을 구독한다.
     LoadArrayLength = 0x02,
     /// 문자열 길이를 올린다. operand: scope_index u8, offset u8.
     /// 값 칸을 구독해 바뀔 때마다 길이를 다시 잰다.
@@ -165,7 +165,7 @@ pub enum ExprOp {
 }
 
 impl ExprOp {
-    /// 바이트에서 표현식 태그로. 알 수 없는 값이면 None.
+    /// 바이트에서 표현식 opcode로. 알 수 없는 값이면 None.
     pub fn from_u8(b: u8) -> Option<ExprOp> {
         Some(match b {
             0x00 => ExprOp::LoadVar,
