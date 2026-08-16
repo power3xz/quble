@@ -628,6 +628,97 @@ mod tests {
         );
     }
 
+    /// 소스 리터럴만으로 된 참인 조건은 접혀서 사라진다 - 분기 자체를 안 내고 몸체만 남는다.
+    /// 연산자마다 실제로 값을 세는지 봐야 해서 갈래별로 하나씩 든다.
+    #[test]
+    fn if_constant_true_folds_away() {
+        for cond in [
+            "true",
+            "!false",
+            "true && true",
+            "true || false",
+            "1 > 0",
+            "2 <= 2",
+            "2 * 3 == 6",
+            "10 % 3 == 1",
+            "7 / 2 > 3",
+            "1 + 1 == 2",
+            "5 - 5 == 0",
+            "-1 < 0",
+            "\"a\" == \"a\"",
+            "true != false",
+            "(1 > 0) && !(2 < 1)",
+        ] {
+            let src = format!("component C {{ template {{ @if ({cond}) {{ p( /) }} }} }}");
+            let bytes =
+                compile(&src).unwrap_or_else(|e| panic!("`{cond}`가 컴파일돼야 한다: {e:?}"));
+            let module = bytecode::decode(&bytes).unwrap();
+            let code = def_code(&module, 0);
+
+            assert!(
+                module.def(0).unwrap().exprs.is_empty(),
+                "`{cond}` 표현식 테이블"
+            );
+            assert!(
+                !code.contains(&(bytecode::Op::If as u8)),
+                "`{cond}` IF가 남았다"
+            );
+            assert!(
+                !code.contains(&(bytecode::Op::IfExpr as u8)),
+                "`{cond}` IF_EXPR가 남았다"
+            );
+            // 몸체는 그대로 나온다.
+            assert!(
+                code.contains(&(bytecode::Op::ElemOpen as u8)),
+                "`{cond}` 몸체"
+            );
+        }
+    }
+
+    /// 거짓으로 접히는 조건은 then 가지가 절대 안 그려진다 - 죽은 코드라 에러다.
+    #[test]
+    fn if_constant_false_errors() {
+        for cond in ["false", "!true", "true && false", "1 < 0", "\"a\" == \"b\""] {
+            let msg = if_cond_diagnostic("", cond);
+            assert!(
+                msg.starts_with("condition is always false: this branch is never rendered"),
+                "`{cond}`: {msg}"
+            );
+        }
+    }
+
+    /// 참으로 접히는데 `@else`가 있으면 그 가지가 죽는다. 밑줄은 조건을 짚는다 - 죽은 가지를
+    /// 만든 원인이 조건이고, 고칠 것도 조건이다.
+    #[test]
+    fn if_constant_true_with_else_errors() {
+        let src = "component C { template {\n@if (1 > 0) { p( /) } @else { em( /) }\n} }";
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let out = format_error(None, "entry", src, &err);
+        assert_eq!(
+            out.split_once("error: ").expect("진단 첫 줄").1,
+            [
+                "condition is always true: the @else branch is never rendered",
+                " 2 | @if (1 > 0) { p( /) } @else { em( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 참조가 하나라도 끼면 안 접힌다 - 값이 런타임에 정해져 컴파일타임에 모른다.
+    /// CONST 슬롯으로 넘어오는 값도 마찬가지다(사용처마다 다를 수 있어 컴포넌트가 접을 수 없다).
+    #[test]
+    fn if_expr_with_ref_is_not_folded() {
+        for cond in ["n > 0", "n > 0 && true", "true && n > 0", "!(n > 0)"] {
+            let src = format!(
+                "component C {{ props {{ n: number }} template {{ @if ({cond}) {{ p( /) }} }} }}"
+            );
+            let bytes = compile(&src).unwrap_or_else(|e| panic!("`{cond}`: {e:?}"));
+            let module = bytecode::decode(&bytes).unwrap();
+            assert_eq!(module.def(0).unwrap().exprs.len(), 1, "`{cond}`");
+        }
+    }
+
     #[test]
     fn parse_expr_division_in_condition_is_not_self_close() {
         // `/`는 self-close와 같은 토큰이지만 조건 자리에선 나눗셈이다 - 파서가 자리로 가른다.

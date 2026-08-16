@@ -44,7 +44,11 @@ pub enum CodegenErrorKind {
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
     ForCountNotIterable(String),
-    /// 한 컴포넌트가 쓰는 표현식이 256개를 넘었다 - `IF_EXPR`의 expr_index가 u8이라 0~255다.
+    /// 조건이 소스 리터럴만으로 되어 컴파일타임에 값이 정해지고, 그래서 한쪽 가지가 절대
+    /// 안 그려진다. 담은 값은 그 조건이 참인지 - 참이면 `@else`가, 거짓이면 then이 죽는다.
+    /// 참인데 `@else`가 없으면 죽는 가지가 없어 에러가 아니다(조건을 접고 몸체만 낸다).
+    ConstantCondition(bool),
+    /// 한 컴포넌트가 쓰는 표현식이 255개를 넘었다 - `expr_count`가 u8이라 그 위는 안 담긴다.
     TooManyExprs,
     /// 식 하나가 255바이트를 넘었다 - 표현식 테이블의 len이 u8이다.
     ExprTooLong,
@@ -98,6 +102,14 @@ impl std::fmt::Display for CodegenErrorKind {
                 f,
                 "`{path}` is neither an array nor a number: it cannot drive @for"
             ),
+            // 무엇이 죽었는지를 말한다 - 조건을 고칠지 죽은 가지를 지울지는 그 다음이다.
+            CodegenErrorKind::ConstantCondition(value) => match value {
+                true => write!(
+                    f,
+                    "condition is always true: the @else branch is never rendered"
+                ),
+                false => write!(f, "condition is always false: this branch is never rendered"),
+            },
             CodegenErrorKind::TooManyExprs => {
                 write!(f, "a component can use at most 255 expressions")
             }
@@ -560,6 +572,73 @@ impl ForScope<'_> {
     };
 }
 
+/// 소스 리터럴만으로 된 식을 접었을 때의 값. 참조가 하나라도 끼면 접을 수 없다.
+///
+/// CONST 슬롯(`Comp(count=5 /)`)은 여기 안 온다 - 사용처마다 값이 다를 수 있는데 컴포넌트
+/// 코드는 한 벌이라 접으면 틀린다. 그래서 판정은 `Expr` 트리만 본다.
+enum Folded {
+    Bool(bool),
+    Number(f64),
+    Str(String),
+}
+
+/// 식이 소스 리터럴만으로 되어 있으면 그 값. 참조가 하나라도 있으면 None.
+///
+/// 타입 검사가 끝난 뒤에 부른다 - 피연산자 타입이 맞다고 보고 짜서, 어긋나는 조합은
+/// `unreachable!`로 둔다.
+fn fold_expr(expr: &Expr) -> Option<Folded> {
+    match expr {
+        Expr::Lit(lit, _) => Some(match lit {
+            LitValue::Bool(b) => Folded::Bool(*b),
+            LitValue::Number(n) => Folded::Number(*n),
+            LitValue::Str(s) => Folded::Str(s.clone()),
+        }),
+
+        // 참조가 끼면 컴파일타임에 값을 모른다.
+        Expr::Var(..) => None,
+
+        Expr::Unary(op, operand, _) => match (op, fold_expr(operand)?) {
+            (UnaryOp::Not, Folded::Bool(b)) => Some(Folded::Bool(!b)),
+            (UnaryOp::Neg, Folded::Number(n)) => Some(Folded::Number(-n)),
+            _ => unreachable!("타입 검사가 통과시킨 단항 피연산자"),
+        },
+
+        Expr::Binary(op, left, right, _) => {
+            let (l, r) = (fold_expr(left)?, fold_expr(right)?);
+            Some(match (op, l, r) {
+                // 산술 - 양쪽 number.
+                (BinaryOp::Add, Folded::Number(a), Folded::Number(b)) => Folded::Number(a + b),
+                (BinaryOp::Sub, Folded::Number(a), Folded::Number(b)) => Folded::Number(a - b),
+                (BinaryOp::Mul, Folded::Number(a), Folded::Number(b)) => Folded::Number(a * b),
+                (BinaryOp::Div, Folded::Number(a), Folded::Number(b)) => Folded::Number(a / b),
+                (BinaryOp::Rem, Folded::Number(a), Folded::Number(b)) => Folded::Number(a % b),
+                // 대소 비교 - 양쪽 number.
+                (BinaryOp::Lt, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a < b),
+                (BinaryOp::Le, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a <= b),
+                (BinaryOp::Gt, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a > b),
+                (BinaryOp::Ge, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a >= b),
+                // 논리 - 양쪽 bool. 단락 평가는 없다(값 자리에 부수효과가 없어 결과가 같다).
+                (BinaryOp::And, Folded::Bool(a), Folded::Bool(b)) => Folded::Bool(a && b),
+                (BinaryOp::Or, Folded::Bool(a), Folded::Bool(b)) => Folded::Bool(a || b),
+                // 같음 비교 - 타입을 안 박고 양쪽이 같기만 하면 된다.
+                (BinaryOp::Eq, a, b) => Folded::Bool(folded_eq(&a, &b)),
+                (BinaryOp::Ne, a, b) => Folded::Bool(!folded_eq(&a, &b)),
+                _ => unreachable!("타입 검사가 통과시킨 이항 피연산자"),
+            })
+        }
+    }
+}
+
+/// 접힌 값끼리 같은지. 타입 검사가 양쪽 타입을 이미 맞춰 놔서 서로 다른 갈래는 안 온다.
+fn folded_eq(a: &Folded, b: &Folded) -> bool {
+    match (a, b) {
+        (Folded::Bool(a), Folded::Bool(b)) => a == b,
+        (Folded::Number(a), Folded::Number(b)) => a == b,
+        (Folded::Str(a), Folded::Str(b)) => a == b,
+        _ => unreachable!("타입 검사가 통과시킨 `==` 피연산자"),
+    }
+}
+
 /// 식 하나를 후위 표기 바이트로 낸다(BYTECODE.md #4 `<EXPR>`). 왼쪽 -> 오른쪽 -> 연산자 순서로
 /// 밀어서, 런타임이 앞에서 뒤로 한 번 훑으면 스택 계산이 끝난다.
 ///
@@ -946,6 +1025,34 @@ fn emit_node(
         Node::If { cond, then, else_ } => {
             // 조건은 bool이어야 한다 - number가 참/거짓으로 새는 걸 막는다(`@if (count > 0)`으로 쓴다).
             require_expr_type(cond, &Type::Bool, props, for_scope.for_vars)?;
+
+            // 소스 리터럴만으로 된 조건은 컴파일타임에 값이 정해진다. 그러면 한쪽 가지가 절대
+            // 안 그려지므로, 죽는 가지가 있으면 에러다. 죽는 것이 없을 때(참 + `@else` 없음)만
+            // 분기를 접고 몸체를 그 자리에 편다.
+            if let Some(folded) = fold_expr(cond) {
+                let value = match folded {
+                    Folded::Bool(b) => b,
+                    _ => unreachable!("bool로 검사가 끝난 조건"),
+                };
+                if !value || !else_.is_empty() {
+                    return Err(CodegenErrorKind::ConstantCondition(value).at(cond.range().0));
+                }
+                for node in then {
+                    emit_node(
+                        node,
+                        props,
+                        events,
+                        contexts,
+                        comp_lookup,
+                        for_scope,
+                        pool,
+                        code,
+                        next_slot_placeholder_index,
+                        exprs,
+                    )?;
+                }
+                return Ok(());
+            }
 
             // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
             // 연산자가 붙은 식만 표현식 테이블을 거친다 - 잎 하나에 테이블을 쓸 이유가 없다.
