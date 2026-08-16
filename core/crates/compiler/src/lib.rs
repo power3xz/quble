@@ -6,9 +6,11 @@ mod ast;
 mod codegen;
 mod diagnostic;
 mod dts;
+mod expr_type;
 mod flatten;
 mod lexer;
 mod parse;
+mod scope;
 mod src_range;
 
 pub use diagnostic::{locate_utf16, Utf16Location};
@@ -272,6 +274,534 @@ mod tests {
         );
     }
 
+    /// `@if (COND)`의 조건식만 파싱해 꺼낸다 - 우선순위/결합이 어떻게 묶였는지 보려는 것.
+    fn if_cond(cond: &str) -> ast::Expr {
+        let src = format!("component C {{ template {{ @if ({cond}) {{ p( /) }} }} }}");
+        let lexed = lexer::lex(&src).unwrap();
+        let mut source = parse::parse(&lexed, src.len()).unwrap();
+        match source.comps.remove(0).template.remove(0) {
+            Node::If { cond, .. } => cond,
+            other => panic!("@if를 기대했다: {other:?}"),
+        }
+    }
+
+    /// 식의 묶인 모양을 괄호 표기로 편다 - `(a - b) - c`처럼 눈으로 결합을 확인한다.
+    fn shape(e: &ast::Expr) -> String {
+        use ast::Expr;
+        match e {
+            Expr::Var(v, _) => {
+                if v.path.is_empty() {
+                    v.root.clone()
+                } else {
+                    format!("{}.{}", v.root, v.path.join("."))
+                }
+            }
+            Expr::Lit(ast::LitValue::Number(n), _) => format!("{n}"),
+            Expr::Lit(ast::LitValue::Bool(b), _) => format!("{b}"),
+            Expr::Lit(ast::LitValue::Str(s), _) => format!("\"{s}\""),
+            Expr::Unary(op, x, _) => format!("({}{})", op.sym(), shape(x)),
+            Expr::Binary(op, l, r, _) => {
+                format!("({} {} {})", shape(l), op.sym(), shape(r))
+            }
+        }
+    }
+
+    #[test]
+    fn parse_expr_single_ref_stays_leaf() {
+        // 연산자가 없는 식은 잎 하나 그대로 - codegen이 이걸 기존 슬롯 인코딩으로 낮춘다.
+        assert_eq!(shape(&if_cond("done")), "done");
+        assert_eq!(shape(&if_cond("gen.open")), "gen.open");
+    }
+
+    #[test]
+    fn parse_expr_precedence_follows_js() {
+        // 곱셈이 덧셈보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a + b * c")), "(a + (b * c))");
+        // 비교가 산술보다 나중에 묶인다.
+        assert_eq!(shape(&if_cond("a + b > c")), "((a + b) > c)");
+        // &&가 ||보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a || b && c")), "(a || (b && c))");
+        // 비교가 &&보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a > 0 && b")), "((a > 0) && b)");
+        // == 는 비교보다 나중에 묶인다.
+        assert_eq!(shape(&if_cond("a < b == c")), "((a < b) == c)");
+    }
+
+    #[test]
+    fn parse_expr_binary_is_left_associative() {
+        // 같은 우선순위는 왼쪽부터 - `a - b - c`가 `(a-b)-c`여야 10-3-2=5가 된다.
+        assert_eq!(shape(&if_cond("a - b - c")), "((a - b) - c)");
+        assert_eq!(shape(&if_cond("a / b / c")), "((a / b) / c)");
+        assert_eq!(shape(&if_cond("a && b && c")), "((a && b) && c)");
+    }
+
+    #[test]
+    fn parse_expr_unary_is_right_associative() {
+        // 단항은 안쪽부터 - 바깥 !가 안쪽 !의 결과를 받는다.
+        assert_eq!(shape(&if_cond("!!done")), "(!(!done))");
+        // 단항이 이항보다 먼저 묶인다.
+        assert_eq!(shape(&if_cond("!a && b")), "((!a) && b)");
+        assert_eq!(shape(&if_cond("-a + b")), "((-a) + b)");
+    }
+
+    #[test]
+    fn parse_expr_paren_overrides_precedence() {
+        // 괄호 안은 우선순위가 초기화되고 그 결과가 피연산자 하나처럼 묶인다.
+        // 괄호 자체는 AST에 안 남는다 - 묶는 순서를 바꿀 뿐이라 노드가 필요 없다.
+        assert_eq!(shape(&if_cond("(a + b) * c")), "((a + b) * c)");
+        assert_eq!(shape(&if_cond("!(a && b)")), "(!(a && b))");
+    }
+
+    #[test]
+    fn parse_expr_literals_and_paths() {
+        assert_eq!(shape(&if_cond("count > 0")), "(count > 0)");
+        assert_eq!(shape(&if_cond("name == \"a\"")), "(name == \"a\")");
+        assert_eq!(shape(&if_cond("done == true")), "(done == true)");
+        // 파서에겐 `.length`도 그냥 경로 조각이다 - 길이인지 필드인지는 expr_type이 가른다.
+        assert_eq!(shape(&if_cond("tags.length > 0")), "(tags.length > 0)");
+    }
+
+    /// `@if` 조건 하나를 컴파일해 진단(메시지 + 밑줄)의 뒤 두 줄만 꺼낸다. 표현식 진단은
+    /// 식의 어느 조각을 짚느냐가 핵심이라 밑줄까지 봐야 한다. 조건만 제 줄에 두어 밑줄이
+    /// 짧게 나오게 한다.
+    fn if_cond_diagnostic(props: &str, cond: &str) -> String {
+        let src = format!("component C {{ {props} template {{\n@if ({cond}) {{ p( /) }}\n}} }}");
+        let err = compile(&src).expect_err("컴파일이 실패해야 한다");
+        let out = format_error(None, "entry", &src, &err);
+        out.split_once("error: ").expect("진단 첫 줄").1.to_string()
+    }
+
+    /// `@if` 조건은 bool이어야 한다 - number를 넣으면 표현식 전체를 탓한다.
+    #[test]
+    fn if_cond_must_be_bool() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number }", "count"),
+            [
+                "expected bool, found number",
+                " 2 | @if (count) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 산술 피연산자는 number - 연산자가 타입을 못 박으므로 어긋난 피연산자를 탓한다.
+    #[test]
+    fn if_arith_operand_must_be_number() {
+        assert_eq!(
+            if_cond_diagnostic("props { title: string }", "title - 1 > 0"),
+            [
+                "`-` expects number, found string",
+                " 2 | @if (title - 1 > 0) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 논리 피연산자는 bool - number를 `&&`에 넣으면 그 피연산자를 탓한다.
+    #[test]
+    fn if_logical_operand_must_be_bool() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, done: bool }", "count && done"),
+            [
+                "`&&` expects bool, found number",
+                " 2 | @if (count && done) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// `==`는 타입을 못 박고 양쪽이 같기만 하면 된다 - 어느 한쪽을 탓할 수 없어 식 전체를 짚는다.
+    #[test]
+    fn if_eq_operands_must_match() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, title: string }", "count == title"),
+            [
+                "`==` needs both sides to be the same type, found number and string",
+                " 2 | @if (count == title) { p( /) }",
+                "   |      ^^^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// `.length`는 배열/문자열에만. 밑줄은 참조 전체를 덮는다 - 조각 하나를 뗀 자리는
+    /// 소스에서 셀 수 없고(`count . length`도 파싱된다), 무엇이 문제인지는 메시지가 말한다.
+    #[test]
+    fn if_length_needs_array_or_string() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number }", "count.length > 0"),
+            [
+                "`count` has no length",
+                " 2 | @if (count.length > 0) { p( /) }",
+                "   |      ^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 실제 `length` 필드라도 객체면 값 자리에 못 온다 - 길이로 새지 않고 leaf 검사에 걸린다.
+    #[test]
+    fn if_length_field_still_needs_leaf() {
+        assert_eq!(
+            if_cond_diagnostic("props { user: { length: { x: number } } }", "user.length"),
+            [
+                "`user.length` is an object or array: only primitive values go in value position",
+                " 2 | @if (user.length) { p( /) }",
+                "   |      ^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// `@if` 조건 하나를 컴파일해 그 def의 표현식 테이블을 꺼낸다.
+    fn if_cond_exprs(props: &str, cond: &str) -> Vec<Vec<u8>> {
+        let src = format!("component C {{ {props} template {{ @if ({cond}) {{ p( /) }} }} }}");
+        let bytes = compile(&src).expect("컴파일이 성공해야 한다");
+        bytecode::decode(&bytes)
+            .unwrap()
+            .def(0)
+            .unwrap()
+            .exprs
+            .clone()
+    }
+
+    /// 연산자가 붙은 조건은 후위 표기로 표현식 테이블에 들어간다. 잎이 무엇으로 실리는지가
+    /// 핵심이라 바이트를 그대로 본다 - 길이는 배열/문자열이 태그로 갈리고(런타임 구독 대상이
+    /// 다르다), 같은 이름의 실제 필드가 있으면 길이가 아니라 그 필드다.
+    #[test]
+    fn if_expr_emits_postfix_bytes() {
+        use bytecode::ExprOp::*;
+
+        for (props, cond, want) in [
+            (
+                "props { count: number }",
+                "count > 0",
+                vec![LoadVar as u8, 0, 0, LoadSmallInt as u8, 0, Gt as u8],
+            ),
+            (
+                "props { a: bool, b: bool }",
+                "a && !b",
+                vec![
+                    LoadVar as u8,
+                    0,
+                    0,
+                    LoadVar as u8,
+                    1,
+                    0,
+                    Not as u8,
+                    And as u8,
+                ],
+            ),
+            (
+                "props { tags: string[] }",
+                "tags.length > 0",
+                vec![LoadArrayLength as u8, 0, 0, LoadSmallInt as u8, 0, Gt as u8],
+            ),
+            // 문자열도 길이를 갖는다 - 배열과 태그가 다르다.
+            (
+                "props { title: string }",
+                "title.length > 0",
+                vec![
+                    LoadStringLength as u8,
+                    0,
+                    0,
+                    LoadSmallInt as u8,
+                    0,
+                    Gt as u8,
+                ],
+            ),
+            // 실제 필드 `length`가 있으면 길이가 아니라 그 필드를 읽는다(offset 0의 잎).
+            (
+                "props { user: { length: number } }",
+                "user.length > 0",
+                vec![LoadVar as u8, 0, 0, LoadSmallInt as u8, 0, Gt as u8],
+            ),
+        ] {
+            assert_eq!(if_cond_exprs(props, cond), vec![want], "조건 `{cond}`");
+        }
+    }
+
+    /// 잎 하나짜리 조건은 표현식 테이블을 안 쓴다 - 기존 `IF`가 슬롯을 그대로 받는다.
+    #[test]
+    fn if_leaf_cond_skips_expr_table() {
+        assert!(if_cond_exprs("props { done: bool }", "done").is_empty());
+    }
+
+    /// 코드에서 `IF_EXPR`이 가리킨 expr_index들을 등장 순서로. opcode 바이트를 그냥 스캔하면
+    /// operand와 구별이 안 돼, 부르는 쪽이 그 값이 operand로 안 나오는 소스를 쓴다.
+    fn if_expr_indices(code: &[u8]) -> Vec<u8> {
+        code.iter()
+            .enumerate()
+            .filter(|(_, &b)| b == bytecode::Op::IfExpr as u8)
+            .map(|(i, _)| code[i + 1])
+            .collect()
+    }
+
+    /// 같은 식이 한 컴포넌트에 두 번 나오면 테이블에 한 번만 들어가고, 두 `IF_EXPR`이 같은
+    /// 번호를 가리킨다 - 중복 제거 기준이 방출된 바이트다.
+    #[test]
+    fn if_expr_dedups_identical_bytes() {
+        let src = "component C { props { n: number } template {
+            @if (n > 0) { p( /) }
+            @if (n > 0) { em( /) }
+            @if (n > 1) { i( /) }
+        } }";
+        let bytes = compile(src).expect("컴파일이 성공해야 한다");
+        let module = bytecode::decode(&bytes).unwrap();
+
+        // `n > 0`이 둘, `n > 1`이 하나 - 고유한 것은 둘이다.
+        assert_eq!(module.def(0).unwrap().exprs.len(), 2);
+        // 앞의 둘이 같은 번호를 함께 쓰고, 셋째만 새 번호다.
+        assert_eq!(if_expr_indices(def_code(&module, 0)), vec![0, 0, 1]);
+    }
+
+    /// 컴포넌트가 다르면 같은 모양의 식이라도 안 합쳐진다 - 테이블을 각자 소유하고, 식 안에
+    /// 박힌 scope_index가 그 컴포넌트의 것이라 뜻이 달라진다.
+    #[test]
+    fn if_expr_table_is_component_local() {
+        let src = "
+            component A { props { n: number } template { @if (n > 0) { p( /) } } }
+            component B { props { m: number } template { @if (m > 0) { em( /) } } }
+        ";
+        let bytes = compile(src).expect("컴파일이 성공해야 한다");
+        let module = bytecode::decode(&bytes).unwrap();
+
+        // 바이트까지 같은 식인데도 각 def가 제 테이블에 하나씩 들고, 번호도 각자 0부터다.
+        assert_eq!(module.def(0).unwrap().exprs.len(), 1);
+        assert_eq!(module.def(1).unwrap().exprs, module.def(0).unwrap().exprs);
+        assert_eq!(if_expr_indices(def_code(&module, 0)), vec![0]);
+        assert_eq!(if_expr_indices(def_code(&module, 1)), vec![0]);
+    }
+
+    /// `@if` 여러 개를 담은 컴포넌트를 만들어 컴파일한다. 상한 검사는 소스를 프로그램으로 지어야
+    /// 닿아서, 진단은 메시지만 본다(밑줄이 짚는 자리가 생성된 소스라 눈으로 읽을 것이 없다).
+    fn compile_ifs(conds: impl Iterator<Item = String>) -> Result<Box<[u8]>, String> {
+        let body: String = conds.map(|c| format!("@if ({c}) {{ p( /) }}\n")).collect();
+        let src = format!("component C {{ props {{ n: number }} template {{\n{body}}} }}");
+        compile(&src).map_err(|e| {
+            let out = format_error(None, "entry", &src, &e);
+            let after = out.split_once("error: ").expect("진단 첫 줄").1;
+            after.lines().next().expect("메시지 줄").to_string()
+        })
+    }
+
+    /// 표현식 테이블은 255개까지다 - `expr_count`가 u8이라 그 위는 담기지 않는다.
+    /// 경계를 양쪽에서 본다: 255개는 지나가고 256개째에 걸린다.
+    #[test]
+    fn if_expr_table_stops_at_255() {
+        // 상수가 다 달라 dedup에 안 걸린다 - 255개가 그대로 테이블에 쌓인다.
+        let bytes = compile_ifs((0..255).map(|i| format!("n > {i}"))).expect("255개는 된다");
+        let module = bytecode::decode(&bytes).unwrap();
+        assert_eq!(module.def(0).unwrap().exprs.len(), 255);
+        // 마지막이 인덱스 254 - 255는 개수가 256이어야 나오는데 그건 담기지 않는다.
+        assert_eq!(*if_expr_indices(def_code(&module, 0)).last().unwrap(), 254);
+
+        assert_eq!(
+            compile_ifs((0..256).map(|i| format!("n > {i}"))).unwrap_err(),
+            "a component can use at most 255 expressions"
+        );
+    }
+
+    /// 식 하나는 255바이트까지다 - 표현식 테이블의 `len`이 u8이다.
+    #[test]
+    fn if_expr_too_long_errors() {
+        // 잎(LoadVar) 3바이트 + 연산자 1바이트. `n > 0`이 6바이트고 `&& (n > 0)`마다 7바이트씩
+        // 붙는다 - 36번이면 6 + 35*7 = 251, 37번이면 258로 넘어간다.
+        let ok = std::iter::repeat_n("(n > 0)", 36)
+            .collect::<Vec<_>>()
+            .join(" && ");
+        let bytes = compile_ifs(std::iter::once(ok)).expect("251바이트는 된다");
+        assert_eq!(
+            bytecode::decode(&bytes).unwrap().def(0).unwrap().exprs[0].len(),
+            251
+        );
+
+        let too_long = std::iter::repeat_n("(n > 0)", 37)
+            .collect::<Vec<_>>()
+            .join(" && ");
+        assert_eq!(
+            compile_ifs(std::iter::once(too_long)).unwrap_err(),
+            "an expression is too long: split it into smaller ones"
+        );
+    }
+
+    /// 소스 리터럴만으로 된 참인 조건은 접혀서 사라진다 - 분기 자체를 안 내고 몸체만 남는다.
+    /// 연산자마다 실제로 값을 세는지 봐야 해서 갈래별로 하나씩 든다.
+    #[test]
+    fn if_constant_true_folds_away() {
+        // 조건을 아예 안 쓴 같은 몸체 - 접힌 결과가 이것과 같아야 한다.
+        let bare =
+            bytecode::decode(&compile("component C { template { p( /) } }").unwrap()).unwrap();
+
+        for cond in [
+            "true",
+            "!false",
+            "true && true",
+            "true || false",
+            "1 > 0",
+            "2 <= 2",
+            "2 * 3 == 6",
+            "10 % 3 == 1",
+            "7 / 2 > 3",
+            "1 + 1 == 2",
+            "5 - 5 == 0",
+            "-1 < 0",
+            "\"a\" == \"a\"",
+            "true != false",
+            "(1 > 0) && !(2 < 1)",
+        ] {
+            let src = format!("component C {{ template {{ @if ({cond}) {{ p( /) }} }} }}");
+            let bytes =
+                compile(&src).unwrap_or_else(|e| panic!("`{cond}`가 컴파일돼야 한다: {e:?}"));
+            let module = bytecode::decode(&bytes).unwrap();
+
+            // 접혔다면 조건을 아예 안 쓴 것과 코드가 같다 - 분기 opcode도 표현식 테이블도 없고
+            // 몸체만 그 자리에 편다. opcode 하나를 찾는 대신 통째로 비교하는 건 operand 바이트가
+            // opcode 값과 겹쳐 보일 수 있어서다.
+            assert_eq!(
+                def_code(&module, 0),
+                def_code(&bare, 0),
+                "`{cond}`가 안 접혔다"
+            );
+            assert!(
+                module.def(0).unwrap().exprs.is_empty(),
+                "`{cond}` 표현식 테이블이 비어야 한다"
+            );
+        }
+    }
+
+    /// 거짓으로 접히는 조건은 then 가지가 절대 안 그려진다 - 죽은 코드라 에러다.
+    #[test]
+    fn if_constant_false_errors() {
+        for cond in ["false", "!true", "true && false", "1 < 0", "\"a\" == \"b\""] {
+            let msg = if_cond_diagnostic("", cond);
+            assert!(
+                msg.starts_with("condition is always false: this branch is never rendered"),
+                "`{cond}`: {msg}"
+            );
+        }
+    }
+
+    /// 참으로 접히는데 `@else`가 있으면 그 가지가 죽는다. 밑줄은 조건을 짚는다 - 죽은 가지를
+    /// 만든 원인이 조건이고, 고칠 것도 조건이다.
+    #[test]
+    fn if_constant_true_with_else_errors() {
+        let src = "component C { template {\n@if (1 > 0) { p( /) } @else { em( /) }\n} }";
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let out = format_error(None, "entry", src, &err);
+        assert_eq!(
+            out.split_once("error: ").expect("진단 첫 줄").1,
+            [
+                "condition is always true: the @else branch is never rendered",
+                " 2 | @if (1 > 0) { p( /) } @else { em( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 참조가 하나라도 끼면 안 접힌다 - 값이 런타임에 정해져 컴파일타임에 모른다.
+    /// CONST 슬롯으로 넘어오는 값도 마찬가지다(사용처마다 다를 수 있어 컴포넌트가 접을 수 없다).
+    #[test]
+    fn if_expr_with_ref_is_not_folded() {
+        for cond in ["n > 0", "n > 0 && true", "true && n > 0", "!(n > 0)"] {
+            let src = format!(
+                "component C {{ props {{ n: number }} template {{ @if ({cond}) {{ p( /) }} }} }}"
+            );
+            let bytes = compile(&src).unwrap_or_else(|e| panic!("`{cond}`: {e:?}"));
+            let module = bytecode::decode(&bytes).unwrap();
+            assert_eq!(module.def(0).unwrap().exprs.len(), 1, "`{cond}`");
+        }
+    }
+
+    #[test]
+    fn parse_expr_division_in_condition_is_not_self_close() {
+        // `/`는 self-close와 같은 토큰이지만 조건 자리에선 나눗셈이다 - 파서가 자리로 가른다.
+        assert_eq!(shape(&if_cond("a / b > 1")), "((a / b) > 1)");
+    }
+
+    #[test]
+    fn lex_operators() {
+        use lexer::Token;
+        // 산술/비교/논리 연산자가 각각 한 토큰으로 나온다.
+        let lexed = lexer::lex("+ - * % == != < <= > >= && || !").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::Plus,
+                Token::Minus,
+                Token::Star,
+                Token::Percent,
+                Token::EqEq,
+                Token::BangEq,
+                Token::Lt,
+                Token::Le,
+                Token::Gt,
+                Token::Ge,
+                Token::AmpAmp,
+                Token::PipePipe,
+                Token::Bang,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_longest_match_wins_over_prefix() {
+        use lexer::Token;
+        // 두 글자 연산자가 한 글자 짝보다 먼저 잡힌다 - `==`가 `=` 둘로 쪼개지지 않는다.
+        // `<`/`>`는 제네릭 타입에도 쓰여(Omit<T, 'a'>) 한 글자로 남아야 한다.
+        let lexed = lexer::lex("== = <= < >= > && | || !=").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::EqEq,
+                Token::Eq,
+                Token::Le,
+                Token::Lt,
+                Token::Ge,
+                Token::Gt,
+                Token::AmpAmp,
+                Token::Pipe,
+                Token::PipePipe,
+                Token::BangEq,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_slot_fill_still_beats_less_than() {
+        use lexer::Token;
+        // `<<`(슬롯 채움)는 `<=`/`<`보다 먼저 잡힌다 - 비교 연산자가 끼어들지 않는다.
+        let lexed = lexer::lex("Header << h1").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::Ident("Header".to_string()),
+                Token::LtLt,
+                Token::Ident("h1".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_division_is_slash_token() {
+        use lexer::Token;
+        // 나눗셈과 self-close가 같은 `/` 토큰이다 - 렉서는 문맥을 모르고, 파서가 자리로 가른다.
+        // Slash가 실은 앞 공백 여부를 싣는다(self-close 검증용).
+        let lexed = lexer::lex("a / b").unwrap();
+        assert_eq!(
+            lexed.tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::Slash(true),
+                Token::Ident("b".to_string()),
+            ]
+        );
+    }
+
     #[test]
     fn lex_number_dot_is_decimal_not_dot() {
         use lexer::Token;
@@ -335,6 +865,7 @@ mod tests {
                 code_len: code.len() as u32,
                 events: vec![],
                 contexts: vec![],
+                exprs: vec![],
             }],
             code,
         );
@@ -1145,7 +1676,7 @@ mod tests {
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::UnknownProp(_),
+                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::UnknownProp(_)),
                     ..
                 },
                 ..
@@ -1471,7 +2002,7 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::NotLeaf(_),
+                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::NotLeaf(_)),
                     ..
                 },
                 ..
@@ -2096,7 +2627,7 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::NotLeaf(_),
+                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::NotLeaf(_)),
                     ..
                 },
                 ..
@@ -2117,7 +2648,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::UnknownField { .. },
+                    kind: codegen::CodegenErrorKind::Scope(
+                        scope::ScopeErrorKind::UnknownField { .. }
+                    ),
                     ..
                 },
                 ..
@@ -2138,7 +2671,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::UnknownField { .. },
+                    kind: codegen::CodegenErrorKind::Scope(
+                        scope::ScopeErrorKind::UnknownField { .. }
+                    ),
                     ..
                 },
                 ..

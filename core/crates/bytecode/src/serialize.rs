@@ -41,34 +41,50 @@ pub fn encode(m: &Module) -> Vec<u8> {
 
     // 상수풀 - 엔트리마다 타입 태그 1바이트 + 타입별 payload.
     put_u16(&mut out, m.pool.len() as u16);
-    for c in m.pool.entries() {
-        put_const(&mut out, c);
+    for constant in m.pool.entries() {
+        put_const(&mut out, constant);
     }
 
     // 타입 테이블(모듈 전역) - 엔트리마다 태그 1바이트 + 태그별 payload.
     put_u16(&mut out, m.types.len() as u16);
-    for t in &m.types {
-        put_type(&mut out, t);
+    for ty in &m.types {
+        put_type(&mut out, ty);
     }
 
     // 컴포넌트 테이블
     put_u16(&mut out, m.defs.len() as u16);
-    for d in &m.defs {
-        put_u16(&mut out, d.name_const_index);
-        put_u16(&mut out, d.props_type_ref);
-        put_u32(&mut out, d.code_off);
-        put_u32(&mut out, d.code_len);
+    for def in &m.defs {
+        put_u16(&mut out, def.name_const_index);
+        put_u16(&mut out, def.props_type_ref);
+        put_u32(&mut out, def.code_off);
+        put_u32(&mut out, def.code_len);
         // 이벤트 테이블 (BYTECODE.md #4) - event_count, [(name_const_index, fields)]
-        put_u16(&mut out, d.events.len() as u16);
-        for e in &d.events {
-            put_u16(&mut out, e.name_const_index);
-            put_fields(&mut out, &e.fields);
+        put_u16(&mut out, def.events.len() as u16);
+        for event in &def.events {
+            put_u16(&mut out, event.name_const_index);
+            put_fields(&mut out, &event.fields);
         }
         // 컨텍스트 테이블 - context_count, [(name_const_index, fields)]. fields는 이벤트와 같은 인코딩.
-        put_u16(&mut out, d.contexts.len() as u16);
-        for c in &d.contexts {
-            put_u16(&mut out, c.name_const_index);
-            put_fields(&mut out, &c.fields);
+        put_u16(&mut out, def.contexts.len() as u16);
+        for context in &def.contexts {
+            put_u16(&mut out, context.name_const_index);
+            put_fields(&mut out, &context.fields);
+        }
+        // 표현식 테이블 - expr_count:u8, [(len:u8, code)]. code는 후위 표기(ExprOp).
+        // 둘 다 u8이라 넘치면 조용히 잘린다. 막는 자리는 codegen이지만(소스 위치를 짚어 에러를
+        // 낸다) 여기까지 온 것은 이미 버그라 개발 중에 걸리게 둔다.
+        debug_assert!(
+            def.exprs.len() <= u8::MAX as usize,
+            "표현식이 255개를 넘었다"
+        );
+        out.push(def.exprs.len() as u8);
+        for expr in &def.exprs {
+            debug_assert!(
+                expr.len() <= u8::MAX as usize,
+                "표현식 하나가 255바이트를 넘었다"
+            );
+            out.push(expr.len() as u8);
+            out.extend_from_slice(expr);
         }
     }
 
@@ -136,10 +152,10 @@ fn put_type(out: &mut Vec<u8>, t: &TypeEntry) {
 /// 컨텍스트가 같은 인코딩을 공유한다.
 fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
     put_u16(out, fields.len() as u16);
-    for f in fields {
-        put_u16(out, f.name_const_index);
-        put_u16(out, f.type_ref);
-        put_ref(out, &f.value);
+    for field in fields {
+        put_u16(out, field.name_const_index);
+        put_u16(out, field.type_ref);
+        put_ref(out, &field.value);
     }
 }
 
@@ -216,6 +232,12 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
                 fields: read_fields(&mut r)?,
             });
         }
+        let expr_count = r.u8()?;
+        let mut exprs = Vec::with_capacity(expr_count as usize);
+        for _ in 0..expr_count {
+            let len = r.u8()? as usize;
+            exprs.push(r.take(len)?.to_vec());
+        }
         defs.push(CompDef {
             name_const_index,
             props_type_ref,
@@ -223,6 +245,7 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
             code_len,
             events,
             contexts,
+            exprs,
         });
     }
 

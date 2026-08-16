@@ -1,22 +1,29 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    ArgValue, AttrValue, Context, Event, ForCount, Ident, LitValue, Node, Prop,
-    SlotPlaceholderContent, Type, VarRef,
+    ArgValue, AttrValue, BinaryOp, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
+    SlotPlaceholderContent, Type, UnaryOp,
 };
+use crate::expr_type::{require_expr_type, ExprTypeError, ExprTypeErrorKind};
 use crate::flatten::{FlatComp, Sourced};
+use crate::scope::{
+    lookup_var_ref, require_leaf_var_ref, var_ref_display, ForVar, ScopeError, ScopeErrorKind,
+};
 use crate::src_range::SrcRange;
 use bytecode::{
-    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
-    TypeEntry,
+    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, ExprOp, Field, FieldValue,
+    Module, Op, TypeEntry,
 };
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CodegenErrorKind {
+    /// 스코프 조회가 낸 실패(없는 이름/필드, leaf 아님, 슬롯 초과) - scope.rs가 정의한다.
+    Scope(ScopeErrorKind),
+    /// 표현식 타입 검사가 낸 실패 - expr_type.rs가 정의한다. 조회 실패와 갈래를 나누는 건
+    /// 경로가 달라서다(여긴 식을 거쳐 왔고, Scope는 codegen이 참조를 직접 조회한 것).
+    ExprType(ExprTypeErrorKind),
     /// 내장 태그 테이블에 없는 태그.
     UnknownTag(String),
-    /// props에 선언되지 않은 변수 참조.
-    UnknownProp(String),
     /// 호출했지만 파일에 정의가 없는 컴포넌트.
     UnknownComponent(String),
     /// 자식 prop명이 자식 props 선언에 없음 (use-site 바인딩 오류).
@@ -29,22 +36,22 @@ pub enum CodegenErrorKind {
     UnknownEvent(String),
     /// `@with Context`가 이 컴포넌트 contexts에 없는 컨텍스트명을 가리킴.
     UnknownContext(String),
-    /// prop 경로가 존재하지 않는 필드를 가리킴(객체 아닌 값에 `.field`, 또는 없는 필드명).
-    UnknownField { root: String, field: String },
-    /// 값 자리(보간/속성/payload/context)에 leaf(원시)가 아닌 객체/배열 경로가 왔다.
-    /// 반응성/값 자리엔 leaf만 올 수 있다 - 객체 통째는 안 넘긴다.
-    NotLeaf(String),
     /// 객체 통째 전달(`user={user}`)에서 넘긴 경로의 도달 타입이 자식 prop 타입과 구조가 다르다.
     /// leaf를 순서로 짝지으므로 필드 이름/순서/타입이 일치해야 한다.
     PropTypeMismatch { comp: String, prop: String },
-    /// scope_index/offset이 u8(255)를 넘었다(BYTECODE.md - 둘 다 u8 operand). 안 펼쳐 슬롯 =
-    /// props/for_var 개수라 정상 컴포넌트는 안 넘지만, 넘으면 넘친 변수 참조를 담아 위치를 알린다.
-    SlotOverflow(String),
     /// @for 회차변수 이름이 prop 또는 바깥 회차변수와 겹친다. 섀도잉을 막아 이름 조회를
     /// 순서 무관하게(매치 최대 하나) 유지한다 - 다른 이름을 쓰라는 컴파일 에러.
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
     ForCountNotIterable(String),
+    /// 조건이 소스 리터럴만으로 되어 컴파일타임에 값이 정해지고, 그래서 한쪽 가지가 절대
+    /// 안 그려진다. 담은 값은 그 조건이 참인지 - 참이면 `@else`가, 거짓이면 then이 죽는다.
+    /// 참인데 `@else`가 없으면 죽는 가지가 없어 에러가 아니다(조건을 접고 몸체만 낸다).
+    ConstantCondition(bool),
+    /// 한 컴포넌트가 쓰는 표현식이 255개를 넘었다 - `expr_count`가 u8이라 그 위는 안 담긴다.
+    TooManyExprs,
+    /// 식 하나가 255바이트를 넘었다 - 표현식 테이블의 len이 u8이다.
+    ExprTooLong,
     /// 자식이 정의하지 않은 슬롯을 채웠다(`Header << ...`인데 자식에 `@slot(Header)` 없음,
     /// 또는 자식이 `@slot()`을 안 뒀는데 자식 블록을 준 경우).
     ///
@@ -65,10 +72,9 @@ pub enum CodegenErrorKind {
 impl std::fmt::Display for CodegenErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            CodegenErrorKind::Scope(e) => e.fmt(f),
+            CodegenErrorKind::ExprType(e) => e.fmt(f),
             CodegenErrorKind::UnknownTag(tag) => write!(f, "unknown builtin tag `{tag}`"),
-            CodegenErrorKind::UnknownProp(name) => {
-                write!(f, "`{name}` is not declared in props")
-            }
             CodegenErrorKind::UnknownComponent(name) => {
                 write!(f, "cannot find component `{name}`")
             }
@@ -84,20 +90,10 @@ impl std::fmt::Display for CodegenErrorKind {
             CodegenErrorKind::UnknownContext(name) => {
                 write!(f, "`{name}` is not declared in contexts")
             }
-            CodegenErrorKind::UnknownField { root, field } => {
-                write!(f, "no field `{field}` on prop `{root}`")
-            }
-            CodegenErrorKind::NotLeaf(path) => write!(
-                f,
-                "`{path}` is an object or array: only primitive values go in value position"
-            ),
             CodegenErrorKind::PropTypeMismatch { comp, prop } => write!(
                 f,
                 "value passed to prop `{prop}` of `{comp}` has a different shape: field names, order and types must match"
             ),
-            CodegenErrorKind::SlotOverflow(name) => {
-                write!(f, "more than 255 slots: `{name}` does not fit")
-            }
             CodegenErrorKind::DuplicateBinding(name) => write!(
                 f,
                 "@for binding `{name}` shadows a prop or an outer binding: use another name"
@@ -106,6 +102,20 @@ impl std::fmt::Display for CodegenErrorKind {
                 f,
                 "`{path}` is neither an array nor a number: it cannot drive @for"
             ),
+            // 무엇이 죽었는지를 말한다 - 조건을 고칠지 죽은 가지를 지울지는 그 다음이다.
+            CodegenErrorKind::ConstantCondition(value) => match value {
+                true => write!(
+                    f,
+                    "condition is always true: the @else branch is never rendered"
+                ),
+                false => write!(f, "condition is always false: this branch is never rendered"),
+            },
+            CodegenErrorKind::TooManyExprs => {
+                write!(f, "a component can use at most 255 expressions")
+            }
+            CodegenErrorKind::ExprTooLong => {
+                write!(f, "an expression is too long: split it into smaller ones")
+            }
             // 없는 것보다 쓸 수 있는 것을 말한다 - 고칠 방법이 문장 안에 있어야 한다.
             CodegenErrorKind::UnknownSlotPlaceholder { comp, declared } => {
                 let named: Vec<String> =
@@ -151,11 +161,40 @@ impl CodegenErrorKind {
     }
 }
 
+/// 스코프 조회 실패를 codegen 실패로 싣는다 - 자리는 그대로 두고 갈래만 감싼다.
+/// `?`가 이걸 자동으로 부르므로 호출부는 변환을 안 적는다.
+impl From<ScopeError> for CodegenError {
+    fn from(e: ScopeError) -> Self {
+        CodegenErrorKind::Scope(e.kind).at(e.range)
+    }
+}
+
+/// 표현식 타입 검사 실패도 같은 축으로 싣는다.
+impl From<ExprTypeError> for CodegenError {
+    fn from(e: ExprTypeError) -> Self {
+        CodegenErrorKind::ExprType(e.kind).at(e.range)
+    }
+}
+
+/// 컴포넌트 하나의 선언. 맵이 슬롯 선언을 소유한다.
+type CompEntry<'a> = (
+    u16,                  /* 컴포넌트 ID(정의 순서) - RENDER에 박는다 */
+    &'a [Prop],           /* 자식 props 선언 - PUSH_ARG를 이 순서로 정렬 */
+    Vec<Option<&'a str>>, /* 자식 슬롯 선언(무기명 None) - 슬롯 콘텐츠를 이 순서로 정렬 */
+);
+
+/// `get`이 돌려주는 `CompEntry` - 슬롯 선언은 맵이 계속 소유하고 슬라이스로만 빌려준다.
+type CompEntryBorrowed<'a, 'e> = (
+    u16,                   /* 컴포넌트 ID(정의 순서) */
+    &'a [Prop],            /* 자식 props 선언 */
+    &'e [Option<&'a str>], /* 자식 슬롯 선언(무기명 None) */
+);
+
 /// 컴포넌트 이름 -> (ID, props 선언, 슬롯 선언) 룩업. 합성 호출(`Comp(...)`)을 만났을 때 RENDER에
 /// 박을 ID를 찾고, PUSH_ARG를 자식 props 순서로, 슬롯 콘텐츠를 자식 슬롯 순서로 정렬하려고
 /// 선언도 같이 돌려준다. 컴포넌트 ID = 정의 순서.
 struct CompLookup<'a> {
-    by_name: std::collections::HashMap<&'a str, (u16, &'a [Prop], Vec<Option<&'a str>>)>,
+    by_name: std::collections::HashMap<&'a str, CompEntry<'a>>,
 }
 
 impl<'a> CompLookup<'a> {
@@ -176,7 +215,7 @@ impl<'a> CompLookup<'a> {
     }
 
     /// 이름으로 (컴포넌트 ID, 자식 props 선언, 자식 슬롯 선언)을 찾는다.
-    fn get(&self, name: &str) -> Option<(u16, &'a [Prop], &[Option<&'a str>])> {
+    fn get(&self, name: &str) -> Option<CompEntryBorrowed<'a, '_>> {
         self.by_name
             .get(name)
             .map(|(id, props, slot_placeholders)| (*id, *props, slot_placeholders.as_slice()))
@@ -253,13 +292,19 @@ fn check_slot_placeholder_defs(
     Ok(())
 }
 
+/// generate 산출물.
+type Emitted = (
+    Box<[u8]>,   /* qubb 바이트코드 */
+    Vec<String>, /* 정규화 리소스 경로 - 등장 순서가 곧 resId */
+);
+
 /// 파일의 컴포넌트 정의들을 하나의 직렬화된 Module로. 컴포넌트 ID = 정의 순서.
 /// 두 번째 반환값은 리소스 사이드맵 - 인덱스가 모듈 전역 resId, 값이 정규화 경로.
 /// 빌드 단계가 이걸 받아 내용 해시/복사/URL화를 한다(BYTECODE.md #5 LOAD_RES 메모).
 ///
 /// 에러의 range는 그 컴포넌트가 정의된 파일의 오프셋이라, 어느 파일인지를 함께 실어 보낸다
 /// (Sourced) - 엔트리 소스에 대고 세면 use한 파일의 에러가 엉뚱한 줄을 짚는다.
-pub fn generate(comps: &[FlatComp]) -> Result<(Box<[u8]>, Vec<String>), Sourced<CodegenError>> {
+pub fn generate(comps: &[FlatComp]) -> Result<Emitted, Sourced<CodegenError>> {
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
     let mut types = TypeTable::new();
@@ -319,8 +364,10 @@ fn generate_comp(
             code.push(Op::LoadRes as u8);
             code.extend_from_slice(&res_id.to_le_bytes());
         }
-        // 슬롯 인덱스는 컴포넌트-로컬 - def마다 0부터 다시 센다.
+        // 슬롯 인덱스는 컴포넌트-로컬 - def마다 0부터 다시 센다. 표현식 테이블도 def가 소유해
+        // 같은 수명이다(DECISIONS.md "표현식 테이블 - 컴포넌트 소유 + 후위 표기 채택").
         let mut next_slot_placeholder_index = 0u16;
+        let mut exprs = Vec::new();
         for node in &comp.template {
             emit_node(
                 node,
@@ -332,6 +379,7 @@ fn generate_comp(
                 pool,
                 code,
                 &mut next_slot_placeholder_index,
+                &mut exprs,
             )?;
         }
         code.push(Op::Halt as u8);
@@ -375,6 +423,7 @@ fn generate_comp(
             code_len: code.len() as u32 - code_off,
             events,
             contexts,
+            exprs,
         })
     }
 }
@@ -386,105 +435,6 @@ fn res_id_for(res_ids: &mut Vec<String>, path: &str) -> u16 {
     }
     res_ids.push(path.to_string());
     (res_ids.len() - 1) as u16
-}
-
-/// 타입이 store에서 차지하는 칸 수. 객체 안 필드 offset을 누적할 때 앞 형제 필드가 먹는 칸을
-/// 세는 데 쓴다. 원시는 1(leaf), 배열은 1(칸 하나에 arrayPoolIndex로 앉고 요소는 arrayPool에
-/// 산다), 객체는 필드 칸의 합(base부터 필드들이 연속으로 깔린다).
-fn store_size(ty: &Type) -> u16 {
-    match ty {
-        Type::Bool | Type::Number | Type::String => 1,
-        Type::Array(_) => 1,
-        Type::Object(fields) => fields.iter().map(|(_, t)| store_size(t)).sum(),
-        Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),
-        Type::Omit(..) | Type::Pick(..) => unreachable!("expand가 유틸 타입을 안 풀었다"),
-    }
-}
-
-/// prop 참조(root + 필드 경로)를 슬롯 위치로 짚는다 - scope_index(넘길 슬롯 번호) + offset
-/// (root 안에서 도달 필드까지의 store 칸 거리) + 도달 타입. 객체를 펼치지 않으므로 scope_index는
-/// props/for_var를 하나씩 센 순번이고(객체/배열도 슬롯 하나), offset은 root가 객체일 때 그 필드
-/// 위치다. path가 비면 offset 0(THROUGH), 있으면 필드 거리(FIELD). u8 상한 가드는 emit이 건다.
-///
-///   {tag}        root=tag(for_var)   path=[]       -> (for_var 슬롯, 0)
-///   {item.title} root=item(for_var)  path=[title]  -> (for_var 슬롯, title 거리)
-///   {user.name}  root=user(prop)     path=[name]   -> (prop 순번, name 거리)
-fn var_ref_to_slot<'a>(
-    var: &VarRef,
-    props: &'a [Prop],
-    for_vars: &'a [ForVar],
-) -> Result<(u8, u8, &'a Type), CodegenError> {
-    // 이 함수의 에러는 모두 이 prop 참조를 탓한다 - 구간도 하나로 같다.
-    let at = |kind: CodegenErrorKind| kind.at(var.range.0);
-    let overflow = || at(CodegenErrorKind::SlotOverflow(var_ref_display(var)));
-
-    // root를 회차변수에서 먼저 찾는다. props와 이름이 겹칠 수 없어(@for 진입에서 충돌을 에러로
-    // 건다) 조회 순서는 무관. for_var는 자기 슬롯 번호를 이미 갖고 있고, prop은 선언 순번이 슬롯.
-    let (scope_index, mut ty) = match for_vars
-        .iter()
-        .find(|fv| fv.name.as_deref() == Some(var.root.as_str()))
-    {
-        Some(fv) => (u8::try_from(fv.offset).map_err(|_| overflow())?, &fv.type_),
-        None => {
-            let mut ty = None;
-            let mut scope_index = 0u8;
-            for (i, p) in props.iter().enumerate() {
-                if p.name == var.root {
-                    ty = Some(&p.type_);
-                    scope_index = u8::try_from(i).map_err(|_| overflow())?;
-                    break;
-                }
-            }
-            let unknown = || at(CodegenErrorKind::UnknownProp(var.root.clone()));
-            (scope_index, ty.ok_or_else(unknown)?)
-        }
-    };
-
-    // 필드 경로를 타입 따라 내려가며 offset을 누적한다. 앞 형제 필드가 먹는 store 칸을 더한다.
-    // checked_add로 넘치는 그 필드에서 즉시 감지한다(사후 검사는 넘친 지점을 잃는다).
-    let mut offset = 0u8;
-    for key in &var.path {
-        let fields = match ty {
-            Type::Object(fields) => fields,
-            _ => {
-                return Err(at(CodegenErrorKind::UnknownField {
-                    root: var.root.clone(),
-                    field: key.clone(),
-                }))
-            }
-        };
-        let mut found = None;
-        for (name, field_ty) in fields {
-            if name == key {
-                found = Some(field_ty);
-                break;
-            }
-            let size = u8::try_from(store_size(field_ty)).map_err(|_| overflow())?;
-            offset = offset.checked_add(size).ok_or_else(overflow)?;
-        }
-        ty = found.ok_or_else(|| {
-            at(CodegenErrorKind::UnknownField {
-                root: var.root.clone(),
-                field: key.clone(),
-            })
-        })?;
-    }
-
-    Ok((scope_index, offset, ty))
-}
-
-/// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. 값/반응성 자리(보간/속성/@if 조건)엔
-/// leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `var_ref_to_slot` 위 leaf-only 래퍼.
-fn var_ref_to_leaf_slot(
-    var: &VarRef,
-    props: &[Prop],
-    for_vars: &[ForVar],
-) -> Result<(u8, u8), CodegenError> {
-    let (scope_index, offset, ty) = var_ref_to_slot(var, props, for_vars)?;
-    match ty {
-        Type::Bool | Type::Number | Type::String => Ok((scope_index, offset)),
-        _ => Err(CodegenErrorKind::NotLeaf(var_ref_display(var)).at(var.range.0)),
-    }
 }
 
 /// 두 타입이 구조적으로 동일한가 - 필드 이름/순서/타입이 재귀로 일치. 객체 통째 전달에서
@@ -504,15 +454,6 @@ fn types_match(a: &Type, b: &Type) -> bool {
                     .all(|((nx, tx), (ny, ty))| nx == ny && types_match(tx, ty))
         }
         _ => false,
-    }
-}
-
-/// 에러 메시지용 경로 표기: `root.a.b`.
-fn var_ref_display(var: &VarRef) -> String {
-    if var.path.is_empty() {
-        var.root.clone()
-    } else {
-        format!("{}.{}", var.root, var.path.join("."))
     }
 }
 
@@ -575,7 +516,7 @@ fn arg_to_field(
     let (type_ref, ref_value) = match value {
         ArgValue::Var(var) => {
             // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
-            let (scope_index, offset, ty) = var_ref_to_slot(var, props, &[])?;
+            let (scope_index, offset, ty) = lookup_var_ref(var, props, &[])?;
             let type_ref = types.intern(ty, pool);
             (type_ref, FieldValue::Scope(scope_index, offset))
         }
@@ -631,15 +572,184 @@ impl ForScope<'_> {
     };
 }
 
-/// @for 회차변수 하나. name = 루프 변수명(`@for (tag of ..)`의 tag). 인덱스변수는 이름이 없을 수
-/// 있어(`@for (row of rows)` - 인덱스 슬롯은 잡되 몸체 참조 불가) Option이다 - None이면 이름 조회에
-/// 안 걸린다(슬롯만 점유). offset = 이 변수가 앉는 scope 슬롯(props leaf 뒤에 회차 진입 순서로 이어짐),
-/// type_ = 요소 타입(배열 inner) 또는 Number(count 회차값/인덱스).
-#[derive(Clone)]
-struct ForVar {
-    name: Option<String>,
-    offset: u16,
-    type_: Type,
+/// 소스 리터럴만으로 된 식을 접었을 때의 값. 참조가 하나라도 끼면 접을 수 없다.
+///
+/// CONST 슬롯(`Comp(count=5 /)`)은 여기 안 온다 - 사용처마다 값이 다를 수 있는데 컴포넌트
+/// 코드는 한 벌이라 접으면 틀린다. 그래서 판정은 `Expr` 트리만 본다.
+enum Folded {
+    Bool(bool),
+    Number(f64),
+    Str(String),
+}
+
+/// 식이 소스 리터럴만으로 되어 있으면 그 값. 참조가 하나라도 있으면 None.
+///
+/// 타입 검사가 끝난 뒤에 부른다 - 피연산자 타입이 맞다고 보고 짜서, 어긋나는 조합은
+/// `unreachable!`로 둔다.
+fn fold_expr(expr: &Expr) -> Option<Folded> {
+    match expr {
+        Expr::Lit(lit, _) => Some(match lit {
+            LitValue::Bool(b) => Folded::Bool(*b),
+            LitValue::Number(n) => Folded::Number(*n),
+            LitValue::Str(s) => Folded::Str(s.clone()),
+        }),
+
+        // 참조가 끼면 컴파일타임에 값을 모른다.
+        Expr::Var(..) => None,
+
+        Expr::Unary(op, operand, _) => match (op, fold_expr(operand)?) {
+            (UnaryOp::Not, Folded::Bool(b)) => Some(Folded::Bool(!b)),
+            (UnaryOp::Neg, Folded::Number(n)) => Some(Folded::Number(-n)),
+            _ => unreachable!("타입 검사가 통과시킨 단항 피연산자"),
+        },
+
+        Expr::Binary(op, left, right, _) => {
+            let (l, r) = (fold_expr(left)?, fold_expr(right)?);
+            Some(match (op, l, r) {
+                // 산술 - 양쪽 number.
+                (BinaryOp::Add, Folded::Number(a), Folded::Number(b)) => Folded::Number(a + b),
+                (BinaryOp::Sub, Folded::Number(a), Folded::Number(b)) => Folded::Number(a - b),
+                (BinaryOp::Mul, Folded::Number(a), Folded::Number(b)) => Folded::Number(a * b),
+                (BinaryOp::Div, Folded::Number(a), Folded::Number(b)) => Folded::Number(a / b),
+                (BinaryOp::Rem, Folded::Number(a), Folded::Number(b)) => Folded::Number(a % b),
+                // 대소 비교 - 양쪽 number.
+                (BinaryOp::Lt, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a < b),
+                (BinaryOp::Le, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a <= b),
+                (BinaryOp::Gt, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a > b),
+                (BinaryOp::Ge, Folded::Number(a), Folded::Number(b)) => Folded::Bool(a >= b),
+                // 논리 - 양쪽 bool. 단락 평가는 없다(값 자리에 부수효과가 없어 결과가 같다).
+                (BinaryOp::And, Folded::Bool(a), Folded::Bool(b)) => Folded::Bool(a && b),
+                (BinaryOp::Or, Folded::Bool(a), Folded::Bool(b)) => Folded::Bool(a || b),
+                // 같음 비교 - 타입을 안 박고 양쪽이 같기만 하면 된다.
+                (BinaryOp::Eq, a, b) => Folded::Bool(folded_eq(&a, &b)),
+                (BinaryOp::Ne, a, b) => Folded::Bool(!folded_eq(&a, &b)),
+                _ => unreachable!("타입 검사가 통과시킨 이항 피연산자"),
+            })
+        }
+    }
+}
+
+/// 접힌 값끼리 같은지. 타입 검사가 양쪽 타입을 이미 맞춰 놔서 서로 다른 갈래는 안 온다.
+fn folded_eq(a: &Folded, b: &Folded) -> bool {
+    match (a, b) {
+        (Folded::Bool(a), Folded::Bool(b)) => a == b,
+        (Folded::Number(a), Folded::Number(b)) => a == b,
+        (Folded::Str(a), Folded::Str(b)) => a == b,
+        _ => unreachable!("타입 검사가 통과시킨 `==` 피연산자"),
+    }
+}
+
+/// 식 하나를 후위 표기 바이트로 낸다(BYTECODE.md #4 `<EXPR>`). 왼쪽 -> 오른쪽 -> 연산자 순서로
+/// 밀어서, 런타임이 앞에서 뒤로 한 번 훑으면 스택 계산이 끝난다.
+///
+/// 타입은 이미 맞다고 보고 짠다 - 부르기 전에 `require_expr_type`이 검사를 마쳤다.
+fn emit_expr(
+    expr: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    out: &mut Vec<u8>,
+) -> Result<(), CodegenError> {
+    match expr {
+        Expr::Lit(lit, _) => match lit {
+            // 0~255 정수는 태그 1 + 값 1로 끝난다 - 상수풀을 거치면 f64 8바이트가 따로 붙는다.
+            LitValue::Number(n) if is_small_int(*n) => {
+                out.push(ExprOp::LoadSmallInt as u8);
+                out.push(*n as u8);
+            }
+            LitValue::Bool(b) => out.push(match b {
+                true => ExprOp::LoadTrue as u8,
+                false => ExprOp::LoadFalse as u8,
+            }),
+            LitValue::Number(n) => {
+                let index = pool.intern(Const::Num(*n));
+                out.push(ExprOp::LoadConst as u8);
+                out.extend_from_slice(&index.to_le_bytes());
+            }
+            LitValue::Str(s) => {
+                let index = pool.intern_str(s);
+                out.push(ExprOp::LoadConst as u8);
+                out.extend_from_slice(&index.to_le_bytes());
+            }
+        },
+
+        // 참조 아니면 `.length` - expr_type과 같은 순서로 가른다(실제 필드가 먼저).
+        Expr::Var(var, _) => match require_leaf_var_ref(var, props, for_vars) {
+            Ok((scope_index, offset)) => {
+                out.push(ExprOp::LoadVar as u8);
+                out.push(scope_index);
+                out.push(offset);
+            }
+            Err(not_leaf) => {
+                let target = match var.length_target() {
+                    Some(t) => t,
+                    None => return Err(not_leaf.into()),
+                };
+                let (scope_index, offset, ty) = lookup_var_ref(&target, props, for_vars)?;
+                // 배열은 길이를 담은 칸을, 문자열은 값 칸을 구독한다 - 런타임이 볼 대상이 달라
+                // 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
+                out.push(match ty {
+                    Type::Array(_) => ExprOp::LoadArrayLength as u8,
+                    _ => ExprOp::LoadStringLength as u8,
+                });
+                out.push(scope_index);
+                out.push(offset);
+            }
+        },
+
+        Expr::Unary(op, operand, _) => {
+            emit_expr(operand, props, for_vars, pool, out)?;
+            out.push(match op {
+                UnaryOp::Not => ExprOp::Not as u8,
+                UnaryOp::Neg => ExprOp::Neg as u8,
+            });
+        }
+
+        Expr::Binary(op, left, right, _) => {
+            emit_expr(left, props, for_vars, pool, out)?;
+            emit_expr(right, props, for_vars, pool, out)?;
+            out.push(match op {
+                BinaryOp::Add => ExprOp::Add as u8,
+                BinaryOp::Sub => ExprOp::Sub as u8,
+                BinaryOp::Mul => ExprOp::Mul as u8,
+                BinaryOp::Div => ExprOp::Div as u8,
+                BinaryOp::Rem => ExprOp::Rem as u8,
+                BinaryOp::Eq => ExprOp::Eq as u8,
+                BinaryOp::Ne => ExprOp::Ne as u8,
+                BinaryOp::Lt => ExprOp::Lt as u8,
+                BinaryOp::Le => ExprOp::Le as u8,
+                BinaryOp::Gt => ExprOp::Gt as u8,
+                BinaryOp::Ge => ExprOp::Ge as u8,
+                BinaryOp::And => ExprOp::And as u8,
+                BinaryOp::Or => ExprOp::Or as u8,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// `LoadSmallInt`로 낼 수 있는 값인지 - 0~255 정수. 음수는 `Neg`가 따로 붙고, 그 밖은 상수풀로.
+fn is_small_int(n: f64) -> bool {
+    n.fract() == 0.0 && (0.0..=255.0).contains(&n)
+}
+
+/// 식 바이트를 이 컴포넌트의 표현식 테이블에 넣고 `expr_index`를 준다. 같은 바이트면 이미 있는
+/// 것을 함께 쓴다 - 중복 제거 기준이 방출된 바이트다(DECISIONS.md "표현식 테이블 - 컴포넌트
+/// 소유 + 후위 표기 채택").
+fn intern_expr(exprs: &mut Vec<Vec<u8>>, bytes: Vec<u8>, at: SrcRange) -> Result<u8, CodegenError> {
+    if bytes.len() > u8::MAX as usize {
+        return Err(CodegenErrorKind::ExprTooLong.at(at));
+    }
+    if let Some(index) = exprs.iter().position(|expr| *expr == bytes) {
+        return Ok(index as u8);
+    }
+    // `expr_count`가 u8이라 테이블에 담기는 것이 255개까지다. `expr_index`는 255를 표현할 수
+    // 있지만 그 자리에 식이 있으려면 개수가 256이어야 해서, 인덱스 255는 쓰이지 않는다.
+    if exprs.len() >= u8::MAX as usize {
+        return Err(CodegenErrorKind::TooManyExprs.at(at));
+    }
+    exprs.push(bytes);
+    Ok((exprs.len() - 1) as u8)
 }
 
 fn emit_node(
@@ -654,6 +764,8 @@ fn emit_node(
     // 지금까지 방출한 `@slot` 수 = 다음 것의 slot_placeholder_index.
     // collect_slot_placeholders의 순회 순서와 같아야 정의쪽/사용쪽 인덱스가 맞는다.
     next_slot_placeholder_index: &mut u16,
+    // 이 컴포넌트의 표현식 테이블. 연산자가 붙은 조건이 여기 쌓이고 `IF_EXPR`이 번호로 가리킨다.
+    exprs: &mut Vec<Vec<u8>>,
 ) -> Result<(), CodegenError> {
     match node {
         Node::Text(s) => {
@@ -662,7 +774,7 @@ fn emit_node(
             code.extend_from_slice(&index.to_le_bytes());
         }
         Node::Var(var) => {
-            let (scope_index, offset) = var_ref_to_leaf_slot(var, props, for_scope.for_vars)?;
+            let (scope_index, offset) = require_leaf_var_ref(var, props, for_scope.for_vars)?;
             code.push(Op::TextVar as u8);
             code.push(scope_index);
             code.push(offset);
@@ -729,7 +841,7 @@ fn emit_node(
                     // 변수 값은 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
                     AttrValue::Var(v) => {
                         let (scope_index, offset) =
-                            var_ref_to_leaf_slot(v, props, for_scope.for_vars)?;
+                            require_leaf_var_ref(v, props, for_scope.for_vars)?;
                         code.push(scope_index);
                         code.push(offset);
                     }
@@ -751,6 +863,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 
@@ -801,7 +914,7 @@ fn emit_node(
                     ArgValue::Var(parent_var) => {
                         // 도달 타입이 자식 prop 타입과 구조가 같아야 한다.
                         let (scope_index, offset, reached_ty) =
-                            var_ref_to_slot(parent_var, props, for_scope.for_vars)?;
+                            lookup_var_ref(parent_var, props, for_scope.for_vars)?;
                         if !types_match(reached_ty, &child_prop.type_) {
                             // 타입이 안 맞는 건 넘긴 그 참조다 - 그 자리를 가리킨다.
                             return Err(CodegenErrorKind::PropTypeMismatch {
@@ -870,6 +983,7 @@ fn emit_node(
                         pool,
                         code,
                         next_slot_placeholder_index,
+                        exprs,
                     )?;
                 }
                 code.push(Op::SlotPlaceholderContentEnd as u8);
@@ -909,11 +1023,55 @@ fn emit_node(
             *next_slot_placeholder_index += 1;
         }
         Node::If { cond, then, else_ } => {
-            // cond는 불리언 prop 참조 - (scope_index, offset)으로. leaf여야 한다. (표현식은 이후 단계)
-            let (scope_index, offset) = var_ref_to_leaf_slot(cond, props, for_scope.for_vars)?;
-            code.push(Op::If as u8);
-            code.push(scope_index);
-            code.push(offset);
+            // 조건은 bool이어야 한다 - number가 참/거짓으로 새는 걸 막는다(`@if (count > 0)`으로 쓴다).
+            require_expr_type(cond, &Type::Bool, props, for_scope.for_vars)?;
+
+            // 소스 리터럴만으로 된 조건은 컴파일타임에 값이 정해진다. 그러면 한쪽 가지가 절대
+            // 안 그려지므로, 죽는 가지가 있으면 에러다. 죽는 것이 없을 때(참 + `@else` 없음)만
+            // 분기를 접고 몸체를 그 자리에 편다.
+            if let Some(folded) = fold_expr(cond) {
+                let value = match folded {
+                    Folded::Bool(b) => b,
+                    _ => unreachable!("bool로 검사가 끝난 조건"),
+                };
+                if !value || !else_.is_empty() {
+                    return Err(CodegenErrorKind::ConstantCondition(value).at(cond.range().0));
+                }
+                for node in then {
+                    emit_node(
+                        node,
+                        props,
+                        events,
+                        contexts,
+                        comp_lookup,
+                        for_scope,
+                        pool,
+                        code,
+                        next_slot_placeholder_index,
+                        exprs,
+                    )?;
+                }
+                return Ok(());
+            }
+
+            // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
+            // 연산자가 붙은 식만 표현식 테이블을 거친다 - 잎 하나에 테이블을 쓸 이유가 없다.
+            match cond {
+                Expr::Var(var, _) if var.length_target().is_none() => {
+                    let (scope_index, offset) =
+                        require_leaf_var_ref(var, props, for_scope.for_vars)?;
+                    code.push(Op::If as u8);
+                    code.push(scope_index);
+                    code.push(offset);
+                }
+                other => {
+                    let mut bytes = Vec::new();
+                    emit_expr(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                    let index = intern_expr(exprs, bytes, other.range().0)?;
+                    code.push(Op::IfExpr as u8);
+                    code.push(index);
+                }
+            }
 
             for node in then {
                 emit_node(
@@ -926,6 +1084,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 
@@ -942,6 +1101,7 @@ fn emit_node(
                         pool,
                         code,
                         next_slot_placeholder_index,
+                        exprs,
                     )?;
                 }
             }
@@ -986,8 +1146,7 @@ fn emit_node(
                     Type::Number
                 }
                 ForCount::Var(var) => {
-                    let (scope_index, offset, ty) =
-                        var_ref_to_slot(var, props, for_scope.for_vars)?;
+                    let (scope_index, offset, ty) = lookup_var_ref(var, props, for_scope.for_vars)?;
                     match ty {
                         Type::Number => {
                             code.push(Op::ForCountVar as u8);
@@ -1042,6 +1201,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 
@@ -1070,6 +1230,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 

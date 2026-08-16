@@ -153,7 +153,33 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
                    name_const_index : u16  // 컨텍스트명("Area") - 상수풀
                    fields           : <FIELDS>   // 이벤트 payload와 같은 인코딩
                  )
+                 expr_count : u8         // 이 컴포넌트가 쓰는 표현식 수(최대 255). `IF_EXPR`의
+                                         //   expr_index가 이 배열의 인덱스라 폭을 맞춘다.
+                                         //   개수가 255까지라 쓰이는 인덱스는 0~254 - expr_index가
+                                         //   표현할 수 있는 255는 나오지 않는다
+                 exprs      : expr_count x (
+                   len  : u8             // code 바이트 수(최대 255)
+                   code : [u8; len]      // 후위 표기 - 아래 <EXPR> opcode들
+                 )
                )
+
+  // EXPR - 식 하나의 바이트. 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다(되돌아갈 일이 없다).
+  //   런타임은 이 바이트를 두 번 훑는다 - 구독을 걸 때 한 번, 값을 셀 때 한 번(#5.2).
+  //   스택에는 **값만** 올라간다. 칸 번호(leafIndex)는 안 올라간다 - 주소와 값이 섞이면 연산자가
+  //   무엇을 계산하는지 알 수 없어진다. Load*가 이미 값을 꺼내 올린다.
+  //   타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 런타임은 타입을 안 본다.
+  <EXPR> = opcode 1바이트 + opcode별 operand   // 코드의 opcode(#5)와 다른 이름공간 - 값이 겹친다
+           0x00 LoadVar          : scope_index:u8, offset:u8  // 그 칸의 값
+           0x01 LoadConst        : const_index:u16            // 컴포넌트 상수풀
+           0x02 LoadArrayLength  : scope_index:u8, offset:u8  // 배열 길이
+           0x03 LoadStringLength : scope_index:u8, offset:u8  // 문자열 길이
+           0x04 LoadSmallInt     : value:u8                   // 0~255 정수. 음수는 Neg가 붙는다
+           0x05 LoadTrue         : -
+           0x06 LoadFalse        : -
+           0x10 Add   0x11 Sub   0x12 Mul   0x13 Div   0x14 Rem   // 이항, operand 없음
+           0x15 Eq    0x16 Ne    0x17 Lt    0x18 Le    0x19 Gt    0x1a Ge
+           0x1b And   0x1c Or
+           0x1d Not   0x1e Neg                                    // 단항, operand 없음
 
   // FIELDS - 이벤트 payload와 컨텍스트가 공유하는 필드 목록 인코딩
   <FIELDS> = field_count : u16
@@ -228,6 +254,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `PUSH_SLOT_PLACEHOLDER_CONTENT` | 0x1b | slot_placeholder_index: u16 | - | 슬롯 콘텐츠 구간 시작(**사용쪽**). `SLOT_PLACEHOLDER_CONTENT_END`까지가 콘텐츠 코드이고 뒤따르는 `RENDER`가 소비한다. 콘텐츠는 부모 def 안에 그대로 남아 **부모 scope/path**로 해석된다(SYNTAX #3.3). |
 | `SLOT_PLACEHOLDER_CONTENT_END` | 0x1c | -              | -                         | 콘텐츠 구간 끝 마커(`IF_END` 동형). 다음 op가 `PUSH_SLOT_PLACEHOLDER_CONTENT`가 아니면 콘텐츠 목록도 끝. |
 | `FILL_SLOT_PLACEHOLDER` | 0x1d | slot_placeholder_index: u16 | -          | `@slot(name)` 자리(**정의쪽**). 그 인덱스의 콘텐츠 구간을 **부모 컨텍스트**(argumentSourcePairs/compId/pathPrefix)로 해석해 이 자리에 끼운다. 안 채운 슬롯이면 아무것도 안 넣는다(미채움 허용). |
+| `IF_EXPR`         | 0x1e | expr_index: u8        | 컴포넌트 표현식 테이블     | 연산자가 붙은 조건으로 분기 시작(`@if (count > 0)`). 이후는 `IF`와 같다 - then 가지가 이어지고 `ELSE`/`IF_END`도 그대로. 런타임이 파생 칸을 잡고 식이 읽는 칸들을 구독해 그 칸에 결과를 넣는다(#5.2). |
 
 설계 메모:
 
@@ -348,7 +375,7 @@ if-only :  IF cond  [then]            IF_END
 if-else :  IF cond  [then]  ELSE  [else]  IF_END
 ```
 
-`cond`는 불리언 scope index 하나(truthy면 then, falsy면 else). 표현식 조건은 `{expr}`에서 확장.
+`cond`는 불리언 칸 하나. 연산자가 붙은 조건은 `IF` 자리에 `IF_EXPR`이 오고 나머지는 같다(#5.2).
 
 양쪽 가지를 다 해석해 두 청사진을 모두 들고 있되, **활성 가지만 build**(DOM/구독 생성)한다.
 비활성 가지는 청사진으로만 보관 - 구독이 없어 `set`이 와도 갱신 대상이 아니다. `cond`가 바뀌면
@@ -375,6 +402,41 @@ if-else :  IF cond  [then]  ELSE  [else]  IF_END
 | `ATTR_G`/`ATTR_L` 의 value (속성값) | 텍스트 규칙 + `"`->`&quot;`          |
 
 태그명/속성명은 신뢰된 식별자라 이스케이프하지 않는다.
+
+## 5.2 표현식 조건 - `IF_EXPR`
+
+`@if (count > 0)`처럼 연산자가 붙은 조건. 잎 하나짜리 조건(`@if (isPaid)`)은 그대로 `IF`가
+받는다 - 표현식 테이블을 거칠 이유가 없다.
+
+```
+IF_EXPR expr_index  [then]  ELSE  [else]  IF_END
+```
+
+`ELSE`/`IF_END`는 `IF`와 똑같이 쓴다. 다른 것은 조건을 어디서 얻느냐뿐이다.
+
+**런타임이 `IF_EXPR`을 만나면 파생 칸(leaf) 하나를 잡는다.** 그 칸이 식의 결과를 담고, 분기는
+그 칸 **하나만** 구독한다. 그래서 분기 쪽 구조는 `IF`와 달라지지 않는다.
+
+1. 파생 칸을 하나 잡는다 - 지역(region)이 소유한다.
+2. 식 바이트를 훑어 `LoadVar`/`LoadArrayLength`/`LoadStringLength`가 가리키는 칸을 모으고,
+   그 칸들을 구독한다. 슬롯 kind가 CONST면 값이 안 변하니 구독하지 않는다.
+3. 식을 세어 결과를 파생 칸에 넣는다.
+4. 원본 칸 중 하나라도 바뀌면 식 전체를 다시 세어 파생 칸에 `set` 한다. 분기는 그 칸을 구독하고
+   있으므로 평소의 값 변경과 똑같이 반응한다.
+
+**파생 칸 번호는 바이트코드에 없다.** 런타임이 발급한다 - `@for`가 요소를 늘리고 줄이며 칸을
+그때그때 잡고 푸는 이상 컴파일타임에 못 박는다(DECISIONS.md "이벤트 payload/context에 객체
+전달"의 "컴파일타임 leafIndex 고정"). `IF_EXPR`의 operand가 `expr_index` 하나뿐인 이유다.
+
+**길이 opcode를 배열과 문자열로 나눈 것은 구독 대상이 달라서다.** 배열은 길이를 담은
+칸(`sizeLeafIndex` - `@for`가 쓰는 그 칸)을 구독하고, 문자열은 값 칸을 구독해 바뀔 때마다
+길이를 다시 잰다.
+
+**점프도 단락 평가(short-circuit)도 없다.** 값 자리에는 부수효과가 없어 `&&`의 오른쪽을 늘
+세어도 결과가 같다. #5.1의 "왜 점프가 없어야 하는가"와 같은 이유다.
+
+왜 후위 표기이고 왜 테이블을 컴포넌트가 소유하는지는 DECISIONS.md "표현식 테이블 - 컴포넌트
+소유 + 후위 표기 채택".
 
 ---
 

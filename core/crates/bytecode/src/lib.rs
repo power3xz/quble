@@ -10,7 +10,7 @@ mod serialize;
 pub mod tags;
 
 pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
-pub use opcode::Op;
+pub use opcode::{ExprOp, Op};
 pub use pool::{Const, ConstPool};
 pub use serialize::{decode, encode, DecodeError};
 
@@ -58,6 +58,7 @@ mod tests {
             code_len: code.len() as u32,
             events: vec![],
             contexts: vec![],
+            exprs: vec![],
         }];
         Module::new(pool, vec![], defs, code)
     }
@@ -147,6 +148,43 @@ mod tests {
         assert_eq!(back.types, types);
     }
 
+    /// 표현식 테이블이 왕복하는지. 길이가 다른 식 둘을 담아 (len, code) 짝이 어긋나지 않는지까지 본다.
+    #[test]
+    fn roundtrip_exprs() {
+        // `count > 0` - scope 0번 슬롯 offset 0의 값과 작은 정수 0을 올려 비교.
+        let gt = vec![
+            ExprOp::LoadVar as u8,
+            0,
+            0,
+            ExprOp::LoadSmallInt as u8,
+            0,
+            ExprOp::Gt as u8,
+        ];
+        // `!isPaid && isReady` - 길이가 다른 식을 하나 더 둔다.
+        let and = vec![
+            ExprOp::LoadVar as u8,
+            0,
+            1,
+            ExprOp::Not as u8,
+            ExprOp::LoadVar as u8,
+            0,
+            2,
+            ExprOp::And as u8,
+        ];
+        let defs = vec![CompDef {
+            name_const_index: 0,
+            props_type_ref: 0,
+            code_off: 0,
+            code_len: 0,
+            events: vec![],
+            contexts: vec![],
+            exprs: vec![gt.clone(), and.clone()],
+        }];
+        let m = Module::new(ConstPool::new(), vec![], defs, vec![]);
+        let back = decode(&encode(&m)).unwrap();
+        assert_eq!(back.def(0).unwrap().exprs, vec![gt, and]);
+    }
+
     /// 알 수 없는 타입 태그는 BadTypeTag로 거부한다.
     #[test]
     fn decode_rejects_bad_type_tag() {
@@ -183,7 +221,28 @@ mod tests {
         assert_eq!(Op::from_u8(0x0d), Some(Op::Else));
         assert_eq!(Op::from_u8(0x0e), Some(Op::IfEnd));
         assert_eq!(Op::from_u8(0x0f), Some(Op::LoadRes));
+        assert_eq!(Op::from_u8(0x1e), Some(Op::IfExpr));
         assert_eq!(Op::from_u8(0xff), None);
+    }
+
+    #[test]
+    fn expr_opcode_from_u8() {
+        assert_eq!(ExprOp::from_u8(0x00), Some(ExprOp::LoadVar));
+        assert_eq!(ExprOp::from_u8(0x04), Some(ExprOp::LoadSmallInt));
+        assert_eq!(ExprOp::from_u8(0x06), Some(ExprOp::LoadFalse));
+        assert_eq!(ExprOp::from_u8(0x19), Some(ExprOp::Gt));
+        assert_eq!(ExprOp::from_u8(0x1e), Some(ExprOp::Neg));
+        // 잎 태그와 연산자 태그 사이는 비어 있다 - 연산자를 늘릴 자리로 남겨 둔다.
+        assert_eq!(ExprOp::from_u8(0x07), None);
+        assert_eq!(ExprOp::from_u8(0xff), None);
+    }
+
+    /// 두 태그는 이름공간이 다르다 - 같은 바이트가 서로 다른 뜻이다. 식 바이트를 `Op`로 읽거나
+    /// 그 반대로 읽으면 조용히 엉뚱한 것이 되므로, 겹치는 값이 있다는 사실을 테스트로 박아 둔다.
+    #[test]
+    fn op_and_expr_op_are_separate_namespaces() {
+        assert_eq!(Op::from_u8(0x1e), Some(Op::IfExpr));
+        assert_eq!(ExprOp::from_u8(0x1e), Some(ExprOp::Neg));
     }
 
     #[test]

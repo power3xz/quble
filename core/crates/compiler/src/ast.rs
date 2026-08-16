@@ -147,10 +147,9 @@ pub enum Node {
         /// 이름이 없어도 짚을 수 있게 노드가 자기 자리를 든다.
         range: NodeRange,
     },
-    /// `@if (cond) { then } @else { else_ }` - 조건 분기. cond는 불리언 prop 참조(경로 허용,
-    /// `gen.open`)이고 leaf여야 한다(표현식은 이후 단계). else_가 비어 있으면 else 없는 if.
+    /// `@if (cond) { then } @else { else_ }` - 조건 분기. else_가 비어 있으면 else 없는 if.
     If {
-        cond: VarRef,
+        cond: Expr,
         then: Vec<Node>,
         else_: Vec<Node>,
     },
@@ -210,6 +209,115 @@ pub struct VarRef {
     /// 이 참조가 쓰인 자리(`root`부터 경로 끝까지). codegen이 prop/필드를 못 찾았을 때
     /// 탓할 대상이다. 비교에서 빠진다(NodeRange).
     pub range: NodeRange,
+}
+
+impl VarRef {
+    /// `x.length`에서 길이를 잴 대상 `x`. 마지막 조각이 `length`가 아니면 None.
+    /// 필드 조회가 먼저 실패했을 때만 길이로 읽으므로 부르는 쪽이 그 순서를 지킨다.
+    ///
+    /// range는 원래 참조 그대로다 - 조각 하나를 뗀 자리는 소스에서 셀 수 없다
+    /// (`x . length`도 파싱된다). 진단은 참조 전체를 짚고 무엇이 문제인지는 메시지가 말한다.
+    pub fn length_target(&self) -> Option<VarRef> {
+        match self.path.last().map(String::as_str) {
+            Some("length") => {
+                let mut target = self.clone();
+                target.path.pop();
+                Some(target)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// 값 자리에 오는 식. 잎(참조/리터럴)과 연산자 가지로 이룬다.
+/// 잎 하나짜리 식(`@if (done)`)은 codegen이 기존 슬롯 인코딩으로 그대로 낮춘다 - 흔한 경우가
+/// 표현식 테이블과 평가기를 안 거치게 하려는 것.
+///
+/// 노드마다 자기가 소스에서 걸친 자리를 든다 - 타입이 안 맞는 지점을 짚으려면 안쪽 노드가
+/// 자기 자리를 알아야 한다. 식 통째를 탓하면 어디가 틀렸는지 안 보인다.
+///
+/// ```text
+/// @if (count > 0 && name)
+///                   ^^^^    bool이 아닌 잎만 짚는다
+/// ```
+///
+#[derive(Debug, PartialEq)]
+pub enum Expr {
+    /// `count`, `user.name`, `tags.length` - 참조 하나. `.length`가 길이인지 같은 이름의
+    /// 필드인지는 타입이 갈라서 expr_type이 정한다(파서는 타입을 모른다).
+    Var(VarRef, NodeRange),
+    Lit(LitValue, NodeRange),
+    /// range는 연산자부터 피연산자 끝까지(`!done`).
+    Unary(UnaryOp, Box<Expr>, NodeRange),
+    /// range는 왼쪽 피연산자 시작부터 오른쪽 끝까지(`a + b`).
+    Binary(BinaryOp, Box<Expr>, Box<Expr>, NodeRange),
+}
+
+impl Expr {
+    /// 이 식이 소스에서 걸친 자리. 진단이 탓할 대상이다.
+    pub fn range(&self) -> NodeRange {
+        match self {
+            Expr::Var(_, r) | Expr::Lit(_, r) | Expr::Unary(_, _, r) | Expr::Binary(_, _, _, r) => {
+                *r
+            }
+        }
+    }
+}
+
+/// 단항 연산자. `!done`, `-count`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UnaryOp {
+    Not,
+    Neg,
+}
+
+impl UnaryOp {
+    /// 소스에 적히는 기호. 진단이 연산자를 탓할 때 이 글자로 찍는다.
+    pub fn sym(&self) -> &'static str {
+        match self {
+            UnaryOp::Not => "!",
+            UnaryOp::Neg => "-",
+        }
+    }
+}
+
+/// 이항 연산자. 우선순위와 결합은 파서가 정하고, AST는 묶인 결과만 담는다.
+#[derive(Debug, PartialEq, Eq)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
+}
+
+impl BinaryOp {
+    /// 소스에 적히는 기호. 진단이 연산자를 탓할 때 이 글자로 찍는다.
+    pub fn sym(&self) -> &'static str {
+        match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Rem => "%",
+            BinaryOp::Eq => "==",
+            BinaryOp::Ne => "!=",
+            BinaryOp::Lt => "<",
+            BinaryOp::Le => "<=",
+            BinaryOp::Gt => ">",
+            BinaryOp::Ge => ">=",
+            BinaryOp::And => "&&",
+            BinaryOp::Or => "||",
+        }
+    }
 }
 
 /// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`, `prop=42`, `prop=true`).

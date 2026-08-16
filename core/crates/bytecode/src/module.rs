@@ -7,6 +7,7 @@ use crate::pool::ConstPool;
 ///   - 부모가 그 슬롯을 어디서 받았느냐에 달려 컴파일이 못 박는다. object/array면 base+offset.
 /// - Const: 컴포넌트 상수풀 인덱스. 리터럴 값(payload에 직접 박힘).
 /// - Raw: @for 등이 런타임에 만든 원시값. 지금은 number only(@for 인덱스). 실사용은 @for 착수 때.
+///
 /// 직렬화는 태그 1바이트 + payload(serialize.rs). variant가 곧 태그라 enum엔 태그 필드가 없다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldValue {
@@ -76,6 +77,11 @@ pub struct CompDef {
     pub events: Vec<EventDef>,
     /// 이 컴포넌트가 선언한 컨텍스트들. 선언 순서 = context_index.
     pub contexts: Vec<ContextDef>,
+    /// 이 컴포넌트가 쓰는 표현식들. 순서 = `IF_EXPR`의 expr_index(u8이라 255개까지).
+    /// 후위 표기 바이트 그대로 든다 - 중복 제거를 바이트 동일성으로 하고 런타임도 이 바이트를
+    /// 훑어서, 중간 표현을 두면 층만 하나 는다(DECISIONS.md "표현식 테이블 - 컴포넌트 소유 +
+    /// 후위 표기 채택"). 바이트 하나하나는 `ExprOp`.
+    pub exprs: Vec<Vec<u8>>,
 }
 
 /// 바이트코드 모듈 하나(= 하나의 컴파일 산출물/파일).
