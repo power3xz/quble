@@ -172,6 +172,37 @@ const OP = {
   PUSH_SLOT_PLACEHOLDER_CONTENT: 0x1b,
   SLOT_PLACEHOLDER_CONTENT_END: 0x1c,
   FILL_SLOT_PLACEHOLDER: 0x1d,
+  IF_EXPR: 0x1e,
+} as const;
+
+// 표현식 opcode(BYTECODE.md #4 <EXPR>). OP와 다른 이름공간이다 - 같은 값이 서로 다른 뜻이라
+// 식 바이트를 OP로 읽으면 안 된다.
+//
+// 식은 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다. 스택에는 값만 올린다 - 칸 번호는 안 올린다.
+// 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 타입을 안 본다.
+const EXPR = {
+  LOAD_VAR: 0x00, // scope_index: u8, offset: u8
+  LOAD_CONST: 0x01, // const_index: u16
+  LOAD_ARRAY_LENGTH: 0x02, // scope_index: u8, offset: u8
+  LOAD_STRING_LENGTH: 0x03, // scope_index: u8, offset: u8
+  LOAD_SMALL_INT: 0x04, // value: u8
+  LOAD_TRUE: 0x05,
+  LOAD_FALSE: 0x06,
+  ADD: 0x10,
+  SUB: 0x11,
+  MUL: 0x12,
+  DIV: 0x13,
+  REM: 0x14,
+  EQ: 0x15,
+  NE: 0x16,
+  LT: 0x17,
+  LE: 0x18,
+  GT: 0x19,
+  GE: 0x1a,
+  AND: 0x1b,
+  OR: 0x1c,
+  NOT: 0x1d,
+  NEG: 0x1e,
 } as const;
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -193,6 +224,7 @@ const operandLen = (op: number) => {
     case OP.SLOT_PLACEHOLDER_CONTENT_END:
       return 0;
     case OP.PUSH_THROUGH: // scope_index: u8
+    case OP.IF_EXPR: // expr_index: u8
       return 1;
     case OP.ELEM_OPEN:
     case OP.TEXT:
@@ -236,9 +268,10 @@ const skipBranch = (code: Uint8Array, startPc: number) => {
   while (pc < code.length) {
     const markerPc = pc;
     const op = code[pc++];
-    if (op === OP.IF) {
+    // IF_EXPR도 IF와 같은 분기다 - 깊이를 안 세면 중첩 안쪽의 IF_END를 이 가지 끝으로 오인한다.
+    if (op === OP.IF || op === OP.IF_EXPR) {
       depth += 1;
-      pc += operandLen(OP.IF);
+      pc += operandLen(op);
     } else if (op === OP.IF_END) {
       if (depth === 0) {
         return markerPc;
@@ -394,6 +427,41 @@ type TScope = number[];
 
 const slotKind = (scope: TScope, o: number): number => scope[2 * o];
 const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
+
+// 이항 연산자 하나를 적용한다. 피연산자 타입은 컴파일타임에 맞춰져(compiler/src/expr_type.rs)
+// 여기서 검사하지 않는다 - 산술/비교는 number, 논리는 bool, `==`/`!=`는 양쪽이 같은 타입이다.
+const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
+  switch (op) {
+    case EXPR.ADD:
+      return (left as number) + (right as number);
+    case EXPR.SUB:
+      return (left as number) - (right as number);
+    case EXPR.MUL:
+      return (left as number) * (right as number);
+    case EXPR.DIV:
+      return (left as number) / (right as number);
+    case EXPR.REM:
+      return (left as number) % (right as number);
+    case EXPR.EQ:
+      return left === right;
+    case EXPR.NE:
+      return left !== right;
+    case EXPR.LT:
+      return (left as number) < (right as number);
+    case EXPR.LE:
+      return (left as number) <= (right as number);
+    case EXPR.GT:
+      return (left as number) > (right as number);
+    case EXPR.GE:
+      return (left as number) >= (right as number);
+    case EXPR.AND:
+      return (left as boolean) && (right as boolean);
+    case EXPR.OR:
+      return (left as boolean) || (right as boolean);
+    default:
+      throw new Error(`bad expr opcode 0x${op.toString(16)}`);
+  }
+};
 
 // 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
 // @for 회차/RENDER 재진입은 같은 walkStacks를 이어 쓰고(push/pop 공유), 지연 실행(@if lazyBuild/@for grow)만
@@ -2051,6 +2119,19 @@ class Interpreter {
           pc = this.runIf(pc, argumentSourcePairs, compId, pathPrefix, loopIndexBase, walkStacks, branch, nodeTop());
           break;
         }
+        case OP.IF_EXPR: {
+          pc = this.runIfExpr(
+            pc,
+            argumentSourcePairs,
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            walkStacks,
+            branch,
+            nodeTop(),
+          );
+          break;
+        }
         case OP.FOR_RAW: {
           // 소스에 박힌 리터럴 횟수 - 안 변하니 지금 가지(startRegion/Branch)에 count회 인라인.
           const count = Number(u16at()) || 0;
@@ -2142,8 +2223,115 @@ class Interpreter {
     return fragment;
   };
 
-  // @if opcode 처리 - then/else Region을 스폰해 anchor를 parent에 붙이고, 활성 가지만 build한다.
-  // 비활성 가지엔 lazyBuild만 심어 첫 활성화 때 만든다. cond가 STORE면 구독을 걸어 swap한다.
+  // 식이 읽는 칸들을 모은다 - 이 칸들이 바뀌면 식을 다시 세야 하므로 구독 대상이다.
+  //
+  // CONST 슬롯은 값이 안 변해 제외한다. 배열 길이는 그 배열의 길이 칸(sizeLeafIndex)을 본다 -
+  // 배열 칸의 값(arrayInfoIndex)은 요소가 늘고 줄어도 안 바뀌기 때문이다. @for가 grow/shrink
+  // 발화에 쓰는 그 칸이고, 아직 없으면 여기서 확보한다(주인은 배열이라 식이 없어져도 안 반납).
+  // 문자열 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다.
+  //
+  // 같은 칸이 두 번 나오면(`n > 0 && n < 10`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때
+  // 식을 두 번 다시 센다.
+  collectExprLeaves = (expr: Uint8Array, pairs: TScope): number[] => {
+    const leafIndices: number[] = [];
+    for (let pc = 0; pc < expr.length; ) {
+      const op = expr[pc++];
+      if (op === EXPR.LOAD_CONST) {
+        pc += 2;
+        continue;
+      }
+      if (op === EXPR.LOAD_SMALL_INT) {
+        pc += 1;
+        continue;
+      }
+      // 연산자와 LOAD_TRUE/FALSE는 operand도 읽는 칸도 없다.
+      if (op !== EXPR.LOAD_VAR && op !== EXPR.LOAD_ARRAY_LENGTH && op !== EXPR.LOAD_STRING_LENGTH) {
+        continue;
+      }
+      const scopeIndex = expr[pc++];
+      const offset = expr[pc++];
+      if (slotKind(pairs, scopeIndex) === CONST) {
+        continue; // 안 변하는 값 - 구독할 것이 없다
+      }
+      const slotLeafIndex = slotRef(pairs, scopeIndex) + offset;
+      let leafIndex = slotLeafIndex;
+      if (op === EXPR.LOAD_ARRAY_LENGTH) {
+        const info = this.arrayPool.entries[this.store.get(slotLeafIndex) as number];
+        info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
+        leafIndex = info.sizeLeafIndex;
+      }
+      if (!leafIndices.includes(leafIndex)) {
+        leafIndices.push(leafIndex);
+      }
+    }
+    return leafIndices;
+  };
+
+  // 식을 후위 표기로 세어 값을 낸다(BYTECODE.md #4 <EXPR>).
+  //
+  // 스택에는 값만 올린다 - 칸 번호는 안 올린다. 주소와 값이 섞이면 연산자가 무엇을 계산하는지
+  // 알 수 없어진다. 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
+  evalExpr = (expr: Uint8Array, pairs: TScope): unknown => {
+    const stack: unknown[] = [];
+    // 슬롯 하나가 가리키는 값. CONST면 상수풀, STORE면 store 칸.
+    const slotValue = (scopeIndex: number, offset: number): unknown => {
+      const ref = slotRef(pairs, scopeIndex);
+      return slotKind(pairs, scopeIndex) === CONST ? this.module.constpool[ref] : this.store.get(ref + offset);
+    };
+    for (let pc = 0; pc < expr.length; ) {
+      const op = expr[pc++];
+      switch (op) {
+        case EXPR.LOAD_VAR: {
+          stack.push(slotValue(expr[pc], expr[pc + 1]));
+          pc += 2;
+          break;
+        }
+        case EXPR.LOAD_ARRAY_LENGTH: {
+          // 배열 칸의 값이 arrayInfoIndex - 요소 수는 그 arrayInfo가 든다.
+          const leafIndex = slotRef(pairs, expr[pc]) + expr[pc + 1];
+          stack.push(this.arrayPool.entries[this.store.get(leafIndex) as number].elemStartLeafIndices.length);
+          pc += 2;
+          break;
+        }
+        case EXPR.LOAD_STRING_LENGTH: {
+          stack.push(String(slotValue(expr[pc], expr[pc + 1])).length);
+          pc += 2;
+          break;
+        }
+        case EXPR.LOAD_CONST: {
+          stack.push(this.module.constpool[expr[pc] | (expr[pc + 1] << 8)]);
+          pc += 2;
+          break;
+        }
+        case EXPR.LOAD_SMALL_INT:
+          stack.push(expr[pc++]);
+          break;
+        case EXPR.LOAD_TRUE:
+          stack.push(true);
+          break;
+        case EXPR.LOAD_FALSE:
+          stack.push(false);
+          break;
+        // 단항 - 하나 꺼내 하나 넣는다.
+        case EXPR.NOT:
+          stack.push(!stack.pop());
+          break;
+        case EXPR.NEG:
+          stack.push(-(stack.pop() as number));
+          break;
+        // 이항 - 둘 꺼내 하나 넣는다. 나중에 밀린 것이 오른쪽이라 먼저 꺼내진다.
+        default: {
+          const right = stack.pop();
+          const left = stack.pop();
+          stack.push(applyBinary(op, left, right));
+          break;
+        }
+      }
+    }
+    return stack[0];
+  };
+
+  // @if opcode 처리 - 조건 슬롯을 그대로 조건 칸으로 쓴다.
   // pc는 IF operand 직후(cond 슬롯)를 가리켜 들어오고, IF_END 다음 pc를 돌려준다.
   runIf = (
     pc: number,
@@ -2162,7 +2350,92 @@ class Interpreter {
     const condIsConst = slotKind(argumentSourcePairs, condScopeIndex) === CONST;
     const condRef = slotRef(argumentSourcePairs, condScopeIndex);
     const condLeafIndex = condIsConst ? -1 : condRef + condOffset;
-    const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex);
+    return this.buildIfRegion(
+      pc,
+      condLeafIndex,
+      condIsConst ? this.module.constpool[condRef] : this.store.get(condLeafIndex),
+      false, // 부모 슬롯을 가리킬 뿐 - 이 region이 만든 칸이 아니다
+      argumentSourcePairs,
+      compId,
+      pathPrefix,
+      loopIndexBase,
+      walkStacks,
+      branch,
+      parent,
+    );
+  };
+
+  // IF_EXPR opcode 처리 - 연산자가 붙은 조건(BYTECODE.md #5.2). 식의 결과를 담을 파생 칸을 하나
+  // 잡고, 식이 읽는 칸들을 구독해 하나라도 바뀌면 다시 세어 그 칸에 넣는다. 분기는 그 칸 하나만
+  // 보므로 그 뒤는 IF와 같다.
+  runIfExpr = (
+    pc: number,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    walkStacks: TWalkStacks,
+    branch: TBranch,
+    parent: Node,
+  ): number => {
+    const expr = this.module.defs[compId].exprs[this.code[pc++]];
+    // 다시 셀 때도 이 지점의 슬롯을 봐야 하는데, 공유 pairs는 @for 회차마다 push/pop돼 그때는
+    // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
+    // (@if lazyBuild/@for grow와 같은 관례). runIf는 조건 칸 번호를 지금 뽑아 둬 카피가 필요 없다.
+    const pairs = [...argumentSourcePairs];
+    const condLeafIndex = this.store.alloc([this.evalExpr(expr, pairs)]);
+    // 식이 읽는 칸이 바뀌면 식 전체를 다시 세어 파생 칸에 넣는다. 그 set이 아래 buildIfRegion이
+    // 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기 때문이다.
+    // 부모 가지 구독에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 어느 칸이 바뀌든 하는
+    // 일이 같아 함수는 하나만 만들고 칸마다 건다 - 끊을 때 (칸, 함수) 짝이 필요해 항목은 칸 수만큼.
+    const recount = () => this.store.set(condLeafIndex, this.evalExpr(expr, pairs));
+    for (const leafIndex of this.collectExprLeaves(expr, pairs)) {
+      branch.leafIndices.push(leafIndex);
+      branch.updateFns.push(recount);
+    }
+    return this.buildIfRegion(
+      pc,
+      condLeafIndex,
+      this.store.get(condLeafIndex),
+      true, // 이 region이 잡은 파생 칸 - region이 없어질 때 반납한다
+      argumentSourcePairs,
+      compId,
+      pathPrefix,
+      loopIndexBase,
+      walkStacks,
+      branch,
+      parent,
+    );
+  };
+
+  // IF/IF_EXPR이 공유하는 분기 구성 - then/else Region을 스폰해 anchor를 parent에 붙이고, 활성
+  // 가지만 build한다. 비활성 가지엔 lazyBuild만 심어 첫 활성화 때 만든다. 조건 칸이 있으면(STORE)
+  // 구독을 걸어 swap한다.
+  //
+  // 둘의 차이는 조건 칸을 어디서 얻느냐뿐이다 - IF는 부모 슬롯을 그대로 쓰고, IF_EXPR은 식을
+  // 세어 넣은 파생 칸을 쓴다. 그래서 그 칸과 초기값만 받는다.
+  //
+  // @param pc             가지 첫 op(조건 operand 직후)
+  // @param condLeafIndex  조건을 담은 칸. CONST 조건이면 -1(구독 없음)
+  // @param condInitial    초기 조건값 - CONST 조건은 store에 없어 따로 받는다
+  // @param ownsCondLeaf   region이 그 칸의 주인인가(IF_EXPR의 파생 칸). free 때 반납 여부
+  // @param branch         구독을 실을 부모 가지 - 부모가 detach/free되면 조건 감시도 꺼진다
+  // @param parent         anchor를 붙일 DOM 노드
+  // @returns              IF_END 다음 pc
+  buildIfRegion = (
+    pc: number,
+    condLeafIndex: number,
+    condInitial: unknown,
+    ownsCondLeaf: boolean,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    walkStacks: TWalkStacks,
+    branch: TBranch,
+    parent: Node,
+  ): number => {
+    const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, ownsCondLeaf);
     const region = this.regionPool.entries[regionIndex];
     branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
     const thenBranchIndex = region.branchIndices[THEN_INDEX];
@@ -2208,8 +2481,8 @@ class Interpreter {
     elseBranch.lazyBuild = buildElse;
 
     // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
-    // CONST 조건은 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
-    if (!condIsConst) {
+    // 조건 칸이 없으면(-1, CONST 조건) 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
+    if (condLeafIndex !== -1) {
       const onCond = (condValue: unknown) => {
         activateIf(this.store, this.regionPool, this.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
       };
@@ -2222,7 +2495,6 @@ class Interpreter {
     // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
     // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
     // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-    const condInitial = condIsConst ? this.module.constpool[condRef] : this.store.get(condLeafIndex);
     const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
     const initialBranch = this.branchPool.entries[region.branchIndices[initialShownIndex]];
     // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님

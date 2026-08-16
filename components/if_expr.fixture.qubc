@@ -1,0 +1,40 @@
+component IfExpr {
+  props {
+    count: number,
+    limit: number,
+    isPaid: bool,
+    isCancelled: bool,
+    note: string,
+    tags: string[]
+  }
+  template {
+    div() {
+      @if (count > 0) {
+        p(class="gt") { "gt" }
+      }
+      @else {
+        p(class="not-gt") { "not-gt" }
+      }
+
+      @if (count == limit) {
+        p(class="eq") { "eq" }
+      }
+
+      @if (isPaid && !isCancelled) {
+        p(class="and") { "and" }
+      }
+
+      @if (count * 2 - 1 > limit) {
+        p(class="arith") { "arith" }
+      }
+
+      @if (note.length > 0) {
+        p(class="strlen") { "strlen" }
+      }
+
+      @if (tags.length > 1) {
+        p(class="arrlen") { "arrlen" }
+      }
+    }
+  }
+}

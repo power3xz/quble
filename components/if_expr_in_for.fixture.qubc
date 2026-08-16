@@ -1,0 +1,25 @@
+component IfExprInFor {
+  props { rows: { n: number }[] }
+  events {
+    ADD({})
+    DEL({})
+  }
+  template {
+    div() {
+      button(class="add" @click:ADD) { "add" }
+      button(class="del" @click:DEL) { "del" }
+      ul() {
+        @for (row of rows) {
+          li(class="row") {
+            @if (row.n > 0) {
+              span(class="pos") { "pos" }
+            }
+            @else {
+              span(class="neg") { "neg" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -22,6 +22,7 @@ import type { Pool } from "./pool-allocator.ts";
 export type Store = {
   get: (leafIndex: number) => unknown;
   set: (leafIndex: number, value: unknown) => void;
+  free: (start: number, size: number) => void;
   subscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
   unsubscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
 };
@@ -38,6 +39,9 @@ export type TBranch = {
 export type TRegion = {
   branchIndices: number[];
   condLeafIndex: number;
+  // condLeafIndex가 이 region이 잡은 파생 칸인가. IF_EXPR만 true - 식의 결과를 담을 칸을
+  // 직접 alloc하므로 region이 없어질 때 반납해야 한다. IF는 부모 슬롯을 가리킬 뿐이라 false.
+  ownsCondLeaf: boolean;
   anchor: Comment;
   shownIndex: number;
   detach: (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion) => void;
@@ -167,11 +171,17 @@ const attachIf = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBra
 // regionPool에 @if Region을 스폰한다 - anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 alloc하고
 // 그 인덱스를 돌려준다. anchor를 DOM 트리 어디에 붙일지는 호출자 몫(IF는 nodeTop, 루트는 fragment).
 // 인덱스는 alloc이 정한다(빈 칸 재사용 시 length와 다름) - 그래서 anchor 라벨은 alloc 후 채운다.
-export const appendIfRegion = (regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, condLeafIndex: number): number => {
+export const appendIfRegion = (
+  regionPool: Pool<TRegion>,
+  branchPool: Pool<TBranch>,
+  condLeafIndex: number,
+  ownsCondLeaf = false,
+): number => {
   const anchor = document.createComment("");
   const regionIndex = regionPool.alloc({
     branchIndices: [appendBranch(branchPool), appendBranch(branchPool)],
     condLeafIndex,
+    ownsCondLeaf,
     anchor,
     shownIndex: -1,
     detach: detachIf,
@@ -238,6 +248,7 @@ export const appendForRegion = (regionPool: Pool<TRegion>, countLeafIndex: numbe
   const regionIndex = regionPool.alloc({
     branchIndices: [],
     condLeafIndex: countLeafIndex,
+    ownsCondLeaf: false, // 횟수 칸은 배열/prop의 것 - @for가 만든 칸이 아니다
     anchor,
     shownIndex: -1,
     detach: detachFor,
@@ -303,17 +314,32 @@ export const attachForIteration = (
 // branch(branchIndex)와 그 자식 region들을 리프까지 재귀로 free해 칸을 반납한다. detach(DOM/구독
 // 떼기)와는 별개 - detach는 @if swap에서도 쓰여 free하면 안 되므로 안 섞는다. 호출 전 detach가
 // 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
-const freeBranchTree = (branchPool: Pool<TBranch>, regionPool: Pool<TRegion>, branchIndex: number): void => {
+const freeBranchTree = (
+  store: Store,
+  branchPool: Pool<TBranch>,
+  regionPool: Pool<TRegion>,
+  branchIndex: number,
+): void => {
   for (const childRegionIndex of branchPool.entries[branchIndex].childRegionIndices) {
-    freeRegionTree(branchPool, regionPool, childRegionIndex);
+    freeRegionTree(store, branchPool, regionPool, childRegionIndex);
   }
   branchPool.release(branchIndex);
 };
 
 // region(regionIndex)이 든 모든 branch를 재귀 free한 뒤 이 region 칸을 반납한다.
-const freeRegionTree = (branchPool: Pool<TBranch>, regionPool: Pool<TRegion>, regionIndex: number): void => {
-  for (const branchIndex of regionPool.entries[regionIndex].branchIndices) {
-    freeBranchTree(branchPool, regionPool, branchIndex);
+// 자기가 잡은 파생 칸(IF_EXPR 조건)이 있으면 store에도 반납한다 - region이 소유한 유일한 칸이다.
+const freeRegionTree = (
+  store: Store,
+  branchPool: Pool<TBranch>,
+  regionPool: Pool<TRegion>,
+  regionIndex: number,
+): void => {
+  const region = regionPool.entries[regionIndex];
+  for (const branchIndex of region.branchIndices) {
+    freeBranchTree(store, branchPool, regionPool, branchIndex);
+  }
+  if (region.ownsCondLeaf) {
+    store.free(region.condLeafIndex, 1);
   }
   regionPool.release(regionIndex);
 };
@@ -330,7 +356,7 @@ export const truncateFor = (
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   for (let i = branchIndices.length - 1; i >= count; i--) {
     detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-    freeBranchTree(branchPool, regionPool, branchIndices[i]);
+    freeBranchTree(store, branchPool, regionPool, branchIndices[i]);
   }
   branchIndices.length = count;
 };
@@ -347,6 +373,6 @@ export const removeBranchAt = (
 ): void => {
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-  freeBranchTree(branchPool, regionPool, branchIndices[i]);
+  freeBranchTree(store, branchPool, regionPool, branchIndices[i]);
   branchIndices.splice(i, 1);
 };
