@@ -846,7 +846,13 @@ const decode = (bytes: Uint8Array) => {
     for (let i = 0; i < contextCount; i++) {
       contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
-    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts });
+    // 표현식 테이블 - expr_count:u8, [(len:u8, code)]. IF_EXPR의 expr_index가 이 배열의 인덱스.
+    const exprCount = r.u8();
+    const exprs = [];
+    for (let i = 0; i < exprCount; i++) {
+      exprs.push(r.take(r.u8()));
+    }
+    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprs });
   }
 
   const codeLen = r.u32();
@@ -865,6 +871,8 @@ type TDef = {
   codeLen: number;
   events: TEventEntry[];
   contexts: TEventEntry[];
+  // 이 def가 쓰는 표현식들(후위 표기 바이트). IF_EXPR의 expr_index가 이 배열의 인덱스.
+  exprs: Uint8Array[];
 };
 type TModule = {
   code: Uint8Array;
