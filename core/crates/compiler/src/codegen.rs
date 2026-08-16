@@ -44,7 +44,7 @@ pub enum CodegenErrorKind {
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
     ForCountNotIterable(String),
-    /// 한 컴포넌트가 쓰는 표현식이 255개를 넘었다 - `IF_EXPR`의 expr_index가 u8이다.
+    /// 한 컴포넌트가 쓰는 표현식이 256개를 넘었다 - `IF_EXPR`의 expr_index가 u8이라 0~255다.
     TooManyExprs,
     /// 식 하나가 255바이트를 넘었다 - 표현식 테이블의 len이 u8이다.
     ExprTooLong,
@@ -664,7 +664,9 @@ fn intern_expr(exprs: &mut Vec<Vec<u8>>, bytes: Vec<u8>, at: SrcRange) -> Result
     if let Some(index) = exprs.iter().position(|e| *e == bytes) {
         return Ok(index as u8);
     }
-    if exprs.len() > u8::MAX as usize {
+    // `expr_count`가 u8이라 테이블에 담기는 것이 255개까지다. `expr_index`는 255를 표현할 수
+    // 있지만 그 자리에 식이 있으려면 개수가 256이어야 해서, 인덱스 255는 쓰이지 않는다.
+    if exprs.len() >= u8::MAX as usize {
         return Err(CodegenErrorKind::TooManyExprs.at(at));
     }
     exprs.push(bytes);

@@ -154,7 +154,9 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
                    fields           : <FIELDS>   // 이벤트 payload와 같은 인코딩
                  )
                  expr_count : u8         // 이 컴포넌트가 쓰는 표현식 수(최대 255). `IF_EXPR`의
-                                         //   expr_index가 이 배열의 인덱스라 폭을 맞춘다
+                                         //   expr_index가 이 배열의 인덱스라 폭을 맞춘다.
+                                         //   개수가 255까지라 쓰이는 인덱스는 0~254 - expr_index가
+                                         //   표현할 수 있는 255는 나오지 않는다
                  exprs      : expr_count x (
                    len  : u8             // code 바이트 수(최대 255)
                    code : [u8; len]      // 후위 표기 - 아래 <EXPR> 태그들

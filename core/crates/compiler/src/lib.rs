@@ -576,6 +576,58 @@ mod tests {
         assert_eq!(if_expr_indices(def_code(&module, 1)), vec![0]);
     }
 
+    /// `@if` 여러 개를 담은 컴포넌트를 만들어 컴파일한다. 상한 검사는 소스를 프로그램으로 지어야
+    /// 닿아서, 진단은 메시지만 본다(밑줄이 짚는 자리가 생성된 소스라 눈으로 읽을 것이 없다).
+    fn compile_ifs(conds: impl Iterator<Item = String>) -> Result<Box<[u8]>, String> {
+        let body: String = conds.map(|c| format!("@if ({c}) {{ p( /) }}\n")).collect();
+        let src = format!("component C {{ props {{ n: number }} template {{\n{body}}} }}");
+        compile(&src).map_err(|e| {
+            let out = format_error(None, "entry", &src, &e);
+            let after = out.split_once("error: ").expect("진단 첫 줄").1;
+            after.lines().next().expect("메시지 줄").to_string()
+        })
+    }
+
+    /// 표현식 테이블은 255개까지다 - `expr_count`가 u8이라 그 위는 담기지 않는다.
+    /// 경계를 양쪽에서 본다: 255개는 지나가고 256개째에 걸린다.
+    #[test]
+    fn if_expr_table_stops_at_255() {
+        // 상수가 다 달라 dedup에 안 걸린다 - 255개가 그대로 테이블에 쌓인다.
+        let bytes = compile_ifs((0..255).map(|i| format!("n > {i}"))).expect("255개는 된다");
+        let module = bytecode::decode(&bytes).unwrap();
+        assert_eq!(module.def(0).unwrap().exprs.len(), 255);
+        // 마지막이 인덱스 254 - 255는 개수가 256이어야 나오는데 그건 담기지 않는다.
+        assert_eq!(*if_expr_indices(def_code(&module, 0)).last().unwrap(), 254);
+
+        assert_eq!(
+            compile_ifs((0..256).map(|i| format!("n > {i}"))).unwrap_err(),
+            "a component can use at most 255 expressions"
+        );
+    }
+
+    /// 식 하나는 255바이트까지다 - 표현식 테이블의 `len`이 u8이다.
+    #[test]
+    fn if_expr_too_long_errors() {
+        // 잎(LoadVar) 3바이트 + 연산자 1바이트. `n > 0`이 6바이트고 `&& (n > 0)`마다 7바이트씩
+        // 붙는다 - 36번이면 6 + 35*7 = 251, 37번이면 258로 넘어간다.
+        let ok = std::iter::repeat_n("(n > 0)", 36)
+            .collect::<Vec<_>>()
+            .join(" && ");
+        let bytes = compile_ifs(std::iter::once(ok)).expect("251바이트는 된다");
+        assert_eq!(
+            bytecode::decode(&bytes).unwrap().def(0).unwrap().exprs[0].len(),
+            251
+        );
+
+        let too_long = std::iter::repeat_n("(n > 0)", 37)
+            .collect::<Vec<_>>()
+            .join(" && ");
+        assert_eq!(
+            compile_ifs(std::iter::once(too_long)).unwrap_err(),
+            "an expression is too long: split it into smaller ones"
+        );
+    }
+
     #[test]
     fn parse_expr_division_in_condition_is_not_self_close() {
         // `/`는 self-close와 같은 토큰이지만 조건 자리에선 나눗셈이다 - 파서가 자리로 가른다.
