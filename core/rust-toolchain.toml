@@ -1,0 +1,8 @@
+[toolchain]
+# nightly 고정 - .cargo/config.toml의 `-Z threads`와 Cargo.toml의 dev codegen-backend가
+# 둘 다 nightly 전용이다. 둘 다 걷어내면 stable로 돌아갈 수 있다.
+# 날짜를 박아 두는 이유는 nightly가 날마다 바뀌면 어제 되던 빌드가 오늘 깨질 수 있어서다.
+# 올릴 때는 수동으로 날짜를 바꾸고 `cargo test --workspace`를 돌려 확인한다.
+channel = "nightly-2026-03-30"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

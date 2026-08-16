@@ -1,0 +1,7 @@
+[build]
+# rustc 프런트엔드 병렬화(nightly 전용). 기본값은 1이다.
+# 8을 넘겨 봐야 더 안 줄어 8에서 멈췄다. 줄어드는 건 clean 빌드고 핫빌드는 차이가 없다.
+#
+# ICE(컴파일러 내부 오류)가 나면 threads=1로 되돌리거나 rust-toolchain.toml의 날짜를
+# 되돌린다 - 병렬 프런트엔드는 아직 stable이 아니다.
+rustflags = ["-Z", "threads=8"]
