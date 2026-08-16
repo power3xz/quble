@@ -1,5 +1,3 @@
-cargo-features = ["codegen-backend"]
-
 [workspace]
 resolver = "2"
 # renderer(SSR)는 보류 - 타입화된 상수풀 미대응이라 워크스페이스에서 제외했다(ISSUES.md).
@@ -17,18 +15,11 @@ default-run = "quble"
 [dependencies]
 compiler = { path = "crates/compiler" }
 
-# dev는 컴파일 속도만 본다 - cranelift는 LLVM보다 빨리 굽는 대신 생성 코드가 느리다.
-# 실행 속도를 안 따지는 dev에서만 이득이다. ICE가 나면 이 줄을 지워 LLVM으로 돌아간다.
-[profile.dev]
-codegen-backend = "cranelift"
-
 # wasm 컴파일러(playground)는 브라우저가 통째로 받으므로 크기가 첫 로딩에 직결된다.
 # lto/codegen-units/strip 셋 다 크기를 줄이려고 켰다.
 #
 # opt-level은 기본(3)을 쓴다. 크기 우선("z"/"s")으로 낮추면 컴파일이 몇 배 느려지는데
 # gzip 후 크기는 얼마 안 줄어 손해였다.
-#
-# dev와 달리 codegen-backend를 건드리지 않는다 - 산출물 크기와 속도가 우선이라 LLVM을 쓴다.
 [profile.release]
 lto = true
 codegen-units = 1
