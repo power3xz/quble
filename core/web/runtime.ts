@@ -460,7 +460,7 @@ const readType = (reader: Reader): TType => {
   if (tag === TYPE_OBJECT) {
     const count = reader.u16();
     const fields: TField[] = [];
-    for (let f = 0; f < count; f++) {
+    for (let i = 0; i < count; i++) {
       fields.push([reader.u16(), reader.u16()]);
     }
     return { tag: "object", fields };
@@ -498,7 +498,7 @@ const readRef = (reader: Reader): TRef => {
 const readFields = (reader: Reader): TFieldEntry[] => {
   const count = reader.u16();
   const fields: TFieldEntry[] = [];
-  for (let f = 0; f < count; f++) {
+  for (let i = 0; i < count; i++) {
     const nameConstIndex = reader.u16();
     const typeRef = reader.u16();
     const ref = readRef(reader);
@@ -837,13 +837,13 @@ const decode = (bytes: Uint8Array) => {
     // 이벤트 테이블 (BYTECODE.md #4) - event_count, [(nameConstIndex, fields)]
     const eventCount = r.u16();
     const events = [];
-    for (let e = 0; e < eventCount; e++) {
+    for (let i = 0; i < eventCount; i++) {
       events.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
     // 컨텍스트 테이블 - context_count, [(nameConstIndex, fields)]. fields는 이벤트와 같은 인코딩.
     const contextCount = r.u16();
     const contexts = [];
-    for (let c = 0; c < contextCount; c++) {
+    for (let i = 0; i < contextCount; i++) {
       contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
     }
     defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts });
@@ -1275,8 +1275,8 @@ class Interpreter {
   // 바뀐 값만 구독 발화로 움직인다(setArrayInto의 자리 유지 전략과 같다).
   swapArrayContents = (x: TArrayInfo, y: TArrayInfo): void => {
     const kept = Math.min(x.elemStartLeafIndices.length, y.elemStartLeafIndices.length);
-    for (let k = 0; k < kept; k++) {
-      this.swapFixedBlocks(x.elemStartLeafIndices[k], y.elemStartLeafIndices[k], x.elemTypeRef);
+    for (let i = 0; i < kept; i++) {
+      this.swapFixedBlocks(x.elemStartLeafIndices[i], y.elemStartLeafIndices[i], x.elemTypeRef);
     }
     if (x.elemStartLeafIndices.length === y.elemStartLeafIndices.length) {
       return; // 길이가 같아 옮길 꼬리가 없다

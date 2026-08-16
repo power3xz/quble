@@ -740,7 +740,7 @@ fn intern_expr(exprs: &mut Vec<Vec<u8>>, bytes: Vec<u8>, at: SrcRange) -> Result
     if bytes.len() > u8::MAX as usize {
         return Err(CodegenErrorKind::ExprTooLong.at(at));
     }
-    if let Some(index) = exprs.iter().position(|e| *e == bytes) {
+    if let Some(index) = exprs.iter().position(|expr| *expr == bytes) {
         return Ok(index as u8);
     }
     // `expr_count`가 u8이라 테이블에 담기는 것이 255개까지다. `expr_index`는 255를 표현할 수
