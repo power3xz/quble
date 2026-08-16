@@ -632,6 +632,10 @@ mod tests {
     /// 연산자마다 실제로 값을 세는지 봐야 해서 갈래별로 하나씩 든다.
     #[test]
     fn if_constant_true_folds_away() {
+        // 조건을 아예 안 쓴 같은 몸체 - 접힌 결과가 이것과 같아야 한다.
+        let bare =
+            bytecode::decode(&compile("component C { template { p( /) } }").unwrap()).unwrap();
+
         for cond in [
             "true",
             "!false",
@@ -653,24 +657,18 @@ mod tests {
             let bytes =
                 compile(&src).unwrap_or_else(|e| panic!("`{cond}`가 컴파일돼야 한다: {e:?}"));
             let module = bytecode::decode(&bytes).unwrap();
-            let code = def_code(&module, 0);
 
+            // 접혔다면 조건을 아예 안 쓴 것과 코드가 같다 - 분기 opcode도 표현식 테이블도 없고
+            // 몸체만 그 자리에 편다. opcode 하나를 찾는 대신 통째로 비교하는 건 operand 바이트가
+            // opcode 값과 겹쳐 보일 수 있어서다.
+            assert_eq!(
+                def_code(&module, 0),
+                def_code(&bare, 0),
+                "`{cond}`가 안 접혔다"
+            );
             assert!(
                 module.def(0).unwrap().exprs.is_empty(),
-                "`{cond}` 표현식 테이블"
-            );
-            assert!(
-                !code.contains(&(bytecode::Op::If as u8)),
-                "`{cond}` IF가 남았다"
-            );
-            assert!(
-                !code.contains(&(bytecode::Op::IfExpr as u8)),
-                "`{cond}` IF_EXPR가 남았다"
-            );
-            // 몸체는 그대로 나온다.
-            assert!(
-                code.contains(&(bytecode::Op::ElemOpen as u8)),
-                "`{cond}` 몸체"
+                "`{cond}` 표현식 테이블이 비어야 한다"
             );
         }
     }
