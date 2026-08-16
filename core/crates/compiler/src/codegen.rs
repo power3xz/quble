@@ -1,8 +1,8 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    ArgValue, AttrValue, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
-    SlotPlaceholderContent, Type,
+    ArgValue, AttrValue, BinaryOp, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
+    SlotPlaceholderContent, Type, UnaryOp,
 };
 use crate::expr_type::{require_expr_type, ExprTypeError, ExprTypeErrorKind};
 use crate::flatten::{FlatComp, Sourced};
@@ -11,8 +11,8 @@ use crate::scope::{
 };
 use crate::src_range::SrcRange;
 use bytecode::{
-    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, Field, FieldValue, Module, Op,
-    TypeEntry,
+    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, ExprOp, Field, FieldValue,
+    Module, Op, TypeEntry,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -44,9 +44,10 @@ pub enum CodegenErrorKind {
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
     ForCountNotIterable(String),
-    /// 파서는 식을 받았지만 codegen이 아직 못 낸다 - 표현식 테이블/opcode가 붙기 전까지.
-    /// 문법만 열리고 컴파일이 조용히 틀린 코드를 내는 상태를 막는다.
-    ExprNotSupported,
+    /// 한 컴포넌트가 쓰는 표현식이 255개를 넘었다 - `IF_EXPR`의 expr_index가 u8이다.
+    TooManyExprs,
+    /// 식 하나가 255바이트를 넘었다 - 표현식 테이블의 len이 u8이다.
+    ExprTooLong,
     /// 자식이 정의하지 않은 슬롯을 채웠다(`Header << ...`인데 자식에 `@slot(Header)` 없음,
     /// 또는 자식이 `@slot()`을 안 뒀는데 자식 블록을 준 경우).
     ///
@@ -97,8 +98,11 @@ impl std::fmt::Display for CodegenErrorKind {
                 f,
                 "`{path}` is neither an array nor a number: it cannot drive @for"
             ),
-            CodegenErrorKind::ExprNotSupported => {
-                write!(f, "operators in a value position are not compiled yet")
+            CodegenErrorKind::TooManyExprs => {
+                write!(f, "a component can use at most 255 expressions")
+            }
+            CodegenErrorKind::ExprTooLong => {
+                write!(f, "an expression is too long: split it into smaller ones")
             }
             // 없는 것보다 쓸 수 있는 것을 말한다 - 고칠 방법이 문장 안에 있어야 한다.
             CodegenErrorKind::UnknownSlotPlaceholder { comp, declared } => {
@@ -348,8 +352,10 @@ fn generate_comp(
             code.push(Op::LoadRes as u8);
             code.extend_from_slice(&res_id.to_le_bytes());
         }
-        // 슬롯 인덱스는 컴포넌트-로컬 - def마다 0부터 다시 센다.
+        // 슬롯 인덱스는 컴포넌트-로컬 - def마다 0부터 다시 센다. 표현식 테이블도 def가 소유해
+        // 같은 수명이다(DECISIONS.md "표현식 테이블 - 컴포넌트 소유 + 후위 표기 채택").
         let mut next_slot_placeholder_index = 0u16;
+        let mut exprs = Vec::new();
         for node in &comp.template {
             emit_node(
                 node,
@@ -361,6 +367,7 @@ fn generate_comp(
                 pool,
                 code,
                 &mut next_slot_placeholder_index,
+                &mut exprs,
             )?;
         }
         code.push(Op::Halt as u8);
@@ -404,8 +411,7 @@ fn generate_comp(
             code_len: code.len() as u32 - code_off,
             events,
             contexts,
-            // 표현식 방출은 아직 없다 - 연산자가 붙은 조건은 ExprNotSupported로 거른다.
-            exprs: vec![],
+            exprs,
         })
     }
 }
@@ -554,6 +560,117 @@ impl ForScope<'_> {
     };
 }
 
+/// 식 하나를 후위 표기 바이트로 낸다(BYTECODE.md #4 `<EXPR>`). 왼쪽 -> 오른쪽 -> 연산자 순서로
+/// 밀어서, 런타임이 앞에서 뒤로 한 번 훑으면 스택 계산이 끝난다.
+///
+/// 타입은 이미 맞다고 보고 짠다 - 부르기 전에 `require_expr_type`이 검사를 마쳤다.
+fn emit_expr(
+    expr: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    out: &mut Vec<u8>,
+) -> Result<(), CodegenError> {
+    match expr {
+        Expr::Lit(lit, _) => match lit {
+            // 0~255 정수는 태그 1 + 값 1로 끝난다 - 상수풀을 거치면 f64 8바이트가 따로 붙는다.
+            LitValue::Number(n) if is_small_int(*n) => {
+                out.push(ExprOp::LoadSmallInt as u8);
+                out.push(*n as u8);
+            }
+            LitValue::Bool(b) => out.push(match b {
+                true => ExprOp::LoadTrue as u8,
+                false => ExprOp::LoadFalse as u8,
+            }),
+            LitValue::Number(n) => {
+                let index = pool.intern(Const::Num(*n));
+                out.push(ExprOp::LoadConst as u8);
+                out.extend_from_slice(&index.to_le_bytes());
+            }
+            LitValue::Str(s) => {
+                let index = pool.intern_str(s);
+                out.push(ExprOp::LoadConst as u8);
+                out.extend_from_slice(&index.to_le_bytes());
+            }
+        },
+
+        // 참조 아니면 `.length` - expr_type과 같은 순서로 가른다(실제 필드가 먼저).
+        Expr::Var(var, _) => match require_leaf_var_ref(var, props, for_vars) {
+            Ok((scope_index, offset)) => {
+                out.push(ExprOp::LoadVar as u8);
+                out.push(scope_index);
+                out.push(offset);
+            }
+            Err(not_leaf) => {
+                let target = match var.length_target() {
+                    Some(t) => t,
+                    None => return Err(not_leaf.into()),
+                };
+                let (scope_index, offset, ty) = lookup_var_ref(&target, props, for_vars)?;
+                // 배열은 길이를 담은 칸을, 문자열은 값 칸을 구독한다 - 런타임이 볼 대상이 달라
+                // 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
+                out.push(match ty {
+                    Type::Array(_) => ExprOp::LoadArrayLength as u8,
+                    _ => ExprOp::LoadStringLength as u8,
+                });
+                out.push(scope_index);
+                out.push(offset);
+            }
+        },
+
+        Expr::Unary(op, operand, _) => {
+            emit_expr(operand, props, for_vars, pool, out)?;
+            out.push(match op {
+                UnaryOp::Not => ExprOp::Not as u8,
+                UnaryOp::Neg => ExprOp::Neg as u8,
+            });
+        }
+
+        Expr::Binary(op, left, right, _) => {
+            emit_expr(left, props, for_vars, pool, out)?;
+            emit_expr(right, props, for_vars, pool, out)?;
+            out.push(match op {
+                BinaryOp::Add => ExprOp::Add as u8,
+                BinaryOp::Sub => ExprOp::Sub as u8,
+                BinaryOp::Mul => ExprOp::Mul as u8,
+                BinaryOp::Div => ExprOp::Div as u8,
+                BinaryOp::Rem => ExprOp::Rem as u8,
+                BinaryOp::Eq => ExprOp::Eq as u8,
+                BinaryOp::Ne => ExprOp::Ne as u8,
+                BinaryOp::Lt => ExprOp::Lt as u8,
+                BinaryOp::Le => ExprOp::Le as u8,
+                BinaryOp::Gt => ExprOp::Gt as u8,
+                BinaryOp::Ge => ExprOp::Ge as u8,
+                BinaryOp::And => ExprOp::And as u8,
+                BinaryOp::Or => ExprOp::Or as u8,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// `LoadSmallInt`로 낼 수 있는 값인지 - 0~255 정수. 음수는 `Neg`가 따로 붙고, 그 밖은 상수풀로.
+fn is_small_int(n: f64) -> bool {
+    n.fract() == 0.0 && (0.0..=255.0).contains(&n)
+}
+
+/// 식 바이트를 이 컴포넌트의 표현식 테이블에 넣고 `expr_index`를 준다. 같은 바이트면 이미 있는
+/// 것을 함께 쓴다 - 중복 제거 기준이 방출된 바이트다(DECISIONS.md "표현식 테이블 - 컴포넌트
+/// 소유 + 후위 표기 채택").
+fn intern_expr(exprs: &mut Vec<Vec<u8>>, bytes: Vec<u8>, at: SrcRange) -> Result<u8, CodegenError> {
+    if bytes.len() > u8::MAX as usize {
+        return Err(CodegenErrorKind::ExprTooLong.at(at));
+    }
+    if let Some(index) = exprs.iter().position(|e| *e == bytes) {
+        return Ok(index as u8);
+    }
+    if exprs.len() > u8::MAX as usize {
+        return Err(CodegenErrorKind::TooManyExprs.at(at));
+    }
+    exprs.push(bytes);
+    Ok((exprs.len() - 1) as u8)
+}
+
 fn emit_node(
     node: &Node,
     props: &[Prop],
@@ -566,6 +683,8 @@ fn emit_node(
     // 지금까지 방출한 `@slot` 수 = 다음 것의 slot_placeholder_index.
     // collect_slot_placeholders의 순회 순서와 같아야 정의쪽/사용쪽 인덱스가 맞는다.
     next_slot_placeholder_index: &mut u16,
+    // 이 컴포넌트의 표현식 테이블. 연산자가 붙은 조건이 여기 쌓이고 `IF_EXPR`이 번호로 가리킨다.
+    exprs: &mut Vec<Vec<u8>>,
 ) -> Result<(), CodegenError> {
     match node {
         Node::Text(s) => {
@@ -663,6 +782,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 
@@ -782,6 +902,7 @@ fn emit_node(
                         pool,
                         code,
                         next_slot_placeholder_index,
+                        exprs,
                     )?;
                 }
                 code.push(Op::SlotPlaceholderContentEnd as u8);
@@ -825,9 +946,9 @@ fn emit_node(
             require_expr_type(cond, &Type::Bool, props, for_scope.for_vars)?;
 
             // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
-            // 연산자가 붙은 식은 표현식 테이블을 거치는 별도 opcode로 간다(이후 단계).
+            // 연산자가 붙은 식만 표현식 테이블을 거친다 - 잎 하나에 테이블을 쓸 이유가 없다.
             match cond {
-                Expr::Var(var, _) => {
+                Expr::Var(var, _) if var.length_target().is_none() => {
                     let (scope_index, offset) =
                         require_leaf_var_ref(var, props, for_scope.for_vars)?;
                     code.push(Op::If as u8);
@@ -835,7 +956,11 @@ fn emit_node(
                     code.push(offset);
                 }
                 other => {
-                    return Err(CodegenErrorKind::ExprNotSupported.at(other.range().0));
+                    let mut bytes = Vec::new();
+                    emit_expr(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                    let index = intern_expr(exprs, bytes, other.range().0)?;
+                    code.push(Op::IfExpr as u8);
+                    code.push(index);
                 }
             }
 
@@ -850,6 +975,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 
@@ -866,6 +992,7 @@ fn emit_node(
                         pool,
                         code,
                         next_slot_placeholder_index,
+                        exprs,
                     )?;
                 }
             }
@@ -965,6 +1092,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 
@@ -993,6 +1121,7 @@ fn emit_node(
                     pool,
                     code,
                     next_slot_placeholder_index,
+                    exprs,
                 )?;
             }
 

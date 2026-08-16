@@ -456,24 +456,124 @@ mod tests {
         );
     }
 
-    /// 타입이 맞는 조건은 검사를 지나 방출까지 간다(방출은 아직 미구현).
+    /// `@if` 조건 하나를 컴파일해 그 def의 표현식 테이블을 꺼낸다.
+    fn if_cond_exprs(props: &str, cond: &str) -> Vec<Vec<u8>> {
+        let src = format!("component C {{ {props} template {{ @if ({cond}) {{ p( /) }} }} }}");
+        let bytes = compile(&src).expect("컴파일이 성공해야 한다");
+        bytecode::decode(&bytes)
+            .unwrap()
+            .def(0)
+            .unwrap()
+            .exprs
+            .clone()
+    }
+
+    /// 연산자가 붙은 조건은 후위 표기로 표현식 테이블에 들어간다. 잎이 무엇으로 실리는지가
+    /// 핵심이라 바이트를 그대로 본다 - 길이는 배열/문자열이 태그로 갈리고(런타임 구독 대상이
+    /// 다르다), 같은 이름의 실제 필드가 있으면 길이가 아니라 그 필드다.
     #[test]
-    fn if_typed_cond_reaches_codegen() {
-        for (props, cond) in [
-            ("props { count: number }", "count > 0"),
-            ("props { a: bool, b: bool }", "a && !b"),
-            ("props { tags: string[] }", "tags.length > 0"),
-            // 문자열도 길이를 갖는다.
-            ("props { title: string }", "title.length > 0"),
-            // 실제 필드 `length`가 있으면 길이가 아니라 그 필드다.
-            ("props { user: { length: number } }", "user.length > 0"),
+    fn if_expr_emits_postfix_bytes() {
+        use bytecode::ExprOp::*;
+
+        for (props, cond, want) in [
+            (
+                "props { count: number }",
+                "count > 0",
+                vec![LoadVar as u8, 0, 0, LoadSmallInt as u8, 0, Gt as u8],
+            ),
+            (
+                "props { a: bool, b: bool }",
+                "a && !b",
+                vec![
+                    LoadVar as u8,
+                    0,
+                    0,
+                    LoadVar as u8,
+                    1,
+                    0,
+                    Not as u8,
+                    And as u8,
+                ],
+            ),
+            (
+                "props { tags: string[] }",
+                "tags.length > 0",
+                vec![LoadArrayLength as u8, 0, 0, LoadSmallInt as u8, 0, Gt as u8],
+            ),
+            // 문자열도 길이를 갖는다 - 배열과 태그가 다르다.
+            (
+                "props { title: string }",
+                "title.length > 0",
+                vec![
+                    LoadStringLength as u8,
+                    0,
+                    0,
+                    LoadSmallInt as u8,
+                    0,
+                    Gt as u8,
+                ],
+            ),
+            // 실제 필드 `length`가 있으면 길이가 아니라 그 필드를 읽는다(offset 0의 잎).
+            (
+                "props { user: { length: number } }",
+                "user.length > 0",
+                vec![LoadVar as u8, 0, 0, LoadSmallInt as u8, 0, Gt as u8],
+            ),
         ] {
-            let msg = if_cond_diagnostic(props, cond);
-            assert!(
-                msg.starts_with("operators in a value position are not compiled yet"),
-                "{cond} - 타입 검사를 지나야 한다: {msg}"
-            );
+            assert_eq!(if_cond_exprs(props, cond), vec![want], "조건 `{cond}`");
         }
+    }
+
+    /// 잎 하나짜리 조건은 표현식 테이블을 안 쓴다 - 기존 `IF`가 슬롯을 그대로 받는다.
+    #[test]
+    fn if_leaf_cond_skips_expr_table() {
+        assert!(if_cond_exprs("props { done: bool }", "done").is_empty());
+    }
+
+    /// 코드에서 `IF_EXPR`이 가리킨 expr_index들을 등장 순서로. opcode 바이트를 그냥 스캔하면
+    /// operand와 구별이 안 돼, 부르는 쪽이 그 값이 operand로 안 나오는 소스를 쓴다.
+    fn if_expr_indices(code: &[u8]) -> Vec<u8> {
+        code.iter()
+            .enumerate()
+            .filter(|(_, &b)| b == bytecode::Op::IfExpr as u8)
+            .map(|(i, _)| code[i + 1])
+            .collect()
+    }
+
+    /// 같은 식이 한 컴포넌트에 두 번 나오면 테이블에 한 번만 들어가고, 두 `IF_EXPR`이 같은
+    /// 번호를 가리킨다 - 중복 제거 기준이 방출된 바이트다.
+    #[test]
+    fn if_expr_dedups_identical_bytes() {
+        let src = "component C { props { n: number } template {
+            @if (n > 0) { p( /) }
+            @if (n > 0) { em( /) }
+            @if (n > 1) { i( /) }
+        } }";
+        let bytes = compile(src).expect("컴파일이 성공해야 한다");
+        let module = bytecode::decode(&bytes).unwrap();
+
+        // `n > 0`이 둘, `n > 1`이 하나 - 고유한 것은 둘이다.
+        assert_eq!(module.def(0).unwrap().exprs.len(), 2);
+        // 앞의 둘이 같은 번호를 함께 쓰고, 셋째만 새 번호다.
+        assert_eq!(if_expr_indices(def_code(&module, 0)), vec![0, 0, 1]);
+    }
+
+    /// 컴포넌트가 다르면 같은 모양의 식이라도 안 합쳐진다 - 테이블을 각자 소유하고, 식 안에
+    /// 박힌 scope_index가 그 컴포넌트의 것이라 뜻이 달라진다.
+    #[test]
+    fn if_expr_table_is_component_local() {
+        let src = "
+            component A { props { n: number } template { @if (n > 0) { p( /) } } }
+            component B { props { m: number } template { @if (m > 0) { em( /) } } }
+        ";
+        let bytes = compile(src).expect("컴파일이 성공해야 한다");
+        let module = bytecode::decode(&bytes).unwrap();
+
+        // 바이트까지 같은 식인데도 각 def가 제 테이블에 하나씩 들고, 번호도 각자 0부터다.
+        assert_eq!(module.def(0).unwrap().exprs.len(), 1);
+        assert_eq!(module.def(1).unwrap().exprs, module.def(0).unwrap().exprs);
+        assert_eq!(if_expr_indices(def_code(&module, 0)), vec![0]);
+        assert_eq!(if_expr_indices(def_code(&module, 1)), vec![0]);
     }
 
     #[test]
