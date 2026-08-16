@@ -10,7 +10,7 @@ mod serialize;
 pub mod tags;
 
 pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
-pub use opcode::Op;
+pub use opcode::{ExprOp, Op};
 pub use pool::{Const, ConstPool};
 pub use serialize::{decode, encode, DecodeError};
 
@@ -183,7 +183,28 @@ mod tests {
         assert_eq!(Op::from_u8(0x0d), Some(Op::Else));
         assert_eq!(Op::from_u8(0x0e), Some(Op::IfEnd));
         assert_eq!(Op::from_u8(0x0f), Some(Op::LoadRes));
+        assert_eq!(Op::from_u8(0x1e), Some(Op::IfExpr));
         assert_eq!(Op::from_u8(0xff), None);
+    }
+
+    #[test]
+    fn expr_opcode_from_u8() {
+        assert_eq!(ExprOp::from_u8(0x00), Some(ExprOp::LoadVar));
+        assert_eq!(ExprOp::from_u8(0x04), Some(ExprOp::LoadSmallInt));
+        assert_eq!(ExprOp::from_u8(0x06), Some(ExprOp::LoadFalse));
+        assert_eq!(ExprOp::from_u8(0x19), Some(ExprOp::Gt));
+        assert_eq!(ExprOp::from_u8(0x1e), Some(ExprOp::Neg));
+        // 잎 태그와 연산자 태그 사이는 비어 있다 - 연산자를 늘릴 자리로 남겨 둔다.
+        assert_eq!(ExprOp::from_u8(0x07), None);
+        assert_eq!(ExprOp::from_u8(0xff), None);
+    }
+
+    /// 두 태그는 이름공간이 다르다 - 같은 바이트가 서로 다른 뜻이다. 식 바이트를 `Op`로 읽거나
+    /// 그 반대로 읽으면 조용히 엉뚱한 것이 되므로, 겹치는 값이 있다는 사실을 테스트로 박아 둔다.
+    #[test]
+    fn op_and_expr_op_are_separate_namespaces() {
+        assert_eq!(Op::from_u8(0x1e), Some(Op::IfExpr));
+        assert_eq!(ExprOp::from_u8(0x1e), Some(ExprOp::Neg));
     }
 
     #[test]

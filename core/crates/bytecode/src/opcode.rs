@@ -78,6 +78,11 @@ pub enum Op {
     /// 런타임이 그 인덱스의 콘텐츠 구간을 부모 컨텍스트로 해석해 이 자리에 끼운다.
     /// 안 채운 슬롯이면 아무것도 안 넣는다(미채움 허용).
     FillSlotPlaceholder = 0x1d,
+    /// 연산자가 붙은 조건으로 분기 시작(`@if (count > 0)`). operand: expr_index u8(이 def의
+    /// CompDef.exprs 인덱스). 잎 하나짜리 조건은 If로 간다. 이후 코드는 If와 같다 - then 가지가
+    /// 이어지고 Else/IfEnd도 그대로. 런타임이 파생 칸을 잡고 식이 읽는 칸들을 구독해 그 칸에
+    /// 결과를 넣는다(BYTECODE.md #5.2).
+    IfExpr = 0x1e,
 }
 
 impl Op {
@@ -114,6 +119,77 @@ impl Op {
             0x1b => Op::PushSlotPlaceholderContent,
             0x1c => Op::SlotPlaceholderContentEnd,
             0x1d => Op::FillSlotPlaceholder,
+            0x1e => Op::IfExpr,
+            _ => return None,
+        })
+    }
+}
+
+/// 표현식 바이트 하나의 태그. `Op`와 다른 이름공간이다 - 표현식 테이블 안에서만 쓴다.
+/// 값은 BYTECODE.md #4의 `<EXPR>`와 일치해야 한다.
+///
+/// 식은 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다. 스택에는 값만 올라간다 - 칸 번호는
+/// 안 올라간다. 타입은 컴파일타임에 검사가 끝나 런타임은 타입을 안 본다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ExprOp {
+    /// 그 칸의 값을 올린다. operand: scope_index u8, offset u8.
+    LoadVar = 0x00,
+    /// 컴포넌트 상수풀 값을 올린다. operand: const_index u16.
+    LoadConst = 0x01,
+    /// 배열 길이를 올린다. operand: scope_index u8, offset u8.
+    /// 문자열과 태그를 나눈 건 구독 대상이 달라서다 - 배열은 길이를 담은 칸을 구독한다.
+    LoadArrayLength = 0x02,
+    /// 문자열 길이를 올린다. operand: scope_index u8, offset u8.
+    /// 값 칸을 구독해 바뀔 때마다 길이를 다시 잰다.
+    LoadStringLength = 0x03,
+    /// 0~255 정수를 올린다. operand: value u8. 음수는 Neg가 붙고, 256 이상이나 소수는 LoadConst로.
+    LoadSmallInt = 0x04,
+    LoadTrue = 0x05,
+    LoadFalse = 0x06,
+    Add = 0x10,
+    Sub = 0x11,
+    Mul = 0x12,
+    Div = 0x13,
+    Rem = 0x14,
+    Eq = 0x15,
+    Ne = 0x16,
+    Lt = 0x17,
+    Le = 0x18,
+    Gt = 0x19,
+    Ge = 0x1a,
+    And = 0x1b,
+    Or = 0x1c,
+    Not = 0x1d,
+    Neg = 0x1e,
+}
+
+impl ExprOp {
+    /// 바이트에서 표현식 태그로. 알 수 없는 값이면 None.
+    pub fn from_u8(b: u8) -> Option<ExprOp> {
+        Some(match b {
+            0x00 => ExprOp::LoadVar,
+            0x01 => ExprOp::LoadConst,
+            0x02 => ExprOp::LoadArrayLength,
+            0x03 => ExprOp::LoadStringLength,
+            0x04 => ExprOp::LoadSmallInt,
+            0x05 => ExprOp::LoadTrue,
+            0x06 => ExprOp::LoadFalse,
+            0x10 => ExprOp::Add,
+            0x11 => ExprOp::Sub,
+            0x12 => ExprOp::Mul,
+            0x13 => ExprOp::Div,
+            0x14 => ExprOp::Rem,
+            0x15 => ExprOp::Eq,
+            0x16 => ExprOp::Ne,
+            0x17 => ExprOp::Lt,
+            0x18 => ExprOp::Le,
+            0x19 => ExprOp::Gt,
+            0x1a => ExprOp::Ge,
+            0x1b => ExprOp::And,
+            0x1c => ExprOp::Or,
+            0x1d => ExprOp::Not,
+            0x1e => ExprOp::Neg,
             _ => return None,
         })
     }
