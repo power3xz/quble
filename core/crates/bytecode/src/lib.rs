@@ -58,6 +58,7 @@ mod tests {
             code_len: code.len() as u32,
             events: vec![],
             contexts: vec![],
+            exprs: vec![],
         }];
         Module::new(pool, vec![], defs, code)
     }
@@ -145,6 +146,43 @@ mod tests {
         let m = Module::new(ConstPool::new(), types.clone(), vec![], vec![]);
         let back = decode(&encode(&m)).unwrap();
         assert_eq!(back.types, types);
+    }
+
+    /// 표현식 테이블이 왕복하는지. 길이가 다른 식 둘을 담아 (len, code) 짝이 어긋나지 않는지까지 본다.
+    #[test]
+    fn roundtrip_exprs() {
+        // `count > 0` - scope 0번 슬롯 offset 0의 값과 작은 정수 0을 올려 비교.
+        let gt = vec![
+            ExprOp::LoadVar as u8,
+            0,
+            0,
+            ExprOp::LoadSmallInt as u8,
+            0,
+            ExprOp::Gt as u8,
+        ];
+        // `!isPaid && isReady` - 길이가 다른 식을 하나 더 둔다.
+        let and = vec![
+            ExprOp::LoadVar as u8,
+            0,
+            1,
+            ExprOp::Not as u8,
+            ExprOp::LoadVar as u8,
+            0,
+            2,
+            ExprOp::And as u8,
+        ];
+        let defs = vec![CompDef {
+            name_const_index: 0,
+            props_type_ref: 0,
+            code_off: 0,
+            code_len: 0,
+            events: vec![],
+            contexts: vec![],
+            exprs: vec![gt.clone(), and.clone()],
+        }];
+        let m = Module::new(ConstPool::new(), vec![], defs, vec![]);
+        let back = decode(&encode(&m)).unwrap();
+        assert_eq!(back.def(0).unwrap().exprs, vec![gt, and]);
     }
 
     /// 알 수 없는 타입 태그는 BadTypeTag로 거부한다.

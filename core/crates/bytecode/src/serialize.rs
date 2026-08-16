@@ -70,6 +70,19 @@ pub fn encode(m: &Module) -> Vec<u8> {
             put_u16(&mut out, c.name_const_index);
             put_fields(&mut out, &c.fields);
         }
+        // 표현식 테이블 - expr_count:u8, [(len:u8, code)]. code는 후위 표기(ExprOp).
+        // 둘 다 u8이라 넘치면 조용히 잘린다. 막는 자리는 codegen이지만(소스 위치를 짚어 에러를
+        // 낸다) 여기까지 온 것은 이미 버그라 개발 중에 걸리게 둔다.
+        debug_assert!(d.exprs.len() <= u8::MAX as usize, "표현식이 255개를 넘었다");
+        out.push(d.exprs.len() as u8);
+        for e in &d.exprs {
+            debug_assert!(
+                e.len() <= u8::MAX as usize,
+                "표현식 하나가 255바이트를 넘었다"
+            );
+            out.push(e.len() as u8);
+            out.extend_from_slice(e);
+        }
     }
 
     // 코드
@@ -216,6 +229,12 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
                 fields: read_fields(&mut r)?,
             });
         }
+        let expr_count = r.u8()?;
+        let mut exprs = Vec::with_capacity(expr_count as usize);
+        for _ in 0..expr_count {
+            let len = r.u8()? as usize;
+            exprs.push(r.take(len)?.to_vec());
+        }
         defs.push(CompDef {
             name_const_index,
             props_type_ref,
@@ -223,6 +242,7 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
             code_len,
             events,
             contexts,
+            exprs,
         });
     }
 

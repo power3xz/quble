@@ -404,6 +404,8 @@ fn generate_comp(
             code_len: code.len() as u32 - code_off,
             events,
             contexts,
+            // 표현식 방출은 아직 없다 - 연산자가 붙은 조건은 ExprNotSupported로 거른다.
+            exprs: vec![],
         })
     }
 }

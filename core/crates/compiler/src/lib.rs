@@ -624,6 +624,7 @@ mod tests {
                 code_len: code.len() as u32,
                 events: vec![],
                 contexts: vec![],
+                exprs: vec![],
             }],
             code,
         );
