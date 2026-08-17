@@ -1,0 +1,100 @@
+/* @if 표현식 부하 벤치 - 그룹이 눈으로 갈리게, 회차 셀은 격자로 깔아 on/off를 색으로 본다. */
+
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #e6e8ec;
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif;
+}
+
+.bench {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.bench__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 16px 0 12px;
+  background: #0f1115;
+  border-bottom: 1px solid #262b36;
+}
+
+.bench__title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.bench__desc {
+  margin: 0 0 12px;
+  color: #8b93a3;
+  font-size: 13px;
+}
+
+.bench__run {
+  padding: 8px 20px;
+  border: 0;
+  border-radius: 6px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bench__run:hover {
+  background: #2f6fdc;
+}
+
+.group {
+  margin-top: 24px;
+  padding: 14px 16px 16px;
+  border: 1px solid #262b36;
+  border-radius: 8px;
+  background: #151922;
+}
+
+.group__name {
+  display: inline-block;
+  margin: 0 10px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #7dd3fc;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.group__cond {
+  color: #8b93a3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.group__cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.cell--off {
+  background: #2a3040;
+  color: #59617a;
+}
+
+.cell--on {
+  background: #22c55e;
+  color: #06301a;
+}

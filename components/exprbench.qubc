@@ -1,0 +1,141 @@
+use "./exprbench.css"
+
+// @if 표현식(IF_EXPR)의 실행 비용을 잎 조건(IF)과 나란히 재는 벤치.
+//
+// 다섯 그룹이 각자 자기 잎만 쓴다 - 한 그룹을 뒤집어도 다른 그룹은 안 건드린다. 그룹 전체를
+// `showing == n`으로 감싸 재는 동안 그 그룹만 DOM에 둔다 - 다섯 그룹이 다 떠 있으면 한 그룹을
+// 교체해도 브라우저가 문서 전체를 레이아웃해 다른 그룹 비용이 섞인다. 감싸는 조건도 표현식이라
+// 그룹 전환에 IF_EXPR이 한 번 돌지만, 재는 대상은 안쪽 rows개의 @if라 영향이 없다.
+//
+//   base - `@if (flag)`. IF 명령. 표현식을 안 거치는 기준선.
+//   real - `a > 0 && flag`. 실제로 흔히 쓰는 꼴. base와의 차가 실무에서 의미 있는 숫자다.
+//   deep - 잎 2개인데 opcode가 긴 표현식. evalExpr 루프 길이만 늘렸다.
+//   wide - 잎 8개인데 opcode는 짧은 표현식. 구독 칸 수만 늘렸다.
+//   both - 잎 8개 + opcode도 긺. 둘이 합산인지 그 이상인지 본다.
+//
+// 조건은 잎이 전부 off(0/false)면 false, 전부 on(2/true)면 true고, 하나만 바꿔서는 안
+// 뒤집힌다 - 잎을 다 set해야 가지가 교체된다. 변수끼리 연산과 리터럴을 섞어 LoadVar /
+// LoadSmallInt(0~255) / LoadConst(256이상, 소수)가 모두 돈다. `&&`는 단축 평가가 아니라
+// 항이 전부 평가된다.
+
+component ExprBench {
+  props {
+    rows: number,
+    showing: number,
+    baseFlag: bool,
+    realA: number,
+    realFlag: bool,
+    deepA: number,
+    deepB: number,
+    wideA: number, wideB: number, wideC: number, wideD: number,
+    wideE: number, wideF: number, wideG: number, wideH: number,
+    bothA: number, bothB: number, bothC: number, bothD: number,
+    bothE: number, bothF: number, bothG: number, bothH: number
+  }
+  events {
+    RUN({
+      showing: showing,
+      baseFlag: baseFlag,
+      realA: realA, realFlag: realFlag,
+      deepA: deepA, deepB: deepB,
+      wideA: wideA, wideB: wideB, wideC: wideC, wideD: wideD,
+      wideE: wideE, wideF: wideF, wideG: wideG, wideH: wideH,
+      bothA: bothA, bothB: bothB, bothC: bothC, bothD: bothD,
+      bothE: bothE, bothF: bothF, bothG: bothG, bothH: bothH
+    })
+  }
+  template {
+    div(class="bench") {
+      div(class="bench__head") {
+        h1(class="bench__title") { "quble @if 표현식 부하" }
+        p(class="bench__desc") { "재는 동안 그 그룹만 DOM에 둔다. RUN은 그룹마다 cold(첫 회)와 hot(예열 뒤)을 콘솔에 찍는다." }
+        button(class="bench__run" @click:RUN) { "RUN" }
+      }
+
+      @if (showing == 0) {
+        div(class="group") {
+          h2(class="group__name") { "base" }
+          code(class="group__cond") { "@if (flag)" }
+          div(class="group__cells") {
+            @for (i of rows) {
+              @if (baseFlag) {
+                span(class="cell cell--on") { "1" }
+              }
+              @else {
+                span(class="cell cell--off") { "0" }
+              }
+            }
+          }
+        }
+      }
+
+      @if (showing == 1) {
+        div(class="group") {
+          h2(class="group__name") { "real" }
+          code(class="group__cond") { "a > 0 && flag" }
+          div(class="group__cells") {
+            @for (i of rows) {
+              @if (realA > 0 && realFlag) {
+                span(class="cell cell--on") { "1" }
+              }
+              @else {
+                span(class="cell cell--off") { "0" }
+              }
+            }
+          }
+        }
+      }
+
+      @if (showing == 2) {
+        div(class="group") {
+          h2(class="group__name") { "deep" }
+          code(class="group__cond") { "잎 2개, opcode 긺" }
+          div(class="group__cells") {
+            @for (i of rows) {
+              @if (deepA * 2 + deepB * 3 - deepA * 4 + deepB * 5 > deepA && deepA % 3 + deepB % 5 - deepA / 2 + deepB / 4 < 300 && !(deepA - deepB > deepB * 1.5) && -deepA < deepB + 1 && deepA * deepB + deepA * deepB - deepA * deepB > 3 - deepA && (deepA + deepB) * (deepA + deepB) > 1000 - 993) {
+                span(class="cell cell--on") { "1" }
+              }
+              @else {
+                span(class="cell cell--off") { "0" }
+              }
+            }
+          }
+        }
+      }
+
+      @if (showing == 3) {
+        div(class="group") {
+          h2(class="group__name") { "wide" }
+          code(class="group__cond") { "잎 8개, opcode 짧음" }
+          div(class="group__cells") {
+            @for (i of rows) {
+              @if (wideA + wideB > 1 && wideC * wideD > wideA && wideE - wideF + wideG > 1 && wideH * wideA % 4 == 0 && wideA * wideB + wideC * wideD > wideE + 1.5 && (wideE + wideF) / 2 + wideG * wideH > 300 - 295 && !(wideA + wideB < wideC) && -wideE < wideG + wideH) {
+                span(class="cell cell--on") { "1" }
+              }
+              @else {
+                span(class="cell cell--off") { "0" }
+              }
+            }
+          }
+        }
+      }
+
+      @if (showing == 4) {
+        div(class="group") {
+          h2(class="group__name") { "both" }
+          code(class="group__cond") { "잎 8개, opcode 긺" }
+          div(class="group__cells") {
+            @for (i of rows) {
+              @if (bothA * bothB + bothC * bothD - bothE * bothF + bothG * bothH > 3 && (bothA + bothB + bothC + bothD) * 2 > bothE + bothF + bothG + bothH && bothA % 3 + bothB % 5 + bothC % 7 < 400 && (bothA * bothC + bothB * bothD) / 2 > 1.5 && !(bothE * bothG - bothF * bothH > 500) && -bothA - bothB < bothC + bothD && (bothE + bothF) * (bothG + bothH) > 1000 - 985 && bothA / 2 + bothC / 2 + bothE / 2 + bothG / 2 > 3) {
+                span(class="cell cell--on") { "1" }
+              }
+              @else {
+                span(class="cell cell--off") { "0" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
