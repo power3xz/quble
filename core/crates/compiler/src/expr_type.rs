@@ -78,7 +78,7 @@ impl From<ScopeError> for ExprTypeError {
 
 /// 진단에 찍는 타입 이름. 한 뎁스까지 풀고 그 안은 뭉뚱그린다 - 어긋난 타입이 뭔지만 알면
 /// 되고, 깊은 객체를 통째로 찍으면 메시지가 길어진다.
-fn type_name(ty: &Type) -> String {
+pub(crate) fn type_name(ty: &Type) -> String {
     match ty {
         Type::Bool | Type::Number | Type::String | Type::Array(_) | Type::Object(_) => {}
         Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),

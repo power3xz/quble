@@ -2026,6 +2026,48 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(&d.src[range.start as usize..range.end as usize], "\"b\"");
     }
 
+    /// 무엇을 기대했고 무엇이 왔는지 말한다 - 스칼라에 "구조가 다르다"고만 하면 안내가 안 된다.
+    #[test]
+    fn prop_type_mismatch_names_expected_and_found() {
+        let src = r#"
+            component C {
+              props { t: string }
+              template { div() { Row(count="abc" /) } }
+            }
+            component Row {
+              props { count: number }
+              template { span() { {count} } }
+            }
+        "#;
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let d = diagnose("entry", src, &err);
+        assert_eq!(
+            d.message,
+            "value passed to prop `count` of `Row`: expected number, found string"
+        );
+    }
+
+    /// 객체는 필드 이름으로 편다 - 어느 쪽 필드가 다른지 보여야 고칠 수 있다.
+    #[test]
+    fn object_prop_mismatch_names_the_fields() {
+        let src = r#"
+            component C {
+              props { a: { label: string, on: bool } }
+              template { div() { Row(row={a} /) } }
+            }
+            component Row {
+              props { row: { text: string, on: bool } }
+              template { span() { {row.text} } }
+            }
+        "#;
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let d = diagnose("entry", src, &err);
+        assert_eq!(
+            d.message,
+            "value passed to prop `row` of `Row`: expected { text, on }, found { label, on }"
+        );
+    }
+
     /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`{a}`)에 객체를 넣으면 여전히 NotLeaf.
     /// 값/반응성 자리엔 leaf만 온다는 경계가 인자 허용으로 무너지지 않아야 한다.
     #[test]

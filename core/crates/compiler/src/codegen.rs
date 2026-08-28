@@ -4,7 +4,7 @@ use crate::ast::{
     ArgValue, AttrValue, BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, Node, Prop,
     SlotPlaceholderContent, Type, UnaryOp,
 };
-use crate::expr_type::{require_expr_type, ExprTypeError, ExprTypeErrorKind};
+use crate::expr_type::{require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind};
 use crate::flatten::{FlatComp, Sourced};
 use crate::scope::{
     lookup_var_ref, require_leaf_var_ref, var_ref_display, ForVar, ScopeError, ScopeErrorKind,
@@ -36,9 +36,15 @@ pub enum CodegenErrorKind {
     UnknownEvent(String),
     /// `@with Context`가 이 컴포넌트 contexts에 없는 컨텍스트명을 가리킴.
     UnknownContext(String),
-    /// 객체 통째 전달(`user={user}`)에서 넘긴 경로의 도달 타입이 자식 prop 타입과 구조가 다르다.
-    /// leaf를 순서로 짝지으므로 필드 이름/순서/타입이 일치해야 한다.
-    PropTypeMismatch { comp: String, prop: String },
+    /// 합성 인자로 넘긴 값의 타입이 자식 prop 타입과 다르다. 변수 바인딩(`user={user}`)과
+    /// 리터럴(`count="abc"`) 둘 다다. 객체는 leaf를 순서로 짝지으므로 필드 이름/순서/타입이
+    /// 모두 일치해야 한다. Type은 Object(Vec)을 품어 Box로 든다.
+    PropTypeMismatch {
+        comp: String,
+        prop: String,
+        want: Box<Type>,
+        got: Box<Type>,
+    },
     /// @for 회차변수 이름이 prop 또는 바깥 회차변수와 겹친다. 섀도잉을 막아 이름 조회를
     /// 순서 무관하게(매치 최대 하나) 유지한다 - 다른 이름을 쓰라는 컴파일 에러.
     DuplicateBinding(String),
@@ -90,9 +96,16 @@ impl std::fmt::Display for CodegenErrorKind {
             CodegenErrorKind::UnknownContext(name) => {
                 write!(f, "`{name}` is not declared in contexts")
             }
-            CodegenErrorKind::PropTypeMismatch { comp, prop } => write!(
+            CodegenErrorKind::PropTypeMismatch {
+                comp,
+                prop,
+                want,
+                got,
+            } => write!(
                 f,
-                "value passed to prop `{prop}` of `{comp}` has a different shape: field names, order and types must match"
+                "value passed to prop `{prop}` of `{comp}`: expected {}, found {}",
+                type_name(want),
+                type_name(got)
             ),
             CodegenErrorKind::DuplicateBinding(name) => write!(
                 f,
@@ -923,6 +936,8 @@ fn emit_node(
                             return Err(CodegenErrorKind::PropTypeMismatch {
                                 comp: name.name.clone(),
                                 prop: child_prop.name.clone(),
+                                want: Box::new(child_prop.type_.clone()),
+                                got: Box::new(reached_ty.clone()),
                             }
                             .at(parent_var.range.0));
                         }
@@ -939,10 +954,13 @@ fn emit_node(
                     }
                     ArgValue::Literal(literal) => {
                         // 변수 바인딩과 같은 판정 - 리터럴만 빠지면 타입 검사를 우회할 수 있다.
-                        if !types_match(&lit_type(&literal.value), &child_prop.type_) {
+                        let ty = lit_type(&literal.value);
+                        if !types_match(&ty, &child_prop.type_) {
                             return Err(CodegenErrorKind::PropTypeMismatch {
                                 comp: name.name.clone(),
                                 prop: child_prop.name.clone(),
+                                want: Box::new(child_prop.type_.clone()),
+                                got: Box::new(ty),
                             }
                             .at(literal.range.0));
                         }
