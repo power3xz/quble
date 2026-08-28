@@ -1,7 +1,7 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    ArgValue, AttrValue, BinaryOp, Context, Event, Expr, ForCount, Ident, LitValue, Node, Prop,
+    ArgValue, AttrValue, BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, Node, Prop,
     SlotPlaceholderContent, Type, UnaryOp,
 };
 use crate::expr_type::{require_expr_type, ExprTypeError, ExprTypeErrorKind};
@@ -522,8 +522,11 @@ fn arg_to_field(
         }
         ArgValue::Literal(lit) => {
             // 리터럴은 항상 스칼라(객체 리터럴 없음). Scalar 엔트리 하나를 intern해 공유.
-            let type_ref = types.intern(&lit_type(lit), pool);
-            (type_ref, FieldValue::Const(pool.intern(lit_to_const(lit))))
+            let type_ref = types.intern(&lit_type(&lit.value), pool);
+            (
+                type_ref,
+                FieldValue::Const(pool.intern(lit_to_const(&lit.value))),
+            )
         }
     };
     Ok(Field {
@@ -534,20 +537,20 @@ fn arg_to_field(
 }
 
 /// 리터럴의 quble 타입. 리터럴은 스칼라라 Bool/Number/String 중 하나(intern은 모두 Scalar 엔트리).
-fn lit_type(lit: &LitValue) -> Type {
+fn lit_type(lit: &Lit) -> Type {
     match lit {
-        LitValue::Str(_) => Type::String,
-        LitValue::Number(_) => Type::Number,
-        LitValue::Bool(_) => Type::Bool,
+        Lit::Str(_) => Type::String,
+        Lit::Number(_) => Type::Number,
+        Lit::Bool(_) => Type::Bool,
     }
 }
 
 /// 리터럴을 상수풀 엔트리로. 소스의 타입을 그대로 실어 런타임이 올바른 JS 값으로 복원한다.
-fn lit_to_const(lit: &LitValue) -> Const {
+fn lit_to_const(lit: &Lit) -> Const {
     match lit {
-        LitValue::Str(s) => Const::Str(s.clone()),
-        LitValue::Number(n) => Const::Num(*n),
-        LitValue::Bool(b) => Const::Bool(*b),
+        Lit::Str(s) => Const::Str(s.clone()),
+        Lit::Number(n) => Const::Num(*n),
+        Lit::Bool(b) => Const::Bool(*b),
     }
 }
 
@@ -588,10 +591,10 @@ enum Folded {
 /// `unreachable!`로 둔다.
 fn fold_expr(expr: &Expr) -> Option<Folded> {
     match expr {
-        Expr::Lit(lit, _) => Some(match lit {
-            LitValue::Bool(b) => Folded::Bool(*b),
-            LitValue::Number(n) => Folded::Number(*n),
-            LitValue::Str(s) => Folded::Str(s.clone()),
+        Expr::Lit(lit, _) => Some(match &lit.value {
+            Lit::Bool(b) => Folded::Bool(*b),
+            Lit::Number(n) => Folded::Number(*n),
+            Lit::Str(s) => Folded::Str(s.clone()),
         }),
 
         // 참조가 끼면 컴파일타임에 값을 모른다.
@@ -651,22 +654,22 @@ fn emit_expr(
     out: &mut Vec<u8>,
 ) -> Result<(), CodegenError> {
     match expr {
-        Expr::Lit(lit, _) => match lit {
+        Expr::Lit(lit, _) => match &lit.value {
             // 0~255 정수는 태그 1 + 값 1로 끝난다 - 상수풀을 거치면 f64 8바이트가 따로 붙는다.
-            LitValue::Number(n) if is_small_int(*n) => {
+            Lit::Number(n) if is_small_int(*n) => {
                 out.push(ExprOp::LoadSmallInt as u8);
                 out.push(*n as u8);
             }
-            LitValue::Bool(b) => out.push(match b {
+            Lit::Bool(b) => out.push(match b {
                 true => ExprOp::LoadTrue as u8,
                 false => ExprOp::LoadFalse as u8,
             }),
-            LitValue::Number(n) => {
+            Lit::Number(n) => {
                 let index = pool.intern(Const::Num(*n));
                 out.push(ExprOp::LoadConst as u8);
                 out.extend_from_slice(&index.to_le_bytes());
             }
-            LitValue::Str(s) => {
+            Lit::Str(s) => {
                 let index = pool.intern_str(s);
                 out.push(ExprOp::LoadConst as u8);
                 out.extend_from_slice(&index.to_le_bytes());
@@ -935,7 +938,15 @@ fn emit_node(
                         }
                     }
                     ArgValue::Literal(literal) => {
-                        let value_index = pool.intern(lit_to_const(literal));
+                        // 변수 바인딩과 같은 판정 - 리터럴만 빠지면 타입 검사를 우회할 수 있다.
+                        if !types_match(&lit_type(&literal.value), &child_prop.type_) {
+                            return Err(CodegenErrorKind::PropTypeMismatch {
+                                comp: name.name.clone(),
+                                prop: child_prop.name.clone(),
+                            }
+                            .at(literal.range.0));
+                        }
+                        let value_index = pool.intern(lit_to_const(&literal.value));
                         code.push(Op::PushArgLit as u8);
                         code.extend_from_slice(&value_index.to_le_bytes());
                     }

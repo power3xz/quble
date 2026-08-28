@@ -11,7 +11,7 @@
 //! 핸들러의 실패는 조용히 사라진다), 핸들러를 받아 감싸는 쪽이 그 Promise를 잡아 건질 수
 //! 있어야 하므로 타입에 드러낸다.
 
-use crate::ast::{ArgValue, Component, LitValue, Node, Prop, Type, VarRef};
+use crate::ast::{ArgValue, Component, Lit, LitValue, Node, Prop, Type, VarRef};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::CompileError;
 
@@ -217,9 +217,17 @@ fn type_to_ts(ty: &Type) -> String {
 /// 값 그대로), 변수는 참조하는 prop의 선언 타입으로 낸다. props는 그 변수가 속한 컴포넌트의 것이다.
 fn value_type(v: &ArgValue, props: &[Prop]) -> String {
     match v {
-        ArgValue::Literal(LitValue::Str(s)) => format!("{s:?}"),
-        ArgValue::Literal(LitValue::Number(n)) => n.to_string(),
-        ArgValue::Literal(LitValue::Bool(b)) => b.to_string(),
+        ArgValue::Literal(LitValue {
+            value: Lit::Str(s), ..
+        }) => format!("{s:?}"),
+        ArgValue::Literal(LitValue {
+            value: Lit::Number(n),
+            ..
+        }) => n.to_string(),
+        ArgValue::Literal(LitValue {
+            value: Lit::Bool(b),
+            ..
+        }) => b.to_string(),
         ArgValue::Var(r) => match var_ref_type(r, props) {
             Some(ty) => type_to_ts(ty),
             None => "unknown".to_string(),

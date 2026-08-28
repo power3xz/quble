@@ -296,9 +296,11 @@ mod tests {
                     format!("{}.{}", v.root, v.path.join("."))
                 }
             }
-            Expr::Lit(ast::LitValue::Number(n), _) => format!("{n}"),
-            Expr::Lit(ast::LitValue::Bool(b), _) => format!("{b}"),
-            Expr::Lit(ast::LitValue::Str(s), _) => format!("\"{s}\""),
+            Expr::Lit(lit, _) => match &lit.value {
+                ast::Lit::Number(n) => format!("{n}"),
+                ast::Lit::Bool(b) => format!("{b}"),
+                ast::Lit::Str(s) => format!("\"{s}\""),
+            },
             Expr::Unary(op, x, _) => format!("({}{})", op.sym(), shape(x)),
             Expr::Binary(op, l, r, _) => {
                 format!("({} {} {})", shape(l), op.sym(), shape(r))
@@ -1986,6 +1988,42 @@ component B { props { a: A } template { div( /) } }"#;
                 ..
             }))
         ));
+    }
+
+    /// 리터럴 인자도 자식 prop 타입과 맞아야 한다 - 변수 바인딩만 검사하면 리터럴로 우회된다.
+    #[test]
+    fn literal_arg_type_mismatch_errors() {
+        let src = r#"
+            component C {
+              props { t: string }
+              template { div() { Row(count="abc" /) } }
+            }
+            component Row {
+              props { count: number }
+              template { span() { {count} } }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::PropTypeMismatch { .. },
+                    ..
+                },
+                ..
+            }))
+        ));
+    }
+
+    /// 틀린 것은 그 리터럴이지 합성 호출이 아니다 - 인자가 여럿이면 어느 것인지 짚어야 한다.
+    #[test]
+    fn literal_arg_mismatch_blames_the_literal() {
+        let src = "component C {\n  props { t: string }\n  template { div() { Row(title=\"a\" count=\"b\" /) } }\n}\ncomponent Row {\n  props { title: string, count: number }\n  template { span() { {title} } }\n}";
+        let err = compile(src).expect_err("컴파일이 실패해야 한다");
+        let d = diagnose("entry", src, &err);
+
+        let range = d.range.expect("자리를 알아야 한다");
+        assert_eq!(&d.src[range.start as usize..range.end as usize], "\"b\"");
     }
 
     /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`{a}`)에 객체를 넣으면 여전히 NotLeaf.
