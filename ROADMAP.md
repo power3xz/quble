@@ -84,9 +84,9 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
   handlers.ts에 주입해 이벤트별 payload/context를 타입 강제(잘못된 fullname은 컴파일 에러).
   `export const handlers`가 규약이고 import도 디스크 d.ts도 없다. 에디터 밖(`tsc`/CI)은
   plugin을 올린 LanguageService로 검사한다(`typecheck-handlers.ts`).
-- [ ] playground - 브라우저에서 `.qubc`를 편집해 바로 컴파일/렌더한다. 여러 파일을 탭으로
-  두고 `use`로 엮는다. 핸들러도 브라우저에서 작성한다. 컴파일 실패는 진단으로 보인다.
-  전제: 컴파일러가 브라우저에서 돌아야 한다(wasm).
+- [x] playground - 브라우저에서 `.qubc`를 편집해 바로 컴파일/렌더한다. 여러 파일을 탭으로
+  두고 `use`로 엮는다. 핸들러도 브라우저에서 작성한다(Blob URL로 평가). 컴파일 실패는
+  인라인 진단으로 보인다. 핸들러 키 자리에 fullname 자동완성이 뜬다.
 - [x] 컴파일 에러의 에디터 표시 - `.qubc`가 컴파일 실패하면 그 자리에 인라인 진단(빨간
   밑줄/문제 패널). LSP 서버 없이 확장이 동봉한 wasm으로 직접 컴파일한다. 진단은 하나다
   (컴파일러가 첫 에러에서 멈춘다).
