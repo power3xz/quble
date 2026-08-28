@@ -45,10 +45,14 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [ ] 데이터 흐름 - provided/props, 반응성. 다른 피처의 전제. 모델: [REACTIVITY.md](REACTIVITY.md) (leafIndex/fullname으로 배열 요소 식별/반응성/events를 꿴 결론).
   - [x] props 변수 보간 - 텍스트(`{name}` -> `TEXT_VAR`)/속성(`class={x}` -> `ATTR_*_VAR`). 같은 scope offset 공간.
   - [x] 반응성 (값 변경 시 DOM 갱신) - pub/sub, `set(leafIndex, v)`, 구독자=함수, Proxy 없음. 텍스트/속성/공유 검증.
-  - [ ] 타입 표기 - props/payload가 스칼라를 넘어 객체/배열을 담으려면 그 형태를 적을
-    타입 표기가 필요하다. `{expr}`(필드 접근/경로)과 `props 객체`의 공통 전제 - 값의 형태를
-    알아야 접근할 수 있다. 최종적으로는 보간/합성에서의 타입 검사까지. 전제 미결: props에
-    타입 단서가 없고(IDEAS.md), qubb 포맷에 타입을 싣는지. 방법 미정.
+  - [ ] 타입 표기 - props/payload의 형태를 적는다. 스칼라/객체/배열은 물론 다른 컴포넌트의
+    props를 타입으로 참조하고(`x: Section`) `Omit`/`Pick`으로 덜어낸다. 순환 참조는 컴파일
+    에러. qubb는 타입을 모듈 전역 테이블로 싣는다.
+    - [x] 표기와 qubb 적재.
+    - [x] 합성 인자 검사 - 변수 바인딩(`p={x}`)과 리터럴(`p="lit"`) 모두 자식 prop 타입과
+      구조가 같은지 본다.
+    - [ ] 보간 검사 - `{name}`은 타입을 안 본다. 그 자리가 무엇을 받는지(스칼라 셋) 정해야
+      한다.
   - [x] props 주소 트리 - 스칼라는 leafIndex, 객체/배열은 노드다. 객체는 필드로
     (`props.ghost.style`), 배열은 인덱스로(`props.items[2].title`) 내려간다. 통째 교체는
     `setObject`/`setArray`.

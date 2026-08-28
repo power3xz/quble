@@ -10,7 +10,7 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, BinaryOp, Component, Context, Event, Expr, ForCount, Ident, LitValue,
+    ArgValue, AttrValue, BinaryOp, Component, Context, Event, Expr, ForCount, Ident, Lit, LitValue,
     Node, Prop, SlotPlaceholderContent, SourceFile, Type, UnaryOp, Use, VarRef,
 };
 use crate::lexer::{Directive, Lexed, Token};
@@ -400,19 +400,16 @@ impl<'a> Parser<'a> {
         // next()가 빌려준 토큰을 아래 팔들이 쓰고 있어 그 안에서 just_read()를 못 부른다
         // (self 재빌림) - 소비 전에 이 리터럴 자리를 잡아둔다.
         let lit_range = self.here();
-        match self.next()? {
-            Token::Str(s) => Ok(LitValue::Str(s.clone())),
-            Token::Bool(b) => Ok(LitValue::Bool(*b)),
-            Token::Num(n) => n
-                .parse::<f64>()
-                .map(LitValue::Number)
-                .map_err(|_| ParseError {
-                    kind: ParseErrorKind::Expected {
-                        want: "number literal".into(),
-                        got: format!("`{n}`"),
-                    },
-                    range: lit_range,
-                }),
+        let value = match self.next()? {
+            Token::Str(s) => Ok(Lit::Str(s.clone())),
+            Token::Bool(b) => Ok(Lit::Bool(*b)),
+            Token::Num(n) => n.parse::<f64>().map(Lit::Number).map_err(|_| ParseError {
+                kind: ParseErrorKind::Expected {
+                    want: "number literal".into(),
+                    got: format!("`{n}`"),
+                },
+                range: lit_range,
+            }),
             got => {
                 let kind = ParseErrorKind::Expected {
                     want: "literal (\"str\", 42, true)".into(),
@@ -423,7 +420,11 @@ impl<'a> Parser<'a> {
                     range: lit_range,
                 })
             }
-        }
+        }?;
+        Ok(LitValue {
+            value,
+            range: NodeRange(lit_range),
+        })
     }
 
     /// 특정 키워드 식별자를 기대.

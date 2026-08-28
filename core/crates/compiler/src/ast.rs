@@ -329,10 +329,19 @@ pub enum ArgValue {
     Literal(LitValue),
 }
 
+/// 소스에 적힌 리터럴 하나 - 값과 그 값이 놓인 자리. 자리를 드는 건 타입이 안 맞을 때
+/// 그 리터럴을 짚기 위해서다(`Row(count="abc")`의 `"abc"`).
+#[derive(Debug, PartialEq, Clone)]
+pub struct LitValue {
+    pub value: Lit,
+    /// 비교에서 빠진다(NodeRange) - 다른 줄의 같은 리터럴은 같은 값이다.
+    pub range: NodeRange,
+}
+
 /// 리터럴 값. quble이 타입을 소유하므로 리터럴도 종류를 갖는다 - 상수풀에 타입대로 실려
 /// 런타임이 올바른 JS 값(string/number/boolean)으로 복원한다. Number 원문은 f64로 파싱해 담는다.
 #[derive(Debug, PartialEq, Clone)]
-pub enum LitValue {
+pub enum Lit {
     Str(String),
     Number(f64),
     Bool(bool),

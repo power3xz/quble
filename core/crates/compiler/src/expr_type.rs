@@ -3,7 +3,7 @@
 //! scope(조회) 위, codegen(방출) 아래다. codegen은 방출 전에 여기로 조건을 검사한다 -
 //! 방출은 타입이 맞다고 보고 짠다.
 
-use crate::ast::{BinaryOp, Expr, LitValue, Prop, Type, UnaryOp, VarRef};
+use crate::ast::{BinaryOp, Expr, Lit, Prop, Type, UnaryOp, VarRef};
 use crate::scope::{var_ref_display, var_ref_type, ForVar, ScopeError, ScopeErrorKind};
 use crate::src_range::SrcRange;
 
@@ -78,7 +78,7 @@ impl From<ScopeError> for ExprTypeError {
 
 /// 진단에 찍는 타입 이름. 한 뎁스까지 풀고 그 안은 뭉뚱그린다 - 어긋난 타입이 뭔지만 알면
 /// 되고, 깊은 객체를 통째로 찍으면 메시지가 길어진다.
-fn type_name(ty: &Type) -> String {
+pub(crate) fn type_name(ty: &Type) -> String {
     match ty {
         Type::Bool | Type::Number | Type::String | Type::Array(_) | Type::Object(_) => {}
         Type::Ref(n) => unreachable!("expand가 Type::Ref({})를 안 풀었다", n.name),
@@ -131,10 +131,10 @@ pub fn require_expr_type(
 /// 식의 결과 타입.
 pub fn expr_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Type, ExprTypeError> {
     match expr {
-        Expr::Lit(lit, _) => Ok(match lit {
-            LitValue::Str(_) => Type::String,
-            LitValue::Number(_) => Type::Number,
-            LitValue::Bool(_) => Type::Bool,
+        Expr::Lit(lit, _) => Ok(match &lit.value {
+            Lit::Str(_) => Type::String,
+            Lit::Number(_) => Type::Number,
+            Lit::Bool(_) => Type::Bool,
         }),
 
         // 파서는 `x.length`도 그냥 참조로 낸다 - 필드인지 길이인지는 타입을 봐야 갈리고,
