@@ -63,7 +63,7 @@ component Board {
             assignee={ghost.assignee}
             points={ghost.points}
             urgent={ghost.urgent}
-            seat=0
+            seat={0}
           /)
         }
       }

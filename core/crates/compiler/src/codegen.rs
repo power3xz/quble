@@ -1,8 +1,8 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    ArgValue, AttrValue, BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, Node, Prop,
-    SlotPlaceholderContent, Type, UnaryOp,
+    BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, Node, Prop, SlotPlaceholderContent, Type,
+    UnaryOp,
 };
 use crate::expr_type::{require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind};
 use crate::flatten::{FlatComp, Sourced};
@@ -73,6 +73,11 @@ pub enum CodegenErrorKind {
         comp: String,
         slot_placeholder: Option<String>,
     },
+    /// 값 자리에 연산자가 붙은 식이 왔다. 지금 식을 평가하는 건 `@if` 조건뿐이고
+    /// 나머지 값 자리(속성값/합성 인자/payload/context)는 잎 하나만 받는다.
+    UnsupportedValueExpr,
+    /// 속성값 리터럴이 문자열이 아니다(`width={100}`). DOM 속성값은 문자열이라 갈 곳이 없다.
+    AttrValueNotString,
 }
 
 impl std::fmt::Display for CodegenErrorKind {
@@ -154,6 +159,12 @@ impl std::fmt::Display for CodegenErrorKind {
                     "`{comp}` declares the unnamed slot twice: the content has no single place to go"
                 ),
             },
+            CodegenErrorKind::UnsupportedValueExpr => {
+                write!(f, "this value takes a single reference or literal")
+            }
+            CodegenErrorKind::AttrValueNotString => {
+                write!(f, "attribute values are strings")
+            }
         }
     }
 }
@@ -521,25 +532,29 @@ impl TypeTable {
 /// (안 펼쳐 객체도 하나). Literal은 스칼라 type_ref + Const ref 하나(객체 리터럴은 문법상 없다).
 fn arg_to_field(
     field: &str,
-    value: &ArgValue,
+    value: &Expr,
     props: &[Prop],
     pool: &mut ConstPool,
     types: &mut TypeTable,
 ) -> Result<Field, CodegenError> {
     let (type_ref, ref_value) = match value {
-        ArgValue::Var(var) => {
+        Expr::Var(var, _) => {
             // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
             let (scope_index, offset, ty) = lookup_var_ref(var, props, &[])?;
             let type_ref = types.intern(ty, pool);
             (type_ref, FieldValue::Scope(scope_index, offset))
         }
-        ArgValue::Literal(lit) => {
+        Expr::Lit(lit, _) => {
             // 리터럴은 항상 스칼라(객체 리터럴 없음). Scalar 엔트리 하나를 intern해 공유.
             let type_ref = types.intern(&lit_type(&lit.value), pool);
             (
                 type_ref,
                 FieldValue::Const(pool.intern(lit_to_const(&lit.value))),
             )
+        }
+        // payload/context 값은 아직 잎 하나뿐 - 연산자는 @if 조건에서만 쓴다.
+        Expr::Unary(..) | Expr::Binary(..) => {
+            return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0));
         }
     };
     Ok(Field {
@@ -836,10 +851,18 @@ fn emit_node(
             }
 
             for (name, value) in attrs {
+                // DOM 속성값은 문자열이라 리터럴은 Str만 온다 - 숫자/불리언은 갈 곳이 없다.
+                let static_str = match value {
+                    Expr::Lit(lit, range) => match &lit.value {
+                        Lit::Str(s) => Some(s),
+                        _ => return Err(CodegenErrorKind::AttrValueNotString.at(range.0)),
+                    },
+                    _ => None,
+                };
                 // 두 축이 opcode를 가른다.
                 //   name : 전역 속성명 테이블에 있으면 G(전역 ID), 없으면 L(상수풀 인덱스)
                 //   value: 정적이면 상수풀 인덱스, 변수면 scope index
-                let is_var = matches!(value, AttrValue::Var(_));
+                let is_var = static_str.is_none();
                 let (op, name_operand) = match bytecode::attrs::attr_id(name) {
                     Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
                     None => (
@@ -849,18 +872,22 @@ fn emit_node(
                 };
                 code.push(op as u8);
                 code.extend_from_slice(&name_operand.to_le_bytes());
-                match value {
+                match static_str {
                     // 정적 값은 상수풀 인덱스 u16.
-                    AttrValue::Static(s) => {
+                    Some(s) => {
                         code.extend_from_slice(&pool.intern_str(s).to_le_bytes());
                     }
                     // 변수 값은 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
-                    AttrValue::Var(v) => {
-                        let (scope_index, offset) =
-                            require_leaf_var_ref(v, props, for_scope.for_vars)?;
-                        code.push(scope_index);
-                        code.push(offset);
-                    }
+                    None => match value {
+                        Expr::Var(v, _) => {
+                            let (scope_index, offset) =
+                                require_leaf_var_ref(v, props, for_scope.for_vars)?;
+                            code.push(scope_index);
+                            code.push(offset);
+                        }
+                        // 연산자가 붙은 식은 값 자리에서 아직 안 된다.
+                        _ => return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0)),
+                    },
                 }
             }
 
@@ -927,7 +954,7 @@ fn emit_node(
                         .at(name.range.0)
                     })?;
                 match arg_value {
-                    ArgValue::Var(parent_var) => {
+                    Expr::Var(parent_var, _) => {
                         // 도달 타입이 자식 prop 타입과 구조가 같아야 한다.
                         let (scope_index, offset, reached_ty) =
                             lookup_var_ref(parent_var, props, for_scope.for_vars)?;
@@ -952,7 +979,7 @@ fn emit_node(
                             code.push(offset);
                         }
                     }
-                    ArgValue::Literal(literal) => {
+                    Expr::Lit(literal, _) => {
                         // 변수 바인딩과 같은 판정 - 리터럴만 빠지면 타입 검사를 우회할 수 있다.
                         let ty = lit_type(&literal.value);
                         if !types_match(&ty, &child_prop.type_) {
@@ -968,6 +995,8 @@ fn emit_node(
                         code.push(Op::PushArgLit as u8);
                         code.extend_from_slice(&value_index.to_le_bytes());
                     }
+                    // 연산자가 붙은 식은 값 자리에서 아직 안 된다.
+                    _ => return Err(CodegenErrorKind::UnsupportedValueExpr.at(arg_value.range().0)),
                 }
             }
 
