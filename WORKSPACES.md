@@ -51,7 +51,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 
 | 산출물 | 만드는 명령 | 필요한 곳 |
 |---|---|---|
-| `core/wasm-compiler/compiler_wasm.wasm` | `npm run build:wasm --prefix core/wasm-compiler` | `quble-wasm-compiler` 실행, `npm run typecheck` |
+| `core/wasm-compiler/compiler_wasm.wasm` | `npm run build:wasm --prefix core/wasm-compiler` | `quble-wasm-compiler` 실행, `npm run typecheck`, `editors/vscode` 빌드(build.mjs가 `dist/`로 복사) |
 | `core/target/debug/quble` | `cargo build --manifest-path core/Cargo.toml --bin quble` | `core/web` 테스트 (`test-helpers/build.ts`) |
 | `core/target/wasm32-unknown-unknown/release/compiler_wasm.wasm` | `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` | `build:wasm`이 `core/wasm-compiler/`로 복사 |
 
@@ -64,3 +64,4 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 | `npm run typecheck` | `npm ci`, `build:wasm` |
 | `npm run lint` | `npm ci` |
 | `node build/build-playground.mjs` (cwd `core`) | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |
+| `npm run install-local --prefix editors/vscode` | `build:wasm` - 확장은 `core/wasm-compiler/`의 wasm을 복사한다. 플레이그라운드 빌드는 `core/target/`에만 내므로 그것으로는 안 갱신된다 |
