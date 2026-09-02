@@ -136,8 +136,8 @@ span() { "담당자: {assignee}" }             // 문자열 안 보간 허용
 ```
 
 - 속성은 공백 구분: `Badge(text={tag} variant="outline" @click:TAG_CLICK)`
-- 속성 값: 문자열 `"..."`, 표현식 `{EXPR}`, 배열 `[...]`
-- 클래스 배열: `div(class=["card", styles.variant, styles.priority])`
+- 속성 값: 문자열 `"..."` 또는 표현식 `{EXPR}` (#5)
+- 클래스 배열: `div(class={["card", styles.variant, styles.priority]})` (아직 미구현)
 
 ### 3.1.1 self-close (자식 없는 요소)
 
@@ -179,8 +179,8 @@ TagBadge: Badge(text={tag} variant="outline" @click:TAG_CLICK /)
 
 ```
 MyTodoCard: Card(title="할일 목록" variant="primary") {
-  p(class=["description"]) { "오늘 완료해야 할 작업들" }
-  TodoItem(id="1" title="문서 작성" completed=false /)
+  p(class="description") { "오늘 완료해야 할 작업들" }
+  TodoItem(id="1" title="문서 작성" completed={false} /)
 }
 ```
 
@@ -206,7 +206,7 @@ MyTodoCard: Card(title="할일 목록" variant="primary") {
 ```
 // 무기명 - 합성 블록이 통째로 그 자리에 들어간다
 MyTodoCard: Card(title="할일 목록") {
-  p(class=["description"]) { "오늘 완료해야 할 작업들" }
+  p(class="description") { "오늘 완료해야 할 작업들" }
   TodoItem(id="1" title="문서 작성" /)
 }
 
@@ -281,8 +281,15 @@ MyCard: Card(title="...") {
 1. `{EXPR}` - template 자식 보간
 2. `"... {EXPR} ..."` - 문자열 리터럴 내 보간
 3. `attr={EXPR}` - 속성 값
-4. `@if (EXPR)` / `@for (_ of EXPR)` - 디렉티브 조건/이터러블
-5. `key: EXPR` - contexts 값, events 페이로드 값
+4. `prop={EXPR}` - 합성 인자
+5. `@if (EXPR)` / `@for (_ of EXPR)` - 디렉티브 조건/이터러블
+6. `key: EXPR` - contexts 값, events 페이로드 값
+
+**`=` 뒤는 따옴표 문자열이거나 `{}`다.** 속성 값과 합성 인자가 그렇다 - 맨 리터럴
+(`count=42`)은 안 된다. 문자열은 `"a"`, 그 밖의 값은 `{42}`/`{true}`/`{x}`로 쓴다
+(`{"a"}`도 같은 값이다 - 리터럴도 식이다).
+
+나머지 자리는 표시가 없다. `@if`는 `()`가, `key:`는 `:`가 값 자리를 이미 열어 뒀다.
 
 쓸 수 있는 형태는 **prop 참조(`title`)와 경로 접근(`assignee.name`)** 이고, `@if` 조건에서만
 연산자를 쓸 수 있다(#5.2). 호출은 어느 자리에서도 지원하지 않는다. 값 자리에는 leaf(원시값)만
