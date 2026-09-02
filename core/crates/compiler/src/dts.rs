@@ -11,7 +11,7 @@
 //! 핸들러의 실패는 조용히 사라진다), 핸들러를 받아 감싸는 쪽이 그 Promise를 잡아 건질 수
 //! 있어야 하므로 타입에 드러낸다.
 
-use crate::ast::{ArgValue, Component, Lit, LitValue, Node, Prop, Type, VarRef};
+use crate::ast::{Component, Expr, Lit, LitValue, Node, Prop, Type, VarRef};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::CompileError;
 
@@ -49,7 +49,7 @@ pub fn handlers_dts_from_path(path: &str) -> Result<String, CompileError> {
 /// 아니라 @with를 쓴 쪽 props를 가리킨다(컨텍스트는 컴포넌트 경계를 넘어 살아 있다).
 type ActiveContext = (
     /* 컨텍스트명 */ String,
-    /* 필드들 */ Vec<(String, ArgValue)>,
+    /* 필드들 */ Vec<(String, Expr)>,
     /* @with를 쓴 컴포넌트의 props */ Vec<Prop>,
 );
 
@@ -57,7 +57,7 @@ type ActiveContext = (
 struct Handler {
     fullname: String,
     /// event payload 필드: (필드명, 값 출처). data는 값이라 리터럴/변수로 타입이 갈린다.
-    data: Vec<(String, ArgValue)>,
+    data: Vec<(String, Expr)>,
     /// 이벤트가 묶인 컴포넌트. props 타입 이름을 여기서 만든다.
     comp_name: String,
     /// 그 컴포넌트의 props(leafIndex 주소기). T는 선언 타입을 TS로 매핑한다.
@@ -215,23 +215,35 @@ fn type_to_ts(ty: &Type) -> String {
 
 /// 값 필드(payload/context)의 TS 타입. 리터럴은 그 값으로 좁히고(문자열은 "..", 숫자/불리언은
 /// 값 그대로), 변수는 참조하는 prop의 선언 타입으로 낸다. props는 그 변수가 속한 컴포넌트의 것이다.
-fn value_type(v: &ArgValue, props: &[Prop]) -> String {
+fn value_type(v: &Expr, props: &[Prop]) -> String {
     match v {
-        ArgValue::Literal(LitValue {
-            value: Lit::Str(s), ..
-        }) => format!("{s:?}"),
-        ArgValue::Literal(LitValue {
-            value: Lit::Number(n),
-            ..
-        }) => n.to_string(),
-        ArgValue::Literal(LitValue {
-            value: Lit::Bool(b),
-            ..
-        }) => b.to_string(),
-        ArgValue::Var(r) => match var_ref_type(r, props) {
+        Expr::Lit(
+            LitValue {
+                value: Lit::Str(s), ..
+            },
+            _,
+        ) => format!("{s:?}"),
+        Expr::Lit(
+            LitValue {
+                value: Lit::Number(n),
+                ..
+            },
+            _,
+        ) => n.to_string(),
+        Expr::Lit(
+            LitValue {
+                value: Lit::Bool(b),
+                ..
+            },
+            _,
+        ) => b.to_string(),
+        Expr::Var(r, _) => match var_ref_type(r, props) {
             Some(ty) => type_to_ts(ty),
             None => "unknown".to_string(),
         },
+        // 연산자가 붙은 식은 값 자리에서 아직 안 온다(codegen이 거른다).
+        // d.ts는 컴파일 실패 중에도 불리므로 에러 대신 unknown으로 낸다.
+        Expr::Unary(..) | Expr::Binary(..) => "unknown".to_string(),
     }
 }
 
@@ -257,7 +269,7 @@ fn var_ref_type<'a>(var: &VarRef, props: &'a [Prop]) -> Option<&'a Type> {
 }
 
 /// (필드명, 값) 목록 -> `a: T; b: U` 객체 본문. props는 변수 필드가 타입을 찾을 선언부다.
-fn fields_type(fields: &[(String, ArgValue)], props: &[Prop]) -> String {
+fn fields_type(fields: &[(String, Expr)], props: &[Prop]) -> String {
     join(
         fields
             .iter()

@@ -10,8 +10,8 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    ArgValue, AttrValue, BinaryOp, Component, Context, Event, Expr, ForCount, Ident, Lit, LitValue,
-    Node, Prop, SlotPlaceholderContent, SourceFile, Type, UnaryOp, Use, VarRef,
+    BinaryOp, Component, Context, Event, Expr, ForCount, Ident, Lit, LitValue, Node, Prop,
+    SlotPlaceholderContent, SourceFile, Type, UnaryOp, Use, VarRef,
 };
 use crate::lexer::{Directive, Lexed, Token};
 use crate::src_range::{NodeRange, SrcRange};
@@ -264,8 +264,8 @@ impl<'a> Parser<'a> {
     }
 
     /// 값 자리의 식 하나. 1 = peek_binary_op 표의 최저 우선순위라 모든 연산자를 받는다.
-    fn expr(&mut self) -> Result<Expr, ParseError> {
-        self.expr_binary(1)
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.parse_expr_binary(1)
     }
 
     /// 이항 연산자를 우선순위대로 묶는다. `min`보다 낮은 연산자는 안 먹고 남겨 둔다 - 그걸
@@ -277,18 +277,18 @@ impl<'a> Parser<'a> {
     ///
     /// 오른쪽을 `prec + 1`로 부르는 것이 좌결합이다 - 같은 우선순위가 오른쪽에 안 붙고
     /// while이 왼쪽에 쌓는다(`a - b - c` -> `(a-b)-c`). `prec`으로 부르면 우결합이 된다.
-    fn expr_binary(&mut self, min: u8) -> Result<Expr, ParseError> {
+    fn parse_expr_binary(&mut self, min: u8) -> Result<Expr, ParseError> {
         // 피연산자 앞에서 시작해, 묶을 때마다 오른쪽 끝에서 닫는다.
         let start = self.here();
         // node는 지금까지 묶은 트리 전체다 - 첫 회차만 피연산자 하나이고, 이후 회차가 그걸
         // 통째로 왼쪽 자식에 밀어 넣는다. 왼쪽이 깊어지는 것이 곧 좌결합이다.
-        let mut node = self.expr_operand()?;
+        let mut node = self.parse_expr_operand()?;
         while let Some((op, prec)) = self.peek_binary_op() {
             if prec < min {
                 break;
             }
             self.next()?;
-            let right = self.expr_binary(prec + 1)?;
+            let right = self.parse_expr_binary(prec + 1)?;
             let range = NodeRange(SrcRange {
                 start: start.start,
                 end: self.just_read().end,
@@ -337,11 +337,11 @@ impl<'a> Parser<'a> {
     /// 괄호도 피연산자다 - 안에 트리가 통째로 들어 있어도 바깥은 그걸 피연산자 하나로만
     /// 본다(`(a + b) * c`에서 `*`의 왼쪽이 `(a + b)` 통째다). 안쪽을 채울 때만 `expr`로
     /// 되올라가고, 그 순간 우선순위가 초기화된다.
-    fn expr_operand(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_operand(&mut self) -> Result<Expr, ParseError> {
         let start = self.here();
         if let Some(op) = self.peek_unary_op() {
             self.next()?;
-            let operand = self.expr_operand()?;
+            let operand = self.parse_expr_operand()?;
             let range = NodeRange(SrcRange {
                 start: start.start,
                 end: self.just_read().end,
@@ -351,7 +351,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some(Token::LParen) => {
                 self.next()?;
-                let inner = self.expr()?;
+                let inner = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
                 Ok(inner)
             }
@@ -376,17 +376,25 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// 값 자리(payload/context/합성 인자)의 값 하나: Ident면 prop 참조(Var), 그 외 리터럴 토큰
-    /// (Str/Num/Bool)이면 타입대로 Literal.
-    fn field_value(&mut self) -> Result<ArgValue, ParseError> {
+    /// `=` 뒤 값 하나: 따옴표 문자열(`"card"`)이거나 중괄호가 연 식(`{x}`, `{42}`).
+    /// 속성값과 합성 인자가 공유한다 - 둘 다 `=` 뒤라 표기가 같다.
+    /// 맨 리터럴(`=42`)은 안 받는다 - 중괄호가 식 자리를 연다.
+    fn parse_value(&mut self) -> Result<Expr, ParseError> {
         match self.peek() {
-            Some(Token::Ident(_)) => Ok(ArgValue::Var(self.var_ref()?)),
-            Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
-                Ok(ArgValue::Literal(self.lit_value()?))
+            Some(Token::Str(_)) => {
+                let lit = self.lit_value()?;
+                let range = lit.range;
+                Ok(Expr::Lit(lit, range))
+            }
+            Some(Token::LBrace) => {
+                self.next()?; // {
+                let expr = self.parse_expr()?;
+                self.expect(&Token::RBrace)?;
+                Ok(expr)
             }
             got => {
                 let kind = ParseErrorKind::Expected {
-                    want: "value (prop, \"str\", 42, true)".into(),
+                    want: "value (\"str\" or {expr})".into(),
                     got: shown(got),
                 };
                 Err(self.err_here(kind))
@@ -685,7 +693,7 @@ impl<'a> Parser<'a> {
 
     // RBrace 전까지 payload 필드를 모은다. 각 필드는 `field`, `field: prop`, 또는 `field: "lit"`.
     // 단축형 `field`는 (field, Var(field))로 푼다(필드명 = prop명). 콤마는 선택적 구분자.
-    fn payload(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
+    fn payload(&mut self) -> Result<Vec<(String, Expr)>, ParseError> {
         let mut payload = Vec::new();
         loop {
             match self.peek() {
@@ -699,14 +707,18 @@ impl<'a> Parser<'a> {
                     // 없으면 단축형(field = prop, Var).
                     let value = if matches!(self.peek(), Some(Token::Colon)) {
                         self.next()?; // :
-                        self.field_value()?
+                        self.parse_expr()?
                     } else {
                         // 단축형은 필드명이 곧 prop 참조라 그 이름 토큰이 구간이다.
-                        ArgValue::Var(VarRef {
-                            root: field.clone(),
-                            path: Vec::new(),
-                            range: NodeRange(self.just_read()),
-                        })
+                        let range = NodeRange(self.just_read());
+                        Expr::Var(
+                            VarRef {
+                                root: field.clone(),
+                                path: Vec::new(),
+                                range,
+                            },
+                            range,
+                        )
                     };
                     payload.push((field, value));
                 }
@@ -745,7 +757,7 @@ impl<'a> Parser<'a> {
 
     // RBrace 전까지 `key`, `key: prop`, 또는 `key: "lit"` 필드를 모은다. 값은 prop명(Var) 또는
     // 리터럴 문자열(Literal). 단축형 `key`는 (key, Var(key))로 푼다. 콤마는 선택적 구분자.
-    fn context_fields(&mut self) -> Result<Vec<(String, ArgValue)>, ParseError> {
+    fn context_fields(&mut self) -> Result<Vec<(String, Expr)>, ParseError> {
         let mut fields = Vec::new();
         loop {
             match self.peek() {
@@ -759,14 +771,18 @@ impl<'a> Parser<'a> {
                     // 없으면 단축형(key = prop, Var).
                     let value = if matches!(self.peek(), Some(Token::Colon)) {
                         self.next()?; // :
-                        self.field_value()?
+                        self.parse_expr()?
                     } else {
                         // 단축형은 키가 곧 prop 참조라 그 이름 토큰이 구간이다.
-                        ArgValue::Var(VarRef {
-                            root: key.clone(),
-                            path: Vec::new(),
-                            range: NodeRange(self.just_read()),
-                        })
+                        let range = NodeRange(self.just_read());
+                        Expr::Var(
+                            VarRef {
+                                root: key.clone(),
+                                path: Vec::new(),
+                                range,
+                            },
+                            range,
+                        )
                     };
                     fields.push((key, value));
                 }
@@ -857,7 +873,7 @@ impl<'a> Parser<'a> {
     fn if_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::If))?;
         self.expect(&Token::LParen)?;
-        let cond = self.expr()?;
+        let cond = self.parse_expr()?;
         self.expect(&Token::RParen)?;
         self.expect(&Token::LBrace)?;
         let then = self.nodes()?;
@@ -1062,9 +1078,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // RParen 전까지 `prop = {var}`(부모 변수) 또는 `prop = "lit"`(리터럴) 인자를 모은다.
-    // 공백 구분(콤마 없음).
-    fn component_args(&mut self) -> Result<Vec<(Ident, ArgValue)>, ParseError> {
+    // RParen 전까지 `prop = "lit"`(따옴표 문자열) 또는 `prop = {식}` 인자를 모은다.
+    // 공백 구분(콤마 없음). 속성값과 같은 두 갈래다 - 같은 `=` 뒤라 표기를 맞춘다.
+    fn component_args(&mut self) -> Result<Vec<(Ident, Expr)>, ParseError> {
         let mut args = Vec::new();
         loop {
             match self.peek() {
@@ -1073,25 +1089,7 @@ impl<'a> Parser<'a> {
                 Some(Token::Ident(_)) => {
                     let prop = self.ident_at()?;
                     self.expect(&Token::Eq)?;
-                    // 값은 `{var}`(부모 변수, 슬롯 공유) 또는 리터럴(`"str"`, `42`, `true` - 독립 값).
-                    let value = match self.peek() {
-                        Some(Token::LBrace) => {
-                            self.next()?; // {
-                            let var = self.var_ref()?;
-                            self.expect(&Token::RBrace)?;
-                            ArgValue::Var(var)
-                        }
-                        Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
-                            ArgValue::Literal(self.lit_value()?)
-                        }
-                        got => {
-                            let kind = ParseErrorKind::Expected {
-                                want: "component arg value ({var}, \"str\", 42, true)".into(),
-                                got: shown(got),
-                            };
-                            return Err(self.err_here(kind));
-                        }
-                    };
+                    let value = self.parse_value()?;
                     args.push((prop, value));
                 }
                 Some(t) => {
@@ -1172,7 +1170,7 @@ impl<'a> Parser<'a> {
     // RParen 전까지 ATTR과 이벤트 바인딩(`@click:EVENT`)을 모은다. 콤마는 선택적 구분자.
     // 둘이 같은 괄호 안에 섞여 와 한 번에 모으고 (attrs, event_bindings)로 가른다.
     #[allow(clippy::type_complexity)]
-    fn attrs(&mut self) -> Result<(Vec<(String, AttrValue)>, Vec<(String, Ident)>), ParseError> {
+    fn attrs(&mut self) -> Result<(Vec<(String, Expr)>, Vec<(String, Ident)>), ParseError> {
         let mut attrs = Vec::new();
         let mut event_bindings = Vec::new();
         loop {
@@ -1216,26 +1214,7 @@ impl<'a> Parser<'a> {
                 Some(Token::Ident(_)) => {
                     let name = self.ident()?;
                     self.expect(&Token::Eq)?;
-                    // 값은 정적 문자열(`="card"`) 또는 변수(`={x}`).
-                    let value = match self.peek() {
-                        Some(Token::Str(_)) => match self.next()? {
-                            Token::Str(s) => AttrValue::Static(s.clone()),
-                            _ => unreachable!(),
-                        },
-                        Some(Token::LBrace) => {
-                            self.next()?; // {
-                            let var = self.var_ref()?;
-                            self.expect(&Token::RBrace)?;
-                            AttrValue::Var(var)
-                        }
-                        got => {
-                            let kind = ParseErrorKind::Expected {
-                                want: "attribute value (string or {var})".into(),
-                                got: shown(got),
-                            };
-                            return Err(self.err_here(kind));
-                        }
-                    };
+                    let value = self.parse_value()?;
                     attrs.push((name, value));
                 }
                 Some(t) => {

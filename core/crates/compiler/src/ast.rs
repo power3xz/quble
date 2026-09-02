@@ -93,28 +93,29 @@ pub enum Type {
 }
 
 /// `contexts { Area { key: 값 } }` - 컴포넌트가 선언한 컨텍스트.
-/// fields 각 항목은 (필드명, 값). 값은 prop 참조(Var) 또는 리터럴(Literal) - 합성 인자와
-/// 같은 두 갈래라 ArgValue를 공유한다. 표현식 값은 아직 미지원.
+/// fields 각 항목은 (필드명, 값). `key:` 구조는 선언 문법이고 그 뒤 값만 식이다.
+/// 지금 오는 건 잎 하나(참조/리터럴)뿐 - 연산자는 codegen이 거른다.
 #[derive(Debug, PartialEq)]
 pub struct Context {
     pub name: String,
-    pub fields: Vec<(String, ArgValue)>,
+    pub fields: Vec<(String, Expr)>,
 }
 
 /// `events { TOGGLE({ label: title, on }) }` - 컴포넌트가 선언한 이벤트.
-/// payload 각 항목은 (이벤트필드명, 값). 값은 prop 참조(Var) 또는 리터럴(Literal).
-/// `{ title }` 단축은 ("title", Var("title"))로 푼다. Var의 prop명은 props에 있어야 한다(codegen이 검증).
+/// payload 각 항목은 (이벤트필드명, 값). `key:` 구조는 선언 문법이고 그 뒤 값만 식이다.
+/// `{ title }` 단축은 ("title", Expr::Var("title"))로 푼다. 참조하는 prop명은 props에 있어야 한다(codegen이 검증).
 #[derive(Debug, PartialEq)]
 pub struct Event {
     pub name: String,
-    pub payload: Vec<(String, ArgValue)>,
+    pub payload: Vec<(String, Expr)>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Node {
     Element {
         tag: Ident,
-        attrs: Vec<(String, AttrValue)>,
+        /// `class="card"`(따옴표 문자열) 또는 `class={x}`(중괄호가 연 식 자리).
+        attrs: Vec<(String, Expr)>,
         /// `@click:TOGGLE` - (DOM이벤트, 이벤트명). 이 요소가 무엇에 반응해 무슨 이벤트를 쏘나.
         /// DOM 이벤트는 렉서가 닫힌 집합으로 걸러 틀릴 수 없어 위치가 없고, 이벤트명은
         /// events 선언에 없을 수 있어 탓할 자리를 든다.
@@ -132,7 +133,7 @@ pub enum Node {
     Component {
         alias: Option<String>,
         name: Ident,
-        args: Vec<(Ident, ArgValue)>,
+        args: Vec<(Ident, Expr)>,
         /// 자식 블록으로 넘긴 슬롯 콘텐츠. 빈 벡터면 self-close(`Comp( /)`) - 슬롯 안 채움.
         /// 무기명은 `SlotPlaceholderContent { name: None }` 하나, 기명은 이름별로 여럿.
         /// 채우는 순서는 무관 - codegen이 자식 선언 순서로 정규화한다.
@@ -190,14 +191,6 @@ pub enum ForCount {
     Var(VarRef),
 }
 
-/// 속성값: 정적 문자열(`class="card"`) 또는 변수 참조(`class={x}`).
-/// 변수는 텍스트 보간(`Node::Var`)과 같은 scope index 공간을 쓴다.
-#[derive(Debug, PartialEq, Eq)]
-pub enum AttrValue {
-    Static(String),
-    Var(VarRef),
-}
-
 /// prop 참조 - 어느 prop(root)의 어느 경로(path)인가. 텍스트 보간/속성값/합성 인자/
 /// payload/context 값이 공유한다. 스칼라는 path 빈 벡터(`title` -> root="title", path=[]),
 /// 객체 접근은 필드들(`assignee.name` -> root="assignee", path=["name"]). root/path 분리:
@@ -229,7 +222,11 @@ impl VarRef {
     }
 }
 
-/// 값 자리에 오는 식. 잎(참조/리터럴)과 연산자 가지로 이룬다.
+/// 값 자리에 오는 식. 잎(참조/리터럴)과 연산자 가지로 이룬다. 값 자리는 전부 이걸 쓴다 -
+/// 속성값(`class={x}`), 합성 인자(`p={42}`), payload/context 값, `@if` 조건.
+/// 자리마다 무엇이 오는지는 다르다(지금은 `@if`만 연산자를 쓰고 나머지는 잎 하나) - 그 제약은
+/// 타입이 아니라 codegen이 잡는다. 구현이 넓어지면 거기만 푼다.
+///
 /// 잎 하나짜리 식(`@if (done)`)은 codegen이 기존 슬롯 인코딩으로 그대로 낮춘다 - 흔한 경우가
 /// 표현식 테이블과 평가기를 안 거치게 하려는 것.
 ///
@@ -241,7 +238,7 @@ impl VarRef {
 ///                   ^^^^    bool이 아닌 잎만 짚는다
 /// ```
 ///
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     /// `count`, `user.name`, `tags.length` - 참조 하나. `.length`가 길이인지 같은 이름의
     /// 필드인지는 타입이 갈라서 expr_type이 정한다(파서는 타입을 모른다).
@@ -265,7 +262,7 @@ impl Expr {
 }
 
 /// 단항 연산자. `!done`, `-count`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum UnaryOp {
     Not,
     Neg,
@@ -282,7 +279,7 @@ impl UnaryOp {
 }
 
 /// 이항 연산자. 우선순위와 결합은 파서가 정하고, AST는 묶인 결과만 담는다.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -318,15 +315,6 @@ impl BinaryOp {
             BinaryOp::Or => "||",
         }
     }
-}
-
-/// 합성 호출의 인자 값: 부모 변수(`prop={x}`) 또는 use-site 리터럴(`prop="lit"`, `prop=42`, `prop=true`).
-/// 변수는 부모 store 슬롯을 자식과 공유한다(자식 수정이 부모에 반영). 리터럴은 부모와 무관한
-/// 독립 값으로, 런타임이 자식 인스턴스에 고유 leaf로 심는다(원본과 분리, 자식이 독립 수정).
-#[derive(Debug, PartialEq, Clone)]
-pub enum ArgValue {
-    Var(VarRef),
-    Literal(LitValue),
 }
 
 /// 소스에 적힌 리터럴 하나 - 값과 그 값이 놓인 자리. 자리를 드는 건 타입이 안 맞을 때

@@ -186,7 +186,7 @@ fn fs_loader(base_canonical_path: &str, target_path: &str) -> Option<(String, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{AttrValue, Node};
+    use crate::ast::{Expr, Lit, Node};
     use bytecode::Const;
 
     /// 상수풀 인덱스의 문자열 값(테스트용). 이름/속성명 등 문자열 상수 검사에 쓴다.
@@ -246,13 +246,14 @@ mod tests {
                 ..
             } => {
                 assert_eq!(tag.name, "div");
-                assert_eq!(
-                    attrs,
-                    &[(
-                        "class".to_string(),
-                        AttrValue::Static("greeting".to_string())
-                    )]
-                );
+                // range는 비교에서 빠지지 않으므로(NodeRange와 달리 Expr이 통째로 든다)
+                // 속성명과 리터럴 값만 본다.
+                assert_eq!(attrs.len(), 1);
+                assert_eq!(attrs[0].0, "class");
+                match &attrs[0].1 {
+                    Expr::Lit(lit, _) => assert_eq!(lit.value, Lit::Str("greeting".to_string())),
+                    other => panic!("expected string literal, got {other:?}"),
+                }
                 assert_eq!(children.len(), 2);
             }
             _ => panic!("expected element"),
@@ -3796,7 +3797,7 @@ component B { props { a: A } template { div( /) } }"#;
     fn message_shows_end_of_source_not_none() {
         assert_eq!(
             error_message("component C { template { div(class="),
-            "expected attribute value (string or {var}), found end of source"
+            "expected value (\"str\" or {expr}), found end of source"
         );
     }
 
