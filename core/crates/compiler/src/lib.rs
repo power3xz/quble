@@ -302,6 +302,10 @@ mod tests {
                 ast::Lit::Bool(b) => format!("{b}"),
                 ast::Lit::Str(s) => format!("\"{s}\""),
             },
+            Expr::List(items, _) => {
+                let parts: Vec<String> = items.iter().map(shape).collect();
+                format!("[{}]", parts.join(", "))
+            }
             Expr::Unary(op, x, _) => format!("({}{})", op.sym(), shape(x)),
             Expr::Binary(op, l, r, _) => {
                 format!("({} {} {})", shape(l), op.sym(), shape(r))
@@ -915,6 +919,53 @@ mod tests {
         want.push(Op::Halt as u8);
 
         assert_eq!(code, want.as_slice());
+    }
+
+    /// `class={["a", "b"]}`는 컴파일타임에 공백으로 이어져 정적 속성이 된다 - `class="a b"`와
+    /// 같은 바이트코드(AttrG + 상수풀 인덱스)라 런타임이 배열을 모른다.
+    #[test]
+    fn class_array_joins_with_space() {
+        let joined = compile(r#"component C { template { div(class={["a", "b"]} /) } }"#).unwrap();
+        let plain = compile(r#"component C { template { div(class="a b" /) } }"#).unwrap();
+        assert_eq!(joined, plain);
+    }
+
+    /// 구분자 콤마는 필수고 마지막 요소 뒤만 생략 가능(객체 타입 필드와 같은 규칙).
+    #[test]
+    fn class_array_needs_comma_between_items() {
+        let msg = error_message(r#"component C { template { div(class={["a" "b"]} /) } }"#);
+        assert_eq!(msg, "expected `,`, found `\"b\"`");
+    }
+
+    #[test]
+    fn class_array_allows_trailing_comma() {
+        let trailing = compile(r#"component C { template { div(class={["a", "b",]} /) } }"#);
+        let plain = compile(r#"component C { template { div(class={["a", "b"]} /) } }"#);
+        assert_eq!(trailing.unwrap(), plain.unwrap());
+    }
+
+    /// 빈 배열은 빈 문자열이다 - 요소가 없으니 이을 것도 없다.
+    #[test]
+    fn class_array_empty_is_empty_string() {
+        let empty = compile(r#"component C { template { div(class={[]} /) } }"#).unwrap();
+        let plain = compile(r#"component C { template { div(class="" /) } }"#).unwrap();
+        assert_eq!(empty, plain);
+    }
+
+    /// 배열을 받는 건 class뿐 - 다른 속성은 여러 값이 붙지 않는다.
+    #[test]
+    fn array_on_non_class_attr_errors() {
+        assert_eq!(
+            error_message(r#"component C { template { div(id={["a"]} /) } }"#),
+            "only `class` takes an array"
+        );
+    }
+
+    /// 요소에 변수를 섞는 건 아직 안 된다 - 런타임 합치기가 없다.
+    #[test]
+    fn class_array_with_var_item_errors() {
+        let src = r#"component C { props { x: string } template { div(class={["a", x]} /) } }"#;
+        assert_eq!(error_message(src), "class array takes string literals");
     }
 
     #[test]

@@ -244,6 +244,8 @@ pub enum Expr {
     /// 필드인지는 타입이 갈라서 expr_type이 정한다(파서는 타입을 모른다).
     Var(VarRef, NodeRange),
     Lit(LitValue, NodeRange),
+    /// `["a", "b"]` - range는 `[`부터 `]`까지.
+    List(Vec<Expr>, NodeRange),
     /// range는 연산자부터 피연산자 끝까지(`!done`).
     Unary(UnaryOp, Box<Expr>, NodeRange),
     /// range는 왼쪽 피연산자 시작부터 오른쪽 끝까지(`a + b`).
@@ -254,9 +256,11 @@ impl Expr {
     /// 이 식이 소스에서 걸친 자리. 진단이 탓할 대상이다.
     pub fn range(&self) -> NodeRange {
         match self {
-            Expr::Var(_, r) | Expr::Lit(_, r) | Expr::Unary(_, _, r) | Expr::Binary(_, _, _, r) => {
-                *r
-            }
+            Expr::Var(_, r)
+            | Expr::Lit(_, r)
+            | Expr::List(_, r)
+            | Expr::Unary(_, _, r)
+            | Expr::Binary(_, _, _, r) => *r,
         }
     }
 }

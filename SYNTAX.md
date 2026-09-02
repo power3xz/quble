@@ -137,7 +137,10 @@ span() { "담당자: {assignee}" }             // 문자열 안 보간 허용
 
 - 속성은 공백 구분: `Badge(text={tag} variant="outline" @click:TAG_CLICK)`
 - 속성 값: 문자열 `"..."` 또는 표현식 `{EXPR}` (#5)
-- 클래스 배열: `div(class={["card", styles.variant, styles.priority]})` (아직 미구현)
+- 클래스 배열: `div(class={["card", "lg"]})` - 공백으로 이어 `class="card lg"`가 된다.
+  배열을 받는 속성은 **class뿐**이고(여러 값이 붙는 속성이 그것뿐이다), 요소는 **문자열
+  리터럴만** 온다(변수 섞기는 아직 - ROADMAP 동적 class 배열). 빈 배열은 `class=""`다.
+  구분자 콤마는 필수, 마지막 요소 뒤만 생략 가능(#2.1 객체 타입 필드와 같은 규칙).
 
 ### 3.1.1 self-close (자식 없는 요소)
 
