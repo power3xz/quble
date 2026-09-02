@@ -78,6 +78,10 @@ pub enum CodegenErrorKind {
     UnsupportedValueExpr,
     /// 속성값 리터럴이 문자열이 아니다(`width={100}`). DOM 속성값은 문자열이라 갈 곳이 없다.
     AttrValueNotString,
+    /// 배열이 안 되는 자리에 배열이 왔다. 지금 배열을 받는 건 class 속성뿐이다.
+    ListNotAllowed,
+    /// class 배열 요소가 문자열 리터럴이 아니다(`class={["a", x]}`). 변수 섞기는 아직 안 된다.
+    ClassArrayItemType,
 }
 
 impl std::fmt::Display for CodegenErrorKind {
@@ -164,6 +168,12 @@ impl std::fmt::Display for CodegenErrorKind {
             }
             CodegenErrorKind::AttrValueNotString => {
                 write!(f, "attribute values are strings")
+            }
+            CodegenErrorKind::ListNotAllowed => {
+                write!(f, "only `class` takes an array")
+            }
+            CodegenErrorKind::ClassArrayItemType => {
+                write!(f, "class array takes string literals")
             }
         }
     }
@@ -552,6 +562,10 @@ fn arg_to_field(
                 FieldValue::Const(pool.intern(lit_to_const(&lit.value))),
             )
         }
+        // 배열을 받는 건 class 속성뿐이다.
+        Expr::List(_, range) => {
+            return Err(CodegenErrorKind::ListNotAllowed.at(range.0));
+        }
         // payload/context 값은 아직 잎 하나뿐 - 연산자는 @if 조건에서만 쓴다.
         Expr::Unary(..) | Expr::Binary(..) => {
             return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0));
@@ -562,6 +576,22 @@ fn arg_to_field(
         type_ref,
         value: ref_value,
     })
+}
+
+/// class 배열 요소를 공백으로 이어 하나의 값으로. ["card", "lg"] -> "card lg".
+/// 요소는 문자열 리터럴만 - 변수가 섞이면 런타임이 합쳐야 하는데 아직 그 길이 없다.
+fn join_class_items(items: &[Expr]) -> Result<String, CodegenError> {
+    let mut parts = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            Expr::Lit(lit, range) => match &lit.value {
+                Lit::Str(s) => parts.push(s.as_str()),
+                _ => return Err(CodegenErrorKind::ClassArrayItemType.at(range.0)),
+            },
+            other => return Err(CodegenErrorKind::ClassArrayItemType.at(other.range().0)),
+        }
+    }
+    Ok(parts.join(" "))
 }
 
 /// 리터럴의 quble 타입. 리터럴은 스칼라라 Bool/Number/String 중 하나(intern은 모두 Scalar 엔트리).
@@ -627,6 +657,9 @@ fn fold_expr(expr: &Expr) -> Option<Folded> {
 
         // 참조가 끼면 컴파일타임에 값을 모른다.
         Expr::Var(..) => None,
+
+        // 식 평가 경로에는 안 온다 - expr_type이 ListNotAllowed로 먼저 막는다.
+        Expr::List(..) => unreachable!("배열은 식으로 평가되지 않는다"),
 
         Expr::Unary(op, operand, _) => match (op, fold_expr(operand)?) {
             (UnaryOp::Not, Folded::Bool(b)) => Some(Folded::Bool(!b)),
@@ -703,6 +736,9 @@ fn emit_expr(
                 out.extend_from_slice(&index.to_le_bytes());
             }
         },
+
+        // 식 평가 경로에는 안 온다 - expr_type이 ListNotAllowed로 먼저 막는다.
+        Expr::List(..) => unreachable!("배열은 식으로 평가되지 않는다"),
 
         // 참조 아니면 `.length` - expr_type과 같은 순서로 가른다(실제 필드가 먼저).
         Expr::Var(var, _) => match require_leaf_var_ref(var, props, for_vars) {
@@ -852,11 +888,18 @@ fn emit_node(
 
             for (name, value) in attrs {
                 // DOM 속성값은 문자열이라 리터럴은 Str만 온다 - 숫자/불리언은 갈 곳이 없다.
+                // 배열은 class에서만 오고, 컴파일타임에 공백으로 이어 같은 정적 값이 된다.
                 let static_str = match value {
                     Expr::Lit(lit, range) => match &lit.value {
-                        Lit::Str(s) => Some(s),
+                        Lit::Str(s) => Some(s.clone()),
                         _ => return Err(CodegenErrorKind::AttrValueNotString.at(range.0)),
                     },
+                    Expr::List(items, range) => {
+                        if name != "class" {
+                            return Err(CodegenErrorKind::ListNotAllowed.at(range.0));
+                        }
+                        Some(join_class_items(items)?)
+                    }
                     _ => None,
                 };
                 // 두 축이 opcode를 가른다.
@@ -875,7 +918,7 @@ fn emit_node(
                 match static_str {
                     // 정적 값은 상수풀 인덱스 u16.
                     Some(s) => {
-                        code.extend_from_slice(&pool.intern_str(s).to_le_bytes());
+                        code.extend_from_slice(&pool.intern_str(&s).to_le_bytes());
                     }
                     // 변수 값은 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
                     None => match value {

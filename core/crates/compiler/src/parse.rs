@@ -366,14 +366,40 @@ impl<'a> Parser<'a> {
                 let lit = self.parse_lit_value()?;
                 Ok(Expr::Lit(lit, NodeRange(self.just_read())))
             }
+            Some(Token::LBracket) => {
+                self.next()?; // [
+                let items = self.parse_expr_list()?;
+                self.expect(&Token::RBracket)?;
+                let range = NodeRange(SrcRange {
+                    start: start.start,
+                    end: self.just_read().end,
+                });
+                Ok(Expr::List(items, range))
+            }
             got => {
                 let kind = ParseErrorKind::Expected {
-                    want: "expression (prop, \"str\", 42, true, `(`)".into(),
+                    want: "expression (prop, \"str\", 42, true, `(`, `[`)".into(),
                     got: shown(got),
                 };
                 Err(self.err_here(kind))
             }
         }
+    }
+
+    // LIST = [ (EXPR (, EXPR)* ,?)? ]  - 여는/닫는 대괄호는 부르는 쪽이 소비한다.
+    // 구분자 콤마 필수, 마지막 요소 뒤만 생략 가능(객체 타입 필드와 같은 규칙). 빈 배열도 된다.
+    fn parse_expr_list(&mut self) -> Result<Vec<Expr>, ParseError> {
+        let mut items = Vec::new();
+        while !matches!(self.peek(), Some(Token::RBracket) | None) {
+            items.push(self.parse_expr()?);
+            // 요소 뒤가 ]면 종료(마지막 생략), 아니면 콤마 필수(소비 후 계속).
+            // trailing 콤마는 다음 루프에서 ]를 만나 종료한다.
+            if matches!(self.peek(), Some(Token::RBracket)) {
+                break;
+            }
+            self.expect(&Token::Comma)?;
+        }
+        Ok(items)
     }
 
     /// `=` 뒤 값 하나: 따옴표 문자열(`"card"`)이거나 중괄호가 연 식(`{x}`, `{42}`).

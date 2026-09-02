@@ -241,9 +241,9 @@ fn value_type(v: &Expr, props: &[Prop]) -> String {
             Some(ty) => type_to_ts(ty),
             None => "unknown".to_string(),
         },
-        // 연산자가 붙은 식은 값 자리에서 아직 안 온다(codegen이 거른다).
+        // 연산자가 붙은 식과 배열은 이 자리에서 codegen이 거른다.
         // d.ts는 컴파일 실패 중에도 불리므로 에러 대신 unknown으로 낸다.
-        Expr::Unary(..) | Expr::Binary(..) => "unknown".to_string(),
+        Expr::List(..) | Expr::Unary(..) | Expr::Binary(..) => "unknown".to_string(),
     }
 }
 

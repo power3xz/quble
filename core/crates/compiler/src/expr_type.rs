@@ -28,6 +28,8 @@ pub enum ExprTypeErrorKind {
     ResultType { want: Box<Type>, got: Box<Type> },
     /// `.length` 대상이 배열도 문자열도 아님.
     NoLength(String),
+    /// 배열이 식으로 평가되는 자리에 왔다. 지금 배열을 받는 건 class 속성뿐이다.
+    ListNotAllowed,
     /// 아래층(scope) 조회 실패 - 여기서 더 할 말이 없어 그대로 통과시킨다.
     Scope(ScopeErrorKind),
 }
@@ -51,6 +53,7 @@ impl std::fmt::Display for ExprTypeErrorKind {
                 write!(f, "expected {}, found {}", type_name(want), type_name(got))
             }
             ExprTypeErrorKind::NoLength(path) => write!(f, "`{path}` has no length"),
+            ExprTypeErrorKind::ListNotAllowed => write!(f, "only `class` takes an array"),
             ExprTypeErrorKind::Scope(e) => e.fmt(f),
         }
     }
@@ -147,6 +150,9 @@ pub fn expr_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Typ
                 None => Err(not_found.into()),
             },
         },
+
+        // 배열이 오는 자리는 class 속성뿐이고 codegen이 거기서 낮춘다 - 식 평가를 안 거친다.
+        Expr::List(_, range) => Err(ExprTypeErrorKind::ListNotAllowed.at(range.0)),
 
         Expr::Unary(op, operand, _) => {
             let want = match op {
