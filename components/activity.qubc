@@ -4,9 +4,9 @@ component Activity {
   props { icon: string, text: string, time: string }
   template {
     div(class="act") {
-      span(class="icon") { {icon} }
-      span(class="text") { {text} }
-      span(class="time") { {time} }
+      span(class="icon") { ${icon} }
+      span(class="text") { ${text} }
+      span(class="time") { ${time} }
     }
   }
 }

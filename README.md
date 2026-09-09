@@ -16,14 +16,14 @@ component Greeting {
   props { name: string }
   template {
     div(class="card") {
-      h3(class="name") { "안녕하세요, " {name} "님" }
+      h3(class="name") { "안녕하세요, " ${name} "님" }
       img(src="wave.png" alt="인사" /)
     }
   }
 }
 ```
 
-`template`만 필수고 나머지 블록은 선택이다. props는 타입 표기가 필수이며, `{name}`으로
+`template`만 필수고 나머지 블록은 선택이다. props는 타입 표기가 필수이며, `${name}`으로
 그 값을 보간한다 - 문자열과는 별개 노드라 위처럼 나란히 놓아 잇는다.
 
 자식이 없는 요소는 self-close로 닫는다 - `img(... /)`, `br( /)`. `/` 앞 공백은 필수고,
@@ -46,8 +46,8 @@ component TodoList {
       ul(class="todo__list") {
         @for (todo, i of todos) {
           li(class="todo__item") {
-            span(class="todo__num") { {i} }
-            span(class="todo__text") { {todo.text} }
+            span(class="todo__num") { ${i} }
+            span(class="todo__text") { ${todo.text} }
             button(class="todo__del" @click:DEL) { "삭제" }
           }
         }
@@ -80,7 +80,7 @@ component Column {
   }
   template {
     div(class="col") {
-      h2(class="col__name" @click:CLICK_HEADING) { {name} }
+      h2(class="col__name" @click:CLICK_HEADING) { ${name} }
 
       @with LaneArea {
         @for (card, seat of cards) {
@@ -104,8 +104,8 @@ component Card {
   }
   template {
     article(class="ticket" @click:CLICK_CARD) {
-      h3(class="ticket__title") { {title} }
-      button(class="ticket__who" @click:CLICK_OWNER) { {assignee} }
+      h3(class="ticket__title") { ${title} }
+      button(class="ticket__who" @click:CLICK_OWNER) { ${assignee} }
     }
   }
 }

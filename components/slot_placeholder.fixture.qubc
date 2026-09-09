@@ -4,10 +4,10 @@ component SlotPlaceholder {
   template {
     div() {
       Panel(heading="panel") {
-        Header << h1(class="filled" @click:PICK) { {title} }
+        Header << h1(class="filled" @click:PICK) { ${title} }
       }
       Plain() {
-        span(class="anon") { {note} }
+        span(class="anon") { ${note} }
       }
     }
   }
@@ -20,7 +20,7 @@ component Panel {
     section() {
       div(class="head") { @slot(Header) }
       div(class="body") { @slot(Body) }
-      p(class="own" @click:OWN) { {heading} }
+      p(class="own" @click:OWN) { ${heading} }
     }
   }
 }

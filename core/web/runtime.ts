@@ -1282,7 +1282,7 @@ class Interpreter {
     this.freeArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef);
     info.elemStartLeafIndices.splice(i, 1);
     // 인덱스 leaf 처리(@for로 순회 중일 때만 - push와 같은 forRegionIndices 기준) - i번째 인덱스 칸을 회수하고
-    // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 {i}가 구독하고
+    // 목록에서 뺀 뒤, 뒤로 당겨진 요소들의 인덱스 leaf를 새 자리 번호로 set한다. 이 leaf를 몸체 ${i}가 구독하고
     // $n이 발화 시 읽으므로, 중간 제거로 뒤가 당겨져도 표시/이벤트 인덱스가 자동 정합한다(값 고정/위치 이동 설계).
     // 칸은 배열이 소유한다 - 자리 번호라 순회하는 @for가 여럿이어도 값이 같아, 회차들이 같은 칸을 함께 구독한다.
     if (info.forRegionIndices.length > 0) {
@@ -1607,7 +1607,7 @@ class Interpreter {
     // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
     // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
     // 새 회차의 전역 branchIndex를 돌려준다.
-    // 몸체 `{i}`가 읽을 회차변수(인덱스) 슬롯을 [RAW, i]로 밀고 build 후 되돌린다
+    // 몸체 `${i}`가 읽을 회차변수(인덱스) 슬롯을 [RAW, i]로 밀고 build 후 되돌린다
     // (array-for와 같은 push/pop 규칙). 슬롯 번호는 그 시점 pairs 길이/2 = props+바깥 회차변수 뒤.
     const addIterationBranch = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
@@ -1698,7 +1698,7 @@ class Interpreter {
     const stacks = snapshotStacks(walkStacks);
 
     // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를
-    // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 {i}가 읽는다. 인덱스 leaf는 발화 시
+    // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 ${i}가 읽는다. 인덱스 leaf는 발화 시
     // $n으로도 해소되게 loopIndexStack에 (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
     const addIterationBranch = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);

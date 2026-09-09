@@ -520,13 +520,13 @@ mod tests {
         reset();
         add_file(
             "main.qubc",
-            "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}",
+            "component C {\n  props { user: { name: string } }\n  template { div() { ${user.nope} } }\n}",
         );
         let (status, out) = diagnose("main.qubc");
         assert_eq!(status, 1);
         assert_eq!(
             out,
-            r#"{"path":"main.qubc","message":"no field `nope` on prop `user`","start":{"line":2,"column":22},"end":{"line":2,"column":31}}"#
+            r#"{"path":"main.qubc","message":"no field `nope` on prop `user`","start":{"line":2,"column":23},"end":{"line":2,"column":32}}"#
         );
     }
 
@@ -540,21 +540,21 @@ mod tests {
         );
         add_file(
             "column.qubc",
-            "component Column {\n  props { name: { label: string } }\n  template { p() { {name.nope} } }\n}",
+            "component Column {\n  props { name: { label: string } }\n  template { p() { ${name.nope} } }\n}",
         );
         let (status, out) = diagnose("main.qubc");
         assert_eq!(status, 1);
         // loader가 `./`를 벗겨 등록된 이름으로 맞추므로 진단도 그 이름을 쓴다 - 확장이
         // 이 이름으로 파일을 되찾는다.
         assert!(out.contains(r#""path":"column.qubc""#), "{out}");
-        assert!(out.contains(r#""start":{"line":2,"column":20}"#), "{out}");
+        assert!(out.contains(r#""start":{"line":2,"column":21}"#), "{out}");
     }
 
     /// 컬럼은 UTF-16이라 한글이 앞서도 안 튄다 - 바이트로 셌다면 3배가 된다.
     #[test]
     fn diagnose_column_counts_utf16() {
         reset();
-        let line = r#"  template { div() { "가나다" {user.nope} } }"#;
+        let line = r#"  template { div() { "가나다" ${user.nope} } }"#;
         add_file(
             "main.qubc",
             &format!("component C {{\n  props {{ user: {{ name: string }} }}\n{line}\n}}"),
@@ -567,7 +567,7 @@ mod tests {
             .chars()
             .map(char::len_utf16)
             .sum();
-        assert_eq!(column, 28);
+        assert_eq!(column, 29);
         assert!(
             out.contains(&format!(r#""start":{{"line":2,"column":{column}}}"#)),
             "{out}"

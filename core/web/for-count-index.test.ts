@@ -1,4 +1,4 @@
-// count @for의 회차변수(인덱스)를 텍스트로 렌더 - `@for (i of count) { {i} }`. 회차 인덱스는
+// count @for의 회차변수(인덱스)를 텍스트로 렌더 - `@for (i of count) { ${i} }`. 회차 인덱스는
 // store에 안 앉는 회차 상수(RAW sourcePair)라, 초기 렌더와 grow로 늘린 꼬리 모두 자기 인덱스를
 // 표시해야 한다. count는 store.set으로 늘려(grow) 반응 경로를 탄다.
 

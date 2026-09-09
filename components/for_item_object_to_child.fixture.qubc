@@ -13,8 +13,8 @@ component Card {
   props { info: { label: string, value: string } }
   template {
     div(class="card") {
-      span(class="label") { {info.label} }
-      span(class="value") { {info.value} }
+      span(class="label") { ${info.label} }
+      span(class="value") { ${info.value} }
     }
   }
 }

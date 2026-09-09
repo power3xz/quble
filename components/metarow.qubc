@@ -4,8 +4,8 @@ component MetaRow {
   props { icon: string, text: string }
   template {
     p(class="metarow") {
-      span(class="icon") { {icon} }
-      span(class="text") { {text} }
+      span(class="icon") { ${icon} }
+      span(class="text") { ${text} }
     }
   }
 }

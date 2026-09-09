@@ -5,18 +5,18 @@ component SlotPlaceholderControl {
     div() {
       @for (tag of tags) {
         Row() {
-          span(class="cell" @click:HIT) { {tag} }
+          span(class="cell" @click:HIT) { ${tag} }
         }
       }
       @if (open) {
         Lazy() {
-          em(class="late") { {label} }
+          em(class="late") { ${label} }
         }
       }
       @for (tag of tags) {
         @if (open) {
           Lazy() {
-            i(class="deferred" @click:HIT) { {tag} }
+            i(class="deferred" @click:HIT) { ${tag} }
           }
         }
       }

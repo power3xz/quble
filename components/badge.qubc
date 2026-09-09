@@ -3,6 +3,6 @@ use "./badge.css"
 component Badge {
   props { role: string, theme: string }
   template {
-    span(class={theme}) { {role} }
+    span(class={theme}) { ${role} }
   }
 }

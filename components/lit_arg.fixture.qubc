@@ -9,5 +9,5 @@ component LitArg {
 
 component Label {
   props { text: string }
-  template { span() { {text} } }
+  template { span() { ${text} } }
 }

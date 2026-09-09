@@ -6,6 +6,6 @@ component Completion {
     CLICK_ITEM({ })
   }
   template {
-    button(class="completion__item" data-selected={isSelected} @click:CLICK_ITEM) { {name} }
+    button(class="completion__item" data-selected={isSelected} @click:CLICK_ITEM) { ${name} }
   }
 }

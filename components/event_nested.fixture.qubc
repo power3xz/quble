@@ -6,7 +6,7 @@ component Nested {
   }
   template {
     div(@click:OUTER) {
-      button(@click:INNER) { {label} }
+      button(@click:INNER) { ${label} }
     }
   }
 }

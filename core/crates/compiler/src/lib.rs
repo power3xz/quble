@@ -59,7 +59,7 @@ pub fn compile_src(
 ///
 /// ```text
 /// card.qubc:6:14: error: no field `nope` on prop `user`
-///   6 |       p() { {user.nope} }
+///   6 |       p() { ${user.nope} }
 ///     |              ^^^^^^^^^
 /// ```
 ///
@@ -1213,7 +1213,7 @@ mod tests {
     }
 
     /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개라 ForArrayVar (scope=0, offset=0).
-    /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 {tag}가 TextVar 1을 낸다.
+    /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 ${tag}가 TextVar 1을 낸다.
     #[test]
     fn compiles_for_scalar_array() {
         use bytecode::{decode, Op};
@@ -1223,7 +1223,7 @@ mod tests {
               props { tags: string[] }
               template {
                 @for (tag of tags) {
-                  p() { {tag} }
+                  p() { ${tag} }
                 }
               }
             }
@@ -1239,7 +1239,7 @@ mod tests {
             code.windows(for_op.len()).any(|w| w == for_op.as_slice()),
             "ForArrayVar(배열 scope=0 offset=0)이 있어야:\n{code:?}",
         );
-        // {tag} 회차변수는 props 슬롯(1개) 뒤 scope_index 1, 요소가 스칼라라 offset 0.
+        // ${tag} 회차변수는 props 슬롯(1개) 뒤 scope_index 1, 요소가 스칼라라 offset 0.
         let text_var = vec![Op::TextVar as u8, 1, 0];
         assert!(
             code.windows(text_var.len())
@@ -1255,7 +1255,7 @@ mod tests {
         use bytecode::{decode, Op};
 
         let src = r#"
-            component Card { props { title: string } template { p() { {title} } } }
+            component Card { props { title: string } template { p() { ${title} } } }
             component C {
               props { tags: string[] }
               template {
@@ -1286,7 +1286,7 @@ mod tests {
     #[test]
     fn for_item_does_not_leak_into_child_props() {
         let src = r#"
-            component Card { props { title: string } template { p() { {title} } } }
+            component Card { props { title: string } template { p() { ${title} } } }
             component C {
               props { tags: string[] }
               template {
@@ -1316,7 +1316,7 @@ mod tests {
               props { tag: string, tags: string[] }
               template {
                 @for (tag of tags) {
-                  p() { {tag} }
+                  p() { ${tag} }
                 }
               }
             }
@@ -1334,7 +1334,7 @@ mod tests {
     }
 
     /// `@for (tag, i of tags)` 인덱스변수. item(tag) 슬롯 뒤에 index(i) 슬롯이 항상 이어진다(모든 @for
-    /// 2칸). props(tags:0) + item(tag:1) + index(i:2)라 {i}는 TextVar 2, {tag}는 TextVar 1.
+    /// 2칸). props(tags:0) + item(tag:1) + index(i:2)라 ${i}는 TextVar 2, ${tag}는 TextVar 1.
     #[test]
     fn compiles_for_index_var() {
         use bytecode::{decode, Op};
@@ -1344,7 +1344,7 @@ mod tests {
               props { tags: string[] }
               template {
                 @for (tag, i of tags) {
-                  p() { {i} {tag} }
+                  p() { ${i} ${tag} }
                 }
               }
             }
@@ -1354,7 +1354,7 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // {tag}=요소 슬롯 1(offset 0), {i}=인덱스 슬롯 2(요소 뒤, offset 0).
+        // ${tag}=요소 슬롯 1(offset 0), ${i}=인덱스 슬롯 2(요소 뒤, offset 0).
         for (name, scope) in [("tag", 1u8), ("i", 2u8)] {
             let text_var = vec![Op::TextVar as u8, scope, 0];
             assert!(
@@ -1373,7 +1373,7 @@ mod tests {
               props { tags: string[] }
               template {
                 @for (tag, tag of tags) {
-                  p() { {tag} }
+                  p() { ${tag} }
                 }
               }
             }
@@ -1799,7 +1799,7 @@ mod tests {
             r#"
             component C {
               props { heading: string, sec: Section }
-              template { div() { {heading} } }
+              template { div() { ${heading} } }
             }
             component Section {
               props { title: string, on: bool }
@@ -1811,7 +1811,7 @@ mod tests {
             r#"
             component C {
               props { heading: string, sec: { title: string, on: bool } }
-              template { div() { {heading} } }
+              template { div() { ${heading} } }
             }
         "#,
         );
@@ -1945,7 +1945,7 @@ component B { props { a: A } template { div( /) } }"#;
                   a: { title: string, on: bool }
                 }
               }
-              template { div() { {heading} } }
+              template { div() { ${heading} } }
             }
         "#;
         assert_eq!(
@@ -1971,7 +1971,7 @@ component B { props { a: A } template { div( /) } }"#;
                 heading: string, dirty: bool,
                 general: { open: bool, a: { title: string, on: bool } }
               }
-              template { div() { {general.a.on} } }
+              template { div() { ${general.a.on} } }
             }
         "#;
         let out = compile_src("entry", src, &(|_: &str, _: &str| None)).unwrap();
@@ -1999,7 +1999,7 @@ component B { props { a: A } template { div( /) } }"#;
             }
             component Row {
               props { row: { label: string, on: bool } }
-              template { span() { {row.label} } }
+              template { span() { ${row.label} } }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -2027,7 +2027,7 @@ component B { props { a: A } template { div( /) } }"#;
             }
             component Row {
               props { row: { text: string, on: bool } }
-              template { span() { {row.text} } }
+              template { span() { ${row.text} } }
             }
         "#;
         assert!(matches!(
@@ -2052,7 +2052,7 @@ component B { props { a: A } template { div( /) } }"#;
             }
             component Row {
               props { count: number }
-              template { span() { {count} } }
+              template { span() { ${count} } }
             }
         "#;
         assert!(matches!(
@@ -2070,7 +2070,7 @@ component B { props { a: A } template { div( /) } }"#;
     /// 틀린 것은 그 리터럴이지 합성 호출이 아니다 - 인자가 여럿이면 어느 것인지 짚어야 한다.
     #[test]
     fn literal_arg_mismatch_blames_the_literal() {
-        let src = "component C {\n  props { t: string }\n  template { div() { Row(title=\"a\" count=\"b\" /) } }\n}\ncomponent Row {\n  props { title: string, count: number }\n  template { span() { {title} } }\n}";
+        let src = "component C {\n  props { t: string }\n  template { div() { Row(title=\"a\" count=\"b\" /) } }\n}\ncomponent Row {\n  props { title: string, count: number }\n  template { span() { ${title} } }\n}";
         let err = compile(src).expect_err("컴파일이 실패해야 한다");
         let d = diagnose("entry", src, &err);
 
@@ -2088,7 +2088,7 @@ component B { props { a: A } template { div( /) } }"#;
             }
             component Row {
               props { count: number }
-              template { span() { {count} } }
+              template { span() { ${count} } }
             }
         "#;
         let err = compile(src).expect_err("컴파일이 실패해야 한다");
@@ -2109,7 +2109,7 @@ component B { props { a: A } template { div( /) } }"#;
             }
             component Row {
               props { row: { text: string, on: bool } }
-              template { span() { {row.text} } }
+              template { span() { ${row.text} } }
             }
         "#;
         let err = compile(src).expect_err("컴파일이 실패해야 한다");
@@ -2120,14 +2120,14 @@ component B { props { a: A } template { div( /) } }"#;
         );
     }
 
-    /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`{a}`)에 객체를 넣으면 여전히 NotLeaf.
+    /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`${a}`)에 객체를 넣으면 여전히 NotLeaf.
     /// 값/반응성 자리엔 leaf만 온다는 경계가 인자 허용으로 무너지지 않아야 한다.
     #[test]
     fn object_in_text_node_still_errors() {
         let src = r#"
             component C {
               props { a: { label: string, on: bool } }
-              template { div() { {a} } }
+              template { div() { ${a} } }
             }
         "#;
         assert!(matches!(
@@ -2153,7 +2153,7 @@ component B { props { a: A } template { div( /) } }"#;
             }
             component Row {
               props { label: string }
-              template { span() { {label} } }
+              template { span() { ${label} } }
             }
         "#;
         let bytes = compile(src).unwrap();
@@ -2184,7 +2184,7 @@ component B { props { a: A } template { div( /) } }"#;
             }
             component Badge {
               props { text: string }
-              template { span() { {text} } }
+              template { span() { ${text} } }
             }
         "#;
         let bytes = compile_map(entry, &[("./parts.qubc", parts)]).unwrap();
@@ -2705,7 +2705,7 @@ component B { props { a: A } template { div( /) } }"#;
         assert!(compile(nested).is_ok());
     }
 
-    /// 객체 경로 보간 `{user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
+    /// 객체 경로 보간 `${user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
     /// 값 자리 TEXT_VAR는 (scope_index, offset) 두 u8. 슬롯 순번 title=0, user=1, done=2.
     /// 객체 필드는 root 슬롯 + 필드까지의 store 칸 offset: user.name=(1,0), user.contact.email=(1,1).
     #[test]
@@ -2719,7 +2719,7 @@ component B { props { a: A } template { div( /) } }"#;
                 done: bool
               }
               template {
-                div() { {title} {user.name} {user.contact.email} }
+                div() { ${title} ${user.name} ${user.contact.email} }
               }
             }
         "#;
@@ -2752,7 +2752,7 @@ component B { props { a: A } template { div( /) } }"#;
         let src = r#"
             component C {
               props { user: { name: string } }
-              template { div() { {user} } }
+              template { div() { ${user} } }
             }
         "#;
         assert!(matches!(
@@ -2773,7 +2773,7 @@ component B { props { a: A } template { div( /) } }"#;
         let src = r#"
             component C {
               props { user: { name: string } }
-              template { div() { {user.age} } }
+              template { div() { ${user.age} } }
             }
         "#;
         assert!(matches!(
@@ -2796,7 +2796,7 @@ component B { props { a: A } template { div( /) } }"#;
         let src = r#"
             component C {
               props { title: string }
-              template { div() { {title.x} } }
+              template { div() { ${title.x} } }
             }
         "#;
         assert!(matches!(
@@ -2975,7 +2975,7 @@ component B { props { a: A } template { div( /) } }"#;
         let src = r#"
             component Outer {
               props { title: string }
-              template { div() { Inner() { {title} } } }
+              template { div() { Inner() { ${title} } } }
             }
             component Inner { template { section() { @slot() } } }
         "#;
@@ -2986,7 +2986,7 @@ component B { props { a: A } template { div( /) } }"#;
         let push = op_positions(outer, Op::PushSlotPlaceholderContent)[0];
         let end = op_positions(outer, Op::SlotPlaceholderContentEnd)[0];
         let text_var = op_positions(&outer[push..end], Op::TextVar);
-        assert_eq!(text_var.len(), 1, "콘텐츠 구간 안에 {{title}} 보간");
+        assert_eq!(text_var.len(), 1, "콘텐츠 구간 안에 ${{title}} 보간");
         // operand = Outer의 scope index 0 (Inner의 것이 아니다).
         assert_eq!(outer[push + text_var[0] + 1], 0);
     }
@@ -3276,7 +3276,7 @@ component B { props { a: A } template { div( /) } }"#;
               props { title: string, tags: string[] }
               template {
                 div(class="card") { // 제목만
-                  {title}
+                  ${title}
                 }
               }
             }
@@ -3378,7 +3378,7 @@ component B { props { a: A } template { div( /) } }"#;
     #[test]
     fn codegen_error_points_at_unknown_prop() {
         // props에 없는 `nope`를 보간했다 - 그 참조를 가리켜야 한다.
-        let src = r#"component C { props { title: string } template { div() { {nope} } } }"#;
+        let src = r#"component C { props { title: string } template { div() { ${nope} } } }"#;
         assert_eq!(codegen_error_snippet(src), "nope");
     }
 
@@ -3388,7 +3388,7 @@ component B { props { a: A } template { div( /) } }"#;
         let src = r#"
             component C {
               props { user: { name: string } }
-              template { div() { {user.nope} } }
+              template { div() { ${user.nope} } }
             }
         "#;
         assert_eq!(codegen_error_snippet(src), "user.nope");
@@ -3400,7 +3400,7 @@ component B { props { a: A } template { div( /) } }"#;
         let src = r#"
             component C {
               props { user: { name: string } }
-              template { div() { {user} } }
+              template { div() { ${user} } }
             }
         "#;
         assert_eq!(codegen_error_snippet(src), "user");
@@ -3455,13 +3455,13 @@ component B { props { a: A } template { div( /) } }"#;
     /// codegen 에러는 참조 자리를 가리키고, 메시지에 variant 이름이 안 새어 나온다.
     #[test]
     fn diagnostic_shows_location_and_message() {
-        let src = "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}";
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { ${user.nope} } }\n}";
         assert_eq!(
             diagnostic_of(src),
             [
-                "entry:3:23: error: no field `nope` on prop `user`",
-                " 3 |   template { div() { {user.nope} } }",
-                "   |                       ^^^^^^^^^",
+                "entry:3:24: error: no field `nope` on prop `user`",
+                " 3 |   template { div() { ${user.nope} } }",
+                "   |                        ^^^^^^^^^",
             ]
             .join("\n")
         );
@@ -3478,7 +3478,7 @@ component B { props { a: A } template { div( /) } }"#;
     /// 소스에서 잘라내면 밑줄 칠 구간이 나온다.
     #[test]
     fn diagnose_gives_byte_range_into_the_source() {
-        let src = "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}";
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { ${user.nope} } }\n}";
         let err = compile(src).expect_err("컴파일이 실패해야 한다");
         let d = diagnose("entry", src, &err);
 
@@ -3496,7 +3496,7 @@ component B { props { a: A } template { div( /) } }"#;
     #[test]
     fn diagnose_carries_the_used_file_source() {
         let entry = "use Column from \"./column.qubc\"\ncomponent Board {\n  props { t: { label: string } }\n  template { Lane: Column(name={t} /) }\n}";
-        let used = "component Column {\n  props { name: { label: string } }\n  template { p() { {name.nope} } }\n}";
+        let used = "component Column {\n  props { name: { label: string } }\n  template { p() { ${name.nope} } }\n}";
 
         let err = compile_map(entry, &[("./column.qubc", used)]).expect_err("실패해야 한다");
         let d = diagnose("entry", entry, &err);
@@ -3534,7 +3534,7 @@ component B { props { a: A } template { div( /) } }"#;
             ),
             // codegen
             (
-                "component C {\n  props { user: { name: string } }\n  template { div() { {user.nope} } }\n}",
+                "component C {\n  props { user: { name: string } }\n  template { div() { ${user.nope} } }\n}",
                 "user.nope",
             ),
         ];
@@ -3558,7 +3558,7 @@ component B { props { a: A } template { div( /) } }"#;
     /// 한글이 앞선 줄이라 바이트로 셌다면 컬럼이 튄다.
     #[test]
     fn diagnose_range_converts_to_editor_position() {
-        let src = "component C {\n  props { user: { name: string } }\n  template { div() { \"가나다\" {user.nope} } }\n}";
+        let src = "component C {\n  props { user: { name: string } }\n  template { div() { \"가나다\" ${user.nope} } }\n}";
         let err = compile(src).expect_err("컴파일이 실패해야 한다");
         let d = diagnose("entry", src, &err);
         let range = d.range.expect("자리를 알아야 한다");
@@ -3583,7 +3583,7 @@ component B { props { a: A } template { div( /) } }"#;
     #[test]
     fn diagnostic_points_at_the_used_file_not_the_entry() {
         let entry = "use Column from \"./column.qubc\"\ncomponent Board {\n  props { t: { label: string } }\n  template { Lane: Column(name={t} /) }\n}";
-        let used = "component Column {\n  props { name: { label: string } }\n  template { p() { {name.nope} } }\n}";
+        let used = "component Column {\n  props { name: { label: string } }\n  template { p() { ${name.nope} } }\n}";
 
         let err = compile_map(entry, &[("./column.qubc", used)]).expect_err("실패해야 한다");
         let out = format_error(None, "entry", entry, &err);
@@ -3591,9 +3591,9 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(
             out,
             [
-                "./column.qubc:3:21: error: no field `nope` on prop `name`",
-                " 3 |   template { p() { {name.nope} } }",
-                "   |                     ^^^^^^^^^",
+                "./column.qubc:3:22: error: no field `nope` on prop `name`",
+                " 3 |   template { p() { ${name.nope} } }",
+                "   |                      ^^^^^^^^^",
             ]
             .join("\n")
         );
@@ -3605,7 +3605,7 @@ component B { props { a: A } template { div( /) } }"#;
     fn diagnostic_handles_offset_past_entry_length() {
         let entry = "use C from \"./c.qubc\"\ncomponent E {\n  props { v: { k: string } }\n  template { X: C(a={v} /) }\n}";
         let used = format!(
-            "component C {{\n{}  props {{ a: {{ k: string }} }}\n  template {{ p() {{ {{a.nope}} }} }}\n}}",
+            "component C {{\n{}  props {{ a: {{ k: string }} }}\n  template {{ p() {{ ${{a.nope}} }} }}\n}}",
             "  \n".repeat(40),
         );
 
@@ -3619,7 +3619,7 @@ component B { props { a: A } template { div( /) } }"#;
     /// 먼저다 - 오타를 냈으면 "title이 빠졌다"보다 그 오타를 짚는 게 낫다.
     #[test]
     fn diagnostic_points_at_the_unknown_arg_name() {
-        let src = "component Card { props { title: string } template { p() { {title} } } }\ncomponent D { props { x: string } template { Card(nope={x} /) } }";
+        let src = "component Card { props { title: string } template { p() { ${title} } } }\ncomponent D { props { x: string } template { Card(nope={x} /) } }";
         assert_eq!(
             diagnostic_of(src),
             [
@@ -3858,7 +3858,17 @@ component B { props { a: A } template { div( /) } }"#;
         // 노드 자리에 숫자는 올 수 없다.
         assert_eq!(
             error_message("component C { template { div() { 42 } } }"),
-            "expected node (element, string, or {var}), found `42`"
+            "expected node (element, string, or ${var}), found `42`"
+        );
+    }
+
+    /// 보간은 `${}`로만 연다 - `$` 없는 `{title}`은 노드 자리에서 `{`로 시작하는 것이
+    /// 없어 파서 에러다.
+    #[test]
+    fn bare_brace_interpolation_rejected() {
+        assert_eq!(
+            error_message("component C { props { title: string } template { p() { {title} } } }"),
+            "expected node (element, string, or ${var}), found `{`"
         );
     }
 

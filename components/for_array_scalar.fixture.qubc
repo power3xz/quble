@@ -3,7 +3,7 @@ component ForArrayScalar {
   template {
     ul() {
       @for (tag of tags) {
-        li() { {tag} }
+        li() { ${tag} }
       }
     }
   }

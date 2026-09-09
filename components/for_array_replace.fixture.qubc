@@ -10,11 +10,11 @@ component RowList {
       ul() {
         @for (row, i of rows) {
           li(class="row") {
-            span(class="idx") { {i} }
-            span(class="label") { {row.label} }
+            span(class="idx") { ${i} }
+            span(class="label") { ${row.label} }
             button(class="pick" @click:PICK) { "p" }
             @for (cell of row.cells) {
-              span(class="cell") { {cell} }
+              span(class="cell") { ${cell} }
             }
           }
         }

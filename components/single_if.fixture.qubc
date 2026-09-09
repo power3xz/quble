@@ -3,10 +3,10 @@ component SingleIf {
   template {
     div() {
       @if (cond) {
-        p() { {a} }
+        p() { ${a} }
       }
       @else {
-        p() { {b} }
+        p() { ${b} }
       }
     }
   }

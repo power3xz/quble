@@ -4,7 +4,7 @@ component Field {
   template {
     div() {
       input(value={value} @input:EDIT /)
-      p() { {value} }
+      p() { ${value} }
     }
   }
 }

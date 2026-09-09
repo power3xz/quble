@@ -32,11 +32,11 @@ component LitProfileCard {
         div(class="header") {
           MainThumb: Thumbnail(avatar={avatar} name={name} /)
           div(class="ident") {
-            h3(class="name") { {name} }
+            h3(class="name") { ${name} }
             Badge(role={role} theme="light" /)
           }
         }
-        p(class="bio" @scroll:BIO_SCROLL) { {bio} }
+        p(class="bio" @scroll:BIO_SCROLL) { ${bio} }
         div(class="stats") {
           @with PremiumStat {
             FirstStat: Stat(label={followersLabel} value={followers} /)

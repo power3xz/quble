@@ -5,7 +5,7 @@ component ForIfLazySlot {
     div() {
       @for (tag of tags) {
         @if (flag) {
-          span(class="on") { {tag} }
+          span(class="on") { ${tag} }
         }
         @else {
           span(class="off") { "off" }

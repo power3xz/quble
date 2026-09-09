@@ -2,6 +2,6 @@ component Toggle {
   props { label: string, on: string }
   events { TOGGLE({ label, on }) }
   template {
-    button(@click:TOGGLE) { {label} }
+    button(@click:TOGGLE) { ${label} }
   }
 }

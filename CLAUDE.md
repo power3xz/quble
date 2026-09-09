@@ -25,6 +25,14 @@
   쓰지 않는다.
 - 기준을 말할 때는 그 기준이 어디서 판정되는지까지 적는다.
 
+### 표현 교정
+
+한 번 지적된 표현은 여기 쌓는다. 응답, 문서, 주석 전부에 걸린다.
+
+| O | X |
+|---|---|
+| `눈으로 구별된다` | `눈으로 갈린다` |
+
 ## Read First (new session / after compact)
 
 The docs below are authoritative and out-rank any conversation summary - when a summary and

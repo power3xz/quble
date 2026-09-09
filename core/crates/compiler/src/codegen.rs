@@ -1011,7 +1011,7 @@ fn emit_node(
                             }
                             .at(parent_var.range.0));
                         }
-                        // 경로 없는 참조(`{a}`)는 슬롯 통째로 THROUGH, 필드 참조(`{user.name}`)는
+                        // 경로 없는 참조(`${a}`)는 슬롯 통째로 THROUGH, 필드 참조(`${user.name}`)는
                         // (슬롯, offset)으로 FIELD - kind는 슬롯이 갖고 자식이 타입을 안다.
                         if parent_var.path.is_empty() {
                             code.push(Op::PushThrough as u8);

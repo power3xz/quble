@@ -301,9 +301,9 @@ const scanQubc: TScanner = (text) => {
       continue;
     }
 
-    // 보간 `{IDENT}` / `{a.b}` - 값을 꺼내 쓰는 자리다. `{`는 블록도 열지만(component/props/
-    // template), 보간은 여는 괄호 바로 뒤에 경로가 붙고 곧장 닫힌다는 형태로 갈린다.
-    if (c === "{") {
+    // 보간 `${IDENT}` / `${a.b}` - 값을 꺼내 쓰는 자리다. `$`가 식별자 시작 문자라
+    // 아래 식별자 분기보다 먼저 본다.
+    if (c === "$" && text[i + 1] === "{") {
       const path = readInterpolation(text, i);
       if (path !== null) {
         tokens.push({ text: path, cls: cls("interpolation") });
@@ -351,13 +351,12 @@ const scanQubc: TScanner = (text) => {
   return tokens;
 };
 
-// `{` 자리에서 보간(`{title}`, `{row.label}`)이면 그 전체를, 아니면 null을 돌려준다.
+// `${` 자리에서 보간(`${title}`, `${row.label}`)이면 그 전체를, 아니면 null을 돌려준다.
 //
-// 파서는 자리로 가르지만(자식 자리의 `{`는 보간, 그 밖은 블록) 렉서는 자리를 모른다. 형태로
-// 가른다 - 여는 괄호 바로 뒤에 경로(IDENT[.IDENT]*)가 붙고 곧장 닫히는 것만 보간이다.
-// 블록은 `{ label }`처럼 공백이 끼거나 `{` 뒤에 선언/노드가 온다.
+// 경로(IDENT[.IDENT]*)가 붙고 곧장 닫히는 것만 보간이다. 닫는 `}`가 없으면 편집 중간
+// 상태라 null이다.
 const readInterpolation = (text: string, from: number): string | null => {
-  let i = from + 1;
+  let i = from + 2;
   if (i >= text.length || !IDENT_START.test(text[i])) {
     return null;
   }

@@ -12,6 +12,6 @@ component Button {
   props { label: string }
   events { CLICK({ label }) }
   template {
-    button(@click:CLICK) { {label} }
+    button(@click:CLICK) { ${label} }
   }
 }

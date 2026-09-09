@@ -5,9 +5,9 @@ component C {
   }
   template {
     div() {
-      h1() { {title} }
-      span() { {user.name} }
-      span() { {user.contact.email} }
+      h1() { ${title} }
+      span() { ${user.name} }
+      span() { ${user.contact.email} }
     }
   }
 }

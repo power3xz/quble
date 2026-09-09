@@ -9,8 +9,8 @@ component SettingRow {
   template {
     div(class="row") {
       div(class="row__text") {
-        div(class="row__label") { {label} }
-        p(class="row__desc") { {desc} }
+        div(class="row__label") { ${label} }
+        p(class="row__desc") { ${desc} }
       }
       div(class="row__control") {
         @if (enabled) {

@@ -7,7 +7,7 @@ component ForIfPushOrder {
       ul() {
         @for (tag of tags) {
           @if (flag) {
-            li() { {tag} }
+            li() { ${tag} }
           }
           @else {
             span() { "off" }

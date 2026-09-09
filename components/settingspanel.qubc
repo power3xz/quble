@@ -20,7 +20,7 @@ component SettingsPanel {
   template {
     div(class="panel") {
       header(class="panel__head") {
-        h1(class="panel__title") { {heading} }
+        h1(class="panel__title") { ${heading} }
         div(class="panel__actions") {
           @if (dirty) {
             button(class="btn btn--ghost" @click:DISCARD) { "되돌리기" }

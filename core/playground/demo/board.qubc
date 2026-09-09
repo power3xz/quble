@@ -29,8 +29,8 @@ component Board {
     section(class="board") {
       header(class="board__bar") {
         div(class="board__id") {
-          h1(class="board__title") { {title} }
-          span(class="board__owner") { {owner} }
+          h1(class="board__title") { ${title} }
+          span(class="board__owner") { ${owner} }
         }
         button(class="board__add" @click:CLICK_ADD_COLUMN) { "+ 컬럼" }
       }

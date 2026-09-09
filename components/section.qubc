@@ -15,7 +15,7 @@ component Section {
   template {
     section(class="section") {
       header(class="section__head" @click:TOGGLE_SECTION) {
-        h2(class="section__title") { {title} }
+        h2(class="section__title") { ${title} }
         @if (open) {
           span(class="section__chevron section__chevron--open") { "접기" }
         } @else {

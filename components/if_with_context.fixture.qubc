@@ -5,11 +5,11 @@ component IfWithContext {
     div() {
       @if (cond) {
         @with Area {
-          p() { {a} }
+          p() { ${a} }
         }
       }
       @else {
-        p() { {b} }
+        p() { ${b} }
       }
     }
   }

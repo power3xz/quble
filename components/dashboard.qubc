@@ -5,14 +5,14 @@ component Dashboard {
       h2() { "계정 대시보드" }
       @if (loggedIn) {
         div(class="account") {
-          p(class="welcome") { "안녕하세요, " {name} "님" }
+          p(class="welcome") { "안녕하세요, " ${name} "님" }
           @if (isPremium) {
             div(class="premium") {
-              p(class="badge") { "프리미엄 회원 · " {plan} }
+              p(class="badge") { "프리미엄 회원 · " ${plan} }
               @if (hasNotifications) {
                 div(class="notif on") {
                   span(class="dot") { "●" }
-                  span() { "새 알림 " {notifCount} "건" }
+                  span() { "새 알림 " ${notifCount} "건" }
                 }
               }
               @else {

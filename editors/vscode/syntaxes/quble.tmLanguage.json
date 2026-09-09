@@ -109,8 +109,8 @@
       }
     },
     "interpolation": {
-      "comment": "{var} 보간 - 단일 prop 참조만(표현식 미구현). 블록 본문의 `{`와 구별하려고 `{ 식별자 }` 한 덩어리만 매칭한다(begin/end로 열면 블록 `{`를 삼킨다).",
-      "match": "(\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
+      "comment": "${var} 보간 - 단일 prop 참조만(표현식 미구현).",
+      "match": "(\\$\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
       "captures": {
         "1": { "name": "punctuation.section.embedded.begin.quble" },
         "2": { "name": "variable.other.quble" },
@@ -118,13 +118,13 @@
       }
     },
     "string": {
-      "comment": "문자열 안 {var} 보간 허용.",
+      "comment": "문자열 안 ${var} 보간 허용.",
       "begin": "\"",
       "end": "\"",
       "name": "string.quoted.double.quble",
       "patterns": [
         {
-          "match": "(\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
+          "match": "(\\$\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
           "captures": {
             "1": { "name": "punctuation.section.embedded.begin.quble" },
             "2": { "name": "variable.other.quble" },

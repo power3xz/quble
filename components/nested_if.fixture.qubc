@@ -3,16 +3,16 @@ component NestedIf {
   template {
     div() {
       @if (outer) {
-        p() { {a} }
+        p() { ${a} }
         @if (inner) {
-          p() { {b} }
+          p() { ${b} }
         }
         @else {
-          p() { {c} }
+          p() { ${c} }
         }
       }
       @else {
-        p() { {a} }
+        p() { ${a} }
       }
     }
   }

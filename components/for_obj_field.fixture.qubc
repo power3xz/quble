@@ -3,7 +3,7 @@ component ForObjField {
   template {
     div() {
       @for (item of c.count) {
-        p() { {c.count} }
+        p() { ${c.count} }
       }
     }
   }

@@ -19,7 +19,7 @@ const source = (body: string) => `component A {
   template { ${body} }
 }`;
 
-const SIMPLE = { [ENTRY]: source("button(@click:GO) { {title} }") };
+const SIMPLE = { [ENTRY]: source("button(@click:GO) { ${title} }") };
 
 let compiler: Awaited<ReturnType<typeof loadCompiler>>;
 
@@ -43,7 +43,7 @@ test("합성 트리를 걸어 핸들러 fullname을 낸다", () => {
 });
 
 test("실패하면 진단 텍스트가 온다", () => {
-  const result = compiler.compile({ [ENTRY]: "component A { template { p() { {nope} } } }" }, ENTRY);
+  const result = compiler.compile({ [ENTRY]: "component A { template { p() { ${nope} } } }" }, ENTRY);
   assert.equal(result.ok, false);
   if (result.ok) {
     return;
@@ -120,7 +120,7 @@ test("use 그래프를 등록된 파일로 해소한다", () => {
     "child.qubc": `component Child {
   props { label: string }
   events { TAP({ label }) }
-  template { span(@click:TAP) { {label} } }
+  template { span(@click:TAP) { \${label} } }
 }`,
     [ENTRY]: `use Child from "./child.qubc"
 component A {
@@ -138,7 +138,7 @@ test("컴파일이 되면 진단이 없다", () => {
 // 한글이 앞선 줄에서 컬럼을 본다 - JS 문자열 인덱스가 곧 UTF-16이라, indexOf가 준 자리와
 // 맞으면 에디터가 짚을 자리와 같다. 컴파일러가 바이트로 셌다면 한글 2자만큼 4칸 더 나간다.
 test("진단이 구간을 0-based/UTF-16으로 낸다", () => {
-  const line = `  template { p() { "가나" {nope} } }`;
+  const line = `  template { p() { "가나" \${nope} } }`;
   const files = {
     [ENTRY]: `component A {
 ${line}
@@ -156,7 +156,7 @@ ${line}
 test("use한 파일의 에러는 그 파일을 가리킨다", () => {
   const files = {
     "child.qubc": `component Child {
-  template { p() { {nope} } }
+  template { p() { \${nope} } }
 }`,
     [ENTRY]: `use Child from "./child.qubc"
 component A { template { Child( /) } }`,

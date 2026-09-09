@@ -23,7 +23,7 @@ pub struct SrcLocation {
 ///
 /// ```text
 /// card.qubc:6:14: error: no field `nope` on prop `user`
-///   6 |       p() { {user.nope} }
+///   6 |       p() { ${user.nope} }
 ///     |              ^^^^^^^^^
 /// ```
 ///

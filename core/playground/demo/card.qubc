@@ -19,10 +19,10 @@ component Card {
         Flag: Badge(text="긴급" tone="hot" /)
       }
 
-      h3(class="ticket__title") { {title} }
+      h3(class="ticket__title") { ${title} }
 
       footer(class="ticket__foot") {
-        button(class="ticket__who" @click:CLICK_OWNER) { {assignee} }
+        button(class="ticket__who" @click:CLICK_OWNER) { ${assignee} }
         Points: Badge(text={points} tone="calm" /)
       }
     }

@@ -5,7 +5,7 @@ component Tokens {
       @for (line of lines) {
         div(class="line") {
           @for (t of line.tokens) {
-            span(class={t.cls}) { {t.text} }
+            span(class={t.cls}) { ${t.text} }
           }
         }
       }

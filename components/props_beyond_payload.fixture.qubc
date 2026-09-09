@@ -2,6 +2,6 @@ component Card {
   props { label: string, hidden: string }
   events { TAP({ label }) }
   template {
-    button(@click:TAP) { {label} }
+    button(@click:TAP) { ${label} }
   }
 }

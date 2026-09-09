@@ -14,21 +14,21 @@ component C {
   }
   template {
     div() {
-      h1(@click:SWAP) { {title} }
-      span(class="name") { {user.name} }
-      span(class="age") { {user.age} }
-      span(class="email") { {user.contact.email} }
+      h1(@click:SWAP) { ${title} }
+      span(class="name") { ${user.name} }
+      span(class="age") { ${user.age} }
+      span(class="email") { ${user.contact.email} }
       ul() {
         @for (tag of user.tags) {
-          li(class="tag") { {tag} }
+          li(class="tag") { ${tag} }
         }
       }
       ul(class="posts") {
         @for (post of user.posts) {
           li(class="post") {
-            span(class="ptitle") { {post.title} }
+            span(class="ptitle") { ${post.title} }
             @for (mark of post.marks) {
-              span(class="mark") { {mark} }
+              span(class="mark") { ${mark} }
             }
           }
         }

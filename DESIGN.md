@@ -142,7 +142,7 @@ component TodoItem {
 | `@click:EVENT`                     | DOM 이벤트를 컴포넌트 이벤트로 위임한다.         |
 | `@slot [name]`                     | 슬롯 정의. 자식 콘텐츠가 들어갈 자리. 한 컴포넌트는 무기명 하나 **또는** 기명 여럿 - 섞을 수 없다. |
 | `Name << 노드`                     | 기명 슬롯에 콘텐츠 주입. 무기명은 합성 블록(`Comp(...) { ... }`)이 그대로 들어간다. |
-| `{expr}`                           | 표현식 보간.                                     |
+| `${expr}`                          | 표현식 보간.                                     |
 
 ### 2.4 이벤트 위임 흐름
 
@@ -281,8 +281,8 @@ component TodoItem {
     div(class="todo-item") {
       @with ContentArea {
         div(class="todo-content") {
-          h3(@click:EDIT) { {title} }
-          @if (description) { p() { {description} } }
+          h3(@click:EDIT) { ${title} }
+          @if (description) { p() { ${description} } }
           @if (tags.length > 0) {
             div(class="tags") {
               @for (tag of tags) {
@@ -297,11 +297,11 @@ component TodoItem {
         @if (dueDate) {
           div(class="due-date") {
             DueDateIcon: Icon(name="calendar" /)
-            span() { {dueDate} }
+            span() { ${dueDate} }
           }
         }
         @if (assignee) {
-          div(class="assignee") { span() { "담당자: {assignee}" } }
+          div(class="assignee") { span() { "담당자: ${assignee}" } }
         }
       }
 
@@ -332,7 +332,7 @@ component Badge {
   }
 
   template {
-    span(class="badge" @click:TAG_CLICK) { {text} }
+    span(class="badge" @click:TAG_CLICK) { ${text} }
   }
 }
 ```
@@ -347,7 +347,7 @@ component Card {
 
   template {
     div(class=["card", {variant}, {priority}]) {
-      h2(class=["title"]) { {title} }
+      h2(class=["title"]) { ${title} }
       div(class=["card-body"]) {
         @slot()   // 무기명 슬롯 - children이 들어온다
       }
