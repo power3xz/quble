@@ -9,8 +9,8 @@ component IndexedTagList {
       button(class="add" @click:ADD) { "+" }
       @for (tag, i of tags) {
         li(class="tag") {
-          span(class="idx") { {i} }
-          span(class="val") { {tag} }
+          span(class="idx") { ${i} }
+          span(class="val") { ${tag} }
           button(class="del" @click:DEL) { "x" }
         }
       }

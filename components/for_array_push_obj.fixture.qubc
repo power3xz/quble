@@ -6,7 +6,7 @@ component StatList {
       button(class="add" @click:ADD) { "+" }
       ul() {
         @for (stat of stats) {
-          li(class="stat") { {stat.label} ": " {stat.value} }
+          li(class="stat") { ${stat.label} ": " ${stat.value} }
         }
       }
     }

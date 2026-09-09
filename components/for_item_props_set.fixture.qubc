@@ -14,8 +14,8 @@ component Card {
   events { BUMP({ }) }
   template {
     div(class="card" @click:BUMP) {
-      span(class="label") { {info.label} }
-      span(class="value") { {info.value} }
+      span(class="label") { ${info.label} }
+      span(class="value") { ${info.value} }
     }
   }
 }

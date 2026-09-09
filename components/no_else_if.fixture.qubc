@@ -3,7 +3,7 @@ component NoElseIf {
   template {
     div() {
       @if (cond) {
-        p() { {a} }
+        p() { ${a} }
       }
     }
   }

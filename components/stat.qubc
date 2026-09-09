@@ -7,8 +7,8 @@ component Stat {
   }
   template {
     div(class="stat" @click:CLICK_STAT) {
-      span(class="value") { {value} }
-      span(class="label") { {label} }
+      span(class="value") { ${value} }
+      span(class="label") { ${label} }
     }
   }
 }

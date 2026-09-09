@@ -9,6 +9,6 @@ component LitBoolIf {
 component Gate {
   props { cond: bool, a: string, b: string }
   template {
-    @if (cond) { p() { {a} } } @else { p() { {b} } }
+    @if (cond) { p() { ${a} } } @else { p() { ${b} } }
   }
 }

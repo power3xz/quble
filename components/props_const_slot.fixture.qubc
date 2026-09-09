@@ -11,6 +11,6 @@ component Child {
   props { lit: string, flow: string }
   events { TAP({ flow }) }
   template {
-    button(@click:TAP) { {flow} }
+    button(@click:TAP) { ${flow} }
   }
 }

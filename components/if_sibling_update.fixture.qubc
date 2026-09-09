@@ -3,11 +3,11 @@ component Panel {
   template {
     div(class="panel") {
       div(class="code") {
-        pre(class="gutter") { {lines} }
-        textarea(class="area" rows={count}) { {text} }
+        pre(class="gutter") { ${lines} }
+        textarea(class="area" rows={count}) { ${text} }
       }
       @if (shown) {
-        pre(class="note") { {note} }
+        pre(class="note") { ${note} }
       }
     }
   }

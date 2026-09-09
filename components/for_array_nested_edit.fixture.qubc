@@ -11,9 +11,9 @@ component RowList {
       ul() {
         @for (row of rows) {
           li(class="row") {
-            {row.label}
+            ${row.label}
             @for (cell of row.cells) {
-              span(class="cell") { {cell} }
+              span(class="cell") { ${cell} }
             }
           }
         }

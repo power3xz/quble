@@ -7,12 +7,12 @@ component Grid {
     div(class="grid") {
       @for (row, i of rows) {
         div(class="row") {
-          span(class="rowidx") { {i} }
-          span(class="label") { {row.label} }
+          span(class="rowidx") { ${i} }
+          span(class="label") { ${row.label} }
           @for (cell, j of row.cells) {
             span(class="cell") {
-              span(class="cellidx") { {j} }
-              span(class="cellval") { {cell} }
+              span(class="cellidx") { ${j} }
+              span(class="cellval") { ${cell} }
               button(class="delcell" @click:DEL_CELL) { "x" }
             }
           }

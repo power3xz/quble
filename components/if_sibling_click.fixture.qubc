@@ -10,7 +10,7 @@ component Panel {
         }
       }
       @if (shown) {
-        pre(class="note") { {note} }
+        pre(class="note") { ${note} }
       }
     }
   }

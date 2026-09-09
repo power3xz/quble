@@ -6,7 +6,7 @@ component TagList {
       button(class="add" @click:ADD) { "+" }
       ul() {
         @for (tag of tags) {
-          li(class="tag") { {tag} }
+          li(class="tag") { ${tag} }
         }
       }
     }

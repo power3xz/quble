@@ -8,5 +8,5 @@ component TypedLitArg {
 
 component Field {
   props { count: number, active: bool, label: string }
-  template { span() { {count} {active} {label} } }
+  template { span() { ${count} ${active} ${label} } }
 }

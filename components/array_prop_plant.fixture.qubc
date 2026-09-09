@@ -6,7 +6,7 @@ component ArrayPropPlant {
   }
   template {
     div() {
-      h1() { {title} }
+      h1() { ${title} }
     }
   }
 }

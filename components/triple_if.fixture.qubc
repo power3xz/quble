@@ -5,18 +5,18 @@ component TripleIf {
       @if (c1) {
         @if (c2) {
           @if (c3) {
-            p() { {a} }
+            p() { ${a} }
           }
           @else {
-            p() { {b} }
+            p() { ${b} }
           }
         }
         @else {
-          p() { {c} }
+          p() { ${c} }
         }
       }
       @else {
-        p() { {d} }
+        p() { ${d} }
       }
     }
   }

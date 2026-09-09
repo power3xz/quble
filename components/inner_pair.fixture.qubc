@@ -3,14 +3,14 @@ component InnerPair {
   template {
     @if (c2) {
       @if (c3) {
-        p() { {a} }
+        p() { ${a} }
       }
       @else {
-        p() { {b} }
+        p() { ${b} }
       }
     }
     @else {
-      p() { {c} }
+      p() { ${c} }
     }
   }
 }

@@ -5,7 +5,7 @@ component ForIfLazyIndex {
     div() {
       @for (i of n) {
         @if (flag) {
-          button(@click:PICK) { "on" {i} }
+          button(@click:PICK) { "on" ${i} }
         }
         @else {
           span() { "off" }

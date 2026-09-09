@@ -10,7 +10,7 @@ component TagList {
       button(class="del" @click:DEL) { "-" }
       ul() {
         @for (tag of tags) {
-          li(class="tag") { {tag} }
+          li(class="tag") { ${tag} }
         }
       }
     }

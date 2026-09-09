@@ -15,9 +15,9 @@ component TodoList {
       ul(class="todo__list") {
         @for (todo, i of todos) {
           li(class="todo__item") {
-            span(class="todo__num") { {i} }
-            span(class="todo__text") { {todo.text} }
-            span(class="todo__done") { {todo.done} }
+            span(class="todo__num") { ${i} }
+            span(class="todo__text") { ${todo.text} }
+            span(class="todo__done") { ${todo.done} }
             button(class="todo__del" @click:DEL) { "삭제" }
           }
         }
