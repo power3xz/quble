@@ -68,8 +68,8 @@ Svelte 5는 Proxy로 **런타임에** "무엇을 구독할지" 알아낸다 - �
 
 ```
 store = { name: 'good', price: 1 }
-a => div() { {name} }              // a의 로컬 name (offset 다름)
-b => div() { {price} {name} }      // b의 로컬 name (offset 다름)
+a => div() { ${name} }              // a의 로컬 name (offset 다름)
+b => div() { ${price} {name} }      // b의 로컬 name (offset 다름)
 
 use: a(name={store.name}) {}
      b(price={store.price} name={store.name}) {}

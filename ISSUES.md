@@ -38,7 +38,7 @@
   스냅샷 순회로 바꿨다. 다른 `childNodes` 사용처는 이미 `Array.from`으로 스냅샷을 떠 안전했다.
 
 - **void 요소 구분 없음** - `input`/`img` 등 void 요소도 자식/닫는 태그를 갖는 일반 요소처럼
-  렌더됐다(`input(@input:EDIT) { {value} }` -> `<input>A</input>`). **해결:** self-close 문법
+  렌더됐다(`input(@input:EDIT) { ${value} }` -> `<input>A</input>`). **해결:** self-close 문법
   (`tag(attrs /)`, SYNTAX #3.1.1)을 구현하고 void 집합을 컴파일러가 알게 했다. void 요소는
   self-close 필수 - 자식 블록/무슨 자식이든 컴파일 에러. 자식 없는 요소/컴포넌트는 모두
   self-close로만 쓴다(빈 블록 `{}` 금지, 처음엔 엄격하게 - DESIGN #4.5). 자식 없는 요소는

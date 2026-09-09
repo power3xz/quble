@@ -281,8 +281,8 @@ component TodoItem {
     div(class="todo-item") {
       @with ContentArea {
         div(class="todo-content") {
-          h3(@click:EDIT) { {title} }
-          @if (description) { p() { {description} } }
+          h3(@click:EDIT) { ${title} }
+          @if (description) { p() { ${description} } }
           @if (tags.length > 0) {
             div(class="tags") {
               @for (tag of tags) {
@@ -297,7 +297,7 @@ component TodoItem {
         @if (dueDate) {
           div(class="due-date") {
             DueDateIcon: Icon(name="calendar" /)
-            span() { {dueDate} }
+            span() { ${dueDate} }
           }
         }
         @if (assignee) {
@@ -332,7 +332,7 @@ component Badge {
   }
 
   template {
-    span(class="badge" @click:TAG_CLICK) { {text} }
+    span(class="badge" @click:TAG_CLICK) { ${text} }
   }
 }
 ```
@@ -347,7 +347,7 @@ component Card {
 
   template {
     div(class=["card", {variant}, {priority}]) {
-      h2(class=["title"]) { {title} }
+      h2(class=["title"]) { ${title} }
       div(class=["card-body"]) {
         @slot()   // 무기명 슬롯 - children이 들어온다
       }

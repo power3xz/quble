@@ -130,9 +130,9 @@ tag(attr=VALUE ...) { ... children ... }
 
 ```
 div(class="todo-item") { ... }
-h3(@click:EDIT) { {title} }
-p() { {description} }                       // 속성 없으면 빈 ()
-span() { "담당자: {assignee}" }             // 문자열 안 보간 허용
+h3(@click:EDIT) { ${title} }
+p() { ${description} }                       // 속성 없으면 빈 ()
+span() { "담당자: ${assignee}" }            // 문자열 안 보간 허용
 ```
 
 - 속성은 공백 구분: `Badge(text={tag} variant="outline" @click:TAG_CLICK)`
@@ -215,7 +215,7 @@ MyTodoCard: Card(title="할일 목록") {
 
 // 기명 - `이름 << 노드`로 슬롯을 지목한다
 MyCard: Card(title="...") {
-  Header << h1(class="hd") { {title} }
+  Header << h1(class="hd") { ${title} }
   Body   << TodoList( /)
 }
 ```
@@ -241,15 +241,15 @@ MyCard: Card(title="...") {
 | `@if (EXPR) { ... } @else { ... }` | 조건부 + 대체 |
 | `@for (IDENT [, IDENT] of EXPR) { ... }` | 반복 렌더링 (EXPR = 정수, 숫자 prop, 또는 배열). 둘째 IDENT = 회차 인덱스변수 |
 | `@click:EVENT` | DOM 이벤트 -> 컴포넌트 이벤트 위임 (속성 위치) |
-| `{EXPR}` | 표현식 보간 (자식 위치 또는 문자열 내부) |
+| `${EXPR}` | 표현식 보간 (자식 위치 또는 문자열 내부) |
 
 예시:
 
 ```
 @with ContentArea {
   div(class="todo-content") {
-    h3(@click:EDIT) { {title} }
-    @if (description) { p() { {description} } }
+    h3(@click:EDIT) { ${title} }
+    @if (description) { p() { ${description} } }
     @if (tags.length > 0) {
       div(class="tags") {
         @for (tag of tags) {
@@ -281,8 +281,8 @@ MyCard: Card(title="...") {
 
 값(EXPR)이 등장하는 위치:
 
-1. `{EXPR}` - template 자식 보간
-2. `"... {EXPR} ..."` - 문자열 리터럴 내 보간
+1. `${EXPR}` - template 자식 보간
+2. `"... ${EXPR} ..."` - 문자열 리터럴 내 보간
 3. `attr={EXPR}` - 속성 값
 4. `prop={EXPR}` - 합성 인자
 5. `@if (EXPR)` / `@for (_ of EXPR)` - 디렉티브 조건/이터러블
@@ -291,6 +291,9 @@ MyCard: Card(title="...") {
 **`=` 뒤는 따옴표 문자열이거나 `{}`다.** 속성 값과 합성 인자가 그렇다 - 맨 리터럴
 (`count=42`)은 안 된다. 문자열은 `"a"`, 그 밖의 값은 `{42}`/`{true}`/`{x}`로 쓴다
 (`{"a"}`도 같은 값이다 - 리터럴도 식이다).
+
+**텍스트 자리는 `${}`다.** 자식 블록의 `{`와 눈으로 구별된다. `$`와 `{` 사이에 공백은
+못 넣는다.
 
 나머지 자리는 표시가 없다. `@if`는 `()`가, `key:`는 `:`가 값 자리를 이미 열어 뒀다.
 
@@ -345,7 +348,7 @@ p() { "여러
 @if (count > 0) { ... }    // O
 ```
 
-**`+`는 숫자 덧셈만.** 문자열을 잇는 것은 기존 보간(`"{a}{b}"`)이 한다.
+**`+`는 숫자 덧셈만.** 문자열을 잇는 것은 기존 보간(`"${a}${b}"`)이 한다.
 
 **`.length`는 배열과 문자열의 길이.** 같은 이름의 실제 필드가 있으면 그 필드가 먼저다
 (`props { user: { length: number } }`면 `user.length`는 그 필드를 읽는다).

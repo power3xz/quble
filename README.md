@@ -46,8 +46,8 @@ component TodoList {
       ul(class="todo__list") {
         @for (todo, i of todos) {
           li(class="todo__item") {
-            span(class="todo__num") { {i} }
-            span(class="todo__text") { {todo.text} }
+            span(class="todo__num") { ${i} }
+            span(class="todo__text") { ${todo.text} }
             button(class="todo__del" @click:DEL) { "삭제" }
           }
         }
@@ -80,7 +80,7 @@ component Column {
   }
   template {
     div(class="col") {
-      h2(class="col__name" @click:CLICK_HEADING) { {name} }
+      h2(class="col__name" @click:CLICK_HEADING) { ${name} }
 
       @with LaneArea {
         @for (card, seat of cards) {
@@ -104,8 +104,8 @@ component Card {
   }
   template {
     article(class="ticket" @click:CLICK_CARD) {
-      h3(class="ticket__title") { {title} }
-      button(class="ticket__who" @click:CLICK_OWNER) { {assignee} }
+      h3(class="ticket__title") { ${title} }
+      button(class="ticket__who" @click:CLICK_OWNER) { ${assignee} }
     }
   }
 }
