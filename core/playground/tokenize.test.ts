@@ -35,13 +35,14 @@ component Panel {
   events { PICK({ label }) }
   template {
     @with Area {
-      button(class="card" @click:PICK) { "담당자: " {label} }
-      @if (on) { span() { {count} } } @else { hr( /) }
+      button(class="card" @click:PICK) { "담당자: " \${label} }
+      @if (on) { span() { \${count} } } @else { hr( /) }
       @for (row, i of rows) {
         Item: Card(id={row.id} /)
+        span() { \${row.id} }
       }
       Shell: Card( ) {
-        Header << h1() { {label} }
+        Header << h1() { \${label} }
       }
       @slot(Body)
     }
@@ -153,7 +154,7 @@ test("qubc - 자식 자리 보간을 가른다", () => {
   const lines = tokenize(QUBC, "a.qubc");
 
   // 값을 꺼내 쓰는 자리 - 경로 접근(row.id)도 한 토큰이다.
-  assert.deepEqual(textsOf(lines, "interpolation"), ["{label}", "{count}", "{row.id}", "{label}"]);
+  assert.deepEqual(textsOf(lines, "interpolation"), ["${label}", "${count}", "${row.id}", "${label}"]);
 });
 
 test("qubc - 주석을 가른다", () => {
@@ -181,7 +182,7 @@ test("qubc - 안 닫힌 블록 주석도 토큰을 낸다", () => {
 });
 
 test("qubc - 블록 여는 괄호는 보간이 아니다", () => {
-  // `{`는 블록도 연다(component/props/template). 형태로 갈린다.
+  // 보간은 `${`로 연다. 블록의 `{`는 그 자리에 안 온다.
   const lines = tokenize("component X {\n  props { a: string }\n}", "a.qubc");
 
   assert.deepEqual(textsOf(lines, "interpolation"), []);
@@ -189,12 +190,12 @@ test("qubc - 블록 여는 괄호는 보간이 아니다", () => {
 
 test("qubc - 문자열 안 중괄호는 그냥 문자열이다", () => {
   // 문자열 안 보간은 구현되어 있지 않다(렉서가 따옴표 사이를 통째로 담는다).
-  const source = 'span() { "담당자: {label}" }';
+  const source = 'span() { "담당자: ${label}" }';
 
   const lines = tokenize(source, "a.qubc");
   assert.equal(rejoin(lines), source);
   assert.deepEqual(textsOf(lines, "interpolation"), []);
-  assert.deepEqual(textsOf(lines, "string"), ['"담당자: {label}"']);
+  assert.deepEqual(textsOf(lines, "string"), ['"담당자: ${label}"']);
 });
 
 test("qubc - 작은따옴표는 유틸 타입 키다", () => {
@@ -211,16 +212,16 @@ test("qubc - 줄 주석은 그 줄만 먹는다", () => {
 });
 
 test("qubc - 보간이 여럿이어도 원문을 지킨다", () => {
-  const source = 'span() { {a} "와" {b} }';
+  const source = 'span() { ${a} "와" ${b} }';
 
   const lines = tokenize(source, "a.qubc");
   assert.equal(rejoin(lines), source);
-  assert.deepEqual(textsOf(lines, "interpolation"), ["{a}", "{b}"]);
+  assert.deepEqual(textsOf(lines, "interpolation"), ["${a}", "${b}"]);
 });
 
 test("qubc - 닫히지 않은 보간은 보간이 아니다", () => {
   // 편집 중간 상태. 멈추지 않고 원문만 지키면 된다.
-  const source = "span() { {a 열기만 }";
+  const source = "span() { ${a 열기만 }";
 
   const lines = tokenize(source, "a.qubc");
   assert.equal(rejoin(lines), source);
