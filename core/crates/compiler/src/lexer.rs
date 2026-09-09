@@ -14,18 +14,20 @@ pub enum Token {
     KwString,        // 타입 키워드 string
     LBrace,          // {
     RBrace,          // }
-    LParen,          // (
-    RParen,          // )
-    LBracket,        // [
-    RBracket,        // ]
-    Eq,              // =
-    Comma,           // ,
-    Colon,           // :
-    Dot,             // . (객체 필드 접근 `assignee.name`)
-    Lt,              // < (제네릭 타입 `Omit<Section, 'a'>`, 값 자리에선 비교)
-    LtLt,            // << (슬롯 채움 `Header << 노드`)
-    Gt,              // >
-    Pipe,            // | (유니온 키 리스트 `'a' | 'b'`)
+    /// `${` - 텍스트 보간을 연다. 사이에 공백을 안 받아 한 토큰이다.
+    DollarLBrace,
+    LParen,   // (
+    RParen,   // )
+    LBracket, // [
+    RBracket, // ]
+    Eq,       // =
+    Comma,    // ,
+    Colon,    // :
+    Dot,      // . (객체 필드 접근 `assignee.name`)
+    Lt,       // < (제네릭 타입 `Omit<Section, 'a'>`, 값 자리에선 비교)
+    LtLt,     // << (슬롯 채움 `Header << 노드`)
+    Gt,       // >
+    Pipe,     // | (유니온 키 리스트 `'a' | 'b'`)
     // 값 자리 표현식 연산자. 나눗셈은 Slash가 겸한다 - self-close와 같은 글자라 렉서는
     // 한 토큰으로 내고 파서가 자리로 가른다(`{` 안이면 나눗셈, 합성 인자 끝이면 self-close).
     Plus,     // +
@@ -62,6 +64,7 @@ impl std::fmt::Display for Token {
             Token::KwString => write!(f, "`string`"),
             Token::LBrace => write!(f, "`{{`"),
             Token::RBrace => write!(f, "`}}`"),
+            Token::DollarLBrace => write!(f, "`${{`"),
             Token::LParen => write!(f, "`(`"),
             Token::RParen => write!(f, "`)`"),
             Token::LBracket => write!(f, "`[`"),
@@ -266,6 +269,21 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                         prev_ws = ws_before;
                     }
                     _ => toks.push(Token::Slash(ws_before)),
+                }
+            }
+            '$' => {
+                chars.next();
+                match chars.peek().map(|&(_, ch)| ch) {
+                    Some('{') => {
+                        chars.next();
+                        toks.push(Token::DollarLBrace);
+                    }
+                    _ => {
+                        return Err(LexError {
+                            kind: LexErrorKind::UnexpectedChar('$'),
+                            range: SrcRange::new(start, start + '$'.len_utf8()),
+                        })
+                    }
                 }
             }
             '{' => {

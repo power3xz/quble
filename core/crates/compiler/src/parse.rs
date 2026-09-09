@@ -5,7 +5,7 @@
 //! TYPE    = ("bool"|"number"|"string"|OBJECT) "[]"*     (재귀; []는 후위 반복)
 //! OBJECT  = { (IDENT : TYPE (, IDENT : TYPE)*)? }
 //! NODE    = ELEMENT | STRING | VAR
-//! VAR     = { IDENT }                         (props 보간)
+//! VAR     = ${ IDENT }                        (props 보간)
 //! ELEMENT = IDENT ( ATTR* ) { NODE* }
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
@@ -850,8 +850,8 @@ impl<'a> Parser<'a> {
                     Err(self.err_read(kind))
                 }
             },
-            // `{ IDENT }` 보간. (자식 자리의 `{`는 블록이 아니라 보간만 온다.)
-            Some(Token::LBrace) => self.parse_var(),
+            // `${ IDENT }` 보간.
+            Some(Token::DollarLBrace) => self.parse_var(),
             // @if 분기.
             Some(Token::At(Directive::If)) => self.parse_if_node(),
             // @for 반복.
@@ -865,7 +865,7 @@ impl<'a> Parser<'a> {
             Some(Token::Ident(_)) => self.parse_element(),
             got => {
                 let kind = ParseErrorKind::Expected {
-                    want: "node (element, string, or {var})".into(),
+                    want: "node (element, string, or ${var})".into(),
                     got: shown(got),
                 };
                 Err(self.err_here(kind))
@@ -979,9 +979,9 @@ impl<'a> Parser<'a> {
         Ok(Node::With { context, children })
     }
 
-    // { IDENT(.IDENT)* }
+    // ${ IDENT(.IDENT)* }
     fn parse_var(&mut self) -> Result<Node, ParseError> {
-        self.expect(&Token::LBrace)?;
+        self.expect(&Token::DollarLBrace)?;
         let var = self.parse_var_ref()?;
         self.expect(&Token::RBrace)?;
         Ok(Node::Var(var))
