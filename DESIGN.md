@@ -142,7 +142,7 @@ component TodoItem {
 | `@click:EVENT`                     | DOM 이벤트를 컴포넌트 이벤트로 위임한다.         |
 | `@slot [name]`                     | 슬롯 정의. 자식 콘텐츠가 들어갈 자리. 한 컴포넌트는 무기명 하나 **또는** 기명 여럿 - 섞을 수 없다. |
 | `Name << 노드`                     | 기명 슬롯에 콘텐츠 주입. 무기명은 합성 블록(`Comp(...) { ... }`)이 그대로 들어간다. |
-| `{expr}`                           | 표현식 보간.                                     |
+| `${expr}`                          | 표현식 보간.                                     |
 
 ### 2.4 이벤트 위임 흐름
 
@@ -301,7 +301,7 @@ component TodoItem {
           }
         }
         @if (assignee) {
-          div(class="assignee") { span() { "담당자: {assignee}" } }
+          div(class="assignee") { span() { "담당자: ${assignee}" } }
         }
       }
 

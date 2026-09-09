@@ -69,13 +69,13 @@ Svelte 5는 Proxy로 **런타임에** "무엇을 구독할지" 알아낸다 - �
 ```
 store = { name: 'good', price: 1 }
 a => div() { ${name} }              // a의 로컬 name (offset 다름)
-b => div() { ${price} {name} }      // b의 로컬 name (offset 다름)
+b => div() { ${price} ${name} }      // b의 로컬 name (offset 다름)
 
 use: a(name={store.name}) {}
      b(price={store.price} name={store.name}) {}
 ```
 
-a의 `{name}`과 b의 `{name}`은 로컬 offset이 다르지만 **둘 다 `store.name`에 바인딩**된다.
+a의 `${name}`과 b의 `${name}`은 로컬 offset이 다르지만 **둘 다 `store.name`에 바인딩**된다.
 "같음"은 컴파일타임에 박는 게 아니라, **렌더 시 바인딩이 같은 store 리프(같은 leafIndex)로
 귀결되며 나타난다.** 그러면 `set(그_leafIndex, v)` 한 번에 a/b 둘 다 갱신된다. 즉 **leafIndex의
 정체성 기준은 컴포넌트 로컬이 아니라 store 리프**이고, 로컬 offset은 바인딩을 따라 그 리프로
@@ -98,7 +98,7 @@ CONST   상수풀 인덱스    constpool[ref]           X (불변)
   자기 타입으로 안다(`TEXT_VAR`=leaf, `FOR_ARRAY_VAR`=array 색인) - 슬롯엔 안 실린다.
 - **왜 슬롯에 출처를 싣나** - 자식은 자기 prop이 `Comp(x="lit")`로 왔는지 `Comp(x={v})`로 왔는지
   모른다. 부모가 넘길 때 kind를 정하고(부모는 앎), 자식은 kind대로 읽는다. CONST면 구독 스킵.
-- **경로 없음** - 컴파일러가 root 타입으로 `{user.name}` -> `base + nameOffset`을 미리 굳힌다.
+- **경로 없음** - 컴파일러가 root 타입으로 `${user.name}` -> `base + nameOffset`을 미리 굳힌다.
   런타임엔 base만 흐른다: 접근 = base(런타임) + offset(컴파일). path 문자열/경로 캐시 불필요.
 - 루트 슬롯은 전부 외부 데이터라 kind가 늘 STORE.
 
@@ -363,7 +363,7 @@ payload 타입을 내듯 **같은 파이프라인으로 컴파일러가 생성**
 - [x] 합성 시 자식 슬롯 주입 - `PUSH_THROUGH`(슬롯 통째)/`PUSH_FIELD`(base+offset)/`PUSH_ARG_LIT`
       (const) + `RENDER`. kind는 전파, 위치만 넘기고 타입은 자식이 안다.
 - [x] 배열 = arrayPool 앵커 + plant(#3.2) - store에 색인 1칸, 원소는 arrayPool로. 진입 때 다 채움.
-- [x] `@for` - `FOR_RAW`/`FOR_COUNT_VAR`(숫자)/`FOR_ARRAY_VAR`(배열). 회차변수 `{item}`/`{item.f}`
+- [x] `@for` - `FOR_RAW`/`FOR_COUNT_VAR`(숫자)/`FOR_ARRAY_VAR`(배열). 회차변수 `${item}`/`${item.f}`
       보간, 회차변수 객체 필드 자식 전달, fullname `[$n]` 인덱스.
 - [x] `@if` Region + 재진입 `interpret` + lazy build(#8) - 활성 가지만 build/구독, 비활성은 첫 swap
       때 build. 단일/중첩/형제 if, 합성 경계 넘는 if. (`core/web/runtime.ts`, `region.ts`)
