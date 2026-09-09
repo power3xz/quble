@@ -35,7 +35,7 @@ const SOURCE = `component HandlerTypes {
     EDIT({ title })
   }
   template {
-    button(class="ht" @click:EDIT) { {title} }
+    button(class="ht" @click:EDIT) { \${title} }
   }
 }`;
 
