@@ -14,7 +14,7 @@ component FileRow {
       @else {
         span(class="filerow__live" /)
       }
-      button(class="filerow__name" @click:CLICK_FILE) { {name} }
+      button(class="filerow__name" @click:CLICK_FILE) { ${name} }
       @if (hasError) {
         span(class="filerow__error" title="컴파일 에러") { "!" }
       }

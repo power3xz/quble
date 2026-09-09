@@ -47,29 +47,29 @@ component Playground {
       }
 
       main(class="pg__main") {
-        header(class="pg__editing") { {editingName} }
+        header(class="pg__editing") { ${editingName} }
 
         div(class="pg__code") {
-          pre(class="pg__gutter") { {lineNumbers} }
+          pre(class="pg__gutter") { ${lineNumbers} }
           div(class="pg__sheet") {
             div(class="pg__caretline" style={caretLine} /)
             pre(class="pg__view") {
             @for (line of lines) {
               div(class="pg__line" data-error={line.hasError}) {
                 @for (t of line.tokens) {
-                  span(class={t.cls}) { {t.text} }
+                  span(class={t.cls}) { ${t.text} }
                 }
                 @if (line.hasUnderline) {
                   span(class="pg__squiggle" style={line.underlineStyle} /)
                 }
                 @if (line.hasError) {
-                  span(class="pg__line-error") { {line.error} }
+                  span(class="pg__line-error") { ${line.error} }
                 }
               }
             }
           }
             textarea(class="pg__area" spellcheck="false" rows={lineCount}
-              @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE) { {source} }
+              @input:INPUT_SOURCE @keydown:KEYDOWN_SOURCE @click:CLICK_SOURCE) { ${source} }
             @if (completion.isOpen) {
               div(class="completion" data-above={completion.isAbove} style={completion.style}) {
                 @for (c of completion.items) {
@@ -81,7 +81,7 @@ component Playground {
         }
 
         @if (hasError) {
-          button(class="pg__diag" @click:CLICK_DIAGNOSTIC) { {diagnostic} }
+          button(class="pg__diag" @click:CLICK_DIAGNOSTIC) { ${diagnostic} }
         }
       }
 

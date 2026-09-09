@@ -4,8 +4,8 @@ component LogRow {
   props { text: string, level: string }
   template {
     div(class="logrow") {
-      span(class="logrow__level" data-level={level}) { {level} }
-      span(class="logrow__text") { {text} }
+      span(class="logrow__level" data-level={level}) { ${level} }
+      span(class="logrow__text") { ${text} }
     }
   }
 }
