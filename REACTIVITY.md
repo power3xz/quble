@@ -117,7 +117,7 @@ store 칸 = arrayInfoIndex ──> arrayPool[arrayInfoIndex] = {
                           될 때만 lazy 확보, 아니면 null - 안 쓰이는 배열은 길이 칸을
                           낭비하지 않는다.
     indexLeafIndices      elemStartLeafIndices와 나란한 요소별 회차 번호 칸. 몸체의
-                          {i}/$0가 이걸 읽어, 중간 제거 시 뒤 칸을 당기면 자동 갱신된다.
+                          ${i}/$0가 이걸 읽어, 중간 제거 시 뒤 칸을 당기면 자동 갱신된다.
                           @for 순회될 때만 lazy. count-for는 꼬리만 줄어 안 쓴다.
   }
 

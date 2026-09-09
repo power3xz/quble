@@ -1213,7 +1213,7 @@ mod tests {
     }
 
     /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개라 ForArrayVar (scope=0, offset=0).
-    /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 {tag}가 TextVar 1을 낸다.
+    /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 ${tag}가 TextVar 1을 낸다.
     #[test]
     fn compiles_for_scalar_array() {
         use bytecode::{decode, Op};
@@ -1239,7 +1239,7 @@ mod tests {
             code.windows(for_op.len()).any(|w| w == for_op.as_slice()),
             "ForArrayVar(배열 scope=0 offset=0)이 있어야:\n{code:?}",
         );
-        // {tag} 회차변수는 props 슬롯(1개) 뒤 scope_index 1, 요소가 스칼라라 offset 0.
+        // ${tag} 회차변수는 props 슬롯(1개) 뒤 scope_index 1, 요소가 스칼라라 offset 0.
         let text_var = vec![Op::TextVar as u8, 1, 0];
         assert!(
             code.windows(text_var.len())
@@ -1334,7 +1334,7 @@ mod tests {
     }
 
     /// `@for (tag, i of tags)` 인덱스변수. item(tag) 슬롯 뒤에 index(i) 슬롯이 항상 이어진다(모든 @for
-    /// 2칸). props(tags:0) + item(tag:1) + index(i:2)라 {i}는 TextVar 2, {tag}는 TextVar 1.
+    /// 2칸). props(tags:0) + item(tag:1) + index(i:2)라 ${i}는 TextVar 2, ${tag}는 TextVar 1.
     #[test]
     fn compiles_for_index_var() {
         use bytecode::{decode, Op};
@@ -1354,7 +1354,7 @@ mod tests {
         let def = module.def(0).unwrap();
         let code = &module.code[def.code_off as usize..(def.code_off + def.code_len) as usize];
 
-        // {tag}=요소 슬롯 1(offset 0), {i}=인덱스 슬롯 2(요소 뒤, offset 0).
+        // ${tag}=요소 슬롯 1(offset 0), ${i}=인덱스 슬롯 2(요소 뒤, offset 0).
         for (name, scope) in [("tag", 1u8), ("i", 2u8)] {
             let text_var = vec![Op::TextVar as u8, scope, 0];
             assert!(
@@ -2120,7 +2120,7 @@ component B { props { a: A } template { div( /) } }"#;
         );
     }
 
-    /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`{a}`)에 객체를 넣으면 여전히 NotLeaf.
+    /// 통째 전달은 합성 인자 자리에서만 - 텍스트 보간(`${a}`)에 객체를 넣으면 여전히 NotLeaf.
     /// 값/반응성 자리엔 leaf만 온다는 경계가 인자 허용으로 무너지지 않아야 한다.
     #[test]
     fn object_in_text_node_still_errors() {
@@ -2705,7 +2705,7 @@ component B { props { a: A } template { div( /) } }"#;
         assert!(compile(nested).is_ok());
     }
 
-    /// 객체 경로 보간 `{user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
+    /// 객체 경로 보간 `${user.name}` - props를 선언 순서로 평탄하게 펼친 leaf 번호로 해석한다.
     /// 값 자리 TEXT_VAR는 (scope_index, offset) 두 u8. 슬롯 순번 title=0, user=1, done=2.
     /// 객체 필드는 root 슬롯 + 필드까지의 store 칸 offset: user.name=(1,0), user.contact.email=(1,1).
     #[test]

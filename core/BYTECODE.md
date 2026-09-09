@@ -21,17 +21,17 @@ component Hello {
 
 기대 출력: `<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>`
 
-**props 보간 (1단계):** `props { name }`로 선언한 변수를 `{name}`으로 텍스트 자리에서 참조.
+**props 보간 (1단계):** `props { name }`로 선언한 변수를 `${name}`으로 텍스트 자리에서 참조.
 선언 순서가 scope 인덱스이고, 렌더 시 `render(qubb, comp_id, scope)`로 값 배열을 넘긴다.
 
 ```
 component Greeting {
   props { name }
-  template { h1() { "Hello, " {name} "!" } }
+  template { h1() { "Hello, " ${name} "!" } }
 }
 ```
 
-scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `{name}`은 단순 식별자 참조이며,
+scope `["world"]` -> `<h1>Hello, world!</h1>`. (값은 문자열만. `${name}`은 단순 식별자 참조이며,
 `{expr}` 전체 표현식은 아직 아니다.)
 
 ---
@@ -232,7 +232,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ELEM_END`        | 0x05 | -                     | -                         | 가장 최근에 연 태그를 닫는다(`</TAG>`). 닫을 태그는 스택 top으로 안다.   |
 | `RENDER`          | 0x06 | comp_id: u16          | -                         | 쌓인 인자를 자식 scope로 넘겨 comp_id 정의를 렌더(호출). 인자 버퍼를 비운다. |
 | `ATTR_L`          | 0x07 | name: u16, value: u16 | 컴포넌트                  | ` name="value"` 출력. name은 컴포넌트 상수풀 인덱스(전역에 없는 속성명). |
-| `TEXT_VAR`        | 0x08 | scope_index:u8, offset:u8 | scope                 | `scope[scope_index]` 슬롯 `(kind,base)`에서 `base+offset` 값을 텍스트로 출력 (HTML 이스케이프). 경로 없는 `{title}`은 offset 0, 객체 필드 `{user.name}`은 필드 거리. |
+| `TEXT_VAR`        | 0x08 | scope_index:u8, offset:u8 | scope                 | `scope[scope_index]` 슬롯 `(kind,base)`에서 `base+offset` 값을 텍스트로 출력 (HTML 이스케이프). 경로 없는 `${title}`은 offset 0, 객체 필드 `${user.name}`은 필드 거리. |
 | `ATTR_G_VAR`      | 0x09 | name:u16, scope_index:u8, offset:u8 | name=전역, value=scope | ` name="..."` 출력. name은 전역 상수풀 ID, 값은 `scope[scope_index]`의 `base+offset`(속성값 이스케이프). |
 | `ATTR_L_VAR`      | 0x0a | name:u16, scope_index:u8, offset:u8 | name=컴포넌트, value=scope | ` name="..."` 출력. name은 컴포넌트 상수풀 인덱스, 값은 `scope[scope_index]`의 `base+offset`. |
 | `PUSH_THROUGH`    | 0x0b | scope_index: u8       | scope                     | 부모 `scope[scope_index]` 슬롯 `(kind,index)`을 편집 없이 그대로 자식 인자 버퍼에 push(경로 없는 참조 `{a}`/`{user}`). 뒤따르는 `RENDER`가 소비. |
@@ -286,7 +286,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   출력한다. 심볼 이름은 바이트코드에 없다
   - 값 자리(`TEXT_VAR`/`ATTR_*_VAR`/`IF`)는 **자기 scope**라 컴파일이 레이아웃을 안다. push와
     달리 kind를 전파할 필요가 없어 `(scope_index, offset)` 한 형태로 통일한다 - 경로 없는
-    `{title}`은 offset 0, 객체 필드 `{user.name}`은 필드 거리. (push는 자식이 kind를 런타임에
+    `${title}`은 offset 0, 객체 필드 `${user.name}`은 필드 거리. (push는 자식이 kind를 런타임에
     받아야 해 `THROUGH`/`FIELD`로 갈리지만, 값 자리는 나눌 실익이 없어 offset을 항상 싣는다.)
 - 속성은 **두 축**으로 갈린다 - name(전역 `G` / 컴포넌트 `L`) x value(정적 / 변수 `_VAR`).
   네 조합이 `ATTR_G`/`ATTR_L`/`ATTR_G_VAR`/`ATTR_L_VAR`. 변수 속성값의 `(scope_index, offset)`은
@@ -305,7 +305,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     칸은 `arrayInfoIndex` 하나라(슬롯 안 펼침) 그 값으로 arrayPool에서 요소 수/위치를 얻어 요소
     수만큼 반복한다. 회차마다 **회차변수(item)** 슬롯을 그 요소 leaf에 바인딩해 본문의
     `TEXT_VAR`/push가 요소값을 쓴다.
-  - **회차변수 슬롯은 operand에 없다.** codegen이 `props 슬롯 수 + 바깥 @for 깊이`로 정해 `{item}`을
+  - **회차변수 슬롯은 operand에 없다.** codegen이 `props 슬롯 수 + 바깥 @for 깊이`로 정해 `${item}`을
     그 slot의 `TEXT_VAR`로 내고, 런타임도 같은 규칙으로 그 자리를 구해 회차 leaf를 꽂는다. 양쪽이
     같은 식이라 operand로 나를 필요가 없다.
   - **회차 인덱스**(fullname의 `[i]`)는 `PUSH_PATH_INDEX_SEGMENT depth:u16`로 별개 축. 런타임이

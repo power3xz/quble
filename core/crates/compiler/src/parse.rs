@@ -921,7 +921,7 @@ impl<'a> Parser<'a> {
 
     // @for ( IDENT [, IDENT] of ( NUM | VAR_REF ) ) { NODE* }
     // count는 정수 리터럴(of 3) 또는 숫자 prop 참조(of count). of는 문맥 키워드(Ident("of")).
-    // 선택적 둘째 변수(, i)는 회차 인덱스변수 - 몸체 {i}/이벤트 $n이 읽는다(item과 별개 슬롯).
+    // 선택적 둘째 변수(, i)는 회차 인덱스변수 - 몸체 ${i}/이벤트 $n이 읽는다(item과 별개 슬롯).
     fn parse_for_node(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::At(Directive::For))?;
         self.expect(&Token::LParen)?;

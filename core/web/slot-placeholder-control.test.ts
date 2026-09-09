@@ -17,7 +17,7 @@ before(() => {
   qubb = buildFixture("slot_placeholder_control");
 });
 
-// @for (tag of tags) { Row() { span.cell {tag} } }  - 회차마다 합성하고 그 슬롯에 회차변수를 보간
+// @for (tag of tags) { Row() { span.cell ${tag} } }  - 회차마다 합성하고 그 슬롯에 회차변수를 보간
 // @if (open) { Lazy() { em.late {label} } }         - 비활성이면 lazyBuild로 실행이 더 밀린다
 const instantiate = (tags: string[], open: boolean, label: string, handlers: TTestHandlers = {}) => {
   const inst = compile(qubb)(0)({ tags, open, label }, handlers as unknown as THandlers);
@@ -29,7 +29,7 @@ const cells = (host: ParentNode) => [...host.querySelectorAll("div.row > span.ce
 
 test("@for 회차마다 슬롯 콘텐츠가 자기 회차변수를 보간한다", () => {
   const { host } = instantiate(["a", "b", "c"], false, "L");
-  assert.deepEqual(cells(host), ["a", "b", "c"], "회차별 {tag} - 콘텐츠가 자기 회차 슬롯을 읽는다");
+  assert.deepEqual(cells(host), ["a", "b", "c"], "회차별 ${tag} - 콘텐츠가 자기 회차 슬롯을 읽는다");
 });
 
 test("@for 안 슬롯 콘텐츠도 자식 자리에 붙는다", () => {
@@ -78,7 +78,7 @@ test("@for 안 비활성 @if의 슬롯 콘텐츠는 나중에 켜도 자기 회�
   const { host, setOpen } = instantiate(["a", "b", "c"], false, "L");
   assert.equal(deferred(host).length, 0, "꺼져 있으면 아직 안 그려진다");
   setOpen(true); // 회차 pop이 이미 끝난 뒤 lazyBuild 실행
-  assert.deepEqual(deferred(host), ["a", "b", "c"], "지연돼도 각 회차가 자기 {tag}");
+  assert.deepEqual(deferred(host), ["a", "b", "c"], "지연돼도 각 회차가 자기 ${tag}");
 });
 
 test("지연 실행된 슬롯 콘텐츠의 이벤트도 자기 회차 인덱스로 발화한다", () => {

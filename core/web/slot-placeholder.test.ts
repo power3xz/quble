@@ -17,7 +17,7 @@ before(() => {
   qubb = buildFixture("slot_placeholder");
 });
 
-// Panel: div.head > @slot(Header), div.body > @slot(Body), p.own > {heading}
+// Panel: div.head > @slot(Header), div.body > @slot(Body), p.own > ${heading}
 // Plain: article > div.inner > @slot()
 // 사용쪽은 Header만 채우고(Body는 미채움) Plain엔 무기명 블록을 준다.
 const instantiate = (title: string, note: string, handlers: TTestHandlers = {}) => {
@@ -53,7 +53,7 @@ test("안 채운 슬롯은 아무것도 안 넣는다", () => {
 
 test("슬롯 콘텐츠는 부모 scope로 해석된다", () => {
   const { host } = instantiate("제목", "메모");
-  // {title}은 부모(SlotPlaceholder)의 prop이지 Panel의 것이 아니다. Panel의 자기 prop은 따로 그려진다.
+  // ${title}은 부모(SlotPlaceholder)의 prop이지 Panel의 것이 아니다. Panel의 자기 prop은 따로 그려진다.
   assert.equal(host.querySelector("h1.filled")?.textContent, "제목");
   assert.equal(host.querySelector("p.own")?.textContent, "panel", "자식 자기 prop은 자식 값");
 });

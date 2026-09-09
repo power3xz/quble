@@ -123,7 +123,7 @@ pub enum Node {
         children: Vec<Node>,
     },
     Text(String),
-    /// `{name}`/`{assignee.name}` 보간 - prop 참조. codegen이 scope 인덱스로 해석.
+    /// `${name}`/`${assignee.name}` 보간 - prop 참조. codegen이 scope 인덱스로 해석.
     Var(VarRef),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
@@ -156,7 +156,7 @@ pub enum Node {
     },
     /// `@for (item[, index] of count) { body }` - count 회 반복 렌더. count는 정수 리터럴 또는 숫자
     /// prop 참조(ForCount). item은 요소(배열) 또는 회차값(count). index는 선택적 회차 인덱스변수 이름
-    /// (`@for (row, i of rows)`의 i) - 몸체 `{i}`/이벤트 `$n`이 읽는다. 없으면 None(인덱스 슬롯은 잡되
+    /// (`@for (row, i of rows)`의 i) - 몸체 `${i}`/이벤트 `$n`이 읽는다. 없으면 None(인덱스 슬롯은 잡되
     /// 몸체에서 이름 참조 불가). item과 index는 별개 슬롯이라 count-for든 array-for든 둘 다 쓸 수 있다.
     For {
         item: Ident,

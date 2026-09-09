@@ -91,9 +91,9 @@ pub fn var_ref_display(var: &VarRef) -> String {
 /// props/for_var를 하나씩 센 순번이고(객체/배열도 슬롯 하나), offset은 root가 객체일 때 그 필드
 /// 위치다. path가 비면 offset 0(THROUGH), 있으면 필드 거리(FIELD). u8 상한 가드는 emit이 건다.
 ///
-///   {tag}        root=tag(for_var)   path=[]       -> (for_var 슬롯, 0)
-///   {item.title} root=item(for_var)  path=[title]  -> (for_var 슬롯, title 거리)
-///   {user.name}  root=user(prop)     path=[name]   -> (prop 순번, name 거리)
+///   ${tag}        root=tag(for_var)  path=[]       -> (for_var 슬롯, 0)
+///   ${item.title} root=item(for_var) path=[title]  -> (for_var 슬롯, title 거리)
+///   ${user.name}  root=user(prop)    path=[name]   -> (prop 순번, name 거리)
 pub fn lookup_var_ref<'a>(
     var: &VarRef,
     props: &'a [Prop],

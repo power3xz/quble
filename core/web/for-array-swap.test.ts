@@ -29,7 +29,7 @@ before(() => {
 type TSwap = (arrayLeafIndex: number, i: number, j: number) => void;
 
 // ── 스칼라 배열 ──────────────────────────────────────────────────
-// for_array_index_del은 각 행에 인덱스({i})와 값({tag})을 나란히 표시한다 - 자리 번호는 그대로고
+// for_array_index_del은 각 행에 인덱스(${i})와 값(${tag})을 나란히 표시한다 - 자리 번호는 그대로고
 // 값만 바뀌는 것을 한 화면에서 본다. ADD 버튼 하나가 유일한 @for 밖 진입점이라 거기에 swap을 매단다.
 
 const rows = (host: ParentNode) =>
@@ -58,7 +58,7 @@ test("스칼라 배열: 두 요소의 값이 서로 바뀐다", () => {
 });
 
 // 인덱스 칸은 자리 번호라 안 건드린다 - 요소를 따라가면 안 된다.
-test("스칼라 배열: 자리 번호({i})는 swap을 따라가지 않는다", () => {
+test("스칼라 배열: 자리 번호(${i})는 swap을 따라가지 않는다", () => {
   const { host, swap } = scalarFixture(["a", "b", "c"], 0, 1);
   swap();
   const indices = [...host.querySelectorAll(".tag")].map((li) => li.querySelector(".idx")?.textContent);
@@ -177,7 +177,7 @@ const nestedFixture = (rows: Array<{ label: string; cells: string[] }>, i: numbe
 };
 
 // 각 행을 "라벨[셀들]"로 - 안쪽 인덱스({j})와 값을 함께 본다. 자리 번호가 요소를 따라가지 않는 것을
-// 바깥({i})과 안쪽({j}) 양쪽에서 확인한다.
+// 바깥(${i})과 안쪽(${j}) 양쪽에서 확인한다.
 const grid = (host: ParentNode) =>
   [...host.querySelectorAll(".row")].map((r) => {
     const cells = [...r.querySelectorAll(".cell")]
