@@ -86,7 +86,7 @@ component Playground {
       }
 
       @if (previewSelected) {
-        header(class="pg__preview-head") { "preview: " {previewName} }
+        header(class="pg__preview-head") { "preview: " ${previewName} }
       }
       @else {
         div(class="pg__guide") {
