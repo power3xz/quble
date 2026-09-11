@@ -707,7 +707,7 @@ fn folded_eq(a: &Folded, b: &Folded) -> bool {
 /// 밀어서, 런타임이 앞에서 뒤로 한 번 훑으면 스택 계산이 끝난다.
 ///
 /// 타입은 이미 맞다고 보고 짠다 - 부르기 전에 `require_expr_type`이 검사를 마쳤다.
-fn emit_expr(
+fn emit_expr_postfix(
     expr: &Expr,
     props: &[Prop],
     for_vars: &[ForVar],
@@ -765,7 +765,7 @@ fn emit_expr(
         },
 
         Expr::Unary(op, operand, _) => {
-            emit_expr(operand, props, for_vars, pool, out)?;
+            emit_expr_postfix(operand, props, for_vars, pool, out)?;
             out.push(match op {
                 UnaryOp::Not => ExprOp::Not as u8,
                 UnaryOp::Neg => ExprOp::Neg as u8,
@@ -773,8 +773,8 @@ fn emit_expr(
         }
 
         Expr::Binary(op, left, right, _) => {
-            emit_expr(left, props, for_vars, pool, out)?;
-            emit_expr(right, props, for_vars, pool, out)?;
+            emit_expr_postfix(left, props, for_vars, pool, out)?;
+            emit_expr_postfix(right, props, for_vars, pool, out)?;
             out.push(match op {
                 BinaryOp::Add => ExprOp::Add as u8,
                 BinaryOp::Sub => ExprOp::Sub as u8,
@@ -1167,7 +1167,7 @@ fn emit_node(
                 }
                 other => {
                     let mut bytes = Vec::new();
-                    emit_expr(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                    emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
                     let index = intern_expr(exprs, bytes, other.range().0)?;
                     code.push(Op::IfExpr as u8);
                     code.push(index);
