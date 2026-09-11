@@ -923,35 +923,55 @@ fn emit_node(
                     }
                     _ => None,
                 };
-                // 두 축이 opcode를 가른다.
-                //   name : 전역 속성명 테이블에 있으면 G(전역 ID), 없으면 L(상수풀 인덱스)
-                //   value: 정적이면 상수풀 인덱스, 변수면 scope index
-                let is_var = static_str.is_none();
-                let (op, name_operand) = match bytecode::attrs::attr_id(name) {
-                    Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
-                    None => (
-                        if is_var { Op::AttrLVar } else { Op::AttrL },
-                        pool.intern_str(name),
-                    ),
-                };
-                code.push(op as u8);
-                code.extend_from_slice(&name_operand.to_le_bytes());
-                match static_str {
-                    // 정적 값은 상수풀 인덱스 u16.
-                    Some(s) => {
-                        code.extend_from_slice(&pool.intern_str(&s).to_le_bytes());
+                // name 축은 셋이 같다 - 전역 속성명 테이블에 있으면 G(전역 ID), 없으면
+                // L(상수풀 인덱스). value 축(정적/변수/식)이 그중 하나를 고른다.
+
+                // 정적 값은 여기서 끝난다 - 상수풀 인덱스 u16.
+                if let Some(s) = static_str {
+                    let (op, name_operand) = match bytecode::attrs::attr_id(name) {
+                        Some(global_id) => (Op::AttrG, global_id),
+                        None => (Op::AttrL, pool.intern_str(name)),
+                    };
+                    code.push(op as u8);
+                    code.extend_from_slice(&name_operand.to_le_bytes());
+                    code.extend_from_slice(&pool.intern_str(&s).to_le_bytes());
+                    continue;
+                }
+
+                // 속성값도 텍스트로 나가므로 원시만 받는다.
+                require_expr_type(
+                    value,
+                    &[Type::Bool, Type::Number, Type::String],
+                    props,
+                    for_scope.for_vars,
+                )?;
+                match value {
+                    // 잎 하나는 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
+                    Expr::Var(v, _) if v.length_target().is_none() => {
+                        let (scope_index, offset) =
+                            require_leaf_var_ref(v, props, for_scope.for_vars)?;
+                        let (op, name_operand) = match bytecode::attrs::attr_id(name) {
+                            Some(global_id) => (Op::AttrGVar, global_id),
+                            None => (Op::AttrLVar, pool.intern_str(name)),
+                        };
+                        code.push(op as u8);
+                        code.extend_from_slice(&name_operand.to_le_bytes());
+                        code.push(scope_index);
+                        code.push(offset);
                     }
-                    // 변수 값은 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
-                    None => match value {
-                        Expr::Var(v, _) => {
-                            let (scope_index, offset) =
-                                require_leaf_var_ref(v, props, for_scope.for_vars)?;
-                            code.push(scope_index);
-                            code.push(offset);
-                        }
-                        // 연산자가 붙은 식은 값 자리에서 아직 안 된다.
-                        _ => return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0)),
-                    },
+                    // 연산자가 붙은 식만 표현식 테이블을 거친다(@if/보간과 같다).
+                    other => {
+                        let mut bytes = Vec::new();
+                        emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                        let index = intern_expr(exprs, bytes, other.range().0)?;
+                        let (op, name_operand) = match bytecode::attrs::attr_id(name) {
+                            Some(global_id) => (Op::AttrGExpr, global_id),
+                            None => (Op::AttrLExpr, pool.intern_str(name)),
+                        };
+                        code.push(op as u8);
+                        code.extend_from_slice(&name_operand.to_le_bytes());
+                        code.push(index);
+                    }
                 }
             }
 
