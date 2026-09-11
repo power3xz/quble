@@ -296,7 +296,7 @@ fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Slo
             Node::For { body, .. } => walk_slot_placeholders(body, slot_placeholders),
             Node::With { children, .. } => walk_slot_placeholders(children, slot_placeholders),
             // 합성 경계 - 자식의 슬롯은 자식 def의 것이라 여기 안 센다.
-            Node::Component { .. } | Node::Text(_) | Node::Var(_) => {}
+            Node::Component { .. } | Node::Text(_) | Node::Interpolation(_) => {}
         }
     }
 }
@@ -831,7 +831,8 @@ fn emit_node(
     // 지금까지 방출한 `@slot` 수 = 다음 것의 slot_placeholder_index.
     // collect_slot_placeholders의 순회 순서와 같아야 정의쪽/사용쪽 인덱스가 맞는다.
     next_slot_placeholder_index: &mut u16,
-    // 이 컴포넌트의 표현식 테이블. 연산자가 붙은 조건이 여기 쌓이고 `IF_EXPR`이 번호로 가리킨다.
+    // 이 컴포넌트의 표현식 테이블. 연산자가 붙은 조건과 값이 여기 쌓이고 `IF_EXPR`/`TEXT_EXPR`
+    // 등이 번호로 가리킨다.
     exprs: &mut Vec<Vec<u8>>,
 ) -> Result<(), CodegenError> {
     match node {
@@ -840,11 +841,31 @@ fn emit_node(
             code.push(Op::Text as u8);
             code.extend_from_slice(&index.to_le_bytes());
         }
-        Node::Var(var) => {
-            let (scope_index, offset) = require_leaf_var_ref(var, props, for_scope.for_vars)?;
-            code.push(Op::TextVar as u8);
-            code.push(scope_index);
-            code.push(offset);
+        Node::Interpolation(expr) => {
+            // 텍스트로 나갈 수 있는 것은 원시뿐이다 - 객체/배열은 통째로 못 찍는다.
+            require_expr_type(
+                expr,
+                &[Type::Bool, Type::Number, Type::String],
+                props,
+                for_scope.for_vars,
+            )?;
+            // 잎 하나는 슬롯을 그대로 쓴다 - 연산자가 붙은 식만 표현식 테이블을 거친다(@if와 같다).
+            match expr {
+                Expr::Var(var, _) if var.length_target().is_none() => {
+                    let (scope_index, offset) =
+                        require_leaf_var_ref(var, props, for_scope.for_vars)?;
+                    code.push(Op::TextVar as u8);
+                    code.push(scope_index);
+                    code.push(offset);
+                }
+                other => {
+                    let mut bytes = Vec::new();
+                    emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                    let index = intern_expr(exprs, bytes, other.range().0)?;
+                    code.push(Op::TextExpr as u8);
+                    code.push(index);
+                }
+            }
         }
         Node::Element {
             tag,

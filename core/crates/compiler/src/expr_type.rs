@@ -27,6 +27,8 @@ pub enum ExprTypeErrorKind {
     /// 식의 결과가 그 자리가 받는 타입에 없음(`@if (count)`). 자리에 따라 받는 것이 하나이거나
     /// (`@if`는 bool) 여럿이다(값 자리는 bool/number/string).
     ResultType { want: Box<[Type]>, got: Box<Type> },
+    /// 값 자리에 원시가 아닌 객체/배열 경로가 왔다. 통째로는 텍스트로도 속성으로도 못 나간다.
+    NotLeaf(String),
     /// `.length` 대상이 배열도 문자열도 아님.
     NoLength(String),
     /// 배열이 식으로 평가되는 자리에 왔다. 지금 배열을 받는 건 class 속성뿐이다.
@@ -55,6 +57,10 @@ impl std::fmt::Display for ExprTypeErrorKind {
                 let want = want.iter().map(type_name).collect::<Vec<_>>().join("/");
                 write!(f, "expected {want}, found {}", type_name(got))
             }
+            ExprTypeErrorKind::NotLeaf(path) => write!(
+                f,
+                "`{path}` is an object or array: only primitive values go in value position"
+            ),
             ExprTypeErrorKind::NoLength(path) => write!(f, "`{path}` has no length"),
             ExprTypeErrorKind::ListNotAllowed => write!(f, "only `class` takes an array"),
             ExprTypeErrorKind::Scope(e) => e.fmt(f),
@@ -222,9 +228,7 @@ fn length_type(
 fn leaf_type(ty: &Type, var: &VarRef) -> Result<Type, ExprTypeError> {
     match ty {
         Type::Bool | Type::Number | Type::String => Ok(ty.clone()),
-        _ => Err(
-            ExprTypeErrorKind::Scope(ScopeErrorKind::NotLeaf(var_ref_display(var))).at(var.range.0),
-        ),
+        _ => Err(ExprTypeErrorKind::NotLeaf(var_ref_display(var)).at(var.range.0)),
     }
 }
 

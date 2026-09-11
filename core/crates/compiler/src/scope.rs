@@ -7,15 +7,13 @@
 use crate::ast::{Prop, Type, VarRef};
 use crate::src_range::SrcRange;
 
-/// 스코프 조회가 낼 수 있는 실패. 넷 다 참조 하나를 탓한다.
+/// 스코프 조회가 낼 수 있는 실패. 셋 다 참조 하나를 탓한다.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ScopeErrorKind {
     /// props에도 회차변수에도 없는 이름.
     UnknownProp(String),
     /// 경로가 존재하지 않는 필드를 가리킴(객체 아닌 값에 `.field`, 또는 없는 필드명).
     UnknownField { root: String, field: String },
-    /// 값 자리에 leaf(원시)가 아닌 객체/배열 경로가 왔다.
-    NotLeaf(String),
     /// scope_index/offset이 u8(255)를 넘었다(BYTECODE.md - 둘 다 u8 operand).
     SlotOverflow(String),
 }
@@ -29,10 +27,6 @@ impl std::fmt::Display for ScopeErrorKind {
             ScopeErrorKind::UnknownField { root, field } => {
                 write!(f, "no field `{field}` on prop `{root}`")
             }
-            ScopeErrorKind::NotLeaf(path) => write!(
-                f,
-                "`{path}` is an object or array: only primitive values go in value position"
-            ),
             ScopeErrorKind::SlotOverflow(name) => {
                 write!(f, "more than 255 slots: `{name}` does not fit")
             }
@@ -169,8 +163,10 @@ pub fn var_ref_type<'a>(
     Ok(ty)
 }
 
-/// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. 값/반응성 자리(보간/속성/@if 조건)엔
-/// leaf만 올 수 있다 - 객체/배열 통째는 안 넘긴다. `lookup_var_ref` 위 leaf-only 래퍼.
+/// prop 참조를 단일 leaf(원시)의 (scope_index, offset)으로. `lookup_var_ref` 위 leaf-only 래퍼.
+///
+/// 원시인지는 부르기 전에 expr_type이 본다(NotLeaf) - 조회 실패(UnknownProp/UnknownField/
+/// SlotOverflow)만 여기서 난다.
 pub fn require_leaf_var_ref(
     var: &VarRef,
     props: &[Prop],
@@ -179,6 +175,6 @@ pub fn require_leaf_var_ref(
     let (scope_index, offset, ty) = lookup_var_ref(var, props, for_vars)?;
     match ty {
         Type::Bool | Type::Number | Type::String => Ok((scope_index, offset)),
-        _ => Err(ScopeErrorKind::NotLeaf(var_ref_display(var)).at(var.range.0)),
+        _ => unreachable!("expr_type이 원시가 아닌 값을 값 자리에서 이미 걸렀다"),
     }
 }

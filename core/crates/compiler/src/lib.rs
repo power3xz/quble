@@ -2134,7 +2134,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::NotLeaf(_)),
+                    kind: codegen::CodegenErrorKind::ExprType(
+                        expr_type::ExprTypeErrorKind::NotLeaf(_)
+                    ),
                     ..
                 },
                 ..
@@ -2759,7 +2761,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::Scope(scope::ScopeErrorKind::NotLeaf(_)),
+                    kind: codegen::CodegenErrorKind::ExprType(
+                        expr_type::ExprTypeErrorKind::NotLeaf(_)
+                    ),
                     ..
                 },
                 ..
@@ -2780,9 +2784,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::Scope(
+                    kind: codegen::CodegenErrorKind::ExprType(expr_type::ExprTypeErrorKind::Scope(
                         scope::ScopeErrorKind::UnknownField { .. }
-                    ),
+                    )),
                     ..
                 },
                 ..
@@ -2803,9 +2807,9 @@ component B { props { a: A } template { div( /) } }"#;
             compile(src),
             Err(CompileError::Codegen(flatten::Sourced {
                 err: codegen::CodegenError {
-                    kind: codegen::CodegenErrorKind::Scope(
+                    kind: codegen::CodegenErrorKind::ExprType(expr_type::ExprTypeErrorKind::Scope(
                         scope::ScopeErrorKind::UnknownField { .. }
-                    ),
+                    )),
                     ..
                 },
                 ..

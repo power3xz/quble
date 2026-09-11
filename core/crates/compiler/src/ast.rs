@@ -123,8 +123,9 @@ pub enum Node {
         children: Vec<Node>,
     },
     Text(String),
-    /// `${name}`/`${assignee.name}` 보간 - prop 참조. codegen이 scope 인덱스로 해석.
-    Var(VarRef),
+    /// `${name}`/`${count * 2}` 보간 - 값을 텍스트로 낸다. 잎 하나면 codegen이 슬롯 인코딩으로
+    /// 그대로 낮추고(TextVar), 연산자가 붙으면 식 테이블을 거친다(TextExpr).
+    Interpolation(Expr),
     /// 대문자로 시작하는 컴포넌트 호출(합성). `Comp(prop={parent_var})` 또는 `Comp(prop="lit")`.
     /// args = (자식 prop명, 바인딩 값). codegen이 자식 props 순서로 PUSH_ARG/PUSH_ARG_CONST를 낸다.
     /// prop명이 자기 자리를 든다 - 자식에 없는 이름을 넘기면(UnknownArg) 그 이름을 탓한다.
