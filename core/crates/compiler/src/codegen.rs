@@ -1125,7 +1125,7 @@ fn emit_node(
         }
         Node::If { cond, then, else_ } => {
             // 조건은 bool이어야 한다 - number가 참/거짓으로 새는 걸 막는다(`@if (count > 0)`으로 쓴다).
-            require_expr_type(cond, &Type::Bool, props, for_scope.for_vars)?;
+            require_expr_type(cond, &[Type::Bool], props, for_scope.for_vars)?;
 
             // 소스 리터럴만으로 된 조건은 컴파일타임에 값이 정해진다. 그러면 한쪽 가지가 절대
             // 안 그려지므로, 죽는 가지가 있으면 에러다. 죽는 것이 없을 때(참 + `@else` 없음)만
