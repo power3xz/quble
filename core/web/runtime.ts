@@ -173,6 +173,9 @@ const OP = {
   SLOT_PLACEHOLDER_CONTENT_END: 0x1c,
   FILL_SLOT_PLACEHOLDER: 0x1d,
   IF_EXPR: 0x1e,
+  TEXT_EXPR: 0x1f,
+  ATTR_G_EXPR: 0x20,
+  ATTR_L_EXPR: 0x21,
 } as const;
 
 // 표현식 opcode(BYTECODE.md #4 <EXPR>). OP와 다른 이름공간이다 - 같은 값이 서로 다른 뜻이라
@@ -225,6 +228,7 @@ const operandLen = (op: number) => {
       return 0;
     case OP.PUSH_THROUGH: // scope_index: u8
     case OP.IF_EXPR: // expr_index: u8
+    case OP.TEXT_EXPR: // expr_index: u8
       return 1;
     case OP.ELEM_OPEN:
     case OP.TEXT:
@@ -243,6 +247,9 @@ const operandLen = (op: number) => {
     case OP.PUSH_SLOT_PLACEHOLDER_CONTENT:
     case OP.FILL_SLOT_PLACEHOLDER:
       return 2;
+    case OP.ATTR_G_EXPR: // name: u16, expr_index: u8
+    case OP.ATTR_L_EXPR: // name: u16, expr_index: u8
+      return 3;
     case OP.ATTR_G:
     case OP.ATTR_L:
     case OP.ATTR_G_VAR: // name: u16, scope_index: u8, offset: u8
@@ -1778,6 +1785,30 @@ class Interpreter {
     return initial;
   };
 
+  // bindVar의 식 버전 - 연산자가 붙은 값(TEXT_EXPR/ATTR_*_EXPR)을 세어 현재 값을 주고, 식이
+  // 읽는 칸이 바뀌면 다시 세어 update에 넘긴다. 슬롯 하나가 아니라 식 하나를 보므로 읽는 칸이
+  // 여럿일 수 있고, 어느 칸이 바뀌든 하는 일이 같아 함수는 하나만 만들어 칸마다 건다.
+  //
+  // IF_EXPR과 달리 파생 칸을 안 잡는다 - 값을 받아 DOM에 바로 쓰므로 중간에 담을 자리가
+  // 필요 없다(IF_EXPR은 분기가 조건 칸 하나를 구독하는 구조라 잡는다).
+  bindExpr = (
+    expr: Uint8Array,
+    update: (v: unknown) => void,
+    argumentSourcePairs: TScope,
+    branch: TBranch,
+  ) => {
+    // 다시 셀 때도 이 지점의 슬롯을 봐야 하는데, 공유 pairs는 @for 회차마다 push/pop돼 그때는
+    // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
+    // (runIfExpr과 같은 관례).
+    const pairs = [...argumentSourcePairs];
+    const recount = () => update(this.evalExpr(expr, pairs));
+    for (const leafIndex of this.collectExprLeaves(expr, pairs)) {
+      branch.leafIndices.push(leafIndex);
+      branch.updateFns.push(recount);
+    }
+    return this.evalExpr(expr, pairs);
+  };
+
   // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
   //
   // 재진입 가능: 최초 인스턴스화는 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만
@@ -1897,6 +1928,32 @@ class Interpreter {
           el.setAttribute(name, v as string);
           break;
         }
+        case OP.ATTR_G_EXPR: {
+          const name = ATTRS[u16at()];
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          const el = pending!;
+          const v = this.bindExpr(
+            this.module.defs[compId].exprs[u8at()],
+            (v) => el.setAttribute(name, v as string),
+            argumentSourcePairs,
+            branch,
+          );
+          el.setAttribute(name, v as string);
+          break;
+        }
+        case OP.ATTR_L_EXPR: {
+          const name = this.module.constpool[u16at()] as string;
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          const el = pending!;
+          const v = this.bindExpr(
+            this.module.defs[compId].exprs[u8at()],
+            (v) => el.setAttribute(name, v as string),
+            argumentSourcePairs,
+            branch,
+          );
+          el.setAttribute(name, v as string);
+          break;
+        }
         case OP.BIND_EVENT: {
           // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
           const domEvent = DOM_EVENTS[u16at()];
@@ -1971,6 +2028,17 @@ class Interpreter {
           node.textContent = this.bindVar(
             scopeIndex,
             offset,
+            (v) => (node.textContent = v as string),
+            argumentSourcePairs,
+            branch,
+          ) as string;
+          nodeTop().appendChild(node);
+          break;
+        }
+        case OP.TEXT_EXPR: {
+          const node = document.createTextNode("");
+          node.textContent = this.bindExpr(
+            this.module.defs[compId].exprs[u8at()],
             (v) => (node.textContent = v as string),
             argumentSourcePairs,
             branch,
