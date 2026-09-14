@@ -8,4 +8,6 @@
 
 ## 하는 중
 
-없음
+값 자리 식의 배열 인덱싱 - `${a[i].title}`, `id={a[n].v}` (ROADMAP `${expr}` 절).
+`ElemAt` opcode 하나를 더하고, 전제로 런타임 식 해석기를 하나로 모은다
+(`collectExprLeaves`가 훑기만 해서는 `ElemAt`이 닿는 칸을 못 뽑는다).
