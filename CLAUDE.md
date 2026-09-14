@@ -58,6 +58,7 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
   커밋하기 전에 읽는다.
 - **WRITING-CODE-RULES.md** - 코드 작성 순서(시그니처 합의, 확인 후 작성, 테스트까지가
   한 스텝). 코드를 쓰기 전에 읽는다.
+- **COMMENT-GUIDELINES.md** - 주석 작성 가이드라인. 주석을 쓰기 전에 읽는다.
 - **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
 - **core/web/LEAF-STORE-LAYOUT.md** - 런타임 데이터 스토어 레이아웃 - 값이 store에 어떻게
   놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
@@ -83,6 +84,10 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
     CI에 넣었으면 CI에서, 브라우저용이면 브라우저에서 본다.
   - 사용자 확인: 무엇을 어떻게 보면 되는지 적어 부탁하고, 됐다는 답을 받는다.
   확인이 남았으면 무엇이 남았는지 항목에 적고 그때까지 둔다.
+
+### 주석을 작성할 때
+
+COMMENT-GUIDELINES.md를 읽고 따른다.
 
 ### 사용자가 quble 변경점을 IDE나 브라우저에서 확인할 때
 
