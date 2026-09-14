@@ -153,8 +153,22 @@ test("qubc - 이벤트명과 이벤트 바인딩을 가른다", () => {
 test("qubc - 자식 자리 보간을 가른다", () => {
   const lines = tokenize(QUBC, "a.qubc");
 
-  // 값을 꺼내 쓰는 자리 - 경로 접근(row.id)도 한 토큰이다.
-  assert.deepEqual(textsOf(lines, "interpolation"), ["${label}", "${count}", "${row.id}", "${label}"]);
+  // 값을 꺼내 쓰는 자리 - 여는/닫는 기호가 보간이고 안쪽은 식으로 갈린다.
+  assert.deepEqual(textsOf(lines, "interpolation"), ["${", "}", "${", "}", "${", "}", "${", "}"]);
+  // `@if`/`@for` 조건과 속성값도 값 자리다 - 그 안의 이름이 전부 변수로 갈린다.
+  assert.deepEqual(textsOf(lines, "variable"), [
+    "label",
+    "on",
+    "count",
+    "row",
+    "i",
+    "rows",
+    "row",
+    "id",
+    "row",
+    "id",
+    "label",
+  ]);
 });
 
 test("qubc - 주석을 가른다", () => {
@@ -216,16 +230,18 @@ test("qubc - 보간이 여럿이어도 원문을 지킨다", () => {
 
   const lines = tokenize(source, "a.qubc");
   assert.equal(rejoin(lines), source);
-  assert.deepEqual(textsOf(lines, "interpolation"), ["${a}", "${b}"]);
+  assert.deepEqual(textsOf(lines, "interpolation"), ["${", "}", "${", "}"]);
+  assert.deepEqual(textsOf(lines, "variable"), ["a", "b"]);
 });
 
-test("qubc - 닫히지 않은 보간은 보간이 아니다", () => {
-  // 편집 중간 상태. 멈추지 않고 원문만 지키면 된다.
-  const source = "span() { ${a 열기만 }";
+test("qubc - 닫히지 않은 보간도 값 자리를 연다", () => {
+  // 편집 중간 상태. 멈추지 않고 원문만 지키면 된다 - 문자열 안 보간과 같은 규칙이다.
+  const source = "span() { ${a 열기만 ";
 
   const lines = tokenize(source, "a.qubc");
   assert.equal(rejoin(lines), source);
-  assert.deepEqual(textsOf(lines, "interpolation"), []);
+  assert.deepEqual(textsOf(lines, "interpolation"), ["${"]);
+  assert.deepEqual(textsOf(lines, "variable"), ["a"]);
 });
 
 test("js - 키워드/문자열/주석을 가른다", () => {
