@@ -93,6 +93,15 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
 사용자가 명령을 시켜서 실행할 때도 같다 - 시킨 명령을 그대로 치기 전에 그 명령의 선행 조건을
 본다.
 
+### 피처 브랜치를 main에 머지할 때
+
+머지 훅이 `npm run lint`, `cargo test --workspace`, `cargo build --bin quble`, `build:wasm`,
+`npm run typecheck`, `npm test`를 돌린다. 그중 포맷은 고치면 커밋이 생기므로 머지 전에
+브랜치에서 돌리고 커밋한다.
+
+- `.ts`/`.css`/`.json`을 만졌으면 `npm run format`.
+- `.rs`를 만졌으면 `cargo fmt`.
+
 ## 커맨드 실행 규칙
 
 논리적으로 나뉘는 작업은 커맨드도 따로 실행한다 - `&&`로 이어 붙이지 않는다. 이으면
