@@ -409,7 +409,6 @@ const lastText = (tokens: TToken[]): string => {
   return "";
 };
 
-
 // qubc 식별자의 갈래. 전대문자는 이벤트명(PICK), 대문자 시작은 컴포넌트/별칭(Card, Row)이다 -
 // SYNTAX.md의 관례라 형태만 보고 가른다.
 const qubcIdentClass = (ident: string) => {

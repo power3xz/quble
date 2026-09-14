@@ -21,13 +21,7 @@ before(() => {
 //   0=count 1=limit 2=isPaid 3=note 4=tags
 const LEAF = { count: 0, limit: 1, isPaid: 2, note: 3 } as const;
 
-const instantiate = (props: {
-  count: number;
-  limit: number;
-  isPaid: boolean;
-  note: string;
-  tags: string[];
-}) => {
+const instantiate = (props: { count: number; limit: number; isPaid: boolean; note: string; tags: string[] }) => {
   const inst = compile(qubb)(0)(props, {});
   const host = mount(inst);
   const textOf = (cls: string) => (host.querySelector(`.${cls}`) as HTMLElement).textContent;

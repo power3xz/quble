@@ -1791,12 +1791,7 @@ class Interpreter {
   //
   // IF_EXPR과 달리 파생 칸을 안 잡는다 - 값을 받아 DOM에 바로 쓰므로 중간에 담을 자리가
   // 필요 없다(IF_EXPR은 분기가 조건 칸 하나를 구독하는 구조라 잡는다).
-  bindExpr = (
-    expr: Uint8Array,
-    update: (v: unknown) => void,
-    argumentSourcePairs: TScope,
-    branch: TBranch,
-  ) => {
+  bindExpr = (expr: Uint8Array, update: (v: unknown) => void, argumentSourcePairs: TScope, branch: TBranch) => {
     // 다시 셀 때도 이 지점의 슬롯을 봐야 하는데, 공유 pairs는 @for 회차마다 push/pop돼 그때는
     // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
     // (runIfExpr과 같은 관례).
