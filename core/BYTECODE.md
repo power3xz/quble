@@ -255,6 +255,9 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `SLOT_PLACEHOLDER_CONTENT_END` | 0x1c | -              | -                         | 콘텐츠 구간 끝 마커(`IF_END` 동형). 다음 op가 `PUSH_SLOT_PLACEHOLDER_CONTENT`가 아니면 콘텐츠 목록도 끝. |
 | `FILL_SLOT_PLACEHOLDER` | 0x1d | slot_placeholder_index: u16 | -          | `@slot(name)` 자리(**정의쪽**). 그 인덱스의 콘텐츠 구간을 **부모 컨텍스트**(argumentSourcePairs/compId/pathPrefix)로 해석해 이 자리에 끼운다. 안 채운 슬롯이면 아무것도 안 넣는다(미채움 허용). |
 | `IF_EXPR`         | 0x1e | expr_index: u8        | 컴포넌트 표현식 테이블     | 연산자가 붙은 조건으로 분기 시작(`@if (count > 0)`). 이후는 `IF`와 같다 - then 가지가 이어지고 `ELSE`/`IF_END`도 그대로. 런타임이 파생 칸을 잡고 식이 읽는 칸들을 구독해 그 칸에 결과를 넣는다(#5.2). |
+| `TEXT_EXPR`       | 0x1f | expr_index: u8        | 컴포넌트 표현식 테이블     | 연산자가 붙은 식을 텍스트로 출력(`${count * 2}`). 잎 하나짜리 보간은 `TEXT_VAR`로 간다. 값 자리라 파생 칸을 안 잡는다 - 식이 읽는 칸들을 구독해 바뀌면 다시 세어 그 자리에 쓴다(#5.3). |
+| `ATTR_G_EXPR`     | 0x20 | name:u16, expr_index:u8 | name=전역, value=표현식 테이블 | ` name="..."` 출력. name은 전역 상수풀 ID, 값은 식을 세어 얻는다(`id={count * 10}`). |
+| `ATTR_L_EXPR`     | 0x21 | name:u16, expr_index:u8 | name=컴포넌트 상수풀, value=표현식 테이블 | 위와 같고 name만 컴포넌트 상수풀 인덱스. |
 
 설계 메모:
 
@@ -437,6 +440,25 @@ IF_EXPR expr_index  [then]  ELSE  [else]  IF_END
 
 왜 후위 표기이고 왜 테이블을 컴포넌트가 소유하는지는 DECISIONS.md "표현식 테이블 - 컴포넌트
 소유 + 후위 표기 채택".
+
+---
+
+## 5.3 표현식 값 - `TEXT_EXPR` / `ATTR_*_EXPR`
+
+텍스트 보간(`${count * 2}`)과 속성값(`id={count * 10}`)에 연산자가 붙은 것. 잎 하나짜리는
+`TEXT_VAR`/`ATTR_*_VAR`가 그대로 받는다 - 표현식 테이블을 거칠 이유가 없다.
+
+**파생 칸을 안 잡는다.** `IF_EXPR`과 다른 점이다. 분기는 조건 칸 하나를 구독하는 구조라 식
+결과를 담을 칸이 필요하지만, 값 자리는 세어 나온 값을 그 자리에 바로 쓰므로 중간에 담을 데가
+없다.
+
+1. 식 바이트를 훑어 `LoadVar`/`LoadArrayLength`/`LoadStringLength`가 가리키는 칸을 모으고,
+   그 칸들을 구독한다(`IF_EXPR` 2단계와 같다).
+2. 식을 세어 텍스트 노드나 속성에 쓴다.
+3. 원본 칸 중 하나라도 바뀌면 식 전체를 다시 세어 같은 자리에 쓴다.
+
+**값 자리가 받는 타입은 원시 셋(bool/number/string)이다.** 객체/배열은 통째로 문자열이 될 수
+없어 컴파일 에러다(SYNTAX.md #5.2).
 
 ---
 
