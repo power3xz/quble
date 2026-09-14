@@ -15,6 +15,7 @@
     { "include": "#composition" },
     { "include": "#tag" },
     { "include": "#attribute" },
+    { "include": "#value-braces" },
     { "include": "#interpolation" },
     { "include": "#string" }
   ],
@@ -108,14 +109,34 @@
         "2": { "name": "keyword.operator.assignment.quble" }
       }
     },
+    "value-braces": {
+      "comment": "`=` 뒤 식 자리(attr={EXPR}, prop={EXPR}). 합성 인자도 같은 표기다.",
+      "begin": "(?<==)\\s*(\\{)",
+      "end": "(\\})",
+      "beginCaptures": { "1": { "name": "punctuation.section.embedded.begin.quble" } },
+      "endCaptures": { "1": { "name": "punctuation.section.embedded.end.quble" } },
+      "patterns": [{ "include": "#expr" }]
+    },
     "interpolation": {
-      "comment": "${var} 보간 - 단일 prop 참조만(표현식 미구현).",
-      "match": "(\\$\\{)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\})",
-      "captures": {
-        "1": { "name": "punctuation.section.embedded.begin.quble" },
-        "2": { "name": "variable.other.quble" },
-        "3": { "name": "punctuation.section.embedded.end.quble" }
-      }
+      "comment": "${EXPR} 보간 - 참조/경로/리터럴에 연산자가 붙는다(SYNTAX #5.2).",
+      "begin": "(\\$\\{)",
+      "end": "(\\})",
+      "beginCaptures": { "1": { "name": "punctuation.section.embedded.begin.quble" } },
+      "endCaptures": { "1": { "name": "punctuation.section.embedded.end.quble" } },
+      "patterns": [{ "include": "#expr" }]
+    },
+    "expr": {
+      "comment": "값 자리 식의 내용물. 경로는 마디마다 나눠 칠한다(user.name).",
+      "patterns": [
+        { "match": "\\b(true|false)\\b", "name": "constant.language.quble" },
+        { "match": "\\b[0-9]+(\\.[0-9]+)?\\b", "name": "constant.numeric.quble" },
+        { "include": "#string" },
+        { "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)", "captures": { "2": { "name": "variable.other.property.quble" } } },
+        { "match": "[A-Za-z_][A-Za-z0-9_]*", "name": "variable.parameter.quble" },
+        { "match": "(&&|\\|\\||!)", "name": "keyword.operator.logical.quble" },
+        { "match": "(==|!=|<=|>=|<|>)", "name": "keyword.operator.comparison.quble" },
+        { "match": "[-+*/%]", "name": "keyword.operator.arithmetic.quble" }
+      ]
     },
     "string": {
       "comment": "문자열 안 ${var} 보간 허용.",
