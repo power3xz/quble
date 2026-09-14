@@ -1,0 +1,21 @@
+component ValueExpr {
+  props {
+    count: number,
+    limit: number,
+    isPaid: bool,
+    note: string,
+    tags: string[]
+  }
+  template {
+    div() {
+      p(class="arith") { ${count * 2} }
+      p(class="mixed") { ${count + limit} }
+      p(class="cmp") { ${count > limit} }
+      p(class="strlen") { ${note.length} }
+      p(class="arrlen") { ${tags.length} }
+      p(class="leaf") { ${note} }
+      span(id={count * 10} title={isPaid}) { "attr" }
+      span(data-n={count - 1}) { "local-attr" }
+    }
+  }
+}

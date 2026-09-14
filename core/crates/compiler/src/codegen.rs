@@ -296,7 +296,7 @@ fn walk_slot_placeholders<'a>(nodes: &'a [Node], slot_placeholders: &mut Vec<Slo
             Node::For { body, .. } => walk_slot_placeholders(body, slot_placeholders),
             Node::With { children, .. } => walk_slot_placeholders(children, slot_placeholders),
             // 합성 경계 - 자식의 슬롯은 자식 def의 것이라 여기 안 센다.
-            Node::Component { .. } | Node::Text(_) | Node::Var(_) => {}
+            Node::Component { .. } | Node::Text(_) | Node::Interpolation(_) => {}
         }
     }
 }
@@ -707,7 +707,7 @@ fn folded_eq(a: &Folded, b: &Folded) -> bool {
 /// 밀어서, 런타임이 앞에서 뒤로 한 번 훑으면 스택 계산이 끝난다.
 ///
 /// 타입은 이미 맞다고 보고 짠다 - 부르기 전에 `require_expr_type`이 검사를 마쳤다.
-fn emit_expr(
+fn emit_expr_postfix(
     expr: &Expr,
     props: &[Prop],
     for_vars: &[ForVar],
@@ -765,7 +765,7 @@ fn emit_expr(
         },
 
         Expr::Unary(op, operand, _) => {
-            emit_expr(operand, props, for_vars, pool, out)?;
+            emit_expr_postfix(operand, props, for_vars, pool, out)?;
             out.push(match op {
                 UnaryOp::Not => ExprOp::Not as u8,
                 UnaryOp::Neg => ExprOp::Neg as u8,
@@ -773,8 +773,8 @@ fn emit_expr(
         }
 
         Expr::Binary(op, left, right, _) => {
-            emit_expr(left, props, for_vars, pool, out)?;
-            emit_expr(right, props, for_vars, pool, out)?;
+            emit_expr_postfix(left, props, for_vars, pool, out)?;
+            emit_expr_postfix(right, props, for_vars, pool, out)?;
             out.push(match op {
                 BinaryOp::Add => ExprOp::Add as u8,
                 BinaryOp::Sub => ExprOp::Sub as u8,
@@ -831,7 +831,8 @@ fn emit_node(
     // 지금까지 방출한 `@slot` 수 = 다음 것의 slot_placeholder_index.
     // collect_slot_placeholders의 순회 순서와 같아야 정의쪽/사용쪽 인덱스가 맞는다.
     next_slot_placeholder_index: &mut u16,
-    // 이 컴포넌트의 표현식 테이블. 연산자가 붙은 조건이 여기 쌓이고 `IF_EXPR`이 번호로 가리킨다.
+    // 이 컴포넌트의 표현식 테이블. 연산자가 붙은 조건과 값이 여기 쌓이고 `IF_EXPR`/`TEXT_EXPR`
+    // 등이 번호로 가리킨다.
     exprs: &mut Vec<Vec<u8>>,
 ) -> Result<(), CodegenError> {
     match node {
@@ -840,11 +841,31 @@ fn emit_node(
             code.push(Op::Text as u8);
             code.extend_from_slice(&index.to_le_bytes());
         }
-        Node::Var(var) => {
-            let (scope_index, offset) = require_leaf_var_ref(var, props, for_scope.for_vars)?;
-            code.push(Op::TextVar as u8);
-            code.push(scope_index);
-            code.push(offset);
+        Node::Interpolation(expr) => {
+            // 텍스트로 나갈 수 있는 것은 원시뿐이다 - 객체/배열은 통째로 못 찍는다.
+            require_expr_type(
+                expr,
+                &[Type::Bool, Type::Number, Type::String],
+                props,
+                for_scope.for_vars,
+            )?;
+            // 잎 하나는 슬롯을 그대로 쓴다 - 연산자가 붙은 식만 표현식 테이블을 거친다(@if와 같다).
+            match expr {
+                Expr::Var(var, _) if var.length_target().is_none() => {
+                    let (scope_index, offset) =
+                        require_leaf_var_ref(var, props, for_scope.for_vars)?;
+                    code.push(Op::TextVar as u8);
+                    code.push(scope_index);
+                    code.push(offset);
+                }
+                other => {
+                    let mut bytes = Vec::new();
+                    emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                    let index = intern_expr(exprs, bytes, other.range().0)?;
+                    code.push(Op::TextExpr as u8);
+                    code.push(index);
+                }
+            }
         }
         Node::Element {
             tag,
@@ -902,35 +923,55 @@ fn emit_node(
                     }
                     _ => None,
                 };
-                // 두 축이 opcode를 가른다.
-                //   name : 전역 속성명 테이블에 있으면 G(전역 ID), 없으면 L(상수풀 인덱스)
-                //   value: 정적이면 상수풀 인덱스, 변수면 scope index
-                let is_var = static_str.is_none();
-                let (op, name_operand) = match bytecode::attrs::attr_id(name) {
-                    Some(global_id) => (if is_var { Op::AttrGVar } else { Op::AttrG }, global_id),
-                    None => (
-                        if is_var { Op::AttrLVar } else { Op::AttrL },
-                        pool.intern_str(name),
-                    ),
-                };
-                code.push(op as u8);
-                code.extend_from_slice(&name_operand.to_le_bytes());
-                match static_str {
-                    // 정적 값은 상수풀 인덱스 u16.
-                    Some(s) => {
-                        code.extend_from_slice(&pool.intern_str(&s).to_le_bytes());
+                // name 축은 셋이 같다 - 전역 속성명 테이블에 있으면 G(전역 ID), 없으면
+                // L(상수풀 인덱스). value 축(정적/변수/식)이 그중 하나를 고른다.
+
+                // 정적 값은 여기서 끝난다 - 상수풀 인덱스 u16.
+                if let Some(s) = static_str {
+                    let (op, name_operand) = match bytecode::attrs::attr_id(name) {
+                        Some(global_id) => (Op::AttrG, global_id),
+                        None => (Op::AttrL, pool.intern_str(name)),
+                    };
+                    code.push(op as u8);
+                    code.extend_from_slice(&name_operand.to_le_bytes());
+                    code.extend_from_slice(&pool.intern_str(&s).to_le_bytes());
+                    continue;
+                }
+
+                // 속성값도 텍스트로 나가므로 원시만 받는다.
+                require_expr_type(
+                    value,
+                    &[Type::Bool, Type::Number, Type::String],
+                    props,
+                    for_scope.for_vars,
+                )?;
+                match value {
+                    // 잎 하나는 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
+                    Expr::Var(v, _) if v.length_target().is_none() => {
+                        let (scope_index, offset) =
+                            require_leaf_var_ref(v, props, for_scope.for_vars)?;
+                        let (op, name_operand) = match bytecode::attrs::attr_id(name) {
+                            Some(global_id) => (Op::AttrGVar, global_id),
+                            None => (Op::AttrLVar, pool.intern_str(name)),
+                        };
+                        code.push(op as u8);
+                        code.extend_from_slice(&name_operand.to_le_bytes());
+                        code.push(scope_index);
+                        code.push(offset);
                     }
-                    // 변수 값은 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
-                    None => match value {
-                        Expr::Var(v, _) => {
-                            let (scope_index, offset) =
-                                require_leaf_var_ref(v, props, for_scope.for_vars)?;
-                            code.push(scope_index);
-                            code.push(offset);
-                        }
-                        // 연산자가 붙은 식은 값 자리에서 아직 안 된다.
-                        _ => return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0)),
-                    },
+                    // 연산자가 붙은 식만 표현식 테이블을 거친다(@if/보간과 같다).
+                    other => {
+                        let mut bytes = Vec::new();
+                        emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                        let index = intern_expr(exprs, bytes, other.range().0)?;
+                        let (op, name_operand) = match bytecode::attrs::attr_id(name) {
+                            Some(global_id) => (Op::AttrGExpr, global_id),
+                            None => (Op::AttrLExpr, pool.intern_str(name)),
+                        };
+                        code.push(op as u8);
+                        code.extend_from_slice(&name_operand.to_le_bytes());
+                        code.push(index);
+                    }
                 }
             }
 
@@ -1125,7 +1166,7 @@ fn emit_node(
         }
         Node::If { cond, then, else_ } => {
             // 조건은 bool이어야 한다 - number가 참/거짓으로 새는 걸 막는다(`@if (count > 0)`으로 쓴다).
-            require_expr_type(cond, &Type::Bool, props, for_scope.for_vars)?;
+            require_expr_type(cond, &[Type::Bool], props, for_scope.for_vars)?;
 
             // 소스 리터럴만으로 된 조건은 컴파일타임에 값이 정해진다. 그러면 한쪽 가지가 절대
             // 안 그려지므로, 죽는 가지가 있으면 에러다. 죽는 것이 없을 때(참 + `@else` 없음)만
@@ -1167,7 +1208,7 @@ fn emit_node(
                 }
                 other => {
                     let mut bytes = Vec::new();
-                    emit_expr(other, props, for_scope.for_vars, pool, &mut bytes)?;
+                    emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
                     let index = intern_expr(exprs, bytes, other.range().0)?;
                     code.push(Op::IfExpr as u8);
                     code.push(index);

@@ -240,6 +240,16 @@
   color: #8b95a5;
 }
 
+/* 값 자리 안의 이름(${count}, class={x}) - 밖의 태그명/속성명과 구별된다. */
+.tok--variable {
+  color: #9fd3ff;
+}
+
+/* 식 연산자 - 구두점보다 밝아 피연산자 사이에서 읽힌다. */
+.tok--operator {
+  color: #d4a5d8;
+}
+
 .pg__area {
   position: absolute;
   top: 0;

@@ -850,8 +850,8 @@ impl<'a> Parser<'a> {
                     Err(self.err_read(kind))
                 }
             },
-            // `${ IDENT }` 보간.
-            Some(Token::DollarLBrace) => self.parse_var(),
+            // `${ EXPR }` 보간.
+            Some(Token::DollarLBrace) => self.parse_interpolation(),
             // @if 분기.
             Some(Token::At(Directive::If)) => self.parse_if_node(),
             // @for 반복.
@@ -979,12 +979,12 @@ impl<'a> Parser<'a> {
         Ok(Node::With { context, children })
     }
 
-    // ${ IDENT(.IDENT)* }
-    fn parse_var(&mut self) -> Result<Node, ParseError> {
+    // ${ EXPR }
+    fn parse_interpolation(&mut self) -> Result<Node, ParseError> {
         self.expect(&Token::DollarLBrace)?;
-        let var = self.parse_var_ref()?;
+        let expr = self.parse_expr()?;
         self.expect(&Token::RBrace)?;
-        Ok(Node::Var(var))
+        Ok(Node::Interpolation(expr))
     }
 
     // [ALIAS :] COMP ( ARG*  /)   - 대문자 컴포넌트 호출. ARG = prop = { var }.

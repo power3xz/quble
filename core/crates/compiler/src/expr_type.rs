@@ -24,8 +24,11 @@ pub enum ExprTypeErrorKind {
         left: Box<Type>,
         right: Box<Type>,
     },
-    /// 식의 결과가 그 자리가 요구하는 타입과 다름(`@if (count)`).
-    ResultType { want: Box<Type>, got: Box<Type> },
+    /// 식의 결과가 그 자리가 받는 타입에 없음(`@if (count)`). 자리에 따라 받는 것이 하나이거나
+    /// (`@if`는 bool) 여럿이다(값 자리는 bool/number/string).
+    ResultType { want: Box<[Type]>, got: Box<Type> },
+    /// 값 자리에 원시가 아닌 객체/배열 경로가 왔다. 통째로는 텍스트로도 속성으로도 못 나간다.
+    NotLeaf(String),
     /// `.length` 대상이 배열도 문자열도 아님.
     NoLength(String),
     /// 배열이 식으로 평가되는 자리에 왔다. 지금 배열을 받는 건 class 속성뿐이다.
@@ -50,8 +53,14 @@ impl std::fmt::Display for ExprTypeErrorKind {
                 type_name(right)
             ),
             ExprTypeErrorKind::ResultType { want, got } => {
-                write!(f, "expected {}, found {}", type_name(want), type_name(got))
+                // 여럿이면 `/`로 잇는다. bool/number/string
+                let want = want.iter().map(type_name).collect::<Vec<_>>().join("/");
+                write!(f, "expected {want}, found {}", type_name(got))
             }
+            ExprTypeErrorKind::NotLeaf(path) => write!(
+                f,
+                "`{path}` is an object or array: only primitive values go in value position"
+            ),
             ExprTypeErrorKind::NoLength(path) => write!(f, "`{path}` has no length"),
             ExprTypeErrorKind::ListNotAllowed => write!(f, "only `class` takes an array"),
             ExprTypeErrorKind::Scope(e) => e.fmt(f),
@@ -112,19 +121,22 @@ fn shallow_name(ty: &Type) -> &'static str {
     }
 }
 
-/// 식의 결과 타입이 want인지까지 본다. 아니면 식 전체를 탓한다 - 결과가 어긋난 것이지
+/// 식의 결과 타입이 want 중 하나인지까지 본다. 아니면 식 전체를 탓한다 - 결과가 어긋난 것이지
 /// 어느 조각 하나가 어긋난 게 아니다.
+///
+/// want가 여럿인 것은 자리마다 받는 것이 달라서다 - `@if`는 bool 하나, 값 자리(보간/속성)는
+/// 원시 셋(bool/number/string)을 받는다.
 pub fn require_expr_type(
     expr: &Expr,
-    want: &Type,
+    want: &[Type],
     props: &[Prop],
     for_vars: &[ForVar],
 ) -> Result<(), ExprTypeError> {
     let got = expr_type(expr, props, for_vars)?;
-    match got == *want {
+    match want.contains(&got) {
         true => Ok(()),
         false => Err(ExprTypeErrorKind::ResultType {
-            want: Box::new(want.clone()),
+            want: want.into(),
             got: Box::new(got),
         }
         .at(expr.range().0)),
@@ -216,9 +228,7 @@ fn length_type(
 fn leaf_type(ty: &Type, var: &VarRef) -> Result<Type, ExprTypeError> {
     match ty {
         Type::Bool | Type::Number | Type::String => Ok(ty.clone()),
-        _ => Err(
-            ExprTypeErrorKind::Scope(ScopeErrorKind::NotLeaf(var_ref_display(var))).at(var.range.0),
-        ),
+        _ => Err(ExprTypeErrorKind::NotLeaf(var_ref_display(var)).at(var.range.0)),
     }
 }
 

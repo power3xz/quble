@@ -274,6 +274,13 @@ const readBlockComment = (text: string, from: number) => {
 const scanQubc: TScanner = (text) => {
   const tokens: TToken[] = [];
   let i = 0;
+  // 값 자리(`${}` 보간, `={}` 속성값/합성 인자, `@if()`/`@for()` 조건) 안이면 > 0. 그 안의
+  // 이름 없는 식별자가 변수다 - 밖의 태그명/속성명과 눈으로 구별된다. 여는 자리에서 올리고
+  // 짝이 닫힐 때 내린다(안 닫히면 끝까지 값 자리 - 편집 중간 상태).
+  let valueDepth = 0;
+  // valueDepth를 올린 자리의 닫는 기호와 그 기호의 클래스. `}`와 `)`가 섞여도 제 짝에서만
+  // 내리고, 같은 `}`라도 보간을 닫는 것과 속성값을 닫는 것이 색이 다르다.
+  const closers: { char: string; cls: string | undefined }[] = [];
   while (i < text.length) {
     const c = text[i];
 
@@ -301,15 +308,23 @@ const scanQubc: TScanner = (text) => {
       continue;
     }
 
-    // 보간 `${IDENT}` / `${a.b}` - 값을 꺼내 쓰는 자리다. `$`가 식별자 시작 문자라
-    // 아래 식별자 분기보다 먼저 본다.
+    // 보간 `${EXPR}` - 값 자리를 연다. `$`가 식별자 시작 문자라 아래 식별자 분기보다 먼저 본다.
     if (c === "$" && text[i + 1] === "{") {
-      const path = readInterpolation(text, i);
-      if (path !== null) {
-        tokens.push({ text: path, cls: cls("interpolation") });
-        i += path.length;
-        continue;
-      }
+      tokens.push({ text: "${", cls: cls("interpolation") });
+      valueDepth += 1;
+      closers.push({ char: "}", cls: "interpolation" });
+      i += 2;
+      continue;
+    }
+
+    // 값 자리를 닫는다 - 연 자리가 지목한 기호일 때만.
+    if (valueDepth > 0 && c === closers[closers.length - 1].char) {
+      // biome-ignore lint/style/noNonNullAssertion: 위 조건이 top을 이미 봤다
+      const closer = closers.pop()!;
+      valueDepth -= 1;
+      tokens.push({ text: c, cls: cls(closer.cls) });
+      i += 1;
+      continue;
     }
 
     // 슬롯 지목(`Header << h1(...)`). 한 토큰으로 둬야 `<`, `<`로 갈리지 않는다.
@@ -331,9 +346,30 @@ const scanQubc: TScanner = (text) => {
       continue;
     }
 
+    // `@if (`/`@for (`의 여는 괄호가 조건 자리를 연다. 직전 토큰이 그 디렉티브일 때만이라
+    // 태그 호출(`div(`)과 구별된다.
+    if (c === "(" && CONDITION_DIRECTIVES.has(lastText(tokens))) {
+      valueDepth += 1;
+      closers.push({ char: ")", cls: "punctuation" });
+      tokens.push({ text: c, cls: cls("punctuation") });
+      i += 1;
+      continue;
+    }
+
+    // `={`의 여는 중괄호가 속성값/합성 인자 자리를 연다. 자식 블록의 `{`와 구별된다.
+    if (c === "{" && lastText(tokens) === "=") {
+      valueDepth += 1;
+      closers.push({ char: "}", cls: "punctuation" });
+      tokens.push({ text: c, cls: cls("punctuation") });
+      i += 1;
+      continue;
+    }
+
     if (IDENT_START.test(c)) {
       const ident = readIdent(text, i);
-      tokens.push({ text: ident, cls: cls(qubcIdentClass(ident)) });
+      // 값 자리 안에서 갈래가 없는 이름은 변수다(`${count}`, `class={x}`, `@if (n > 0)`).
+      const kind = qubcIdentClass(ident) ?? (valueDepth > 0 ? "variable" : undefined);
+      tokens.push({ text: ident, cls: cls(kind) });
       i += ident.length;
       continue;
     }
@@ -345,25 +381,32 @@ const scanQubc: TScanner = (text) => {
       continue;
     }
 
+    // 연산자는 구두점과 나눈다 - 값 자리 밖에도 걸린다(`@if` 조건은 괄호가 값 자리를 연다).
+    const operator = QUBC_OPERATORS.find((op) => text.startsWith(op, i));
+    if (operator) {
+      tokens.push({ text: operator, cls: cls("operator") });
+      i += operator.length;
+      continue;
+    }
+
     tokens.push({ text: c, cls: cls("punctuation") });
     i += 1;
   }
   return tokens;
 };
 
-// `${` 자리에서 보간(`${title}`, `${row.label}`)이면 그 전체를, 아니면 null을 돌려준다.
-//
-// 경로(IDENT[.IDENT]*)가 붙고 곧장 닫히는 것만 보간이다. 닫는 `}`가 없으면 편집 중간
-// 상태라 null이다.
-const readInterpolation = (text: string, from: number): string | null => {
-  let i = from + 2;
-  if (i >= text.length || !IDENT_START.test(text[i])) {
-    return null;
+// qubc 식 연산자(SYNTAX #5.2). 두 글자를 먼저 보므로 긴 것이 앞이다.
+const QUBC_OPERATORS = ["&&", "||", "==", "!=", "<=", ">=", "+", "-", "*", "/", "%", "<", ">", "!"];
+// 괄호로 값 자리를 여는 디렉티브. `@with`/`@slot`은 이름을 받아 값 자리가 아니다.
+const CONDITION_DIRECTIVES = new Set(["@if", "@for"]);
+
+// 공백을 건너뛴 직전 토큰의 text. 여는 기호가 무엇에 붙었는지 본다(`@if (`, `={`).
+// 여는 기호를 만났을 때만 부르고 사이에 오는 것은 공백 하나뿐이라 실질 O(1)이다.
+const lastText = (tokens: TToken[]): string => {
+  for (let i = tokens.length - 1; i >= 0; i -= 1) {
+    if (tokens[i].text.trim() !== "") return tokens[i].text;
   }
-  while (i < text.length && (IDENT_PART.test(text[i]) || text[i] === ".")) {
-    i += 1;
-  }
-  return text[i] === "}" ? text.slice(from, i + 1) : null;
+  return "";
 };
 
 // qubc 식별자의 갈래. 전대문자는 이벤트명(PICK), 대문자 시작은 컴포넌트/별칭(Card, Row)이다 -

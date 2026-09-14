@@ -477,7 +477,7 @@ fn walk_nodes(
                     seen,
                 );
             }
-            Node::Text(_) | Node::Var(_) => {}
+            Node::Text(_) | Node::Interpolation(_) => {}
         }
     }
 }

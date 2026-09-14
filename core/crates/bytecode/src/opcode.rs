@@ -83,6 +83,13 @@ pub enum Op {
     /// 이어지고 Else/IfEnd도 그대로. 런타임이 파생 칸을 잡고 식이 읽는 칸들을 구독해 그 칸에
     /// 결과를 넣는다(BYTECODE.md #5.2).
     IfExpr = 0x1e,
+    /// 연산자가 붙은 식을 텍스트로 낸다(`${count * 2}`). operand: expr_index u8.
+    /// 잎 하나짜리 보간은 TextVar로 간다 - 식 테이블을 거칠 이유가 없다.
+    TextExpr = 0x1f,
+    /// 전역 속성명 + 연산자가 붙은 식 값. operand: name u16(전역 속성 ID), expr_index u8.
+    AttrGExpr = 0x20,
+    /// 컴포넌트 속성명 + 연산자가 붙은 식 값. operand: name u16(상수풀), expr_index u8.
+    AttrLExpr = 0x21,
 }
 
 impl Op {
@@ -120,6 +127,9 @@ impl Op {
             0x1c => Op::SlotPlaceholderContentEnd,
             0x1d => Op::FillSlotPlaceholder,
             0x1e => Op::IfExpr,
+            0x1f => Op::TextExpr,
+            0x20 => Op::AttrGExpr,
+            0x21 => Op::AttrLExpr,
             _ => return None,
         })
     }
