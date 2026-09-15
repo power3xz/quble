@@ -471,6 +471,62 @@ mod tests {
         );
     }
 
+    /// 인덱싱은 요소 타입으로 내려간다 - `tags[i]`는 string이라 bool 조건에서 걸린다.
+    #[test]
+    fn index_reaches_element_type() {
+        assert_eq!(
+            if_cond_diagnostic("props { tags: string[], i: number }", "tags[i]"),
+            [
+                "expected bool, found string",
+                " 2 | @if (tags[i]) { p( /) }",
+                "   |      ^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 인덱스 자리는 number다.
+    #[test]
+    fn index_needs_number_index() {
+        assert_eq!(
+            if_cond_diagnostic("props { tags: string[], name: string }", "tags[name]"),
+            [
+                "`[]` expects number, found string",
+                " 2 | @if (tags[name]) { p( /) }",
+                "   |           ^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 배열이 아닌 것에는 인덱싱을 못 한다.
+    #[test]
+    fn index_needs_an_array() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, i: number }", "count[i]"),
+            [
+                "`count` is number, not an array",
+                " 2 | @if (count[i]) { p( /) }",
+                "   |      ^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 객체 배열의 요소는 통째로 값 자리에 못 온다 - 필드까지 내려가야 한다.
+    #[test]
+    fn index_element_still_needs_leaf() {
+        assert_eq!(
+            if_cond_diagnostic("props { rows: { on: bool }[], i: number }", "rows[i]"),
+            [
+                "`rows[..]` is an object or array: only primitive values go in value position",
+                " 2 | @if (rows[i]) { p( /) }",
+                "   |      ^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
     /// 실제 `length` 필드라도 객체면 값 자리에 못 온다 - 길이로 새지 않고 leaf 검사에 걸린다.
     #[test]
     fn if_length_field_still_needs_leaf() {
