@@ -3,8 +3,8 @@
 //! scope(조회) 위, codegen(방출) 아래다. codegen은 방출 전에 여기로 조건을 검사한다 -
 //! 방출은 타입이 맞다고 보고 짠다.
 
-use crate::ast::{BinaryOp, Expr, Lit, Prop, Type, UnaryOp, VarRef};
-use crate::scope::{var_ref_display, var_ref_type, ForVar, ScopeError, ScopeErrorKind};
+use crate::ast::{BinaryOp, Expr, Lit, Prop, Type, UnaryOp};
+use crate::scope::{expr_display, lookup_field, lookup_name, ForVar, ScopeError, ScopeErrorKind};
 use crate::src_range::SrcRange;
 
 /// 타입 검사가 낼 수 있는 실패.
@@ -31,6 +31,8 @@ pub enum ExprTypeErrorKind {
     NotLeaf(String),
     /// `.length` 대상이 배열도 문자열도 아님.
     NoLength(String),
+    /// `a[i]`의 `a`가 배열이 아님.
+    NotIndexable { target: String, got: Box<Type> },
     /// 배열이 식으로 평가되는 자리에 왔다. 지금 배열을 받는 건 class 속성뿐이다.
     ListNotAllowed,
     /// 아래층(scope) 조회 실패 - 여기서 더 할 말이 없어 그대로 통과시킨다.
@@ -62,6 +64,9 @@ impl std::fmt::Display for ExprTypeErrorKind {
                 "`{path}` is an object or array: only primitive values go in value position"
             ),
             ExprTypeErrorKind::NoLength(path) => write!(f, "`{path}` has no length"),
+            ExprTypeErrorKind::NotIndexable { target, got } => {
+                write!(f, "`{target}` is {}, not an array", type_name(got))
+            }
             ExprTypeErrorKind::ListNotAllowed => write!(f, "only `class` takes an array"),
             ExprTypeErrorKind::Scope(e) => e.fmt(f),
         }
@@ -152,16 +157,14 @@ pub fn expr_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Typ
             Lit::Bool(_) => Type::Bool,
         }),
 
-        // 파서는 `x.length`도 그냥 참조로 낸다 - 필드인지 길이인지는 타입을 봐야 갈리고,
-        // 타입은 여기서만 안다. 실제 필드가 우선이고 없을 때만 길이로 읽는다.
-        Expr::Var(var, _) => match var_ref_type(var, props, for_vars) {
-            Ok(ty) => leaf_type(ty, var),
-            // 조회에 실패했을 때만 길이로 읽어 본다. `length`가 실제 필드면 위에서 이미 잡혔다.
-            Err(not_found) => match var.length_target() {
-                Some(target) => length_type(&target, props, for_vars),
-                None => Err(not_found.into()),
-            },
-        },
+        // 값 자리엔 원시만 온다 - 객체/배열 통째는 연산자에 넣을 것이 없다.
+        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => {
+            let ty = path_type(expr, props, for_vars)?;
+            match ty {
+                Type::Bool | Type::Number | Type::String => Ok(ty),
+                _ => Err(ExprTypeErrorKind::NotLeaf(expr_display(expr)).at(expr.range().0)),
+            }
+        }
 
         // 배열이 오는 자리는 class 속성뿐이고 codegen이 거기서 낮춘다 - 식 평가를 안 거친다.
         Expr::List(_, range) => Err(ExprTypeErrorKind::ListNotAllowed.at(range.0)),
@@ -212,23 +215,45 @@ pub fn expr_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Typ
     }
 }
 
-/// `x.length`에서 길이를 잴 대상 `x`의 타입을 보고 결과를 낸다. 길이를 갖는 건 배열과 문자열뿐.
-fn length_type(
-    target: &VarRef,
-    props: &[Prop],
-    for_vars: &[ForVar],
-) -> Result<Type, ExprTypeError> {
-    match var_ref_type(target, props, for_vars)? {
-        Type::Array(_) | Type::String => Ok(Type::Number),
-        _ => Err(ExprTypeErrorKind::NoLength(var_ref_display(target)).at(target.range.0)),
-    }
-}
+/// 참조/필드/인덱싱 체인이 도달한 타입. 슬롯으로 접히는지와 무관하다 - fixed_ref_of가 None을
+/// 내는 `a[i]`도 요소 타입은 안다.
+/// props { rows: { cells: string[] }[] }에서 rows[i].cells[j] -> String
+fn path_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Type, ExprTypeError> {
+    match expr {
+        Expr::Var(name, range) => {
+            let (_, ty) = lookup_name(name, range.0, props, for_vars)?;
+            Ok(ty.clone())
+        }
 
-/// 값 자리엔 leaf만 온다 - 객체/배열 통째는 연산자에 넣을 것이 없다.
-fn leaf_type(ty: &Type, var: &VarRef) -> Result<Type, ExprTypeError> {
-    match ty {
-        Type::Bool | Type::Number | Type::String => Ok(ty.clone()),
-        _ => Err(ExprTypeErrorKind::NotLeaf(var_ref_display(var)).at(var.range.0)),
+        // 실제 필드가 먼저다. 없을 때만 길이로 읽어 본다 - `length`라는 필드를 선언했으면
+        // 그 필드가 잡힌다(SYNTAX #5.2).
+        Expr::Field(owner, field, range) => {
+            let owner_ty = path_type(owner, props, for_vars)?;
+            match lookup_field(&owner_ty, field, owner, expr) {
+                Ok((ty, _)) => Ok(ty.clone()),
+                Err(not_found) => match (field.as_str(), &owner_ty) {
+                    ("length", Type::Array(_) | Type::String) => Ok(Type::Number),
+                    ("length", _) => {
+                        Err(ExprTypeErrorKind::NoLength(expr_display(owner)).at(range.0))
+                    }
+                    _ => Err(not_found.into()),
+                },
+            }
+        }
+
+        Expr::Index(arr, index, range) => {
+            require_operand(index, &Type::Number, "[]", props, for_vars)?;
+            match path_type(arr, props, for_vars)? {
+                Type::Array(elem) => Ok(*elem),
+                got => Err(ExprTypeErrorKind::NotIndexable {
+                    target: expr_display(arr),
+                    got: Box::new(got),
+                }
+                .at(range.0)),
+            }
+        }
+
+        _ => expr_type(expr, props, for_vars),
     }
 }
 

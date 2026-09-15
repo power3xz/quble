@@ -185,42 +185,12 @@ pub struct SlotPlaceholderContent {
 
 /// `@for`의 반복 횟수 출처. codegen이 이걸로 ForRaw(리터럴) / ForScopeIndex(prop) opcode를 가른다.
 /// - Literal: 소스에 직접 박은 정수(`of 3`). 슬롯 안 거치고 opcode에 값 인라인.
-/// - Var: 숫자 prop 참조(`of count`). 슬롯 offset을 거쳐 런타임이 값을 읽는다(STORE/CONST 위임).
-#[derive(Debug, PartialEq, Eq)]
+/// - Var: 참조 식(`of count`, `of user.tags`). 슬롯 offset을 거쳐 런타임이 값을 읽는다
+///   (STORE/CONST 위임). 연산자가 붙은 식은 codegen이 거른다 - 순회할 것이 없다.
+#[derive(Debug, PartialEq)]
 pub enum ForCount {
     Literal(u16),
-    Var(VarRef),
-}
-
-/// prop 참조 - 어느 prop(root)의 어느 경로(path)인가. 텍스트 보간/속성값/합성 인자/
-/// payload/context 값이 공유한다. 스칼라는 path 빈 벡터(`title` -> root="title", path=[]),
-/// 객체 접근은 필드들(`assignee.name` -> root="assignee", path=["name"]). root/path 분리:
-/// 나중에 AST에서 객체 단위 처리(root 통째)가 필요할 수 있어 root를 분리해 둔다.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct VarRef {
-    pub root: String,
-    pub path: Vec<String>,
-    /// 이 참조가 쓰인 자리(`root`부터 경로 끝까지). codegen이 prop/필드를 못 찾았을 때
-    /// 탓할 대상이다. 비교에서 빠진다(NodeRange).
-    pub range: NodeRange,
-}
-
-impl VarRef {
-    /// `x.length`에서 길이를 잴 대상 `x`. 마지막 조각이 `length`가 아니면 None.
-    /// 필드 조회가 먼저 실패했을 때만 길이로 읽으므로 부르는 쪽이 그 순서를 지킨다.
-    ///
-    /// range는 원래 참조 그대로다 - 조각 하나를 뗀 자리는 소스에서 셀 수 없다
-    /// (`x . length`도 파싱된다). 진단은 참조 전체를 짚고 무엇이 문제인지는 메시지가 말한다.
-    pub fn length_target(&self) -> Option<VarRef> {
-        match self.path.last().map(String::as_str) {
-            Some("length") => {
-                let mut target = self.clone();
-                target.path.pop();
-                Some(target)
-            }
-            _ => None,
-        }
-    }
+    Var(Expr),
 }
 
 /// 값 자리에 오는 식. 잎(참조/리터럴)과 연산자 가지로 이룬다. 값 자리는 전부 이걸 쓴다 -
@@ -241,12 +211,18 @@ impl VarRef {
 ///
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
-    /// `count`, `user.name`, `tags.length` - 참조 하나. `.length`가 길이인지 같은 이름의
-    /// 필드인지는 타입이 갈라서 expr_type이 정한다(파서는 타입을 모른다).
-    Var(VarRef, NodeRange),
+    /// `count` - 이름 하나. 경로는 Field가, 인덱싱은 Index가 잇는다.
+    Var(String, NodeRange),
     Lit(LitValue, NodeRange),
     /// `["a", "b"]` - range는 `[`부터 `]`까지.
     List(Vec<Expr>, NodeRange),
+    /// 필드 접근. `.length`가 길이인지 같은 이름의 필드인지는 타입이 갈라서 expr_type이
+    /// 정한다(파서는 타입을 모른다). range는 왼쪽 시작부터 필드 이름 끝까지.
+    /// a.b -> Field(a, "b")
+    Field(Box<Expr>, String, NodeRange),
+    /// 배열 인덱싱. 첫 자리가 배열 식, 둘째가 인덱스 식이다. range는 배열 시작부터 `]`까지.
+    /// a[i + 1] -> Index(a, i + 1)
+    Index(Box<Expr>, Box<Expr>, NodeRange),
     /// range는 연산자부터 피연산자 끝까지(`!done`).
     Unary(UnaryOp, Box<Expr>, NodeRange),
     /// range는 왼쪽 피연산자 시작부터 오른쪽 끝까지(`a + b`).
@@ -260,6 +236,8 @@ impl Expr {
             Expr::Var(_, r)
             | Expr::Lit(_, r)
             | Expr::List(_, r)
+            | Expr::Field(_, _, r)
+            | Expr::Index(_, _, r)
             | Expr::Unary(_, _, r)
             | Expr::Binary(_, _, _, r) => *r,
         }

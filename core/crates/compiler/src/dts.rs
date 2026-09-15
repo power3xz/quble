@@ -11,7 +11,7 @@
 //! 핸들러의 실패는 조용히 사라진다), 핸들러를 받아 감싸는 쪽이 그 Promise를 잡아 건질 수
 //! 있어야 하므로 타입에 드러낸다.
 
-use crate::ast::{Component, Expr, Lit, LitValue, Node, Prop, Type, VarRef};
+use crate::ast::{Component, Expr, Lit, LitValue, Node, Prop, Type};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::CompileError;
 
@@ -237,7 +237,7 @@ fn value_type(v: &Expr, props: &[Prop]) -> String {
             },
             _,
         ) => b.to_string(),
-        Expr::Var(r, _) => match var_ref_type(r, props) {
+        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => match var_ref_type(v, props) {
             Some(ty) => type_to_ts(ty),
             None => "unknown".to_string(),
         },
@@ -247,25 +247,24 @@ fn value_type(v: &Expr, props: &[Prop]) -> String {
     }
 }
 
-/// prop 참조가 가리키는 선언 타입. root로 prop을 찾고 path를 객체 필드로 따라 내려간다.
-/// 못 찾으면 None - codegen이 UnknownProp/UnknownField로 거르는 몫이라 여기서 에러를 내지 않는다
-/// (d.ts는 편집기가 컴파일 실패 중에도 부른다).
-fn var_ref_type<'a>(var: &VarRef, props: &'a [Prop]) -> Option<&'a Type> {
-    let mut ty = props
-        .iter()
-        .find(|p| p.name == var.root)
-        .map(|p| &p.type_)?;
-    for key in &var.path {
-        let fields = match ty {
-            Type::Object(fields) => fields,
-            _ => return None,
-        };
-        ty = fields
-            .iter()
-            .find(|(name, _)| name == key)
-            .map(|(_, t)| t)?;
+/// 참조 체인이 가리키는 선언 타입. 못 찾으면 None - codegen이 UnknownProp/UnknownField로
+/// 거르는 몫이라 여기서 에러를 내지 않는다(d.ts는 편집기가 컴파일 실패 중에도 부른다).
+fn var_ref_type<'a>(expr: &Expr, props: &'a [Prop]) -> Option<&'a Type> {
+    match expr {
+        Expr::Var(name, _) => props.iter().find(|p| p.name == *name).map(|p| &p.type_),
+        Expr::Field(owner, field, _) => match var_ref_type(owner, props)? {
+            Type::Object(fields) => fields
+                .iter()
+                .find(|(name, _)| name == field)
+                .map(|(_, t)| t),
+            _ => None,
+        },
+        Expr::Index(arr, _, _) => match var_ref_type(arr, props)? {
+            Type::Array(elem) => Some(elem),
+            _ => None,
+        },
+        _ => None,
     }
-    Some(ty)
 }
 
 /// (필드명, 값) 목록 -> `a: T; b: U` 객체 본문. props는 변수 필드가 타입을 찾을 선언부다.

@@ -58,7 +58,7 @@ pub fn compile_src(
 /// 컴파일 에러를 CLI에 그대로 찍을 진단 텍스트로 만든다(끝에 개행 없음).
 ///
 /// ```text
-/// card.qubc:6:14: error: no field `nope` on prop `user`
+/// card.qubc:6:14: error: no field `nope` on `user`
 ///   6 |       p() { ${user.nope} }
 ///     |              ^^^^^^^^^
 /// ```
@@ -290,13 +290,9 @@ mod tests {
     fn shape(e: &ast::Expr) -> String {
         use ast::Expr;
         match e {
-            Expr::Var(v, _) => {
-                if v.path.is_empty() {
-                    v.root.clone()
-                } else {
-                    format!("{}.{}", v.root, v.path.join("."))
-                }
-            }
+            Expr::Var(name, _) => name.clone(),
+            Expr::Field(owner, field, _) => format!("{}.{field}", shape(owner)),
+            Expr::Index(arr, index, _) => format!("{}[{}]", shape(arr), shape(index)),
             Expr::Lit(lit, _) => match &lit.value {
                 ast::Lit::Number(n) => format!("{n}"),
                 ast::Lit::Bool(b) => format!("{b}"),
@@ -3463,7 +3459,7 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(
             diagnostic_of(src),
             [
-                "entry:3:24: error: no field `nope` on prop `user`",
+                "entry:3:24: error: no field `nope` on `user`",
                 " 3 |   template { div() { ${user.nope} } }",
                 "   |                        ^^^^^^^^^",
             ]
@@ -3487,7 +3483,7 @@ component B { props { a: A } template { div( /) } }"#;
         let d = diagnose("entry", src, &err);
 
         assert_eq!(d.path, "entry");
-        assert_eq!(d.message, "no field `nope` on prop `user`");
+        assert_eq!(d.message, "no field `nope` on `user`");
         let range = d.range.expect("자리를 알아야 한다");
         assert_eq!(
             &d.src[range.start as usize..range.end as usize],
@@ -3595,7 +3591,7 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(
             out,
             [
-                "./column.qubc:3:22: error: no field `nope` on prop `name`",
+                "./column.qubc:3:22: error: no field `nope` on `name`",
                 " 3 |   template { p() { ${name.nope} } }",
                 "   |                      ^^^^^^^^^",
             ]
