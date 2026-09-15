@@ -317,6 +317,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_expr_index_binds_left_to_right() {
+        // 인덱싱과 필드가 이어지면 왼쪽부터 감싼다 - `a[i].b`는 a[i]를 먼저 짚고 그 필드다.
+        assert_eq!(shape(&if_cond("a[i]")), "a[i]");
+        assert_eq!(shape(&if_cond("a[i].title")), "a[i].title");
+        assert_eq!(shape(&if_cond("a[i][j]")), "a[i][j]");
+        assert_eq!(shape(&if_cond("a.b[i].c")), "a.b[i].c");
+    }
+
+    #[test]
+    fn parse_expr_index_takes_an_expression() {
+        // 인덱스 자리는 부분식이라 연산자가 그대로 섞인다.
+        assert_eq!(shape(&if_cond("a[n + 1]")), "a[(n + 1)]");
+        assert_eq!(shape(&if_cond("a[0]")), "a[0]");
+        // 바깥 연산자보다 인덱싱이 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a[i] + 1")), "(a[i] + 1)");
+    }
+
+    #[test]
+    fn parse_expr_index_needs_closing_bracket() {
+        assert_eq!(
+            error_message("component C { template { @if (a[i) { p( /) } } }"),
+            "expected `]`, found `)`"
+        );
+    }
+
+    #[test]
     fn parse_expr_precedence_follows_js() {
         // 곱셈이 덧셈보다 먼저 묶인다.
         assert_eq!(shape(&if_cond("a + b * c")), "(a + (b * c))");

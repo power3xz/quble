@@ -247,9 +247,9 @@ impl<'a> Parser<'a> {
     // prop 참조 하나: `root` 또는 `root.field.field...`. root는 prop 이름, 뒤는 객체 필드 경로.
     // leaf 여부(경로 끝이 원시냐)는 여기서 안 본다 - 타입을 모르는 파서의 몫이 아니라 codegen이
     // props 타입과 대조해 판단한다.
-    /// 이름 뒤에 `.name`이 이어지는 동안 왼쪽부터 감싼다.
-    /// a.b.c -> Field(Field(Var(a), "b"), "c")
-    fn parse_var_ref(&mut self) -> Result<Expr, ParseError> {
+    /// 이름 뒤에 `.name`과 `[EXPR]`이 이어지는 동안 왼쪽부터 감싼다.
+    /// a[i].b -> Field(Index(Var(a), Var(i)), "b")
+    fn parse_ref_chain(&mut self) -> Result<Expr, ParseError> {
         // `assignee.name` 전체를 걸치게 - root 앞에서 시작해 마디마다 끝을 늘린다.
         let start = self.here();
         let closing = |p: &Self| {
@@ -259,12 +259,22 @@ impl<'a> Parser<'a> {
             })
         };
         let mut node = Expr::Var(self.parse_ident()?, closing(self));
-        while matches!(self.peek(), Some(Token::Dot)) {
-            self.next()?;
-            let field = self.parse_ident()?;
-            node = Expr::Field(Box::new(node), field, closing(self));
+        loop {
+            match self.peek() {
+                Some(Token::Dot) => {
+                    self.next()?;
+                    let field = self.parse_ident()?;
+                    node = Expr::Field(Box::new(node), field, closing(self));
+                }
+                Some(Token::LBracket) => {
+                    self.next()?;
+                    let index = self.parse_expr()?;
+                    self.expect(&Token::RBracket)?;
+                    node = Expr::Index(Box::new(node), Box::new(index), closing(self));
+                }
+                _ => return Ok(node),
+            }
         }
-        Ok(node)
     }
 
     /// 값 자리의 식 하나. 1 = peek_binary_op 표의 최저 우선순위라 모든 연산자를 받는다.
@@ -362,7 +372,7 @@ impl<'a> Parser<'a> {
             Some(Token::Ident(_)) => {
                 // `tags.length`도 그냥 필드 접근이다 - 길이인지 같은 이름의 필드인지는 타입이
                 // 갈라서 expr_type이 정한다. 파서는 타입을 몰라 그 판단을 할 수 없다.
-                self.parse_var_ref()
+                self.parse_ref_chain()
             }
             Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
                 let lit = self.parse_lit_value()?;
@@ -949,7 +959,7 @@ impl<'a> Parser<'a> {
                 self.next()?;
                 ForCount::Literal(count)
             }
-            _ => ForCount::Var(self.parse_var_ref()?),
+            _ => ForCount::Var(self.parse_ref_chain()?),
         };
         self.expect(&Token::RParen)?;
         self.expect(&Token::LBrace)?;
