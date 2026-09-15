@@ -2,9 +2,10 @@
 // dist/는 gitignore라 산출물을 커밋하지 않는다 - 테스트가 빌드를 트리거해 재현성을 보장한다.
 //
 // `cargo run`이 아니라 미리 빌드된 바이너리(target/debug/quble)를 직접 실행한다.
-// `node --test web/*.test.js`는 파일마다 별도 프로세스라, 여럿이 동시에 `cargo run`을 치면
-// 빌드 최신성 검사가 target/ 락을 다투어 간헐 실패했다(매번 다른 파일). 바이너리 직접 실행은
-// 락을 잡지 않는다. 바이너리 보장은 호출자 몫 - 없으면 안내와 함께 실패한다(테스트 전 `cargo build`).
+// `node --test web/*.test.js`는 테스트 파일마다 별도 프로세스를 띄운다. cargo run은 실행 전
+// 빌드가 최신인지 확인하면서 target/ 디렉터리를 잠그는데, 여러 프로세스가 동시에 그 잠금을
+// 기다리다 간헐적으로 실패했다(실패하는 파일은 매번 달랐다). 바이너리를 직접 실행하면
+// cargo가 관여하지 않아 잠금이 생기지 않는다.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
