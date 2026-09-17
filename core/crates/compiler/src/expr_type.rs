@@ -215,10 +215,10 @@ pub fn expr_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Typ
     }
 }
 
-/// 참조/필드/인덱싱 체인이 도달한 타입. 슬롯으로 접히는지와 무관하다 - fixed_ref_of가 None을
+/// 참조/필드/인덱스 접근 체인이 도달한 타입. 슬롯으로 접히는지와 무관하다 - fixed_ref_of가 None을
 /// 내는 `a[i]`도 요소 타입은 안다.
 /// props { rows: { cells: string[] }[] }에서 rows[i].cells[j] -> String
-fn path_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Type, ExprTypeError> {
+pub fn path_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Type, ExprTypeError> {
     match expr {
         Expr::Var(name, range) => {
             let (_, ty) = lookup_name(name, range.0, props, for_vars)?;

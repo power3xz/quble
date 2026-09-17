@@ -149,10 +149,13 @@ pub fn lookup_field<'a>(
     Err(unknown())
 }
 
-/// 참조 체인(이름 + 필드들)이면 (슬롯 번호, 슬롯 base부터의 store 칸 거리, 도달 타입).
-/// 인덱싱은 인덱스를 세어야, 연산자는 읽는 칸이 여럿이라 칸이 컴파일타임에 안 정해져 None이다.
+/// 참조 체인(이름 + 필드들)이 읽는 leafIndex가 컴파일타임에 정해지면 그 위치를 낸다.
+/// 반환은 (슬롯 번호, 슬롯 시작점부터의 거리, 도달 타입).
+///
+/// 인덱스 접근은 인덱스를 실행해 봐야 알고, 연산자는 읽는 자리가 여럿이라 둘 다 None이다.
+///
 /// count -> Some((슬롯, 0))   user.name -> Some((슬롯, name 거리))
-/// a[i].x -> None   count * 2 -> None
+/// a[i].x -> None             count * 2 -> None
 pub fn fixed_ref_of<'a>(
     expr: &Expr,
     props: &'a [Prop],

@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn parse_expr_index_binds_left_to_right() {
-        // 인덱싱과 필드가 이어지면 왼쪽부터 감싼다 - `a[i].b`는 a[i]를 먼저 짚고 그 필드다.
+        // 인덱스 접근과 필드가 이어지면 왼쪽부터 감싼다 - `a[i].b`는 a[i]를 먼저 짚고 그 필드다.
         assert_eq!(shape(&if_cond("a[i]")), "a[i]");
         assert_eq!(shape(&if_cond("a[i].title")), "a[i].title");
         assert_eq!(shape(&if_cond("a[i][j]")), "a[i][j]");
@@ -330,7 +330,7 @@ mod tests {
         // 인덱스 자리는 부분식이라 연산자가 그대로 섞인다.
         assert_eq!(shape(&if_cond("a[n + 1]")), "a[(n + 1)]");
         assert_eq!(shape(&if_cond("a[0]")), "a[0]");
-        // 바깥 연산자보다 인덱싱이 먼저 묶인다.
+        // 바깥 연산자보다 인덱스 접근이 먼저 묶인다.
         assert_eq!(shape(&if_cond("a[i] + 1")), "(a[i] + 1)");
     }
 
@@ -471,7 +471,7 @@ mod tests {
         );
     }
 
-    /// 인덱싱은 요소 타입으로 내려간다 - `tags[i]`는 string이라 bool 조건에서 걸린다.
+    /// 인덱스 접근은 요소 타입으로 내려간다 - `tags[i]`는 string이라 bool 조건에서 걸린다.
     #[test]
     fn index_reaches_element_type() {
         assert_eq!(
@@ -499,7 +499,7 @@ mod tests {
         );
     }
 
-    /// 배열이 아닌 것에는 인덱싱을 못 한다.
+    /// 배열이 아닌 것에는 인덱스로 접근할 수 없다.
     #[test]
     fn index_needs_an_array() {
         assert_eq!(

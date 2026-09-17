@@ -4,10 +4,12 @@ use crate::ast::{
     BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, Node, Prop, SlotPlaceholderContent, Type,
     UnaryOp,
 };
-use crate::expr_type::{require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind};
+use crate::expr_type::{
+    path_type, require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind,
+};
 use crate::flatten::{FlatComp, Sourced};
 use crate::scope::{
-    expr_display, fixed_ref_of, ForVar, ScopeError, ScopeErrorKind,
+    expr_display, fixed_ref_of, lookup_field, ForVar, ScopeError, ScopeErrorKind,
 };
 use crate::src_range::SrcRange;
 use bytecode::{
@@ -569,7 +571,7 @@ fn arg_to_field(
         Expr::List(_, range) => {
             return Err(CodegenErrorKind::ListNotAllowed.at(range.0));
         }
-        // payload/context 값은 아직 참조 체인뿐 - 연산자와 인덱싱은 ROADMAP에 남아 있다.
+        // payload/context 값은 아직 참조 체인뿐 - 연산자와 인덱스 접근은 ROADMAP에 남아 있다.
         Expr::Unary(..) | Expr::Binary(..) | Expr::Index(..) => {
             return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0));
         }
@@ -743,36 +745,11 @@ fn emit_expr_postfix(
         // 식 평가 경로에는 안 온다 - expr_type이 ListNotAllowed로 먼저 막는다.
         Expr::List(..) => unreachable!("배열은 식으로 평가되지 않는다"),
 
-        // 참조 아니면 `.length` - expr_type과 같은 순서로 가른다(실제 필드가 먼저).
-        Expr::Var(..) | Expr::Field(..) => match fixed_ref_of(expr, props, for_vars)? {
-            Some((scope_index, offset, _)) => {
-                out.push(ExprOp::LoadVar as u8);
-                out.push(scope_index);
-                out.push(offset);
+        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => {
+            if let Pushed::LeafIndex = emit_ref_path(expr, props, for_vars, pool, out)? {
+                out.push(ExprOp::ReadLeaf as u8);
             }
-            // 체인이 슬롯으로 안 접히는 경우는 `.length`뿐이다 - 인덱싱은 위 Index 갈래가 받는다.
-            None => {
-                let target = match expr {
-                    Expr::Field(owner, field, _) if field == "length" => owner,
-                    _ => unreachable!("expr_type이 통과시킨 참조 체인"),
-                };
-                let (scope_index, offset, ty) = match fixed_ref_of(target, props, for_vars)? {
-                    Some(found) => found,
-                    None => unreachable!("expr_type이 통과시킨 `.length` 대상"),
-                };
-                // 배열은 길이를 담은 칸을, 문자열은 값 칸을 구독한다 - 런타임이 볼 대상이 달라
-                // 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
-                out.push(match ty {
-                    Type::Array(_) => ExprOp::LoadArrayLength as u8,
-                    _ => ExprOp::LoadStringLength as u8,
-                });
-                out.push(scope_index);
-                out.push(offset);
-            }
-        },
-
-        // 파서가 아직 안 만든다 - ElemAt opcode와 함께 들어온다.
-        Expr::Index(..) => unreachable!("배열 인덱싱은 아직 파싱되지 않는다"),
+        }
 
         Expr::Unary(op, operand, _) => {
             emit_expr_postfix(operand, props, for_vars, pool, out)?;
@@ -803,6 +780,72 @@ fn emit_expr_postfix(
         }
     }
     Ok(())
+}
+
+/// `emit_ref_path`가 스택에 올린 것. 인덱스 접근을 거치면 leafIndex라 값으로 쓰려면 ReadLeaf가 붙는다.
+enum Pushed {
+    Value,
+    LeafIndex,
+}
+
+/// 참조 경로를 바이트코드로 낸다. 슬롯 하나로 접히면 그 자리에서 값이 나오고, 인덱스 접근이
+/// 끼면 leafIndex까지만 낸다.
+/// count       -> LoadVar(slot, 0)                            Value
+/// a.b         -> LoadVar(slot, b 거리)                        Value
+/// tags.length -> LoadArrayLength(slot, offset)               Value
+/// a[i].b      -> LoadVar(a) LoadVar(i) ElemAt FieldAt(b 거리)  LeafIndex
+fn emit_ref_path(
+    expr: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    out: &mut Vec<u8>,
+) -> Result<Pushed, CodegenError> {
+    // 슬롯 하나로 접히면 경로를 안 걷는다 - 필드 거리가 이미 offset에 누적돼 있다.
+    if let Some((scope_index, offset, _)) = fixed_ref_of(expr, props, for_vars)? {
+        out.push(ExprOp::LoadVar as u8);
+        out.push(scope_index);
+        out.push(offset);
+        return Ok(Pushed::Value);
+    }
+    match expr {
+        Expr::Index(arr, index, _) => {
+            emit_expr_postfix(arr, props, for_vars, pool, out)?;
+            emit_expr_postfix(index, props, for_vars, pool, out)?;
+            out.push(ExprOp::ElemAt as u8);
+            Ok(Pushed::LeafIndex)
+        }
+        Expr::Field(owner, field, _) => {
+            let owner_ty = path_type(owner, props, for_vars)?;
+            match lookup_field(&owner_ty, field, owner, expr) {
+                // 실제 필드가 먼저다 - 왼쪽이 낸 leafIndex에 거리를 더한다.
+                Ok((_, offset)) => {
+                    emit_ref_path(owner, props, for_vars, pool, out)?;
+                    out.push(ExprOp::FieldAt as u8);
+                    out.push(offset);
+                    Ok(Pushed::LeafIndex)
+                }
+                // 배열은 길이를 담은 leafIndex를, 문자열은 값 leafIndex를 구독한다 - 런타임이
+                // 볼 대상이 달라 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
+                Err(not_found) if field == "length" => {
+                    let (scope_index, offset, _) = match fixed_ref_of(owner, props, for_vars)? {
+                        Some(found) => found,
+                        None => return Err(not_found.into()),
+                    };
+                    out.push(match owner_ty {
+                        Type::Array(_) => ExprOp::LoadArrayLength as u8,
+                        _ => ExprOp::LoadStringLength as u8,
+                    });
+                    out.push(scope_index);
+                    out.push(offset);
+                    Ok(Pushed::Value)
+                }
+                Err(not_found) => Err(not_found.into()),
+            }
+        }
+        // 슬롯으로 접히지 않는 참조 경로는 인덱스 접근이 낀 것뿐이다.
+        other => Err(CodegenErrorKind::UnsupportedValueExpr.at(other.range().0)),
+    }
 }
 
 /// `LoadSmallInt`로 낼 수 있는 값인지 - 0~255 정수. 음수는 `Neg`가 따로 붙고, 그 밖은 상수풀로.

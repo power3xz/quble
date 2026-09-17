@@ -211,7 +211,7 @@ pub enum ForCount {
 ///
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
-    /// `count` - 이름 하나. 경로는 Field가, 인덱싱은 Index가 잇는다.
+    /// `count` - 이름 하나. 경로는 Field가, 인덱스 접근은 Index가 잇는다.
     Var(String, NodeRange),
     Lit(LitValue, NodeRange),
     /// `["a", "b"]` - range는 `[`부터 `]`까지.
@@ -220,7 +220,7 @@ pub enum Expr {
     /// 정한다(파서는 타입을 모른다). range는 왼쪽 시작부터 필드 이름 끝까지.
     /// a.b -> Field(a, "b")
     Field(Box<Expr>, String, NodeRange),
-    /// 배열 인덱싱. 첫 자리가 배열 식, 둘째가 인덱스 식이다. range는 배열 시작부터 `]`까지.
+    /// 배열 인덱스 접근. 첫 자리가 배열 식, 둘째가 인덱스 식이다. range는 배열 시작부터 `]`까지.
     /// a[i + 1] -> Index(a, i + 1)
     Index(Box<Expr>, Box<Expr>, NodeRange),
     /// range는 연산자부터 피연산자 끝까지(`!done`).
