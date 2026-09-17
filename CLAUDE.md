@@ -130,6 +130,20 @@ COMMENT-GUIDELINES.md를 읽고 따른다.
 | `cargo fmt` 결과 확인 후 `git add`                      | `cargo fmt && git add -A`                         | fmt가 무엇을 고쳤는지 안 보고 넘어감 |
 | `git status && git log --oneline -3`                    | -                                                 | 조회는 이어도 된다                   |
 
+**`cd`를 쓰지 않는다.** Bash 도구의 작업 디렉터리는 호출 사이에 유지되므로, `cd` 한 번이 그
+뒤 모든 커맨드의 기준을 바꿔 놓는다. 커맨드는 레포 루트에서 실행하고, 다른 디렉터리를 봐야
+하면 `cd` 대신 그 커맨드가 가진 경로 옵션으로 짚는다.
+
+| O | X |
+|---|---|
+| `cargo test --workspace --manifest-path core/Cargo.toml` | `cd core && cargo test --workspace` |
+| `npm test --prefix core/web` | `cd core/web && npm test` |
+| `git -C editors/vscode status` | `cd editors/vscode && git status` |
+
+cargo는 현재 디렉터리에서 위로 올라가며 `Cargo.toml`을 찾는데, 이 레포는 워크스페이스 루트가
+`core/`라 레포 루트에서는 못 찾는다. `--manifest-path`가 없으면 "could not find `Cargo.toml`"로
+실패한다.
+
 ## 메모리 저장할 때
 
 **스스로 저장하지 않는다.** 사용자가 저장하라고 할 때만 저장한다.

@@ -57,11 +57,25 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 
 ## 명령별 선행 조건
 
+명령은 레포 루트에서 실행한다. cargo 워크스페이스 루트가 `core/`라 `--manifest-path`로 짚어야
+하고, npm은 루트 `package.json`이 멤버를 훑는다.
+
 | 명령 | 먼저 필요한 것 |
 |---|---|
-| `cargo test --workspace` | 없음 |
-| `npm test` | `npm ci`, `cargo build --bin quble` |
+| `cargo test --workspace --manifest-path core/Cargo.toml` | 없음 |
+| `cargo build --bin quble --manifest-path core/Cargo.toml` | 없음 |
+| `npm test` | `npm ci`, `build:wasm` - 멤버 넷을 다 돈다 |
 | `npm run typecheck` | `npm ci`, `build:wasm` |
 | `npm run lint` | `npm ci` |
-| `node build/build-playground.mjs` (cwd `core`) | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |
+| `node core/build/build-playground.mjs` | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |
 | `npm run install-local --prefix editors/vscode` | `build:wasm` - 확장은 `core/wasm-compiler/`의 wasm을 복사한다. 플레이그라운드 빌드는 `core/target/`에만 내므로 그것으로는 안 갱신된다 |
+
+루트 `npm test`는 `npm test --workspaces`라 멤버마다 선행 조건이 다르다. 한 멤버만 돌릴 때는
+그 줄만 챙기면 된다.
+
+| 멤버 | 먼저 필요한 것 |
+|---|---|
+| `core/web` | 없음 - 자기 `test`가 `cargo build --bin quble`을 먼저 돌린다 |
+| `core/playground` | 없음 |
+| `core/wasm-compiler` | `build:wasm` - 테스트가 `.wasm`을 읽는다 |
+| `editors/ts-plugin` | `build:wasm` - `quble-wasm-compiler`를 거쳐 `.wasm`을 읽는다 |
