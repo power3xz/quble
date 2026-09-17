@@ -1,7 +1,7 @@
 // 배열 인덱스 접근 - `props.items[2].title`처럼 요소로 내려간다.
 //
 // 요소 주소는 컴파일타임 offset이 아니라 arrayInfo.elemStartLeafIndices가 들고 있고(alloc/free로
-// 자리가 오간다) push/removeAt으로 목록이 계속 바뀐다. 그래서 배열 노드는 인덱싱하는 그 순간에
+// 자리가 오간다) push/removeAt으로 목록이 계속 바뀐다. 그래서 배열 노드는 인덱스로 접근하는 그 순간에
 // 요소 노드를 만든다 - 확인할 것은 그 해소가 늘 현재 목록을 보는가다. 미리 펴 두었다면 push/
 // removeAt 뒤에 낡은 자리를 가리킨다.
 
@@ -85,8 +85,8 @@ test("요소 노드는 setObject 대상이다", () => {
   assert.deepEqual(marksOf(host), [[], ["m3"]], "안 준 marks는 비워진다(교체)");
 });
 
-// 배열 -> 객체 -> 배열. 안쪽 배열도 노드라 인덱싱과 push가 그대로 된다.
-test("요소가 품은 배열도 인덱싱된다", () => {
+// 배열 -> 객체 -> 배열. 안쪽 배열도 노드라 인덱스 접근과 push가 그대로 된다.
+test("요소가 품은 배열도 인덱스로 접근된다", () => {
   const seen: unknown[] = [];
   const { host, fire } = run((ctx) => {
     const marks = ctx.props.user.posts[0].marks as TNode;
@@ -113,7 +113,7 @@ test("length가 지금 개수를 준다", () => {
 });
 
 // 노드를 미리 펴 두었다면 여기서 낡는다 - push로 목록이 바뀐 뒤 같은 인덱스가 새 요소를 봐야 한다.
-test("목록이 바뀌어도 인덱싱이 현재 요소를 본다", () => {
+test("목록이 바뀌어도 인덱스 접근이 현재 요소를 본다", () => {
   const seen: unknown[] = [];
   const { fire } = run((ctx) => {
     ctx.removeAt(ctx.props.user.tags, 0); // ["b"]

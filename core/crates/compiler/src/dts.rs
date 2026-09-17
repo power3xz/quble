@@ -184,7 +184,7 @@ fn signature(h: &Handler, root_name: &str) -> String {
 ///
 /// 스칼라만 leaf 한 칸이다. 객체/배열은 여러 leaf의 묶음이라 각자의 노드 타입이 받고, 안으로
 /// 내려가는 길(`set(props.ghost.title, ..)`, `props.items[2]`)은 그쪽 매핑이 파생한다 - 여기서는
-/// 값 타입만 낸다. 배열은 요소 타입을 실어야 매핑이 인덱싱 결과를 안다.
+/// 값 타입만 낸다. 배열은 요소 타입을 실어야 매핑이 인덱스 접근 결과를 안다.
 fn leaf_tree_to_ts(ty: &Type) -> String {
     match ty {
         Type::Object(_) => format!("TLeafObject<{}>", type_to_ts(ty)),

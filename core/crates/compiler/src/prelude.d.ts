@@ -24,7 +24,7 @@ type TLeafObject<T> = { readonly __obj: T } & {
 // 배열 노드 - 인덱스로 요소에 내려간다(`props.items[2].title`). push/removeAt/swapAt/setArray의 대상이다.
 //
 // 요소 주소는 컴파일타임 offset이 아니라 런타임이 발급하고(alloc/free) push/removeAt으로 계속
-// 바뀌므로, 런타임은 인덱싱하는 그 순간에 요소 노드를 만든다. 여기 타입은 그 접근이 무엇을
+// 바뀌므로, 런타임은 인덱스로 접근하는 그 순간에 요소 노드를 만든다. 여기 타입은 그 접근이 무엇을
 // 돌려주는지만 말한다.
 type TLeafArray<TElement> = { readonly __arr: TElement } & {
   readonly length: number;
@@ -53,7 +53,7 @@ type TLeafArray<TElement> = { readonly __arr: TElement } & {
 // 배열 조작(push/removeAt/swapAt/setArray)은 대상이 TLeafArray여야 한다 - leaf나 객체 노드를 넘기면
 // 타입에서 걸리고, 요소 타입도 그 배열에 묶인다. removeAt/swapAt은 요소 타입을 안 쓰지만 그래도
 // 제네릭을 받는다 - TLeafArray<unknown>으로 두면 인덱스 시그니처가 TLeafIndex<unknown>으로 굳어 객체
-// 요소 배열이 안 들어간다(TLeafArray는 요소 타입에 따라 인덱싱 결과가 갈리는 매핑이다).
+// 요소 배열이 안 들어간다(TLeafArray는 요소 타입에 따라 인덱스 접근 결과가 달라지는 매핑이다).
 //
 // 제네릭 이름을 자리별로 나눈 이유 - get의 것은 leaf가 담은 값(TValue)이고 push의 것은 그 배열의
 // 요소(TElement)라 뜻이 다르다. 한 이름으로 두면 나란히 놓였을 때 같은 것으로 읽힌다.

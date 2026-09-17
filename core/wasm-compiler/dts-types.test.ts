@@ -144,8 +144,8 @@ test("스칼라 배열 요소는 leaf지 객체가 아니다", () => {
   assert.match(out ?? "", /TS2345/);
 });
 
-// 객체 안 배열도 같은 규칙 - ghost.marks는 노드고 인덱싱하면 leaf다.
-test("객체 안 배열도 인덱싱된다", () => {
+// 객체 안 배열도 같은 규칙 - ghost.marks는 노드고 인덱스로 접근하면 leaf다.
+test("객체 안 배열도 인덱스로 접근된다", () => {
   assert.equal(
     typecheck(`
     const m: string = get(props.ghost.marks[0]);
@@ -167,7 +167,7 @@ test("객체 노드는 get에 못 넘긴다", () => {
   assert.match(out ?? "", /TS2345/);
 });
 
-// 배열의 배열 - 인덱싱 한 번이면 또 배열 노드고, 두 번이면 leaf다. 매핑이 요소가 배열일 때
+// 배열의 배열 - 인덱스 접근 한 번이면 또 배열 노드고, 두 번이면 leaf다. 매핑이 요소가 배열일 때
 // TLeafArray로 다시 내려가는지를 본다(안 그러면 안쪽이 객체 노드나 leaf로 잘못 파생된다).
 test("배열의 배열은 한 겹씩 내려간다", () => {
   assert.equal(

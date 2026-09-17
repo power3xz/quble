@@ -22,7 +22,7 @@
 - **루트 store에서 배열 요소 경로로 못 내려감** - `store.items[2].title` 같은 접근이 안 됐다
   (`leafTree`가 배열을 칸 leafIndex 하나로 두고 멈췄다). **해결:** 배열 칸도 노드로 낸다
   (`arrayNode`). 요소 주소는 컴파일타임 offset이 아니라 `elemStartLeafIndices`가 들고
-  push/removeAt으로 계속 바뀌므로, 요소 노드를 미리 펴지 않고 **인덱싱하는 그 순간에** 만든다
+  push/removeAt으로 계속 바뀌므로, 요소 노드를 미리 펴지 않고 **인덱스로 접근하는 그 순간에** 만든다
   (Proxy). 노드가 `NODE_BASE`에 배열 칸 leafIndex를 실어 push/removeAt/setArray가 거기서 요소
   목록에 닿는다. 타입은 `TLeafIndex<T[]>`에서 `TLeafArray<T>`로 갈리고, 요소가 객체면 객체 노드,
   스칼라면 leaf로 파생된다. `length`도 지금 개수를 준다.
