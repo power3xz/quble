@@ -144,6 +144,16 @@ cargo는 현재 디렉터리에서 위로 올라가며 `Cargo.toml`을 찾는데
 `core/`라 레포 루트에서는 못 찾는다. `--manifest-path`가 없으면 "could not find `Cargo.toml`"로
 실패한다.
 
+**`*`, `?`, `[]`가 든 인자는 따옴표로 감싼다.** 셸이 zsh다. bash와 달리 맞는 파일이 없으면
+글롭을 그대로 넘기지 않고 `no matches found`로 커맨드 자체를 실행하지 않는다. 파일을 고르려는
+글롭이 아니라 커맨드에 넘길 문자열이면 따옴표가 필요하다.
+
+| O | X |
+|---|---|
+| `esbuild --external:svelte "--external:svelte/*"` | `esbuild --external:svelte --external:svelte/*` |
+| `grep -rn "Expr::*" src` | `grep -rn Expr::* src` |
+| `find . -name "*.qubc"` | `find . -name *.qubc` |
+
 ## 메모리 저장할 때
 
 **스스로 저장하지 않는다.** 사용자가 저장하라고 할 때만 저장한다.
