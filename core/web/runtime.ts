@@ -181,8 +181,12 @@ const OP = {
 // 표현식 opcode(BYTECODE.md #4 <EXPR>). OP와 다른 이름공간이다 - 같은 값이 서로 다른 뜻이라
 // 식 바이트를 OP로 읽으면 안 된다.
 //
-// 식은 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다. 스택에는 값만 올린다 - 칸 번호는 안 올린다.
-// 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 타입을 안 본다.
+// 식은 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다. 타입은 컴파일타임에 검사가 끝나
+// (compiler/src/expr_type.rs) 여기서 타입을 안 본다.
+//
+// 스택에는 값이 오르는 것이 기본이고, ELEM_AT/FIELD_AT만 leafIndex를 올린다 - 요소 위치는
+// 인덱스를 세어 봐야 정해져 컴파일타임에 슬롯으로 접히지 않는다. READ_LEAF가 그 leafIndex를
+// 값으로 바꾸므로 연산자에는 늘 값만 닿는다.
 const EXPR = {
   LOAD_VAR: 0x00, // scope_index: u8, offset: u8
   LOAD_CONST: 0x01, // const_index: u16
@@ -206,6 +210,9 @@ const EXPR = {
   OR: 0x1c,
   NOT: 0x1d,
   NEG: 0x1e,
+  ELEM_AT: 0x1f, // 인덱스와 arrayInfoIndex를 꺼내 elemStartLeafIndices[i]를 올린다
+  FIELD_AT: 0x20, // offset: u8 - leafIndex에 필드 거리를 더한다
+  READ_LEAF: 0x21, // leafIndex를 꺼내 그 칸의 값을 올린다
 } as const;
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -1796,12 +1803,13 @@ class Interpreter {
     // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
     // (runIfExpr과 같은 관례).
     const pairs = [...argumentSourcePairs];
-    const recount = () => update(this.evalExpr(expr, pairs));
-    for (const leafIndex of this.collectExprLeaves(expr, pairs)) {
+    const recount = () => update(this.evalExpr(expr, pairs).value);
+    const { value, readLeaves } = this.evalExpr(expr, pairs);
+    for (const leafIndex of readLeaves) {
       branch.leafIndices.push(leafIndex);
       branch.updateFns.push(recount);
     }
-    return this.evalExpr(expr, pairs);
+    return value;
   };
 
   // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
@@ -2286,60 +2294,30 @@ class Interpreter {
     return fragment;
   };
 
-  // 식이 읽는 칸들을 모은다 - 이 칸들이 바뀌면 식을 다시 세야 하므로 구독 대상이다.
+  // 식을 후위 표기로 세어 값과 그 값을 세며 읽은 칸을 낸다(BYTECODE.md #4 <EXPR>).
   //
-  // CONST 슬롯은 값이 안 변해 제외한다. 배열 길이는 그 배열의 길이 칸(sizeLeafIndex)을 본다 -
-  // 배열 칸의 값(arrayInfoIndex)은 요소가 늘고 줄어도 안 바뀌기 때문이다. @for가 grow/shrink
-  // 발화에 쓰는 그 칸이고, 아직 없으면 여기서 확보한다(주인은 배열이라 식이 없어져도 안 반납).
-  // 문자열 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다.
+  // 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
   //
-  // 같은 칸이 두 번 나오면(`n > 0 && n < 10`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때
-  // 식을 두 번 다시 센다.
-  collectExprLeaves = (expr: Uint8Array, pairs: TScope): number[] => {
-    const leafIndices: number[] = [];
-    for (let pc = 0; pc < expr.length; ) {
-      const op = expr[pc++];
-      if (op === EXPR.LOAD_CONST) {
-        pc += 2;
-        continue;
-      }
-      if (op === EXPR.LOAD_SMALL_INT) {
-        pc += 1;
-        continue;
-      }
-      // 연산자와 LOAD_TRUE/FALSE는 operand도 읽는 칸도 없다.
-      if (op !== EXPR.LOAD_VAR && op !== EXPR.LOAD_ARRAY_LENGTH && op !== EXPR.LOAD_STRING_LENGTH) {
-        continue;
-      }
-      const scopeIndex = expr[pc++];
-      const offset = expr[pc++];
-      if (slotKind(pairs, scopeIndex) === CONST) {
-        continue; // 안 변하는 값 - 구독할 것이 없다
-      }
-      const slotLeafIndex = slotRef(pairs, scopeIndex) + offset;
-      let leafIndex = slotLeafIndex;
-      if (op === EXPR.LOAD_ARRAY_LENGTH) {
-        const info = this.arrayPool.entries[this.store.get(slotLeafIndex) as number];
-        info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
-        leafIndex = info.sizeLeafIndex;
-      }
-      if (!leafIndices.includes(leafIndex)) {
-        leafIndices.push(leafIndex);
-      }
-    }
-    return leafIndices;
-  };
-
-  // 식을 후위 표기로 세어 값을 낸다(BYTECODE.md #4 <EXPR>).
-  //
-  // 스택에는 값만 올린다 - 칸 번호는 안 올린다. 주소와 값이 섞이면 연산자가 무엇을 계산하는지
-  // 알 수 없어진다. 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
-  evalExpr = (expr: Uint8Array, pairs: TScope): unknown => {
+  // readLeaves는 구독할 칸이다. 세어 보지 않고는 알 수 없어 값과 함께 나온다 - 인덱스 접근은
+  // 어느 요소를 읽는지가 인덱스를 세어 봐야 정해진다. CONST 슬롯은 값이 안 변해 빠지고, 같은
+  // 칸이 두 번 나오면(`a[i] + a[i]`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때 식을 두 번
+  // 다시 센다.
+  evalExpr = (expr: Uint8Array, pairs: TScope): { value: unknown; readLeaves: number[] } => {
     const stack: unknown[] = [];
+    const readLeaves: number[] = [];
+    const addReadLeaf = (leafIndex: number) => {
+      if (!readLeaves.includes(leafIndex)) {
+        readLeaves.push(leafIndex);
+      }
+    };
     // 슬롯 하나가 가리키는 값. CONST면 상수풀, STORE면 store 칸.
     const slotValue = (scopeIndex: number, offset: number): unknown => {
       const ref = slotRef(pairs, scopeIndex);
-      return slotKind(pairs, scopeIndex) === CONST ? this.module.constpool[ref] : this.store.get(ref + offset);
+      if (slotKind(pairs, scopeIndex) === CONST) {
+        return this.module.constpool[ref];
+      }
+      addReadLeaf(ref + offset);
+      return this.store.get(ref + offset);
     };
     for (let pc = 0; pc < expr.length; ) {
       const op = expr[pc++];
@@ -2351,12 +2329,22 @@ class Interpreter {
         }
         case EXPR.LOAD_ARRAY_LENGTH: {
           // 배열 칸의 값이 arrayInfoIndex - 요소 수는 그 arrayInfo가 든다.
+          //
+          // 구독은 배열 칸이 아니라 길이 칸(sizeLeafIndex)에 건다 - 배열 칸의 값은 요소가 늘고
+          // 줄어도 안 바뀐다. @for가 grow/shrink 발화에 쓰는 그 칸이고, 아직 없으면 여기서
+          // 확보한다(주인은 배열이라 식이 없어져도 안 반납).
           const leafIndex = slotRef(pairs, expr[pc]) + expr[pc + 1];
-          stack.push(this.arrayPool.entries[this.store.get(leafIndex) as number].elemStartLeafIndices.length);
+          const info = this.arrayPool.entries[this.store.get(leafIndex) as number];
+          if (slotKind(pairs, expr[pc]) !== CONST) {
+            info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
+            addReadLeaf(info.sizeLeafIndex);
+          }
+          stack.push(info.elemStartLeafIndices.length);
           pc += 2;
           break;
         }
         case EXPR.LOAD_STRING_LENGTH: {
+          // 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다 - slotValue가 그 칸을 담는다.
           stack.push(String(slotValue(expr[pc], expr[pc + 1])).length);
           pc += 2;
           break;
@@ -2382,6 +2370,22 @@ class Interpreter {
         case EXPR.NEG:
           stack.push(-(stack.pop() as number));
           break;
+        // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
+        case EXPR.ELEM_AT: {
+          const i = stack.pop() as number;
+          const info = this.arrayPool.entries[stack.pop() as number];
+          stack.push(info.elemStartLeafIndices[i]);
+          break;
+        }
+        case EXPR.FIELD_AT:
+          stack.push((stack.pop() as number) + expr[pc++]);
+          break;
+        case EXPR.READ_LEAF: {
+          const leafIndex = stack.pop() as number;
+          addReadLeaf(leafIndex);
+          stack.push(this.store.get(leafIndex));
+          break;
+        }
         // 이항 - 둘 꺼내 하나 넣는다. 나중에 밀린 것이 오른쪽이라 먼저 꺼내진다.
         default: {
           const right = stack.pop();
@@ -2391,7 +2395,7 @@ class Interpreter {
         }
       }
     }
-    return stack[0];
+    return { value: stack[0], readLeaves };
   };
 
   // @if opcode 처리 - 조건 슬롯을 그대로 조건 칸으로 쓴다.
@@ -2446,13 +2450,14 @@ class Interpreter {
     // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
     // (@if lazyBuild/@for grow와 같은 관례). runIf는 조건 칸 번호를 지금 뽑아 둬 카피가 필요 없다.
     const pairs = [...argumentSourcePairs];
-    const condLeafIndex = this.store.alloc([this.evalExpr(expr, pairs)]);
+    const { value, readLeaves } = this.evalExpr(expr, pairs);
+    const condLeafIndex = this.store.alloc([value]);
     // 식이 읽는 칸이 바뀌면 식 전체를 다시 세어 파생 칸에 넣는다. 그 set이 아래 buildIfRegion이
     // 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기 때문이다.
     // 부모 가지 구독에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 어느 칸이 바뀌든 하는
     // 일이 같아 함수는 하나만 만들고 칸마다 건다 - 끊을 때 (칸, 함수) 짝이 필요해 항목은 칸 수만큼.
-    const recount = () => this.store.set(condLeafIndex, this.evalExpr(expr, pairs));
-    for (const leafIndex of this.collectExprLeaves(expr, pairs)) {
+    const recount = () => this.store.set(condLeafIndex, this.evalExpr(expr, pairs).value);
+    for (const leafIndex of readLeaves) {
       branch.leafIndices.push(leafIndex);
       branch.updateFns.push(recount);
     }

@@ -1,0 +1,17 @@
+component ExprArrayIndex {
+  props {
+    rows: { title: string, score: number }[],
+    scalars: number[],
+    cursor: number
+  }
+  template {
+    div() {
+      p(class="field") { ${rows[cursor].title} }
+      p(class="scalar") { ${scalars[cursor]} }
+      p(class="arith") { ${rows[cursor].score * 2} }
+      p(class="two") { ${rows[0].score + rows[1].score} }
+      p(class="shifted") { ${rows[cursor + 1].title} }
+      span(id={rows[cursor].title}) { "attr" }
+    }
+  }
+}
