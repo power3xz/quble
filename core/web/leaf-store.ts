@@ -30,17 +30,22 @@ const createLeafStore = (leaves: unknown[]) => {
 // ── leafStoreSubject (leafStore + 반응성 + 동적 칸) ──────────────────
 // leafStore를 감싸 구독/통지(subscribe/set 통지)와 동적 칸(alloc/free - 배열 요소 추가/제거)을
 // 얹는다(Subject - 값을 들고 변경을 구독자에게 통지하는 주체).
+
+// 칸이 바뀌면 불리는 함수. 새 값과 함께 어느 칸이 바뀌었는지 받는다 - 식 하나가 칸 a, b를 함께
+// 구독하면 두 칸에 같은 함수 하나를 걸고, 불릴 때 leafIndex로 a인지 b인지 가린다.
+export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
+
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
   alloc: (values: unknown[]) => LeafIndex;
   free: (start: LeafIndex, size: number) => void;
-  subscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
-  unsubscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
+  subscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
+  unsubscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
-  const subscribers: Array<Set<(v: unknown) => void> | undefined> = []; // leafIndex -> Set<(v)=>void>. Set이라 unsubscribe가 O(1).
+  const subscribers: Array<Set<TSubscriber> | undefined> = []; // leafIndex -> Set<TSubscriber>. Set이라 unsubscribe가 O(1).
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
   // 정적/유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합/split/정렬 없이 O(1) 재사용/반납.
   const freeBySize = new Map<number, LeafIndex[]>();
@@ -54,7 +59,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     if (subs) {
       // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
       for (const fn of [...subs]) {
-        fn(value);
+        fn(value, leafIndex);
       }
     }
   };
@@ -86,12 +91,12 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     bucket.push(start);
   };
 
-  const subscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {
+  const subscribe = (leafIndex: LeafIndex, fn: TSubscriber): void => {
     subscribers[leafIndex] ??= new Set();
     subscribers[leafIndex].add(fn);
   };
 
-  const unsubscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {
+  const unsubscribe = (leafIndex: LeafIndex, fn: TSubscriber): void => {
     subscribers[leafIndex]?.delete(fn);
   };
 

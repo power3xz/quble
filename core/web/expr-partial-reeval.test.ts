@@ -6,6 +6,8 @@
 //   - 건너뛰기: 바뀐 칸을 품지 않은 부분식의 칸은 다시 읽지 않는다. 인스턴스가 내놓는 store는
 //     런타임이 쓰는 store와 같은 객체라, get을 감싸 어느 칸을 읽었는지 기록해 본다.
 //   - 부모가 같은 칸을 두 prop으로 넘겨 식의 두 변수가 같은 칸을 가리켜도 값이 맞다.
+//   - 구독: 식 하나가 칸을 여럿 읽어도 구독 함수는 하나다. 식이 든 가지가 꺼진 동안 칸이 바뀌어도
+//     다시 켜면 맞게 센다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
@@ -20,8 +22,8 @@ before(() => {
 });
 
 // props 선언 순서가 곧 고정부 leafIndex. 배열은 칸 하나(arrayInfoIndex).
-//   0=a 1=b 2=c 3=d 4=rows 5=cursor 6=x 7=shared 8=z
-// rows 요소는 {score} 1칸이라 요소 i의 score = 9 + i.
+//   0=a 1=b 2=c 3=d 4=rows 5=cursor 6=x 7=shared 8=z 9=show
+// rows 요소는 {score} 1칸이라 요소 i의 score = 10 + i.
 const A = 0;
 const B = 1;
 const C = 2;
@@ -31,7 +33,8 @@ const CURSOR = 5;
 const X = 6;
 const SHARED = 7;
 const Z = 8;
-const scoreLeaf = (i: number) => 9 + i;
+const SHOW = 9;
+const scoreLeaf = (i: number) => 10 + i;
 
 const seed = () => ({
   a: 1,
@@ -43,6 +46,8 @@ const seed = () => ({
   x: 100,
   shared: 2,
   z: 3,
+  // 켜 두면 @if 안의 (a + b) * (c - d)도 a~d를 읽어, 읽은 칸을 세는 테스트가 두 식 몫을 본다.
+  show: false,
 });
 
 const instantiate = () => {
@@ -50,6 +55,7 @@ const instantiate = () => {
   const host = mount(inst);
   const store = inst.store;
   return {
+    inst,
     textOf: (cls: string) => (host.querySelector(`.${cls}`) as HTMLElement).textContent,
     set: (leafIndex: number, v: unknown) => store.set(leafIndex, v),
     // action 동안 런타임이 store에서 읽은 칸들. set 안의 값 비교는 store 내부에서 get을 거치지 않아
@@ -138,4 +144,27 @@ test("두 변수가 같은 칸을 가리켜도 그 칸이 바뀌면 맞게 센�
   assert.equal(textOf("pair"), "16", "4 + 4 * 3");
   set(Z, 5);
   assert.equal(textOf("pair"), "24", "4 + 4 * 5");
+});
+
+test("식 하나가 칸을 여럿 읽어도 구독 함수는 하나다", () => {
+  const { inst } = instantiate();
+  // (a + b) * (c - d)는 루트 가지에 있고, a~d 네 칸을 구독한다. 칸마다 함수를 따로 만들면 1만 행에서
+  // 함수가 수만 개 늘어 메모리가 CPU 캐시를 넘친다.
+  const root = inst.branchPool.entries.find((b: { leafIndices: number[] }) => b.leafIndices.includes(A));
+  assert.ok(root);
+  const subscriberOf = (leafIndex: number) => root.updateFns[root.leafIndices.indexOf(leafIndex)];
+  assert.equal(new Set([A, B, C, D].map(subscriberOf)).size, 1);
+});
+
+
+test("식이 든 가지가 꺼진 동안 칸 둘이 바뀌어도 다시 켜면 맞게 센다", () => {
+  const { set, textOf } = instantiate();
+  set(SHOW, true);
+  assert.equal(textOf("shown"), "6", "(1 + 2) * (5 - 3)");
+  set(SHOW, false);
+  set(A, 4);
+  set(C, 7);
+  // 다시 켤 때 구독한 칸마다 한 번씩 다시 센다. a가 바뀐 몫과 c가 바뀐 몫을 둘 다 반영해야 한다.
+  set(SHOW, true);
+  assert.equal(textOf("shown"), "24", "(4 + 2) * (7 - 3)");
 });

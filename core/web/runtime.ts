@@ -24,7 +24,11 @@ type TIndexSymbol = `$${TDigitString}`;
 
 import { EXPR, instrSize } from "./expr-opcode.ts";
 import { buildSkipPastOp, buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
-import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
+import {
+  createLeafStoreSubject,
+  type LeafStoreSubject as TLeafStoreSubject,
+  type TSubscriber,
+} from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
@@ -1781,7 +1785,11 @@ class Interpreter {
   // 식을 처음 세고, 식이 읽은 칸마다 구독을 건다. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며
   // 다시 세어 onValue에 넘긴다. 처음 센 값을 돌려준다. 구독은 branch에 실어 가지와 생애를 함께 한다.
   //
-  // 칸마다 건너뛸 부분식이 달라 구독 함수도 칸마다 만든다. 그 칸을 읽는 변수가
+  // 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 칸에 같은 함수를 걸고, 불릴 때
+  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다. 칸마다 함수를 만들면 1만 행 목록에서 함수가
+  // 수만 개 늘어, 메모리가 CPU 캐시를 넘쳐 다시 세기가 오히려 느려진다.
+  //
+  // 칸의 건너뛰기 표는 그 칸을 읽는 변수가
   //   하나면   식 정의가 공유하는 표(table.skipPastOpByVar)를 쓴다.
   //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
   //            그 칸이 바뀌면 두 변수가 함께 바뀌므로, 위치를 합쳐 이 인스턴스용 표를 만든다.
@@ -1789,15 +1797,20 @@ class Interpreter {
     const table = this.skipTable(expr);
     const cache: unknown[] = new Array(table.opCount);
     const { value, readLeaves, varsOfLeaf } = this.evalExpr(expr, pairs, table, cache);
-    readLeaves.forEach((leafIndex, k) => {
-      const vars = varsOfLeaf[k];
-      const skipPastOp =
-        vars.length === 1
-          ? table.skipPastOpByVar[vars[0]]
-          : buildSkipPastOp(table, expr, Int32Array.from(vars.flatMap((v) => [...table.positionsByVar[v]])).sort());
+    // readLeaves[k]가 바뀌면 skipPastOpOfLeaf[k]로 건너뛴다.
+    const skipPastOpOfLeaf = varsOfLeaf.map((vars) =>
+      vars.length === 1
+        ? table.skipPastOpByVar[vars[0]]
+        : buildSkipPastOp(table, expr, Int32Array.from(vars.flatMap((v) => [...table.positionsByVar[v]])).sort()),
+    );
+    const reevalOnChange: TSubscriber = (_, leafIndex) => {
+      const skipPastOp = skipPastOpOfLeaf[readLeaves.indexOf(leafIndex)];
+      onValue(this.reevalExpr(expr, pairs, table, cache, skipPastOp));
+    };
+    for (const leafIndex of readLeaves) {
       branch.leafIndices.push(leafIndex);
-      branch.updateFns.push(() => onValue(this.reevalExpr(expr, pairs, table, cache, skipPastOp)));
-    });
+      branch.updateFns.push(reevalOnChange);
+    }
     return value;
   };
 

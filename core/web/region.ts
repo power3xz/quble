@@ -23,14 +23,15 @@ export type Store = {
   get: (leafIndex: number) => unknown;
   set: (leafIndex: number, value: unknown) => void;
   free: (start: number, size: number) => void;
-  subscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
-  unsubscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
+  subscribe: (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
+  unsubscribe: (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
 };
 
 export type TBranch = {
   nodes: ChildNode[];
   leafIndices: number[];
-  updateFns: Array<(v: unknown) => void>;
+  // updateFns[i]는 leafIndices[i]를 구독한다. 식 하나가 칸 여럿을 읽으면 그 칸들 자리에 같은 함수가 든다.
+  updateFns: Array<(v: unknown, leafIndex: number) => void>;
   childRegionIndices: number[];
   built: boolean;
   lazyBuild: (() => void) | null;
@@ -103,7 +104,7 @@ const teardownBranchSubs = (store: Store, branch: TBranch): void => {
 const restoreBranchSubs = (store: Store, branch: TBranch): void => {
   const { leafIndices, updateFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
-    updateFns[i](store.get(leafIndices[i])); // 비활성 동안 놓친 값 따라잡기
+    updateFns[i](store.get(leafIndices[i]), leafIndices[i]); // 비활성 동안 놓친 값 따라잡기
     store.subscribe(leafIndices[i], updateFns[i]);
   }
 };
