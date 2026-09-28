@@ -62,8 +62,15 @@ export type TExprSkipTable = {
   skipPastOpByVar: TSkipPastOp[];
 };
 
-// 잎 명령인가. 스택에서 아무것도 꺼내지 않고 값 하나를 올린다(LOAD_VAR, LOAD_CONST, LOAD_TRUE 등).
-const isLeaf = (opcode: number) => opcode <= EXPR.LOAD_FALSE;
+// 잎 명령인가. 스택에서 아무것도 꺼내지 않고 값 하나를 올린다.
+const isLeaf = (opcode: number) =>
+  opcode === EXPR.LOAD_VAR ||
+  opcode === EXPR.LOAD_CONST ||
+  opcode === EXPR.LOAD_ARRAY_LENGTH ||
+  opcode === EXPR.LOAD_STRING_LENGTH ||
+  opcode === EXPR.LOAD_SMALL_INT ||
+  opcode === EXPR.LOAD_TRUE ||
+  opcode === EXPR.LOAD_FALSE;
 
 // 단항 연산인가. 값 하나를 꺼내 하나를 올린다. 나머지 연산(ADD, ELEM_AT 등)은 둘을 꺼내 하나를 올린다.
 const isUnary = (opcode: number) =>
