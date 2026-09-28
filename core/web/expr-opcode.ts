@@ -34,3 +34,19 @@ export const EXPR = {
   FIELD_AT: 0x20, // offset: u8 - leafIndex에 필드 거리를 더한다
   READ_LEAF: 0x21, // leafIndex를 꺼내 그 칸의 값을 올린다
 } as const;
+
+// 명령 하나가 차지하는 바이트 수(opcode 포함). LOAD_VAR a -> 3, FIELD_AT 1 -> 2, ADD -> 1
+export const instrSize = (opcode: number) => {
+  switch (opcode) {
+    case EXPR.LOAD_VAR:
+    case EXPR.LOAD_CONST:
+    case EXPR.LOAD_ARRAY_LENGTH:
+    case EXPR.LOAD_STRING_LENGTH:
+      return 3;
+    case EXPR.LOAD_SMALL_INT:
+    case EXPR.FIELD_AT:
+      return 2;
+    default:
+      return 1;
+  }
+};

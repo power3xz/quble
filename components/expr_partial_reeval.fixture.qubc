@@ -1,0 +1,22 @@
+use ExprPartialReevalPair from "./expr_partial_reeval_pair.fixture.qubc"
+
+component ExprPartialReeval {
+  props {
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    rows: { score: number }[],
+    cursor: number,
+    x: number,
+    shared: number,
+    z: number
+  }
+  template {
+    div() {
+      p(class="arith") { ${(a + b) * (c - d)} }
+      p(class="index") { ${rows[cursor].score + x} }
+      ExprPartialReevalPair(p={shared} q={shared} z={z} /)
+    }
+  }
+}

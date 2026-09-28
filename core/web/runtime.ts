@@ -22,7 +22,8 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 
 type TIndexSymbol = `$${TDigitString}`;
 
-import { EXPR } from "./expr-opcode.ts";
+import { EXPR, instrSize } from "./expr-opcode.ts";
+import { buildSkipPastOp, buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
@@ -440,6 +441,15 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
       throw new Error(`bad expr opcode 0x${op.toString(16)}`);
   }
 };
+
+// 식 정의(expr 바이트)당 건너뛰기 표 하나. 같은 식을 쓰는 인스턴스(@for 회차마다 생기는 것)끼리
+// 공유한다. expr 바이트는 decode한 모듈이 들고 있어, 모듈이 버려지면 표도 함께 버려진다.
+const skipTables = new WeakMap<Uint8Array, TExprSkipTable>();
+
+// 식을 처음 셀 때 runExpr에 넘기는 값 - 아무것도 건너뛰지 않는다.
+const SKIP_NOTHING: TSkipPastOp = {};
+// 식을 다시 셀 때 runExpr에 넘기는 값 - 읽은 칸은 처음 셀 때 구독을 걸었으니 다시 모으지 않는다.
+const IGNORE_READ = () => {};
 
 // 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
 // @for 회차/RENDER 재진입은 같은 walkStacks를 이어 쓰고(push/pop 공유), 지연 실행(@if lazyBuild/@for grow)만
@@ -1757,8 +1767,7 @@ class Interpreter {
   };
 
   // bindVar의 식 버전 - 연산자가 붙은 값(TEXT_EXPR/ATTR_*_EXPR)을 세어 현재 값을 주고, 식이
-  // 읽는 칸이 바뀌면 다시 세어 update에 넘긴다. 슬롯 하나가 아니라 식 하나를 보므로 읽는 칸이
-  // 여럿일 수 있고, 어느 칸이 바뀌든 하는 일이 같아 함수는 하나만 만들어 칸마다 건다.
+  // 읽는 칸이 바뀌면 다시 세어 update에 넘긴다.
   //
   // IF_EXPR과 달리 파생 칸을 안 잡는다 - 값을 받아 DOM에 바로 쓰므로 중간에 담을 자리가
   // 필요 없다(IF_EXPR은 분기가 조건 칸 하나를 구독하는 구조라 잡는다).
@@ -1766,14 +1775,40 @@ class Interpreter {
     // 다시 셀 때도 이 지점의 슬롯을 봐야 하는데, 공유 pairs는 @for 회차마다 push/pop돼 그때는
     // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
     // (runIfExpr과 같은 관례).
-    const pairs = [...argumentSourcePairs];
-    const recount = () => update(this.evalExpr(expr, pairs).value);
-    const { value, readLeaves } = this.evalExpr(expr, pairs);
-    for (const leafIndex of readLeaves) {
+    return this.subscribeExpr(expr, [...argumentSourcePairs], branch, update);
+  };
+
+  // 식을 처음 세고, 식이 읽은 칸마다 구독을 건다. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며
+  // 다시 세어 onValue에 넘긴다. 처음 센 값을 돌려준다. 구독은 branch에 실어 가지와 생애를 함께 한다.
+  //
+  // 칸마다 건너뛸 부분식이 달라 구독 함수도 칸마다 만든다. 그 칸을 읽는 변수가
+  //   하나면   식 정의가 공유하는 표(table.skipPastOpByVar)를 쓴다.
+  //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
+  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로, 위치를 합쳐 이 인스턴스용 표를 만든다.
+  subscribeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch, onValue: (v: unknown) => void): unknown => {
+    const table = this.skipTable(expr);
+    const cache: unknown[] = new Array(table.opCount);
+    const { value, readLeaves, varsOfLeaf } = this.evalExpr(expr, pairs, table, cache);
+    readLeaves.forEach((leafIndex, k) => {
+      const vars = varsOfLeaf[k];
+      const skipPastOp =
+        vars.length === 1
+          ? table.skipPastOpByVar[vars[0]]
+          : buildSkipPastOp(table, expr, Int32Array.from(vars.flatMap((v) => [...table.positionsByVar[v]])).sort());
       branch.leafIndices.push(leafIndex);
-      branch.updateFns.push(recount);
-    }
+      branch.updateFns.push(() => onValue(this.reevalExpr(expr, pairs, table, cache, skipPastOp)));
+    });
     return value;
+  };
+
+  // 식 정의당 건너뛰기 표 하나. 같은 expr 바이트면 같은 표를 돌려준다.
+  skipTable = (expr: Uint8Array): TExprSkipTable => {
+    let table = skipTables.get(expr);
+    if (table === undefined) {
+      table = buildSkipTable(expr);
+      skipTables.set(expr, table);
+    }
+    return table;
   };
 
   // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
@@ -2258,36 +2293,92 @@ class Interpreter {
     return fragment;
   };
 
-  // 식을 후위 표기로 세어 값과 그 값을 세며 읽은 칸을 낸다(BYTECODE.md #4 <EXPR>).
-  //
-  // 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
+  // 식을 처음부터 센다. 값과 함께, 식이 읽은 칸(readLeaves)과 칸마다 그 칸을 읽은 변수 번호
+  // (varsOfLeaf, 번호는 expr-skip-table.ts의 변수)를 낸다. 연산 결과는 cache에 써 둔다.
   //
   // readLeaves는 구독할 칸이다. 세어 보지 않고는 알 수 없어 값과 함께 나온다 - 인덱스 접근은
   // 어느 요소를 읽는지가 인덱스를 세어 봐야 정해진다. CONST 슬롯은 값이 안 변해 빠지고, 같은
-  // 칸이 두 번 나오면(`a[i] + a[i]`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때 식을 두 번
-  // 다시 센다.
-  evalExpr = (expr: Uint8Array, pairs: TScope): { value: unknown; readLeaves: number[] } => {
-    const stack: unknown[] = [];
+  // 칸이 두 번 나오면(`a + a`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때 식을 두 번 다시 센다.
+  //
+  // ((a + b) * c) - (d + e)에서 a~e가 leafIndex 20~24를 읽는 인스턴스
+  //   readLeaves [20, 21, 22, 23, 24], varsOfLeaf [[0], [1], [2], [3], [4]]
+  // 부모가 d와 e에 같은 칸 23을 넘긴 인스턴스
+  //   readLeaves [20, 21, 22, 23],     varsOfLeaf [[0], [1], [2], [3, 4]]
+  evalExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable,
+    cache: unknown[],
+  ): { value: unknown; readLeaves: number[]; varsOfLeaf: number[][] } => {
     const readLeaves: number[] = [];
-    const addReadLeaf = (leafIndex: number) => {
-      if (!readLeaves.includes(leafIndex)) {
+    const varsOfLeaf: number[][] = [];
+    const value = this.runExpr(expr, pairs, table, cache, SKIP_NOTHING, (leafIndex, at) => {
+      let k = readLeaves.indexOf(leafIndex);
+      if (k < 0) {
+        k = readLeaves.length;
         readLeaves.push(leafIndex);
+        varsOfLeaf.push([]);
       }
+      const varNumber = table.varAt[at];
+      if (!varsOfLeaf[k].includes(varNumber)) {
+        varsOfLeaf[k].push(varNumber);
+      }
+    });
+    return { value, readLeaves, varsOfLeaf };
+  };
+
+  // 식을 다시 센다. skipPastOp에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다.
+  reevalExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable,
+    cache: unknown[],
+    skipPastOp: TSkipPastOp,
+  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOp, IGNORE_READ);
+
+  // 식을 후위 표기로 센다(BYTECODE.md #4 <EXPR>). evalExpr와 reevalExpr가 함께 쓰는 본체다.
+  //
+  // 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
+  //
+  //   - 잎 명령 위치 at에 skipPastOp[at]이 있으면, 그 연산까지를 계산하지 않고 cache에 든 그 연산의
+  //     지난번 값을 올린 뒤 그 연산 다음 명령으로 간다.
+  //   - 연산 결과는 cache[table.cacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
+  //   - store 칸을 읽을 때마다 onRead(leafIndex, 읽은 명령의 위치)를 부른다.
+  runExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable,
+    cache: unknown[],
+    skipPastOp: TSkipPastOp,
+    onRead: (leafIndex: number, at: number) => void,
+  ): unknown => {
+    const stack: unknown[] = [];
+    // 연산 결과를 스택에 올리고 cache에도 써 둔다.
+    const pushResult = (at: number, value: unknown) => {
+      stack.push(value);
+      cache[table.cacheIndex[at]] = value;
     };
     // 슬롯 하나가 가리키는 값. CONST면 상수풀, STORE면 store 칸.
-    const slotValue = (scopeIndex: number, offset: number): unknown => {
+    const slotValue = (scopeIndex: number, offset: number, at: number): unknown => {
       const ref = slotRef(pairs, scopeIndex);
       if (slotKind(pairs, scopeIndex) === CONST) {
         return this.module.constpool[ref];
       }
-      addReadLeaf(ref + offset);
+      onRead(ref + offset, at);
       return this.store.get(ref + offset);
     };
     for (let pc = 0; pc < expr.length; ) {
+      const at = pc;
+      const skipPastOpAt = skipPastOp[at];
+      if (skipPastOpAt !== undefined) {
+        stack.push(cache[table.cacheIndex[skipPastOpAt]]);
+        pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
+        continue;
+      }
       const op = expr[pc++];
       switch (op) {
         case EXPR.LOAD_VAR: {
-          stack.push(slotValue(expr[pc], expr[pc + 1]));
+          stack.push(slotValue(expr[pc], expr[pc + 1], at));
           pc += 2;
           break;
         }
@@ -2301,7 +2392,7 @@ class Interpreter {
           const info = this.arrayPool.entries[this.store.get(leafIndex) as number];
           if (slotKind(pairs, expr[pc]) !== CONST) {
             info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
-            addReadLeaf(info.sizeLeafIndex);
+            onRead(info.sizeLeafIndex, at);
           }
           stack.push(info.elemStartLeafIndices.length);
           pc += 2;
@@ -2309,7 +2400,7 @@ class Interpreter {
         }
         case EXPR.LOAD_STRING_LENGTH: {
           // 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다 - slotValue가 그 칸을 담는다.
-          stack.push(String(slotValue(expr[pc], expr[pc + 1])).length);
+          stack.push(String(slotValue(expr[pc], expr[pc + 1], at)).length);
           pc += 2;
           break;
         }
@@ -2329,37 +2420,37 @@ class Interpreter {
           break;
         // 단항 - 하나 꺼내 하나 넣는다.
         case EXPR.NOT:
-          stack.push(!stack.pop());
+          pushResult(at, !stack.pop());
           break;
         case EXPR.NEG:
-          stack.push(-(stack.pop() as number));
+          pushResult(at, -(stack.pop() as number));
           break;
         // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
         case EXPR.ELEM_AT: {
           const i = stack.pop() as number;
           const info = this.arrayPool.entries[stack.pop() as number];
-          stack.push(info.elemStartLeafIndices[i]);
+          pushResult(at, info.elemStartLeafIndices[i]);
           break;
         }
         case EXPR.FIELD_AT:
-          stack.push((stack.pop() as number) + expr[pc++]);
+          pushResult(at, (stack.pop() as number) + expr[pc++]);
           break;
         case EXPR.READ_LEAF: {
           const leafIndex = stack.pop() as number;
-          addReadLeaf(leafIndex);
-          stack.push(this.store.get(leafIndex));
+          onRead(leafIndex, at);
+          pushResult(at, this.store.get(leafIndex));
           break;
         }
         // 이항 - 둘 꺼내 하나 넣는다. 나중에 밀린 것이 오른쪽이라 먼저 꺼내진다.
         default: {
           const right = stack.pop();
           const left = stack.pop();
-          stack.push(applyBinary(op, left, right));
+          pushResult(at, applyBinary(op, left, right));
           break;
         }
       }
     }
-    return { value: stack[0], readLeaves };
+    return stack[0];
   };
 
   // @if opcode 처리 - 조건 슬롯을 그대로 조건 칸으로 쓴다.
@@ -2414,17 +2505,12 @@ class Interpreter {
     // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
     // (@if lazyBuild/@for grow와 같은 관례). runIf는 조건 칸 번호를 지금 뽑아 둬 카피가 필요 없다.
     const pairs = [...argumentSourcePairs];
-    const { value, readLeaves } = this.evalExpr(expr, pairs);
+    // 식이 읽는 칸이 바뀌면 식을 다시 세어 파생 칸(condLeafIndex)에 넣는다. 그 set이 아래
+    // buildIfRegion이 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
+    // 때문이다. 구독은 부모 가지에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 구독 함수는
+    // 칸이 바뀔 때 불리므로, 그때는 아래에서 파생 칸을 이미 잡아 두었다.
+    const value = this.subscribeExpr(expr, pairs, branch, (v) => this.store.set(condLeafIndex, v));
     const condLeafIndex = this.store.alloc([value]);
-    // 식이 읽는 칸이 바뀌면 식 전체를 다시 세어 파생 칸에 넣는다. 그 set이 아래 buildIfRegion이
-    // 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기 때문이다.
-    // 부모 가지 구독에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 어느 칸이 바뀌든 하는
-    // 일이 같아 함수는 하나만 만들고 칸마다 건다 - 끊을 때 (칸, 함수) 짝이 필요해 항목은 칸 수만큼.
-    const recount = () => this.store.set(condLeafIndex, this.evalExpr(expr, pairs).value);
-    for (const leafIndex of readLeaves) {
-      branch.leafIndices.push(leafIndex);
-      branch.updateFns.push(recount);
-    }
     return this.buildIfRegion(
       pc,
       condLeafIndex,

@@ -1,4 +1,4 @@
-import { EXPR } from "./expr-opcode.ts";
+import { EXPR, instrSize } from "./expr-opcode.ts";
 
 // 식을 다시 셀 때, 바뀐 칸과 무관한 부분식을 계산하지 않고 지난번 값을 쓰려고 만드는 표.
 //
@@ -21,7 +21,9 @@ export const CHAIN_END = 0;
 
 // 바뀐 칸이 있을 때 건너뛸 부분식. 키는 부분식이 시작하는 잎 위치, 값은 그 부분식의 끝 연산
 // 위치다. 평가하다 잎 위치 p에 왔을 때 skipPastOp[p]가 있으면, 연산 skipPastOp[p]까지를 계산하지
-// 않고 cache에 든 그 연산의 지난번 값을 쓴 뒤 skipPastOp[p] + 1로 간다. 키가 없으면 잎을 읽는다.
+// 않고 cache에 든 그 연산의 지난번 값을 쓴 뒤 그 연산 다음 명령으로 간다. 키가 없으면 잎을 읽는다.
+// 다음 명령은 끝 연산 위치 + 그 명령의 바이트 수다 - FIELD_AT처럼 operand가 붙은 연산이 끝일 수
+// 있어 + 1이 아니다.
 //
 // 위 식에서 c(위치 7)가 바뀌면 c에서 루트로 가는 길(MUL 10, SUB 18) 옆의 부분식을 건너뛴다.
 //   { 0: 6, 11: 17 }   위치 0에서 a + b(끝 ADD 6)를, 위치 11에서 d + e(끝 ADD 17)를 건너뛴다
@@ -83,22 +85,6 @@ const readsCell = (opcode: number) =>
   opcode === EXPR.LOAD_STRING_LENGTH ||
   opcode === EXPR.LOAD_ARRAY_LENGTH ||
   opcode === EXPR.READ_LEAF;
-
-// 명령 하나가 차지하는 바이트 수(opcode 포함). LOAD_VAR a -> 3, ADD -> 1
-const instrSize = (opcode: number) => {
-  switch (opcode) {
-    case EXPR.LOAD_VAR:
-    case EXPR.LOAD_CONST:
-    case EXPR.LOAD_ARRAY_LENGTH:
-    case EXPR.LOAD_STRING_LENGTH:
-      return 3;
-    case EXPR.LOAD_SMALL_INT:
-    case EXPR.FIELD_AT:
-      return 2;
-    default:
-      return 1;
-  }
-};
 
 // varKey가 같으면 같은 변수다. 슬롯을 읽는 명령(LOAD_VAR, LOAD_STRING_LENGTH, LOAD_ARRAY_LENGTH)에만
 // 쓴다. 같은 슬롯이라도 값 칸과 길이 칸은 다른 변수라 칸 종류까지 넣는다.
@@ -232,7 +218,7 @@ export const buildSkipPastOp = (
       const op = outermostUnchangedFrom(pc);
       if (op !== CHAIN_END) {
         skipPastOp[pc] = op;
-        pc = op + 1;
+        pc = op + instrSize(expr[op]);
         continue;
       }
     }

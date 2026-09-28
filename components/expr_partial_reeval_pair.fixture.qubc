@@ -1,0 +1,6 @@
+component ExprPartialReevalPair {
+  props { p: number, q: number, z: number }
+  template {
+    p(class="pair") { ${p + q * z} }
+  }
+}

@@ -75,6 +75,18 @@ test("배열 인덱스 접근의 요소 칸을 읽는 명령(READ_LEAF)도 변�
   assert.deepEqual(table.skipPastOpByVar[3], { 0: 9 });
 });
 
+test("operand가 붙은 FIELD_AT에서 끝나는 부분식을 건너뛰면 그 operand 다음 명령부터 이어 본다", () => {
+  // a[i].b + (c + d), b는 요소의 둘째 필드라 FIELD_AT 1
+  //   위치  0          3          6       7          9         10         13         16   17
+  //         LOAD_VAR a LOAD_VAR i ELEM_AT FIELD_AT 1 READ_LEAF LOAD_VAR c LOAD_VAR d ADD  ADD
+  const table = buildSkipTable(
+    bytes(v(0), v(1), EXPR.ELEM_AT, EXPR.FIELD_AT, 1, EXPR.READ_LEAF, v(2), v(3), EXPR.ADD, EXPR.ADD),
+  );
+  // READ_LEAF가 읽는 요소 칸(9)이 바뀌면 a[i].b의 leafIndex(0~7)를 건너뛰고 9로 간다. 8은 FIELD_AT의
+  // operand 1이라 명령으로 읽으면 안 된다. 이어서 c + d(10~16)도 건너뛴다.
+  assert.deepEqual(table.skipPastOpByVar[2], { 0: 7, 10: 16 });
+});
+
 test("READ_LEAF는 둘이 같은 칸을 읽을 수 있어도 명령마다 따로 변수다", () => {
   // a[i].b + a[i].b
   //   위치  0 LOAD_VAR a ... 9 READ_LEAF, 10 LOAD_VAR a ... 19 READ_LEAF, 20 ADD
