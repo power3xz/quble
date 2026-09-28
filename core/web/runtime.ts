@@ -1783,7 +1783,8 @@ class Interpreter {
   };
 
   // 식을 처음 세고, 식이 읽은 칸마다 구독을 건다. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며
-  // 다시 세어 onValue에 넘긴다. 처음 센 값을 돌려준다. 구독은 branch에 실어 가지와 생애를 함께 한다.
+  // 다시 세어, 값이 지난번과 다를 때만 onValue에 넘긴다. 처음 센 값을 돌려준다. 구독은 branch에
+  // 실어 가지와 생애를 함께 한다.
   //
   // 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 칸에 같은 함수를 걸고, 불릴 때
   // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다. 칸마다 함수를 만들면 1만 행 목록에서 함수가
@@ -1803,9 +1804,15 @@ class Interpreter {
         ? table.skipPastOpByVar[vars[0]]
         : buildSkipPastOp(table, expr, Int32Array.from(vars.flatMap((v) => [...table.positionsByVar[v]])).sort()),
     );
+    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 DOM에 쓰지 않는다.
+    let lastValue = value;
     const reevalOnChange: TSubscriber = (_, leafIndex) => {
       const skipPastOp = skipPastOpOfLeaf[readLeaves.indexOf(leafIndex)];
-      onValue(this.reevalExpr(expr, pairs, table, cache, skipPastOp));
+      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOp);
+      if (v !== lastValue) {
+        lastValue = v;
+        onValue(v);
+      }
     };
     for (const leafIndex of readLeaves) {
       branch.leafIndices.push(leafIndex);

@@ -11,13 +11,15 @@ component ExprPartialReeval {
     x: number,
     shared: number,
     z: number,
-    show: bool
+    show: bool,
+    big: number
   }
   template {
     div() {
       p(class="arith") { ${(a + b) * (c - d)} }
       p(class="index") { ${rows[cursor].score + x} }
       ExprPartialReevalPair(p={shared} q={shared} z={z} /)
+      p(class="flag") { ${big > 50} }
       @if (show) {
         p(class="shown") { ${(a + b) * (c - d)} }
       }
