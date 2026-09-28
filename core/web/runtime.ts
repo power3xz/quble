@@ -1831,6 +1831,69 @@ class Interpreter {
     return table;
   };
 
+  // el에 DOM 이벤트 바인딩을 심고 document 위임을 켠다(BIND_EVENT).
+  //
+  // interpret 밖에 따로 둔다. 이 본문이 interpret의 switch 안에 있으면 V8이 interpret를 잘 최적화하지
+  // 못해, 1만 행 목록의 mount가 눈에 띄게 느려졌다(작은 도우미 u16at/nodeTop이 인라인되지 않았다).
+  // 어느 V8 제약에 걸리는지는 확인하지 못했다.
+  bindEvent = (
+    el: HTMLElement,
+    domEventIndex: number,
+    eventIndex: number,
+    segment: string | null,
+    compId: number,
+    pathPrefix: string,
+    argumentSourcePairs: TScope,
+    walkStacks: TWalkStacks,
+  ): void => {
+    const domEvent = DOM_EVENTS[domEventIndex];
+    const event = this.componentEvents(compId)[eventIndex];
+    const eventName = this.module.constpool[event.nameConstIndex] as string;
+    // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
+    let eventPrefix = pathPrefix;
+    if (segment !== null) {
+      eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
+    }
+    const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
+    // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
+    // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
+    const payload: TAssembled[] = event.fields.map((field) => ({
+      name: this.module.constpool[field.nameConstIndex] as string,
+      typeRef: field.typeRef,
+      fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
+    }));
+    // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
+    // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 현재 scope로 편다.
+    const props = this.buildProps(this.module.defs[compId].propsTypeRef, argumentSourcePairs);
+    // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
+    // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
+    const contextLeaves: Record<string, TAssembled[]> = {};
+    for (const i of walkStacks.activeContexts) {
+      const created = this.createdContexts[i];
+      contextLeaves[created.name] = created.fields;
+    }
+    // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
+    // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가
+    // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
+    // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
+    const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
+    for (let i = 0; i * 2 < walkStacks.loopIndexStack.length; i++) {
+      loopIndices[`$${i}` as TIndexSymbol] = {
+        kind: walkStacks.loopIndexStack[2 * i],
+        ref: walkStacks.loopIndexStack[2 * i + 1],
+      };
+    }
+    // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
+    // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
+    let bound = this.eventBindings.get(el);
+    if (!bound) {
+      bound = {};
+      this.eventBindings.set(el, bound);
+    }
+    bound[domEvent] = { fullName, payload, contextLeaves, props, loopIndices };
+    this.ensureDelegate(domEvent);
+  };
+
   // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
   //
   // 재진입 가능: 최초 인스턴스화는 루트 전체를, lazy build는 swap으로 처음 켜지는 가지 범위만
@@ -1978,57 +2041,13 @@ class Interpreter {
         }
         case OP.BIND_EVENT: {
           // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
-          const domEvent = DOM_EVENTS[u16at()];
-          const event = this.componentEvents(compId)[u16at()];
-          const eventName = this.module.constpool[event.nameConstIndex] as string;
-          // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
-          // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
-          // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
-          let eventPrefix = pathPrefix;
-          if (segment !== null) {
-            eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
-            segment = null;
-          }
-          const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
-          // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
-          // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
-          const payload: TAssembled[] = event.fields.map((field) => ({
-            name: this.module.constpool[field.nameConstIndex] as string,
-            typeRef: field.typeRef,
-            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
-          }));
-          // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
-          // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 현재 scope로 편다.
-          const props = this.buildProps(this.module.defs[compId].propsTypeRef, argumentSourcePairs);
-          // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
-          // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
-          const contextLeaves: Record<string, TAssembled[]> = {};
-          for (const i of walkStacks.activeContexts) {
-            const created = this.createdContexts[i];
-            contextLeaves[created.name] = created.fields;
-          }
-          // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
-          // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가
-          // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
-          // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
-          const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
-          for (let i = 0; i * 2 < walkStacks.loopIndexStack.length; i++) {
-            loopIndices[`$${i}` as TIndexSymbol] = {
-              kind: walkStacks.loopIndexStack[2 * i],
-              ref: walkStacks.loopIndexStack[2 * i + 1],
-            };
-          }
-          // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
-          // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
+          const domEventIndex = u16at();
+          const eventIndex = u16at();
           // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          let bound = this.eventBindings.get(el);
-          if (!bound) {
-            bound = {};
-            this.eventBindings.set(el, bound);
-          }
-          bound[domEvent] = { fullName, payload, contextLeaves, props, loopIndices };
-          this.ensureDelegate(domEvent);
+          this.bindEvent(pending!, domEventIndex, eventIndex, segment, compId, pathPrefix, argumentSourcePairs, walkStacks);
+          // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n]이다(RENDER를 안 거치니 여기서
+          // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
+          segment = null;
           break;
         }
         case OP.ELEM_CLOSE_OPEN: {
