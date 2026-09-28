@@ -36,7 +36,6 @@ test("연산마다 캐시 번호를 매기고 연산 수를 센다", () => {
     [0, 1, 2, 3],
   );
   assert.equal(table.opCount, 4);
-  assert.equal(table.hasIndexAccess, false);
 });
 
 test("단항 연산은 자식 하나를 왼쪽 자식으로 쳐 같은 위치에서 시작한다", () => {
@@ -58,13 +57,31 @@ test("operand 길이가 다른 명령도 위치를 맞게 센다", () => {
   assert.deepEqual(table.sameStartOpChain, chain(8, { 0: 7, 1: 6 }));
 });
 
-test("배열 인덱스 접근이 있으면 표시한다", () => {
-  // a[i].b
-  //   위치  0          3          6       7          9
-  //         LOAD_VAR a LOAD_VAR i ELEM_AT FIELD_AT 0 READ_LEAF
-  // FIELD_AT은 operand(필드 거리)까지 2바이트다.
-  const table = buildSkipTable(bytes(v(0), v(1), EXPR.ELEM_AT, EXPR.FIELD_AT, 0, EXPR.READ_LEAF));
-  assert.equal(table.hasIndexAccess, true);
+test("배열 인덱스 접근의 요소 칸을 읽는 명령(READ_LEAF)도 변수로 치고 건너뛰는 표를 만든다", () => {
+  // a[i].b + x
+  //   위치  0          3          6       7          9         10         13
+  //         LOAD_VAR a LOAD_VAR i ELEM_AT FIELD_AT 0 READ_LEAF LOAD_VAR x ADD
+  // FIELD_AT은 operand(필드 거리)까지 2바이트다. 위치 0에서 식 전체(13), a[i].b(9), a[i].b의
+  // leafIndex(7), a[i]의 leafIndex(6)가 시작한다.
+  const table = buildSkipTable(bytes(v(0), v(1), EXPR.ELEM_AT, EXPR.FIELD_AT, 0, EXPR.READ_LEAF, v(2), EXPR.ADD));
+  // 변수는 a(0), i(1), READ_LEAF(2), x(3)
+  assert.deepEqual(table.positionsByVar, [[0], [3], [9], [10]].map((p) => Int32Array.from(p)));
+  // i(3)가 바뀌면 a[i].b 전체와 루트가 i를 품어 건너뛸 것이 없다.
+  assert.deepEqual(table.skipPastOpByVar[1], {});
+  // READ_LEAF가 읽는 요소 칸(9)이 바뀌면, 그 칸의 leafIndex를 내는 a[i].b의 앞부분(0~7)은 그대로라
+  // 지난번 leafIndex를 쓰고 READ_LEAF만 다시 읽는다.
+  assert.deepEqual(table.skipPastOpByVar[2], { 0: 7 });
+  // x(10)가 바뀌면 a[i].b(0~9)를 건너뛴다.
+  assert.deepEqual(table.skipPastOpByVar[3], { 0: 9 });
+});
+
+test("READ_LEAF는 둘이 같은 칸을 읽을 수 있어도 명령마다 따로 변수다", () => {
+  // a[i].b + a[i].b
+  //   위치  0 LOAD_VAR a ... 9 READ_LEAF, 10 LOAD_VAR a ... 19 READ_LEAF, 20 ADD
+  const one = [v(0), v(1), EXPR.ELEM_AT, EXPR.FIELD_AT, 0, EXPR.READ_LEAF];
+  const table = buildSkipTable(bytes(...one, ...one, EXPR.ADD));
+  // a와 i는 두 번씩 나와 한 변수로 묶이고, READ_LEAF 둘은 따로다.
+  assert.deepEqual(table.positionsByVar, [[0, 10], [3, 13], [9], [19]].map((p) => Int32Array.from(p)));
 });
 
 test("칸을 읽는 명령을 변수로 묶어 번호를 매긴다", () => {

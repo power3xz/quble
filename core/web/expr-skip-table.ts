@@ -44,12 +44,12 @@ export type TExprSkipTable = {
   cacheIndex: Uint8Array;
   // 연산 수. 위 식은 4.
   opCount: number;
-  // 식에 배열 인덱스 접근(ELEM_AT)이 있는가. a[i].b처럼 읽는 칸이 실행 중에 정해지는 식은 어느
-  // 위치가 어느 칸을 읽는지 미리 알 수 없어 캐시를 쓰지 않는다. 이때 아래 변수 표들은 비어 있다.
-  hasIndexAccess: boolean;
-  // 변수는 store 칸을 읽는 명령을 "같은 칸을 읽는가"로 묶은 것이다. 같은 슬롯이라도 값 칸과 길이
-  // 칸은 다른 변수다 - LOAD_VAR a와 LOAD_STRING_LENGTH a는 a의 값 칸을 읽어 같은 변수이고,
-  // LOAD_ARRAY_LENGTH a는 a 배열의 길이 칸을 읽어 다른 변수다. 번호는 식에 처음 나오는 순서다.
+  // 변수는 store 칸을 읽는 명령을 "같은 칸을 읽는가"로 묶은 것이다. 번호는 식에 처음 나오는
+  // 순서다.
+  //   - 같은 슬롯이라도 값 칸과 길이 칸은 다른 변수다. LOAD_VAR a와 LOAD_STRING_LENGTH a는 a의 값
+  //     칸을 읽어 같은 변수이고, LOAD_ARRAY_LENGTH a는 a 배열의 길이 칸을 읽어 다른 변수다.
+  //   - READ_LEAF(배열 인덱스 접근 a[i].b에서 요소 칸을 읽는 명령)는 하나하나가 따로 변수다. 어느
+  //     칸을 읽는지는 i에 따라 실행 중에 정해지지만, 읽는 명령의 위치는 바이트에 고정돼 있다.
   //
   // 위 식에서 a=0, b=1, c=2, d=3, e=4.
   // 변수 번호 -> 그 변수를 읽는 위치들(오름차순). [[0], [3], [7], [11], [14]]
@@ -76,10 +76,13 @@ const isLeaf = (opcode: number) =>
 const isUnary = (opcode: number) =>
   opcode === EXPR.NOT || opcode === EXPR.NEG || opcode === EXPR.FIELD_AT || opcode === EXPR.READ_LEAF;
 
-// store 칸을 읽는 잎 명령인가. 이 명령들만 변수로 묶는다. LOAD_CONST, LOAD_SMALL_INT, LOAD_TRUE,
+// store 칸을 읽는 명령인가. 이 명령들만 변수로 묶는다. LOAD_CONST, LOAD_SMALL_INT, LOAD_TRUE,
 // LOAD_FALSE는 값이 바이트에 박혀 있어 바뀌지 않는다.
 const readsCell = (opcode: number) =>
-  opcode === EXPR.LOAD_VAR || opcode === EXPR.LOAD_STRING_LENGTH || opcode === EXPR.LOAD_ARRAY_LENGTH;
+  opcode === EXPR.LOAD_VAR ||
+  opcode === EXPR.LOAD_STRING_LENGTH ||
+  opcode === EXPR.LOAD_ARRAY_LENGTH ||
+  opcode === EXPR.READ_LEAF;
 
 // 명령 하나가 차지하는 바이트 수(opcode 포함). LOAD_VAR a -> 3, ADD -> 1
 const instrSize = (opcode: number) => {
@@ -97,13 +100,19 @@ const instrSize = (opcode: number) => {
   }
 };
 
-// 칸을 읽는 명령이 어느 칸을 읽는지 나타내는 문자열. 문자열이 같으면 같은 변수다.
-//   LOAD_VAR 0 2           -> "value 0 2"
-//   LOAD_STRING_LENGTH 0 2 -> "value 0 2"    문자열 길이는 값 칸을 읽어 LOAD_VAR와 같은 변수다
-//   LOAD_ARRAY_LENGTH 0 2  -> "length 0 2"   배열 길이는 길이 칸을 읽어 다른 변수다
-const cellKey = (expr: Uint8Array, pc: number) => {
-  const cell = expr[pc] === EXPR.LOAD_ARRAY_LENGTH ? "length" : "value";
-  return `${cell} ${expr[pc + 1]} ${expr[pc + 2]}`;
+// varKey가 같으면 같은 변수다. 슬롯을 읽는 명령(LOAD_VAR, LOAD_STRING_LENGTH, LOAD_ARRAY_LENGTH)에만
+// 쓴다. 같은 슬롯이라도 값 칸과 길이 칸은 다른 변수라 칸 종류까지 넣는다.
+//
+// 칸 종류, scope_index, offset을 한 바이트씩 이어 붙인다: 종류 << 16 | scope << 8 | offset
+//   LOAD_VAR           scope 0, offset 2  -> 0x00_00_02    a의 값 칸
+//   LOAD_STRING_LENGTH scope 0, offset 2  -> 0x00_00_02    문자열 길이는 값 칸을 읽어 위와 같다
+//   LOAD_ARRAY_LENGTH  scope 0, offset 2  -> 0x01_00_02    배열 길이는 길이 칸을 읽어 다르다
+//   LOAD_VAR           scope 1, offset 2  -> 0x00_01_02    scope가 달라 다르다
+const VALUE_CELL = 0;
+const LENGTH_CELL = 1;
+const varKey = (expr: Uint8Array, pc: number) => {
+  const cell = expr[pc] === EXPR.LOAD_ARRAY_LENGTH ? LENGTH_CELL : VALUE_CELL;
+  return (cell << 16) | (expr[pc + 1] << 8) | expr[pc + 2];
 };
 
 export const buildSkipTable = (expr: Uint8Array): TExprSkipTable => {
@@ -111,10 +120,30 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable => {
   const sameStartOpChain = new Uint8Array(len).fill(CHAIN_END);
   const cacheIndex = new Uint8Array(len);
   const varAt = new Uint8Array(len);
-  const varNumberByCell = new Map<string, number>();
   const positions: number[][] = [];
   let opCount = 0;
-  let hasIndexAccess = false;
+
+  // pc의 명령이 읽는 칸의 변수 번호. 처음 나온 칸이면 새 번호를 준다.
+  //   READ_LEAF는 읽는 칸이 실행 중에 정해져 서로 비교할 수 없으므로 늘 새 번호다.
+  //   슬롯을 읽는 명령은 varKey가 같으면 같은 번호다.
+  const varNumberByKey = new Map<number, number>();
+  const newVar = () => {
+    positions.push([]);
+    return positions.length - 1;
+  };
+  const varNumberOf = (pc: number) => {
+    if (expr[pc] === EXPR.READ_LEAF) {
+      return newVar();
+    }
+    const key = varKey(expr, pc);
+    const found = varNumberByKey.get(key);
+    if (found !== undefined) {
+      return found;
+    }
+    const created = newVar();
+    varNumberByKey.set(key, created);
+    return created;
+  };
 
   // 연산 op를 start에서 시작하는 사슬에 넣는다. 후위 표기에서는 바깥 연산이 안쪽 연산보다 뒤에
   // 나오므로, 새로 만난 연산을 사슬 맨 앞에 넣으면 사슬이 바깥부터 이어진다.
@@ -136,25 +165,15 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable => {
   const startStack: number[] = [];
   for (let pc = 0; pc < len; pc += instrSize(expr[pc])) {
     const opcode = expr[pc];
+    if (readsCell(opcode)) {
+      const varNumber = varNumberOf(pc);
+      positions[varNumber].push(pc);
+      varAt[pc] = varNumber;
+    }
 
     if (isLeaf(opcode)) {
       startStack.push(pc);
-      if (readsCell(opcode)) {
-        const cell = cellKey(expr, pc);
-        let varNumber = varNumberByCell.get(cell);
-        if (varNumber === undefined) {
-          varNumber = positions.length;
-          varNumberByCell.set(cell, varNumber);
-          positions.push([]);
-        }
-        positions[varNumber].push(pc);
-        varAt[pc] = varNumber;
-      }
       continue;
-    }
-
-    if (opcode === EXPR.ELEM_AT) {
-      hasIndexAccess = true;
     }
     if (!isUnary(opcode)) {
       startStack.pop();
@@ -167,15 +186,11 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable => {
     sameStartOpChain,
     cacheIndex,
     opCount,
-    hasIndexAccess,
-    positionsByVar: [],
+    positionsByVar: positions.map((p) => Int32Array.from(p)),
     varAt,
     skipPastOpByVar: [],
   };
-  if (!hasIndexAccess) {
-    table.positionsByVar = positions.map((p) => Int32Array.from(p));
-    table.skipPastOpByVar = table.positionsByVar.map((p) => buildSkipPastOp(table, expr, p));
-  }
+  table.skipPastOpByVar = table.positionsByVar.map((p) => buildSkipPastOp(table, expr, p));
   return table;
 };
 
