@@ -9,7 +9,7 @@
 ## 하는 중
 
 식 부분 재평가 - 식이 읽는 칸 하나가 바뀌면 그 칸을 품지 않은 부분식은 지난번 값을 쓴다
-(docs/expr-partial-reeval.draft.md). 인덱스 접근 식은 캐시 없이 처음부터 평가한다.
+(docs/expr-partial-reeval.draft.md). 남은 것은 draft 7절.
 `expr-array-index`에서 딴 브랜치라 끝나면 그 브랜치로 머지한다.
 
 ## 할 것
