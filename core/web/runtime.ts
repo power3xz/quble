@@ -469,6 +469,17 @@ type TWalkStacks = {
   activeContexts: number[];
 };
 
+// 템플릿 복제 계획 - 한 범위(startPc~endPc)의 정적 뼈대와 값 자리 목록(templatePlanOf).
+//   template  요소/정적 속성/정적 텍스트만 든 뼈대. 값 자리 텍스트는 빈 텍스트 노드로 자리만 잡는다.
+//   holes     [명령 위치, 노드 번호]를 이어 담은 목록. 노드 번호는 뼈대를 앞순회한 순서다. 노드가
+//             없는 명령(PUSH_PATH_INDEX_SEGMENT)은 -1.
+//
+// li(class="row") { span() { ${row.label} } button(@click:PICK) { "pick" } } 이면
+//   template  <li class="row"><span>""</span><button>"pick"</button></li>
+//   노드 번호  0=li 1=span 2=span 안 텍스트 3=button 4="pick"
+//   holes     [TEXT_VAR 위치, 2, BIND_EVENT 위치, 3]
+type TTemplatePlan = { template: DocumentFragment; holes: number[] };
+
 // 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
 // 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
 // 보간/이벤트 경로는 콘텐츠를 쓴 곳(부모) 기준이다(SYNTAX #3.3).
@@ -998,6 +1009,9 @@ class Interpreter {
   forEndCache = new Map<number, number>();
   ifRangesCache = new Map<number, { ifBodyEnd: number; elseBodyStart: number; ifEndPc: number }>();
   slotContentEndCache = new Map<number, number>();
+  // 범위 -> 템플릿 복제 계획(복제할 수 없는 범위면 null). 키는 시작 pc - interpret 범위는 끝이 시작에서
+  // 정해진다(@for 본문은 FOR_END, @if 가지는 ELSE/IF_END, 합성은 def 끝).
+  templatePlanCache = new Map<number, TTemplatePlan | null>();
 
   constructor(
     module: TModule,
@@ -1831,6 +1845,183 @@ class Interpreter {
     return table;
   };
 
+  // 값 자리 명령 하나(TEXT_VAR, TEXT_EXPR, ATTR_G_VAR, ATTR_L_VAR, ATTR_G_EXPR, ATTR_L_EXPR)를 node에
+  // 건다 - 지금 값을 쓰고, 값이 바뀌면 다시 쓰도록 구독한다. operand는 pc(opcode 다음 바이트)부터 읽는다.
+  // node는 TEXT_*면 텍스트 노드, ATTR_*면 그 속성을 가진 요소다.
+  //
+  // interpret와 cloneTemplate가 함께 쓴다. 해석할 때는 노드를 새로 만들어 넘기고, 복제할 때는 복제본의
+  // 노드를 넘긴다.
+  bindValueSlot = (
+    op: number,
+    pc: number,
+    node: Node,
+    compId: number,
+    argumentSourcePairs: TScope,
+    branch: TBranch,
+  ): void => {
+    const code = this.code;
+    const u16 = (at: number) => code[at] | (code[at + 1] << 8);
+    switch (op) {
+      case OP.TEXT_VAR: {
+        // operand: scope_index, offset
+        node.textContent = this.bindVar(
+          code[pc],
+          code[pc + 1],
+          (v) => (node.textContent = v as string),
+          argumentSourcePairs,
+          branch,
+        ) as string;
+        return;
+      }
+      case OP.TEXT_EXPR: {
+        // operand: expr_index
+        node.textContent = this.bindExpr(
+          this.module.defs[compId].exprs[code[pc]],
+          (v) => (node.textContent = v as string),
+          argumentSourcePairs,
+          branch,
+        ) as string;
+        return;
+      }
+    }
+    // ATTR_*: operand 앞 두 바이트가 속성 이름. G는 전역 속성 표(ATTRS), L은 상수풀.
+    const el = node as HTMLElement;
+    const nameIndex = u16(pc);
+    const name = op === OP.ATTR_G_VAR || op === OP.ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
+    const update = (v: unknown) => el.setAttribute(name, v as string);
+    const v =
+      op === OP.ATTR_G_VAR || op === OP.ATTR_L_VAR
+        ? // 이어서 scope_index, offset
+          this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
+        : // 이어서 expr_index
+          this.bindExpr(this.module.defs[compId].exprs[code[pc + 2]], update, argumentSourcePairs, branch);
+    el.setAttribute(name, v as string);
+  };
+
+  // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
+  //
+  // 범위가 아래 명령만으로 되어 있으면 뼈대를 DOM으로 만들고 값 자리를 적는다. 하나라도 다른 명령
+  // (@if, @for, 합성, 슬롯, @with, LOAD_RES)이 섞이면 null - interpret가 지금처럼 해석한다.
+  //   뼈대      ELEM_OPEN, ATTR_G, ATTR_L, ELEM_CLOSE_OPEN, ELEM_END, TEXT
+  //   값 자리   TEXT_VAR, TEXT_EXPR, ATTR_G_VAR, ATTR_L_VAR, ATTR_G_EXPR, ATTR_L_EXPR, BIND_EVENT
+  //   경로 상태  PUSH_PATH_INDEX_SEGMENT(뒤따르는 BIND_EVENT의 [$n])
+  //
+  // 노드 번호는 노드를 만든 순서다. 요소는 자식보다 먼저, 형제는 앞에서부터 만들므로 이 순서가
+  // 곧 뼈대의 앞순회 순서다 - 복제본을 앞순회로 모으면 같은 번호로 같은 노드를 찾는다.
+  templatePlanOf = (startPc: number, endPc: number): TTemplatePlan | null => {
+    const cached = this.templatePlanCache.get(startPc);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const code = this.code;
+    const u16 = (at: number) => code[at] | (code[at + 1] << 8);
+    const template = document.createDocumentFragment();
+    const parents: Node[] = [template];
+    const holes: number[] = [];
+    let pending: HTMLElement | null = null;
+    let nodeCount = 0;
+    let plan: TTemplatePlan | null = { template, holes };
+    for (let pc = startPc; pc < endPc && plan !== null; ) {
+      const at = pc;
+      const op = code[pc++];
+      switch (op) {
+        case OP.ELEM_OPEN:
+          pending = document.createElement(TAGS[u16(pc)]);
+          nodeCount++;
+          break;
+        case OP.ATTR_G:
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          pending!.setAttribute(ATTRS[u16(pc)], this.module.constpool[u16(pc + 2)] as string);
+          break;
+        case OP.ATTR_L:
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          pending!.setAttribute(this.module.constpool[u16(pc)] as string, this.module.constpool[u16(pc + 2)] as string);
+          break;
+        case OP.ATTR_G_VAR:
+        case OP.ATTR_L_VAR:
+        case OP.ATTR_G_EXPR:
+        case OP.ATTR_L_EXPR:
+        case OP.BIND_EVENT:
+          // 여는 중인 요소가 방금 만든 노드다.
+          holes.push(at, nodeCount - 1);
+          break;
+        case OP.ELEM_CLOSE_OPEN:
+          // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          parents[parents.length - 1].appendChild(pending!);
+          // biome-ignore lint/style/noNonNullAssertion: 바로 위와 같은 pending
+          parents.push(pending!);
+          pending = null;
+          break;
+        case OP.ELEM_END:
+          parents.pop();
+          break;
+        case OP.TEXT:
+          parents[parents.length - 1].appendChild(document.createTextNode(this.module.constpool[u16(pc)] as string));
+          nodeCount++;
+          break;
+        case OP.TEXT_VAR:
+        case OP.TEXT_EXPR:
+          parents[parents.length - 1].appendChild(document.createTextNode(""));
+          holes.push(at, nodeCount);
+          nodeCount++;
+          break;
+        case OP.PUSH_PATH_INDEX_SEGMENT:
+          holes.push(at, -1);
+          break;
+        default:
+          plan = null;
+      }
+      pc += operandLen(op);
+    }
+    this.templatePlanCache.set(startPc, plan);
+    return plan;
+  };
+
+  // 계획의 뼈대를 복제하고 값 자리에 바인딩을 건다. interpret가 계획이 있는 범위에서 해석 대신 부른다.
+  // 값 자리는 interpret와 같은 bindValueSlot/bindEvent로 건다.
+  cloneTemplate = (
+    plan: TTemplatePlan,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    walkStacks: TWalkStacks,
+    branch: TBranch,
+  ): DocumentFragment => {
+    const fragment = plan.template.cloneNode(true) as DocumentFragment;
+    // 복제본의 노드를 앞순회로 모은다 - 계획의 노드 번호와 같은 순서다.
+    const nodes: Node[] = [];
+    const collect = (parent: Node) => {
+      for (let child = parent.firstChild; child !== null; child = child.nextSibling) {
+        nodes.push(child);
+        collect(child);
+      }
+    };
+    collect(fragment);
+
+    const code = this.code;
+    const { holes } = plan;
+    // interpret의 segment와 같다 - PUSH_PATH_INDEX_SEGMENT가 깔고 다음 BIND_EVENT가 소비한다.
+    let segment: string | null = null;
+    for (let h = 0; h < holes.length; h += 2) {
+      const at = holes[h];
+      const node = nodes[holes[h + 1]];
+      const op = code[at];
+      const pc = at + 1;
+      if (op === OP.PUSH_PATH_INDEX_SEGMENT) {
+        segment = `${segment ?? ""}[$${loopIndexBase + (code[pc] | (code[pc + 1] << 8))}]`;
+      } else if (op === OP.BIND_EVENT) {
+        const domEventIndex = code[pc] | (code[pc + 1] << 8);
+        const eventIndex = code[pc + 2] | (code[pc + 3] << 8);
+        this.bindEvent(node as HTMLElement, domEventIndex, eventIndex, segment, compId, pathPrefix, argumentSourcePairs, walkStacks);
+        segment = null;
+      } else {
+        this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
+      }
+    }
+    return fragment;
+  };
+
   // el에 DOM 이벤트 바인딩을 심고 document 위임을 켠다(BIND_EVENT).
   //
   // interpret 밖에 따로 둔다. 이 본문이 interpret의 switch 안에 있으면 V8이 interpret를 잘 최적화하지
@@ -1921,6 +2112,19 @@ class Interpreter {
     walkStacks: TWalkStacks,
     slotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [],
   ): DocumentFragment => {
+    // 요소/텍스트/값 자리/이벤트만으로 된 범위(@for 회차 본문 등)는 해석하지 않고 뼈대를 복제한다.
+    const plan = this.templatePlanOf(startPc, endPc);
+    if (plan !== null) {
+      return this.cloneTemplate(
+        plan,
+        argumentSourcePairs,
+        compId,
+        pathPrefix,
+        loopIndexBase,
+        walkStacks,
+        this.branchPool.entries[startBranchIndex],
+      );
+    }
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
@@ -1981,62 +2185,13 @@ class Interpreter {
           pending!.setAttribute(name, this.module.constpool[u16at()] as string);
           break;
         }
-        case OP.ATTR_G_VAR: {
-          const name = ATTRS[u16at()];
-          const scopeIndex = u8at();
-          const offset = u8at();
-          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindVar(
-            scopeIndex,
-            offset,
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
-          break;
-        }
-        case OP.ATTR_L_VAR: {
-          const name = this.module.constpool[u16at()] as string;
-          const scopeIndex = u8at();
-          const offset = u8at();
-          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindVar(
-            scopeIndex,
-            offset,
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
-          break;
-        }
-        case OP.ATTR_G_EXPR: {
-          const name = ATTRS[u16at()];
-          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindExpr(
-            this.module.defs[compId].exprs[u8at()],
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
-          break;
-        }
+        case OP.ATTR_G_VAR:
+        case OP.ATTR_L_VAR:
+        case OP.ATTR_G_EXPR:
         case OP.ATTR_L_EXPR: {
-          const name = this.module.constpool[u16at()] as string;
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindExpr(
-            this.module.defs[compId].exprs[u8at()],
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
+          this.bindValueSlot(op, pc, pending!, compId, argumentSourcePairs, branch);
+          pc += operandLen(op);
           break;
         }
         case OP.BIND_EVENT: {
@@ -2062,28 +2217,11 @@ class Interpreter {
           nodeTop().appendChild(document.createTextNode(this.module.constpool[u16at()] as string));
           break;
         }
-        case OP.TEXT_VAR: {
-          const node = document.createTextNode("");
-          const scopeIndex = u8at();
-          const offset = u8at();
-          node.textContent = this.bindVar(
-            scopeIndex,
-            offset,
-            (v) => (node.textContent = v as string),
-            argumentSourcePairs,
-            branch,
-          ) as string;
-          nodeTop().appendChild(node);
-          break;
-        }
+        case OP.TEXT_VAR:
         case OP.TEXT_EXPR: {
           const node = document.createTextNode("");
-          node.textContent = this.bindExpr(
-            this.module.defs[compId].exprs[u8at()],
-            (v) => (node.textContent = v as string),
-            argumentSourcePairs,
-            branch,
-          ) as string;
+          this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
+          pc += operandLen(op);
           nodeTop().appendChild(node);
           break;
         }
