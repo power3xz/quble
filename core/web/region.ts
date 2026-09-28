@@ -34,6 +34,9 @@ export type TBranch = {
   updateFns: Array<(v: unknown, leafIndex: number) => void>;
   childRegionIndices: number[];
   built: boolean;
+  // 한 번이라도 DOM에 붙었나. 처음 붙을 때는 build가 방금 현재 값으로 노드를 채웠으므로 놓친 값을
+  // 따라잡지 않는다(restoreBranchSubs).
+  everAttached: boolean;
   lazyBuild: (() => void) | null;
 };
 
@@ -89,6 +92,7 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     updateFns: [],
     childRegionIndices: [],
     built: false,
+    everAttached: false,
     lazyBuild: null, // runtime.ts가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
   });
 
@@ -101,12 +105,19 @@ const teardownBranchSubs = (store: Store, branch: TBranch): void => {
 };
 
 // 한 가지의 직속 구독만 복원(현재값 갱신 + 재구독)한다(잎 작업). 자식 재귀는 attach 함수 전담.
+//
+// 현재값 갱신은 다시 붙을 때만 한다. `@if (show) { p() { ${count} } }`에서 show가 꺼진 동안 count가
+// 1 -> 5로 바뀌면 떼어 둔 <p>에는 1이 남아 있어, 다시 붙일 때 구독 함수를 5로 불러 고친다. 처음
+// 붙을 때는 build가 방금 현재 값으로 채웠으니 부르지 않는다 - 부르면 같은 값을 두 번 쓴다.
 const restoreBranchSubs = (store: Store, branch: TBranch): void => {
   const { leafIndices, updateFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
-    updateFns[i](store.get(leafIndices[i]), leafIndices[i]); // 비활성 동안 놓친 값 따라잡기
+    if (branch.everAttached) {
+      updateFns[i](store.get(leafIndices[i]), leafIndices[i]); // 비활성 동안 놓친 값 따라잡기
+    }
     store.subscribe(leafIndices[i], updateFns[i]);
   }
+  branch.everAttached = true;
 };
 
 // 한 가지를 떼어낸다. anchor가 평평한 형제라 자식 swap 노드가 잔류하므로 자식 Region까지 재귀로 뗀다.
