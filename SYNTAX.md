@@ -344,9 +344,24 @@ span(id={count * 10})
 | 단항 | `!` | bool | bool |
 | 단항 | `-` | number | number |
 
-괄호로 묶을 수 있다. 삼항(`? :`)과 배열 인덱스 접근(`a[i]`)은 아직 없다.
+괄호로 묶을 수 있다. 삼항(`? :`)은 아직 없다.
 
-**피연산자는 참조/경로/리터럴/`.length`.** 호출은 없다.
+**피연산자는 참조/경로/리터럴/`.length`/인덱스 접근.** 호출은 없다.
+
+**배열 인덱스 접근 `a[i]`.** 인덱스는 number 식이다. 요소의 필드로 내려가거나 중첩할 수 있다.
+결과는 다른 피연산자처럼 값 자리에서 원시 셋이어야 한다.
+
+```
+p() { ${rows[cursor].title} }
+p() { ${rows[cursor + 1].score * 2} }
+span(id={columns[lane].cards[seat].title})
+@if (rows[cursor].score > 15) { ... }
+
+p() { ${rows[key].title} }   // X - `[]` expects number, found string
+p() { ${title[0]} }          // X - `title` is string, not an array
+```
+
+인덱스가 배열 길이를 넘는지는 컴파일러가 알 수 없다. 핸들러가 인덱스를 범위 안에 두어야 한다.
 
 **`@if` 조건은 bool이어야 한다.** number나 문자열이 참/거짓으로 새지 않는다.
 
