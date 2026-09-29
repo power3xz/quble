@@ -1,0 +1,18 @@
+component ExprIndexUnsubscribe {
+  props {
+    rows: { title: string }[],
+    cursor: number,
+    show: bool
+  }
+  events {
+    REMOVE_FIRST_ROW({})
+  }
+  template {
+    div() {
+      button(class="remove-first-row" @click:REMOVE_FIRST_ROW) { "remove row" }
+      @if (show) {
+        p(class="shown") { ${rows[cursor].title} }
+      }
+    }
+  }
+}
