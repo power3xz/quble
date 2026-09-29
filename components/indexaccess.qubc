@@ -11,6 +11,7 @@ component IndexAccess {
     EDIT_TITLE({})
     ADD_SCORE({})
     TOGGLE({})
+    REMOVE_FIRST({})
   }
   template {
     div(class="ia") {
@@ -20,6 +21,7 @@ component IndexAccess {
         button(@click:EDIT_TITLE) { "지금 행 제목에 ! 붙이기" }
         button(@click:ADD_SCORE) { "지금 행 점수 +1" }
         button(@click:TOGGLE) { "@if 보이기/숨기기" }
+        button(@click:REMOVE_FIRST) { "첫 행 삭제" }
       }
       p() { "cursor = " ${cursor} }
       p() { "rows[cursor].title = " ${rows[cursor].title} }

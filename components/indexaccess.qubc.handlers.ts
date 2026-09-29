@@ -24,4 +24,17 @@ export const handlers = {
   TOGGLE: (_data, ctx) => {
     ctx.set(ctx.store.show, !ctx.get(ctx.store.show));
   },
+  // cursor는 그대로 두고 앞 행을 뺀다 - 같은 cursor가 당겨진 행을 읽는다. 지운 뒤 cursor가 범위를
+  // 벗어나지 않도록 먼저 줄인다.
+  REMOVE_FIRST: (_data, ctx) => {
+    const n = ctx.store.rows.length;
+    if (n === 1) {
+      return;
+    }
+    if (ctx.get(ctx.store.cursor) === n - 1) {
+      ctx.set(ctx.store.cursor, n - 2);
+    }
+    ctx.removeAt(ctx.store.rows, 0);
+    ctx.removeAt(ctx.store.labels, 0);
+  },
 };
