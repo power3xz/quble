@@ -1,0 +1,40 @@
+component IndexAccess {
+  props {
+    rows: { title: string, score: number }[],
+    labels: string[],
+    cursor: number,
+    show: bool
+  }
+  events {
+    PREV({})
+    NEXT({})
+    EDIT_TITLE({})
+    ADD_SCORE({})
+    TOGGLE({})
+  }
+  template {
+    div(class="ia") {
+      div(class="ia__bar") {
+        button(@click:PREV) { "이전" }
+        button(@click:NEXT) { "다음" }
+        button(@click:EDIT_TITLE) { "지금 행 제목에 ! 붙이기" }
+        button(@click:ADD_SCORE) { "지금 행 점수 +1" }
+        button(@click:TOGGLE) { "@if 보이기/숨기기" }
+      }
+      p() { "cursor = " ${cursor} }
+      p() { "rows[cursor].title = " ${rows[cursor].title} }
+      p() { "labels[cursor] = " ${labels[cursor]} }
+      p() { "rows[cursor].score + rows[0].score = " ${rows[cursor].score + rows[0].score} }
+      @if (show) {
+        p() { "(@if 안) rows[cursor].title = " ${rows[cursor].title} }
+      }
+      h3() { "rows 전체" }
+      @for (row, k of rows) {
+        p() { ${k} ": " ${row.title} " / 점수 " ${row.score} " / labels[k] = " ${labels[k]} }
+      }
+      @for (row, k of rows) {
+        p() { ${rows[k].title} }
+      }
+    }
+  }
+}
