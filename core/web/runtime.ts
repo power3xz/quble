@@ -2244,8 +2244,8 @@ class Interpreter {
           // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
           const domEventIndex = u16at();
           const eventIndex = u16at();
-          // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           this.bindEvent(
+            // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
             pending!,
             domEventIndex,
             eventIndex,

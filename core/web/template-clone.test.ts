@@ -8,9 +8,9 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import type { THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
-import type { THandlers } from "./runtime.ts";
 
 const { compile } = await import("./runtime.ts");
 
