@@ -8,9 +8,9 @@
 
 ## 하는 중
 
-식 부분 재평가 - 식이 읽는 칸 하나가 바뀌면 그 칸을 품지 않은 부분식은 지난번 값을 쓴다
-(docs/expr-partial-reeval.draft.md). 남은 것은 draft 7절.
-`expr-array-index`에서 딴 브랜치라 끝나면 그 브랜치로 머지한다.
+값 자리 식의 배열 인덱싱 - `${a[i].title}`, `id={a[n].v}` (ROADMAP `${expr}` 절).
+`ElemAt` opcode 하나를 더하고, 전제로 런타임 식 해석기를 하나로 모은다
+(`collectExprLeaves`가 훑기만 해서는 `ElemAt`이 닿는 칸을 못 뽑는다).
 
 ## 할 것
 
