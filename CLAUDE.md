@@ -79,6 +79,8 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
 - **core/web/LEAF-STORE-LAYOUT.md** - 런타임 데이터 스토어 레이아웃 - 값이 store에 어떻게
   놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
   따라 고친다.
+- **core/web/EXPR-EVAL.md** - 표현식 평가 - 후위 바이트와 트리, 부분 재평가, 구독, 인덱스
+  접근의 구독 다시 걸기. LEAF-STORE-LAYOUT.md처럼 현재 구현 설명이다.
 - **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
 ### 코드 작업에 착수할 때
