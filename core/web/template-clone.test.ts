@@ -42,7 +42,8 @@ const instantiate = (handlers: THandlers = {}) => {
     host,
     rows,
     // 행마다 [data-n, label 텍스트, 전체 텍스트]
-    snapshot: () => rows().map((li) => [li.getAttribute("data-n"), li.querySelector(".label")?.textContent, li.textContent]),
+    snapshot: () =>
+      rows().map((li) => [li.getAttribute("data-n"), li.querySelector(".label")?.textContent, li.textContent]),
     set: (leafIndex: number, v: unknown) => inst.store.set(leafIndex, v),
   };
 };

@@ -172,7 +172,6 @@ test("다시 센 값이 지난번과 같으면 DOM에 쓰지 않는다", () => {
   observer.disconnect();
 });
 
-
 test("식이 든 가지가 꺼진 동안 칸 둘이 바뀌어도 다시 켜면 맞게 센다", () => {
   const { set, textOf } = instantiate();
   set(SHOW, true);

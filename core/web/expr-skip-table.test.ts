@@ -72,7 +72,10 @@ test("배열 인덱스 접근의 요소 칸을 읽는 명령(READ_LEAF)도 변�
   // leafIndex(7), a[i]의 leafIndex(6)가 시작한다.
   const table = tableOf(bytes(v(0), v(1), EXPR.ELEM_AT, EXPR.FIELD_AT, 0, EXPR.READ_LEAF, v(2), EXPR.ADD));
   // 변수는 a(0), i(1), READ_LEAF(2), x(3)
-  assert.deepEqual(table.positionsByVar, [[0], [3], [9], [10]].map((p) => Int32Array.from(p)));
+  assert.deepEqual(
+    table.positionsByVar,
+    [[0], [3], [9], [10]].map((p) => Int32Array.from(p)),
+  );
   // i(3)가 바뀌면 a[i].b 전체와 루트가 i를 품어 건너뛸 것이 없다.
   assert.deepEqual(table.skipPastOpByVar[1], {});
   // READ_LEAF가 읽는 요소 칸(9)이 바뀌면, 그 칸의 leafIndex를 내는 a[i].b의 앞부분(0~7)은 그대로라
@@ -100,16 +103,19 @@ test("READ_LEAF는 둘이 같은 칸을 읽을 수 있어도 명령마다 따로
   const one = [v(0), v(1), EXPR.ELEM_AT, EXPR.FIELD_AT, 0, EXPR.READ_LEAF];
   const table = tableOf(bytes(...one, ...one, EXPR.ADD));
   // a와 i는 두 번씩 나와 한 변수로 묶이고, READ_LEAF 둘은 따로다.
-  assert.deepEqual(table.positionsByVar, [[0, 10], [3, 13], [9], [19]].map((p) => Int32Array.from(p)));
+  assert.deepEqual(
+    table.positionsByVar,
+    [[0, 10], [3, 13], [9], [19]].map((p) => Int32Array.from(p)),
+  );
 });
 
 test("칸을 읽는 명령을 변수로 묶어 번호를 매긴다", () => {
   const table = tableOf(MIXED);
-  assert.deepEqual(table.positionsByVar, [[0], [3], [7], [11], [14]].map((p) => Int32Array.from(p)));
   assert.deepEqual(
-    [table.varAt[0], table.varAt[3], table.varAt[7], table.varAt[11], table.varAt[14]],
-    [0, 1, 2, 3, 4],
+    table.positionsByVar,
+    [[0], [3], [7], [11], [14]].map((p) => Int32Array.from(p)),
   );
+  assert.deepEqual([table.varAt[0], table.varAt[3], table.varAt[7], table.varAt[11], table.varAt[14]], [0, 1, 2, 3, 4]);
 });
 
 test("같은 슬롯이라도 값 칸과 길이 칸은 다른 변수다", () => {
@@ -117,10 +123,11 @@ test("같은 슬롯이라도 값 칸과 길이 칸은 다른 변수다", () => {
   //   위치  0          3                    6    7                 10
   //         LOAD_VAR a LOAD_STRING_LENGTH a ADD  LOAD_ARRAY_LENGTH a ADD
   // LOAD_VAR와 LOAD_STRING_LENGTH는 a의 값 칸을, LOAD_ARRAY_LENGTH는 길이 칸을 읽는다.
-  const table = tableOf(
-    bytes(v(0), EXPR.LOAD_STRING_LENGTH, 0, 0, EXPR.ADD, EXPR.LOAD_ARRAY_LENGTH, 0, 0, EXPR.ADD),
+  const table = tableOf(bytes(v(0), EXPR.LOAD_STRING_LENGTH, 0, 0, EXPR.ADD, EXPR.LOAD_ARRAY_LENGTH, 0, 0, EXPR.ADD));
+  assert.deepEqual(
+    table.positionsByVar,
+    [[0, 3], [7]].map((p) => Int32Array.from(p)),
   );
-  assert.deepEqual(table.positionsByVar, [[0, 3], [7]].map((p) => Int32Array.from(p)));
 });
 
 test("변수마다 바뀐 잎에서 루트로 가는 길 옆의 부분식을 건너뛰는 표를 만든다", () => {

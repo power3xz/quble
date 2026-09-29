@@ -24,11 +24,7 @@ type TIndexSymbol = `$${TDigitString}`;
 
 import { EXPR, instrSize } from "./expr-opcode.ts";
 import { buildSkipPastOp, buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
-import {
-  createLeafStoreSubject,
-  type LeafStoreSubject as TLeafStoreSubject,
-  type TSubscriber,
-} from "./leaf-store.ts";
+import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
@@ -1927,7 +1923,8 @@ class Interpreter {
     // ATTR_*: operand 앞 두 바이트가 속성 이름. G는 전역 속성 표(ATTRS), L은 상수풀.
     const el = node as HTMLElement;
     const nameIndex = u16(pc);
-    const name = op === OP.ATTR_G_VAR || op === OP.ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
+    const name =
+      op === OP.ATTR_G_VAR || op === OP.ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
     const update = (v: unknown) => el.setAttribute(name, v as string);
     const v =
       op === OP.ATTR_G_VAR || op === OP.ATTR_L_VAR
@@ -2053,7 +2050,16 @@ class Interpreter {
       } else if (op === OP.BIND_EVENT) {
         const domEventIndex = code[pc] | (code[pc + 1] << 8);
         const eventIndex = code[pc + 2] | (code[pc + 3] << 8);
-        this.bindEvent(node as HTMLElement, domEventIndex, eventIndex, segment, compId, pathPrefix, argumentSourcePairs, walkStacks);
+        this.bindEvent(
+          node as HTMLElement,
+          domEventIndex,
+          eventIndex,
+          segment,
+          compId,
+          pathPrefix,
+          argumentSourcePairs,
+          walkStacks,
+        );
         segment = null;
       } else {
         this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
@@ -2239,7 +2245,16 @@ class Interpreter {
           const domEventIndex = u16at();
           const eventIndex = u16at();
           // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          this.bindEvent(pending!, domEventIndex, eventIndex, segment, compId, pathPrefix, argumentSourcePairs, walkStacks);
+          this.bindEvent(
+            pending!,
+            domEventIndex,
+            eventIndex,
+            segment,
+            compId,
+            pathPrefix,
+            argumentSourcePairs,
+            walkStacks,
+          );
           // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n]이다(RENDER를 안 거치니 여기서
           // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
           segment = null;

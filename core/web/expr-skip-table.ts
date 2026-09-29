@@ -195,11 +195,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
 // 위 식에서 d와 e가 같은 칸을 가리키면 changedPositions = [11, 14]
 //   { 0: 10 }   (a + b) * c(0~10)는 건너뛰고, d + e는 d, e를 품어 다시 센다
 // 식에 없는 칸이면 changedPositions = []이고 식 전체를 건너뛴다. { 0: 18 }
-export const buildSkipPastOp = (
-  table: TExprSkipTable,
-  expr: Uint8Array,
-  changedPositions: Int32Array,
-): TSkipPastOp => {
+export const buildSkipPastOp = (table: TExprSkipTable, expr: Uint8Array, changedPositions: Int32Array): TSkipPastOp => {
   const chain = table.sameStartOpChain;
 
   // 위치 start~end 구간에 바뀐 위치가 하나라도 있나. 표를 만들 때만 도는 코드라 그냥 다 본다.
