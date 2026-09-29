@@ -109,13 +109,21 @@ const teardownBranchSubs = (store: Store, branch: TBranch): void => {
 // 현재값 갱신은 다시 붙을 때만 한다. `@if (show) { p() { ${count} } }`에서 show가 꺼진 동안 count가
 // 1 -> 5로 바뀌면 떼어 둔 <p>에는 1이 남아 있어, 다시 붙일 때 구독 함수를 5로 불러 고친다. 처음
 // 붙을 때는 build가 방금 현재 값으로 채웠으니 부르지 않는다 - 부르면 같은 값을 두 번 쓴다.
+//
+// 모두 구독한 뒤에 따라잡는다. `${rows[cursor].title}`에서 꺼진 동안 cursor가 바뀌었으면 따라잡는
+// 구독 함수가 읽는 칸을 옮기며 구독을 풀고 건다 - 그 칸들이 이미 구독된 상태여야 맞게 풀린다. 옮기면서
+// branch의 두 배열도 고치므로 따라잡기는 사본으로 돈다.
 const restoreBranchSubs = (store: Store, branch: TBranch): void => {
   const { leafIndices, updateFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
-    if (branch.everAttached) {
-      updateFns[i](store.get(leafIndices[i]), leafIndices[i]); // 비활성 동안 놓친 값 따라잡기
-    }
     store.subscribe(leafIndices[i], updateFns[i]);
+  }
+  if (branch.everAttached) {
+    const leaves = [...leafIndices];
+    const fns = [...updateFns];
+    for (let i = 0; i < leaves.length; i++) {
+      fns[i](store.get(leaves[i]), leaves[i]); // 비활성 동안 놓친 값 따라잡기
+    }
   }
   branch.everAttached = true;
 };
