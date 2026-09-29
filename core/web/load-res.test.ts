@@ -4,10 +4,9 @@
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import). 심볼은 안 쓰고 부수효과만 필요.
+import "./test-helpers/dom.ts"; // jsdom 전역 document 주입. 심볼은 안 쓰고 부수효과만 필요.
+import { compile } from "./runtime.ts";
 import { buildFixture, buildFixtureWithResmap } from "./test-helpers/build.ts";
-
-const { compile } = await import("./runtime.ts");
 
 const qubb = buildFixture("styled_res");
 

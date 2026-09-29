@@ -11,7 +11,7 @@
 
 use crate::ast::{
     BinaryOp, Component, Context, Event, Expr, ForCount, Ident, Lit, LitValue, Node, Prop,
-    SlotPlaceholderContent, SourceFile, Type, UnaryOp, Use, VarRef,
+    SlotPlaceholderContent, SourceFile, Type, UnaryOp, Use,
 };
 use crate::lexer::{Directive, Lexed, Token};
 use crate::src_range::{NodeRange, SrcRange};
@@ -247,20 +247,34 @@ impl<'a> Parser<'a> {
     // prop 참조 하나: `root` 또는 `root.field.field...`. root는 prop 이름, 뒤는 객체 필드 경로.
     // leaf 여부(경로 끝이 원시냐)는 여기서 안 본다 - 타입을 모르는 파서의 몫이 아니라 codegen이
     // props 타입과 대조해 판단한다.
-    fn parse_var_ref(&mut self) -> Result<VarRef, ParseError> {
-        // `assignee.name` 전체를 걸치게 - root 앞에서 시작해 경로 끝에서 닫는다.
+    /// 이름 뒤에 `.name`과 `[EXPR]`이 이어지는 동안 왼쪽부터 감싼다.
+    /// a[i].b -> Field(Index(Var(a), Var(i)), "b")
+    fn parse_ref_chain(&mut self) -> Result<Expr, ParseError> {
+        // `assignee.name` 전체를 걸치게 - root 앞에서 시작해 마디마다 끝을 늘린다.
         let start = self.here();
-        let root = self.parse_ident()?;
-        let mut path = Vec::new();
-        while matches!(self.peek(), Some(Token::Dot)) {
-            self.next()?;
-            path.push(self.parse_ident()?);
+        let closing = |p: &Self| {
+            NodeRange(SrcRange {
+                start: start.start,
+                end: p.just_read().end,
+            })
+        };
+        let mut node = Expr::Var(self.parse_ident()?, closing(self));
+        loop {
+            match self.peek() {
+                Some(Token::Dot) => {
+                    self.next()?;
+                    let field = self.parse_ident()?;
+                    node = Expr::Field(Box::new(node), field, closing(self));
+                }
+                Some(Token::LBracket) => {
+                    self.next()?;
+                    let index = self.parse_expr()?;
+                    self.expect(&Token::RBracket)?;
+                    node = Expr::Index(Box::new(node), Box::new(index), closing(self));
+                }
+                _ => return Ok(node),
+            }
         }
-        let range = NodeRange(SrcRange {
-            start: start.start,
-            end: self.just_read().end,
-        });
-        Ok(VarRef { root, path, range })
     }
 
     /// 값 자리의 식 하나. 1 = peek_binary_op 표의 최저 우선순위라 모든 연산자를 받는다.
@@ -356,11 +370,9 @@ impl<'a> Parser<'a> {
                 Ok(inner)
             }
             Some(Token::Ident(_)) => {
-                // `tags.length`도 그냥 참조다 - 길이인지 같은 이름의 필드인지는 타입이 갈라서
-                // expr_type이 정한다. 파서는 타입을 몰라 그 판단을 할 수 없다.
-                let var = self.parse_var_ref()?;
-                let range = var.range;
-                Ok(Expr::Var(var, range))
+                // `tags.length`도 그냥 필드 접근이다 - 길이인지 같은 이름의 필드인지는 타입이
+                // 갈라서 expr_type이 정한다. 파서는 타입을 몰라 그 판단을 할 수 없다.
+                self.parse_ref_chain()
             }
             Some(Token::Str(_) | Token::Num(_) | Token::Bool(_)) => {
                 let lit = self.parse_lit_value()?;
@@ -738,11 +750,7 @@ impl<'a> Parser<'a> {
                         // 단축형은 필드명이 곧 prop 참조라 그 이름 토큰이 구간이다.
                         let range = NodeRange(self.just_read());
                         Expr::Var(
-                            VarRef {
-                                root: field.clone(),
-                                path: Vec::new(),
-                                range,
-                            },
+                            field.clone(),
                             range,
                         )
                     };
@@ -802,11 +810,7 @@ impl<'a> Parser<'a> {
                         // 단축형은 키가 곧 prop 참조라 그 이름 토큰이 구간이다.
                         let range = NodeRange(self.just_read());
                         Expr::Var(
-                            VarRef {
-                                root: key.clone(),
-                                path: Vec::new(),
-                                range,
-                            },
+                            key.clone(),
                             range,
                         )
                     };
@@ -955,7 +959,7 @@ impl<'a> Parser<'a> {
                 self.next()?;
                 ForCount::Literal(count)
             }
-            _ => ForCount::Var(self.parse_var_ref()?),
+            _ => ForCount::Var(self.parse_ref_chain()?),
         };
         self.expect(&Token::RParen)?;
         self.expect(&Token::LBrace)?;

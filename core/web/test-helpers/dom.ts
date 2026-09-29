@@ -1,5 +1,5 @@
 // 통합 테스트용 jsdom 셋업. runtime.ts/region.ts는 전역 document에 의존하므로
-// 모듈 import 전에 globalThis.document를 주입해야 한다.
+// 인스턴스를 만들기 전에 globalThis.document를 주입해야 한다.
 import { JSDOM } from "jsdom";
 
 const dom = new JSDOM("<!DOCTYPE html><body></body>");

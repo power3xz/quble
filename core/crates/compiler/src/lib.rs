@@ -58,7 +58,7 @@ pub fn compile_src(
 /// 컴파일 에러를 CLI에 그대로 찍을 진단 텍스트로 만든다(끝에 개행 없음).
 ///
 /// ```text
-/// card.qubc:6:14: error: no field `nope` on prop `user`
+/// card.qubc:6:14: error: no field `nope` on `user`
 ///   6 |       p() { ${user.nope} }
 ///     |              ^^^^^^^^^
 /// ```
@@ -290,13 +290,9 @@ mod tests {
     fn shape(e: &ast::Expr) -> String {
         use ast::Expr;
         match e {
-            Expr::Var(v, _) => {
-                if v.path.is_empty() {
-                    v.root.clone()
-                } else {
-                    format!("{}.{}", v.root, v.path.join("."))
-                }
-            }
+            Expr::Var(name, _) => name.clone(),
+            Expr::Field(owner, field, _) => format!("{}.{field}", shape(owner)),
+            Expr::Index(arr, index, _) => format!("{}[{}]", shape(arr), shape(index)),
             Expr::Lit(lit, _) => match &lit.value {
                 ast::Lit::Number(n) => format!("{n}"),
                 ast::Lit::Bool(b) => format!("{b}"),
@@ -318,6 +314,32 @@ mod tests {
         // 연산자가 없는 식은 잎 하나 그대로 - codegen이 이걸 기존 슬롯 인코딩으로 낮춘다.
         assert_eq!(shape(&if_cond("done")), "done");
         assert_eq!(shape(&if_cond("gen.open")), "gen.open");
+    }
+
+    #[test]
+    fn parse_expr_index_binds_left_to_right() {
+        // 인덱스 접근과 필드가 이어지면 왼쪽부터 감싼다 - `a[i].b`는 a[i]를 먼저 짚고 그 필드다.
+        assert_eq!(shape(&if_cond("a[i]")), "a[i]");
+        assert_eq!(shape(&if_cond("a[i].title")), "a[i].title");
+        assert_eq!(shape(&if_cond("a[i][j]")), "a[i][j]");
+        assert_eq!(shape(&if_cond("a.b[i].c")), "a.b[i].c");
+    }
+
+    #[test]
+    fn parse_expr_index_takes_an_expression() {
+        // 인덱스 자리는 부분식이라 연산자가 그대로 섞인다.
+        assert_eq!(shape(&if_cond("a[n + 1]")), "a[(n + 1)]");
+        assert_eq!(shape(&if_cond("a[0]")), "a[0]");
+        // 바깥 연산자보다 인덱스 접근이 먼저 묶인다.
+        assert_eq!(shape(&if_cond("a[i] + 1")), "(a[i] + 1)");
+    }
+
+    #[test]
+    fn parse_expr_index_needs_closing_bracket() {
+        assert_eq!(
+            error_message("component C { template { @if (a[i) { p( /) } } }"),
+            "expected `]`, found `)`"
+        );
     }
 
     #[test]
@@ -444,6 +466,62 @@ mod tests {
                 "`count` has no length",
                 " 2 | @if (count.length > 0) { p( /) }",
                 "   |      ^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 인덱스 접근은 요소 타입으로 내려간다 - `tags[i]`는 string이라 bool 조건에서 걸린다.
+    #[test]
+    fn index_reaches_element_type() {
+        assert_eq!(
+            if_cond_diagnostic("props { tags: string[], i: number }", "tags[i]"),
+            [
+                "expected bool, found string",
+                " 2 | @if (tags[i]) { p( /) }",
+                "   |      ^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 인덱스 자리는 number다.
+    #[test]
+    fn index_needs_number_index() {
+        assert_eq!(
+            if_cond_diagnostic("props { tags: string[], name: string }", "tags[name]"),
+            [
+                "`[]` expects number, found string",
+                " 2 | @if (tags[name]) { p( /) }",
+                "   |           ^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 배열이 아닌 것에는 인덱스로 접근할 수 없다.
+    #[test]
+    fn index_needs_an_array() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, i: number }", "count[i]"),
+            [
+                "`count` is number, not an array",
+                " 2 | @if (count[i]) { p( /) }",
+                "   |      ^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 객체 배열의 요소는 통째로 값 자리에 못 온다 - 필드까지 내려가야 한다.
+    #[test]
+    fn index_element_still_needs_leaf() {
+        assert_eq!(
+            if_cond_diagnostic("props { rows: { on: bool }[], i: number }", "rows[i]"),
+            [
+                "`rows[..]` is an object or array: only primitive values go in value position",
+                " 2 | @if (rows[i]) { p( /) }",
+                "   |      ^^^^^^^",
             ]
             .join("\n")
         );
@@ -3463,7 +3541,7 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(
             diagnostic_of(src),
             [
-                "entry:3:24: error: no field `nope` on prop `user`",
+                "entry:3:24: error: no field `nope` on `user`",
                 " 3 |   template { div() { ${user.nope} } }",
                 "   |                        ^^^^^^^^^",
             ]
@@ -3487,7 +3565,7 @@ component B { props { a: A } template { div( /) } }"#;
         let d = diagnose("entry", src, &err);
 
         assert_eq!(d.path, "entry");
-        assert_eq!(d.message, "no field `nope` on prop `user`");
+        assert_eq!(d.message, "no field `nope` on `user`");
         let range = d.range.expect("자리를 알아야 한다");
         assert_eq!(
             &d.src[range.start as usize..range.end as usize],
@@ -3595,7 +3673,7 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(
             out,
             [
-                "./column.qubc:3:22: error: no field `nope` on prop `name`",
+                "./column.qubc:3:22: error: no field `nope` on `name`",
                 " 3 |   template { p() { ${name.nope} } }",
                 "   |                      ^^^^^^^^^",
             ]

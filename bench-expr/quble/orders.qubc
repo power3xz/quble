@@ -1,0 +1,35 @@
+component Orders {
+  props {
+    rows: { id: number, price: number, qty: number, discount: number, stock: number }[],
+    rate: number,
+    tax: number,
+    threshold: number
+  }
+  events {
+    INC({})
+    RATE({})
+    THRESHOLD({})
+  }
+  template {
+    div(class="orders") {
+      div(class="orders__bar") {
+        button(id="btn-rate" @click:RATE) { "환율 변경" }
+        button(id="btn-threshold" @click:THRESHOLD) { "기준 변경" }
+        span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } " / 기준 " span(class="orders__threshold") { ${threshold} } }
+      }
+      div(class="orders__list") {
+        @for (row of rows) {
+          div(class="row") {
+            span(class="row__id") { ${row.id} }
+            span(class="row__price") { ${row.price} }
+            span(class="row__qty") { ${row.qty} }
+            span(class="row__amount") { ${(row.price * row.qty - row.discount) * (100 + tax) / 100 * rate} }
+            span(class="row__left") { ${row.stock - row.qty} }
+            span(class="row__warn" data-warn={row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold}) { "!" }
+            button(class="row__inc" @click:INC) { "+1" }
+          }
+        }
+      }
+    }
+  }
+}

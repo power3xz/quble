@@ -6,14 +6,14 @@ use LogRow from "./logrow.qubc"
 component Playground {
   props {
     files: { name: string, source: string, isEntry: bool, isEditing: bool, isPreviewing: bool, hasError: bool }[],
-    editingName: string,
+    editing: number,
     source: string,
     lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string,
              hasUnderline: bool, underlineStyle: string }[],
     lineNumbers: string,
     lineCount: number,
     caretLine: string,
-    previewName: string,
+    preview: number,
     previewSelected: bool,
     completion: {
       isOpen: bool,
@@ -47,7 +47,7 @@ component Playground {
       }
 
       main(class="pg__main") {
-        header(class="pg__editing") { ${editingName} }
+        header(class="pg__editing") { ${files[editing].name} }
 
         div(class="pg__code") {
           pre(class="pg__gutter") { ${lineNumbers} }
@@ -86,7 +86,7 @@ component Playground {
       }
 
       @if (previewSelected) {
-        header(class="pg__preview-head") { "preview: " ${previewName} }
+        header(class="pg__preview-head") { "preview: " ${files[preview].name} }
       }
       @else {
         div(class="pg__guide") {

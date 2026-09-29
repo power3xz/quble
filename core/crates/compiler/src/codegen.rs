@@ -4,10 +4,12 @@ use crate::ast::{
     BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, Node, Prop, SlotPlaceholderContent, Type,
     UnaryOp,
 };
-use crate::expr_type::{require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind};
+use crate::expr_type::{
+    path_type, require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind,
+};
 use crate::flatten::{FlatComp, Sourced};
 use crate::scope::{
-    lookup_var_ref, require_leaf_var_ref, var_ref_display, ForVar, ScopeError, ScopeErrorKind,
+    expr_display, fixed_ref_of, lookup_field, ForVar, ScopeError, ScopeErrorKind,
 };
 use crate::src_range::SrcRange;
 use bytecode::{
@@ -548,9 +550,12 @@ fn arg_to_field(
     types: &mut TypeTable,
 ) -> Result<Field, CodegenError> {
     let (type_ref, ref_value) = match value {
-        Expr::Var(var, _) => {
+        Expr::Var(..) | Expr::Field(..) => {
             // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
-            let (scope_index, offset, ty) = lookup_var_ref(var, props, &[])?;
+            let (scope_index, offset, ty) = match fixed_ref_of(value, props, &[])? {
+                Some(found) => found,
+                None => unreachable!("참조 체인은 늘 슬롯으로 접힌다"),
+            };
             let type_ref = types.intern(ty, pool);
             (type_ref, FieldValue::Scope(scope_index, offset))
         }
@@ -566,8 +571,8 @@ fn arg_to_field(
         Expr::List(_, range) => {
             return Err(CodegenErrorKind::ListNotAllowed.at(range.0));
         }
-        // payload/context 값은 아직 잎 하나뿐 - 연산자는 @if 조건에서만 쓴다.
-        Expr::Unary(..) | Expr::Binary(..) => {
+        // payload/context 값은 아직 참조 체인뿐 - 연산자와 인덱스 접근은 ROADMAP에 남아 있다.
+        Expr::Unary(..) | Expr::Binary(..) | Expr::Index(..) => {
             return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0));
         }
     };
@@ -656,7 +661,7 @@ fn fold_expr(expr: &Expr) -> Option<Folded> {
         }),
 
         // 참조가 끼면 컴파일타임에 값을 모른다.
-        Expr::Var(..) => None,
+        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => None,
 
         // 식 평가 경로에는 안 온다 - expr_type이 ListNotAllowed로 먼저 막는다.
         Expr::List(..) => unreachable!("배열은 식으로 평가되지 않는다"),
@@ -740,29 +745,11 @@ fn emit_expr_postfix(
         // 식 평가 경로에는 안 온다 - expr_type이 ListNotAllowed로 먼저 막는다.
         Expr::List(..) => unreachable!("배열은 식으로 평가되지 않는다"),
 
-        // 참조 아니면 `.length` - expr_type과 같은 순서로 가른다(실제 필드가 먼저).
-        Expr::Var(var, _) => match require_leaf_var_ref(var, props, for_vars) {
-            Ok((scope_index, offset)) => {
-                out.push(ExprOp::LoadVar as u8);
-                out.push(scope_index);
-                out.push(offset);
+        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => {
+            if let Pushed::LeafIndex = emit_ref_path(expr, props, for_vars, pool, out)? {
+                out.push(ExprOp::ReadLeaf as u8);
             }
-            Err(not_leaf) => {
-                let target = match var.length_target() {
-                    Some(t) => t,
-                    None => return Err(not_leaf.into()),
-                };
-                let (scope_index, offset, ty) = lookup_var_ref(&target, props, for_vars)?;
-                // 배열은 길이를 담은 칸을, 문자열은 값 칸을 구독한다 - 런타임이 볼 대상이 달라
-                // 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
-                out.push(match ty {
-                    Type::Array(_) => ExprOp::LoadArrayLength as u8,
-                    _ => ExprOp::LoadStringLength as u8,
-                });
-                out.push(scope_index);
-                out.push(offset);
-            }
-        },
+        }
 
         Expr::Unary(op, operand, _) => {
             emit_expr_postfix(operand, props, for_vars, pool, out)?;
@@ -793,6 +780,72 @@ fn emit_expr_postfix(
         }
     }
     Ok(())
+}
+
+/// `emit_ref_path`가 스택에 올린 것. 인덱스 접근을 거치면 leafIndex라 값으로 쓰려면 ReadLeaf가 붙는다.
+enum Pushed {
+    Value,
+    LeafIndex,
+}
+
+/// 참조 경로를 바이트코드로 낸다. 슬롯 하나로 접히면 그 자리에서 값이 나오고, 인덱스 접근이
+/// 끼면 leafIndex까지만 낸다.
+/// count       -> LoadVar(slot, 0)                            Value
+/// a.b         -> LoadVar(slot, b 거리)                        Value
+/// tags.length -> LoadArrayLength(slot, offset)               Value
+/// a[i].b      -> LoadVar(a) LoadVar(i) ElemAt FieldAt(b 거리)  LeafIndex
+fn emit_ref_path(
+    expr: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    out: &mut Vec<u8>,
+) -> Result<Pushed, CodegenError> {
+    // 슬롯 하나로 접히면 경로를 안 걷는다 - 필드 거리가 이미 offset에 누적돼 있다.
+    if let Some((scope_index, offset, _)) = fixed_ref_of(expr, props, for_vars)? {
+        out.push(ExprOp::LoadVar as u8);
+        out.push(scope_index);
+        out.push(offset);
+        return Ok(Pushed::Value);
+    }
+    match expr {
+        Expr::Index(arr, index, _) => {
+            emit_expr_postfix(arr, props, for_vars, pool, out)?;
+            emit_expr_postfix(index, props, for_vars, pool, out)?;
+            out.push(ExprOp::ElemAt as u8);
+            Ok(Pushed::LeafIndex)
+        }
+        Expr::Field(owner, field, _) => {
+            let owner_ty = path_type(owner, props, for_vars)?;
+            match lookup_field(&owner_ty, field, owner, expr) {
+                // 실제 필드가 먼저다 - 왼쪽이 낸 leafIndex에 거리를 더한다.
+                Ok((_, offset)) => {
+                    emit_ref_path(owner, props, for_vars, pool, out)?;
+                    out.push(ExprOp::FieldAt as u8);
+                    out.push(offset);
+                    Ok(Pushed::LeafIndex)
+                }
+                // 배열은 길이를 담은 leafIndex를, 문자열은 값 leafIndex를 구독한다 - 런타임이
+                // 볼 대상이 달라 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
+                Err(not_found) if field == "length" => {
+                    let (scope_index, offset, _) = match fixed_ref_of(owner, props, for_vars)? {
+                        Some(found) => found,
+                        None => return Err(not_found.into()),
+                    };
+                    out.push(match owner_ty {
+                        Type::Array(_) => ExprOp::LoadArrayLength as u8,
+                        _ => ExprOp::LoadStringLength as u8,
+                    });
+                    out.push(scope_index);
+                    out.push(offset);
+                    Ok(Pushed::Value)
+                }
+                Err(not_found) => Err(not_found.into()),
+            }
+        }
+        // 슬롯으로 접히지 않는 참조 경로는 인덱스 접근이 낀 것뿐이다.
+        other => Err(CodegenErrorKind::UnsupportedValueExpr.at(other.range().0)),
+    }
 }
 
 /// `LoadSmallInt`로 낼 수 있는 값인지 - 0~255 정수. 음수는 `Neg`가 따로 붙고, 그 밖은 상수풀로.
@@ -850,18 +903,16 @@ fn emit_node(
                 for_scope.for_vars,
             )?;
             // 잎 하나는 슬롯을 그대로 쓴다 - 연산자가 붙은 식만 표현식 테이블을 거친다(@if와 같다).
-            match expr {
-                Expr::Var(var, _) if var.length_target().is_none() => {
-                    let (scope_index, offset) =
-                        require_leaf_var_ref(var, props, for_scope.for_vars)?;
+            match fixed_ref_of(expr, props, for_scope.for_vars)? {
+                Some((scope_index, offset, _)) => {
                     code.push(Op::TextVar as u8);
                     code.push(scope_index);
                     code.push(offset);
                 }
-                other => {
+                None => {
                     let mut bytes = Vec::new();
-                    emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
-                    let index = intern_expr(exprs, bytes, other.range().0)?;
+                    emit_expr_postfix(expr, props, for_scope.for_vars, pool, &mut bytes)?;
+                    let index = intern_expr(exprs, bytes, expr.range().0)?;
                     code.push(Op::TextExpr as u8);
                     code.push(index);
                 }
@@ -945,11 +996,9 @@ fn emit_node(
                     props,
                     for_scope.for_vars,
                 )?;
-                match value {
+                match fixed_ref_of(value, props, for_scope.for_vars)? {
                     // 잎 하나는 (scope_index, offset) 두 u8 - TEXT_VAR와 같은 slot 인코딩.
-                    Expr::Var(v, _) if v.length_target().is_none() => {
-                        let (scope_index, offset) =
-                            require_leaf_var_ref(v, props, for_scope.for_vars)?;
+                    Some((scope_index, offset, _)) => {
                         let (op, name_operand) = match bytecode::attrs::attr_id(name) {
                             Some(global_id) => (Op::AttrGVar, global_id),
                             None => (Op::AttrLVar, pool.intern_str(name)),
@@ -960,10 +1009,10 @@ fn emit_node(
                         code.push(offset);
                     }
                     // 연산자가 붙은 식만 표현식 테이블을 거친다(@if/보간과 같다).
-                    other => {
+                    None => {
                         let mut bytes = Vec::new();
-                        emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
-                        let index = intern_expr(exprs, bytes, other.range().0)?;
+                        emit_expr_postfix(value, props, for_scope.for_vars, pool, &mut bytes)?;
+                        let index = intern_expr(exprs, bytes, value.range().0)?;
                         let (op, name_operand) = match bytecode::attrs::attr_id(name) {
                             Some(global_id) => (Op::AttrGExpr, global_id),
                             None => (Op::AttrLExpr, pool.intern_str(name)),
@@ -1038,10 +1087,13 @@ fn emit_node(
                         .at(name.range.0)
                     })?;
                 match arg_value {
-                    Expr::Var(parent_var, _) => {
+                    Expr::Var(..) | Expr::Field(..) => {
                         // 도달 타입이 자식 prop 타입과 구조가 같아야 한다.
-                        let (scope_index, offset, reached_ty) =
-                            lookup_var_ref(parent_var, props, for_scope.for_vars)?;
+                        let found = fixed_ref_of(arg_value, props, for_scope.for_vars)?;
+                        let (scope_index, offset, reached_ty) = match found {
+                            Some(found) => found,
+                            None => unreachable!("참조 체인은 늘 슬롯으로 접힌다"),
+                        };
                         if !types_match(reached_ty, &child_prop.type_) {
                             // 타입이 안 맞는 건 넘긴 그 참조다 - 그 자리를 가리킨다.
                             return Err(CodegenErrorKind::PropTypeMismatch {
@@ -1050,17 +1102,20 @@ fn emit_node(
                                 want: Box::new(child_prop.type_.clone()),
                                 got: Box::new(reached_ty.clone()),
                             }
-                            .at(parent_var.range.0));
+                            .at(arg_value.range().0));
                         }
                         // 경로 없는 참조(`${a}`)는 슬롯 통째로 THROUGH, 필드 참조(`${user.name}`)는
                         // (슬롯, offset)으로 FIELD - kind는 슬롯이 갖고 자식이 타입을 안다.
-                        if parent_var.path.is_empty() {
-                            code.push(Op::PushThrough as u8);
-                            code.push(scope_index);
-                        } else {
-                            code.push(Op::PushField as u8);
-                            code.push(scope_index);
-                            code.push(offset);
+                        match arg_value {
+                            Expr::Var(..) => {
+                                code.push(Op::PushThrough as u8);
+                                code.push(scope_index);
+                            }
+                            _ => {
+                                code.push(Op::PushField as u8);
+                                code.push(scope_index);
+                                code.push(offset);
+                            }
                         }
                     }
                     Expr::Lit(literal, _) => {
@@ -1198,18 +1253,16 @@ fn emit_node(
 
             // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
             // 연산자가 붙은 식만 표현식 테이블을 거친다 - 잎 하나에 테이블을 쓸 이유가 없다.
-            match cond {
-                Expr::Var(var, _) if var.length_target().is_none() => {
-                    let (scope_index, offset) =
-                        require_leaf_var_ref(var, props, for_scope.for_vars)?;
+            match fixed_ref_of(cond, props, for_scope.for_vars)? {
+                Some((scope_index, offset, _)) => {
                     code.push(Op::If as u8);
                     code.push(scope_index);
                     code.push(offset);
                 }
-                other => {
+                None => {
                     let mut bytes = Vec::new();
-                    emit_expr_postfix(other, props, for_scope.for_vars, pool, &mut bytes)?;
-                    let index = intern_expr(exprs, bytes, other.range().0)?;
+                    emit_expr_postfix(cond, props, for_scope.for_vars, pool, &mut bytes)?;
+                    let index = intern_expr(exprs, bytes, cond.range().0)?;
                     code.push(Op::IfExpr as u8);
                     code.push(index);
                 }
@@ -1288,7 +1341,15 @@ fn emit_node(
                     Type::Number
                 }
                 ForCount::Var(var) => {
-                    let (scope_index, offset, ty) = lookup_var_ref(var, props, for_scope.for_vars)?;
+                    // 순회 대상은 슬롯으로 접히는 참조여야 한다 - 연산자가 붙은 식은 셀 것이 없다.
+                    let found = fixed_ref_of(var, props, for_scope.for_vars)?;
+                    let (scope_index, offset, ty) = match found {
+                        Some(found) => found,
+                        None => {
+                            let kind = CodegenErrorKind::ForCountNotIterable(expr_display(var));
+                            return Err(kind.at(var.range().0));
+                        }
+                    };
                     match ty {
                         Type::Number => {
                             code.push(Op::ForCountVar as u8);
@@ -1303,8 +1364,8 @@ fn emit_node(
                             (**inner).clone()
                         }
                         _ => {
-                            let kind = CodegenErrorKind::ForCountNotIterable(var_ref_display(var));
-                            return Err(kind.at(var.range.0));
+                            let kind = CodegenErrorKind::ForCountNotIterable(expr_display(var));
+                            return Err(kind.at(var.range().0));
                         }
                     }
                 }

@@ -270,7 +270,7 @@ handler(data, { props, store, get, set }) {
 `store`에 싣는다.
 
 배열 요소의 주소는 컴파일타임에 확정되지 않는다 - `elemStartLeafIndices`가 들고 push/removeAt으로
-계속 바뀌므로, 런타임은 인덱싱하는 그 순간에 요소 노드를 만든다.
+계속 바뀌므로, 런타임은 인덱스로 접근하는 그 순간에 요소 노드를 만든다.
 
 **두 스텝으로 나눈다.**
 

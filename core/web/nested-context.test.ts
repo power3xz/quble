@@ -5,13 +5,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { compile, type THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
-import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
+import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 
 import type { TTestHandlers } from "./test-helpers/handlers.ts";
-
-const { compile } = await import("./runtime.ts");
-type THandlers = import("./runtime.ts").THandlers;
 
 const fireToggle = (qubb: Uint8Array, values: unknown, handlers: TTestHandlers) => {
   const inst = compile(qubb)(0)(values, handlers as unknown as THandlers);

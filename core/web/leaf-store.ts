@@ -3,7 +3,7 @@
 // - store는 타입을 모르는 순수 저장소다(leafIndex가 유일한 접근 축).
 //
 //   createLeafStore(leaves)        -> { get, set }                                 (데이터만)
-//   createLeafStoreSubject(leaves) -> 위 + { subscribe, unsubscribe, alloc, free }  (반응성 + 동적 칸)
+//   createLeafStoreSubject(leaves) -> 위 + { notify, subscribe, unsubscribe, alloc, free }  (반응성 + 동적 칸)
 //
 // runtime.ts의 blueprint가 만들어 인스턴스에 싣는 store가 곧 createLeafStoreSubject의 반환물이다.
 
@@ -30,17 +30,23 @@ const createLeafStore = (leaves: unknown[]) => {
 // ── leafStoreSubject (leafStore + 반응성 + 동적 칸) ──────────────────
 // leafStore를 감싸 구독/통지(subscribe/set 통지)와 동적 칸(alloc/free - 배열 요소 추가/제거)을
 // 얹는다(Subject - 값을 들고 변경을 구독자에게 통지하는 주체).
+
+// 칸이 바뀌면 불리는 함수. 새 값과 함께 어느 칸이 바뀌었는지 받는다 - 식 하나가 칸 a, b를 함께
+// 구독하면 두 칸에 같은 함수 하나를 걸고, 불릴 때 leafIndex로 a인지 b인지 가린다.
+export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
+
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
+  notify: (leafIndex: LeafIndex) => void;
   alloc: (values: unknown[]) => LeafIndex;
   free: (start: LeafIndex, size: number) => void;
-  subscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
-  unsubscribe: (leafIndex: LeafIndex, fn: (v: unknown) => void) => void;
+  subscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
+  unsubscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
-  const subscribers: Array<Set<(v: unknown) => void> | undefined> = []; // leafIndex -> Set<(v)=>void>. Set이라 unsubscribe가 O(1).
+  const subscribers: Array<Set<TSubscriber> | undefined> = []; // leafIndex -> Set<TSubscriber>. Set이라 unsubscribe가 O(1).
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
   // 정적/유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합/split/정렬 없이 O(1) 재사용/반납.
   const freeBySize = new Map<number, LeafIndex[]>();
@@ -50,11 +56,18 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
       return;
     }
     leafStore.set(leafIndex, value);
+    notify(leafIndex);
+  };
+
+  // leaf의 값은 바꾸지 않고, 그 leaf에 걸린 구독 함수들을 호출한다. set은 값이 같으면 구독 함수를
+  // 호출하지 않아, 값은 그대로인데 구독자가 다시 읽어야 할 때 set 대신 호출한다.
+  const notify = (leafIndex: LeafIndex): void => {
     const subs = subscribers[leafIndex];
     if (subs) {
+      const value = leafStore.get(leafIndex);
       // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
       for (const fn of [...subs]) {
-        fn(value);
+        fn(value, leafIndex);
       }
     }
   };
@@ -86,18 +99,19 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     bucket.push(start);
   };
 
-  const subscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {
+  const subscribe = (leafIndex: LeafIndex, fn: TSubscriber): void => {
     subscribers[leafIndex] ??= new Set();
     subscribers[leafIndex].add(fn);
   };
 
-  const unsubscribe = (leafIndex: LeafIndex, fn: (v: unknown) => void): void => {
+  const unsubscribe = (leafIndex: LeafIndex, fn: TSubscriber): void => {
     subscribers[leafIndex]?.delete(fn);
   };
 
   return {
     get: leafStore.get,
     set,
+    notify,
     alloc,
     free,
     subscribe,

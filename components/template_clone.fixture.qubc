@@ -1,0 +1,21 @@
+component TemplateClone {
+  props {
+    rows: { label: string, n: number }[],
+    k: number
+  }
+  events {
+    PICK({})
+  }
+  template {
+    ul() {
+      @for (row of rows) {
+        li(class="row" data-n={row.n}) {
+          span(class="label") { ${row.label} }
+          " x "
+          b(class="scaled") { ${row.n * k} }
+          button(class="pick" @click:PICK) { "pick" }
+        }
+      }
+    }
+  }
+}

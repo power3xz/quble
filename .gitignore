@@ -6,3 +6,4 @@ dist/
 *.qubc.d.ts
 *.wasm
 *.vsix
+.env

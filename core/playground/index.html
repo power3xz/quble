@@ -87,14 +87,16 @@
         isPreviewing: false,
         hasError: false,
       })),
-      editingName: sources[0].name,
+      editing: 0, // 편집 중인 파일 - files의 인덱스
       source: sources[0].source,
       lines: handlers.tokenize(sources[0].source, sources[0].name),
       lineNumbers: handlers.lineNumbersFor(sources[0].source),
       lineCount: handlers.lineCountOf(sources[0].source),
       caretLine: "transform: translateY(1rem)", // 첫 줄 - .pg__view의 padding-top과 같다
       // 줄의 hasError/error는 tokenize가 꺼진 채로 채운다 - 컴파일 에러가 나면 그때 얹힌다.
-      previewName: "",
+      // 미리보기 중인 파일 - files의 인덱스. @if (previewSelected) 안에서만 읽으므로 미리보기 전에는
+      // 쓰이지 않는다.
+      preview: 0,
       previewSelected: false,
       // 자동완성 팝업 - 핸들러 파일의 키 자리에서 큰따옴표를 치면 열린다.
       completion: { isOpen: false, style: "", isAbove: false, items: [] },

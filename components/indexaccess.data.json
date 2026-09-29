@@ -1,0 +1,10 @@
+{
+  "rows": [
+    { "title": "A", "score": 10 },
+    { "title": "B", "score": 20 },
+    { "title": "C", "score": 30 }
+  ],
+  "labels": ["첫째", "둘째", "셋째"],
+  "cursor": 0,
+  "show": false
+}

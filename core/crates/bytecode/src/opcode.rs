@@ -172,6 +172,12 @@ pub enum ExprOp {
     Or = 0x1c,
     Not = 0x1d,
     Neg = 0x1e,
+    /// 스택에서 인덱스와 arrayInfoIndex를 꺼내 elemStartLeafIndices[i]를 올린다.
+    ElemAt = 0x1f,
+    /// leafIndex에 필드 거리를 더한다. operand: offset u8.
+    FieldAt = 0x20,
+    /// leafIndex를 꺼내 store의 그 값을 올린다. ElemAt/FieldAt 결과를 값으로 쓸 때 붙는다.
+    ReadLeaf = 0x21,
 }
 
 impl ExprOp {
@@ -200,6 +206,9 @@ impl ExprOp {
             0x1c => ExprOp::Or,
             0x1d => ExprOp::Not,
             0x1e => ExprOp::Neg,
+            0x1f => ExprOp::ElemAt,
+            0x20 => ExprOp::FieldAt,
+            0x21 => ExprOp::ReadLeaf,
             _ => return None,
         })
     }

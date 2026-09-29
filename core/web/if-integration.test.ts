@@ -7,11 +7,9 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import { compile } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
-import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
-
-// dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
-const { compile } = await import("./runtime.ts");
+import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb: Record<string, Uint8Array> = {};
@@ -73,6 +71,48 @@ test("단일 if: 비활성 가지 set은 화면을 안 바꾼다(구독 0)", () 
   assert.deepEqual(texts(host), ["A"], "여전히 A");
   set("cond", false); // else 활성화 -> 최신값 B2 따라잡기
   assert.deepEqual(texts(host), ["B2"], "재활성 시 놓친 값 반영");
+});
+
+// action 동안 텍스트 노드에 쓴 값들. 런타임은 텍스트 칸을 textContent로 쓴다.
+const textWritesDuring = (action: () => void) => {
+  const nodeProto = (document.defaultView as unknown as typeof globalThis).Node.prototype;
+  const original = Object.getOwnPropertyDescriptor(nodeProto, "textContent") as PropertyDescriptor;
+  const writes: unknown[] = [];
+  Object.defineProperty(nodeProto, "textContent", {
+    ...original,
+    set(value) {
+      writes.push(value);
+      original.set?.call(this, value);
+    },
+  });
+  try {
+    action();
+  } finally {
+    Object.defineProperty(nodeProto, "textContent", original);
+  }
+  return writes;
+};
+
+test("단일 if: 처음 붙일 때는 build가 쓴 텍스트를 다시 쓰지 않는다", () => {
+  // build가 현재 값으로 이미 썼다. 붙일 때 또 쓰면 1만 행 mount에서 텍스트 1만 개를 두 번 쓴다.
+  const writes = textWritesDuring(() => {
+    instantiate("single_if", ["cond", "a", "b"], { cond: true, a: "A", b: "B" });
+  });
+  assert.deepEqual(
+    writes.filter((v) => v === "A"),
+    ["A"],
+  );
+});
+
+test("단일 if: 꺼져 있던 가지를 처음 켤 때도 한 번만 쓴다", () => {
+  const { host, set } = instantiate("single_if", ["cond", "a", "b"], { cond: false, a: "A", b: "B" });
+  // then은 이때 처음 build된다(lazy). build가 쓴 A를 붙일 때 다시 쓰지 않는다.
+  const writes = textWritesDuring(() => set("cond", true));
+  assert.deepEqual(
+    writes.filter((v) => v === "A"),
+    ["A"],
+  );
+  assert.deepEqual(texts(host), ["A"]);
 });
 
 test("단일 if: 활성 가지 set은 즉시 반영", () => {

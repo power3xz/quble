@@ -526,7 +526,7 @@ mod tests {
         assert_eq!(status, 1);
         assert_eq!(
             out,
-            r#"{"path":"main.qubc","message":"no field `nope` on prop `user`","start":{"line":2,"column":23},"end":{"line":2,"column":32}}"#
+            r#"{"path":"main.qubc","message":"no field `nope` on `user`","start":{"line":2,"column":23},"end":{"line":2,"column":32}}"#
         );
     }
 

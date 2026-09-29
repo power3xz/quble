@@ -4,10 +4,9 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import { compile } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
-
-const { compile } = await import("./runtime.ts");
 
 const qubb: Record<string, Uint8Array> = {};
 before(() => {

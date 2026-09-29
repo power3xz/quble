@@ -43,6 +43,11 @@
 | O | X |
 |---|---|
 | `구별된다` / `나뉜다` / `달라진다` | `갈린다` |
+| `leafIndex` | `칸` (leaf store 자리의 번호를 가리킬 때) |
+| `leaf` | `칸` (leaf store의 자리나 그 값을 가리킬 때) |
+| `호출한다` | `부른다` (함수 호출을 가리킬 때) |
+| `사용한다` | `쓴다` (사용한다는 뜻일 때) |
+| `값을 기록한다` | `쓴다` (값을 기록한다는 뜻일 때) |
 
 ## Read First (new session / after compact)
 
@@ -74,6 +79,8 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
 - **core/web/LEAF-STORE-LAYOUT.md** - 런타임 데이터 스토어 레이아웃 - 값이 store에 어떻게
   놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
   따라 고친다.
+- **core/web/EXPR-EVAL.md** - 표현식 평가 - 후위 바이트와 트리, 부분 재평가, 구독, 인덱스
+  접근의 구독 다시 걸기. LEAF-STORE-LAYOUT.md처럼 현재 구현 설명이다.
 - **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
 ### 코드 작업에 착수할 때
@@ -129,6 +136,39 @@ COMMENT-GUIDELINES.md를 읽고 따른다.
 | `git checkout -b foo` 실행 후 `git add x` `git commit`  | `git checkout -b foo && git add x && git commit`  | 브랜치 생성과 커밋은 별개 판단       |
 | `cargo fmt` 결과 확인 후 `git add`                      | `cargo fmt && git add -A`                         | fmt가 무엇을 고쳤는지 안 보고 넘어감 |
 | `git status && git log --oneline -3`                    | -                                                 | 조회는 이어도 된다                   |
+
+**`cd`를 쓰지 않는다.** Bash 도구의 작업 디렉터리는 호출 사이에 유지되므로, `cd` 한 번이 그
+뒤 모든 커맨드의 기준을 바꿔 놓는다. 커맨드는 레포 루트에서 실행하고, 다른 디렉터리를 봐야
+하면 `cd` 대신 그 커맨드가 가진 경로 옵션으로 짚는다.
+
+| O | X |
+|---|---|
+| `cargo test --workspace --manifest-path core/Cargo.toml` | `cd core && cargo test --workspace` |
+| `npm test --prefix core/web` | `cd core/web && npm test` |
+| `git -C editors/vscode status` | `cd editors/vscode && git status` |
+
+cargo는 현재 디렉터리에서 위로 올라가며 `Cargo.toml`을 찾는데, 이 레포는 워크스페이스 루트가
+`core/`라 레포 루트에서는 못 찾는다. `--manifest-path`가 없으면 "could not find `Cargo.toml`"로
+실패한다.
+
+**파일은 Edit 도구로 고친다.** `sed`, `python`, 셸 리다이렉트로 고치면 무엇이 어떻게
+바뀌는지가 사용자에게 diff로 보이지 않아 한 줄씩 확인하고 거절할 수 없다. 여러 곳을 한 번에
+바꿔야 해 스크립트가 필요하면, 먼저 무엇을 몇 곳 바꿀지 말하고 동의를 받는다.
+
+| O | X |
+|---|---|
+| Edit로 블록을 지우고, Edit로 import 한 줄을 더한다 | `python3`로 블록을 잘라 내고 import를 끼워 넣는다 |
+| `식별자 셋을 바꾸는데 12곳입니다. sed로 한 번에 바꿀까요?` 동의 후 `sed` | 묻지 않고 `sed -i`로 이름을 바꾼다 |
+
+**`*`, `?`, `[]`가 든 인자는 따옴표로 감싼다.** 셸이 zsh다. bash와 달리 맞는 파일이 없으면
+글롭을 그대로 넘기지 않고 `no matches found`로 커맨드 자체를 실행하지 않는다. 파일을 고르려는
+글롭이 아니라 커맨드에 넘길 문자열이면 따옴표가 필요하다.
+
+| O | X |
+|---|---|
+| `esbuild --external:svelte "--external:svelte/*"` | `esbuild --external:svelte --external:svelte/*` |
+| `grep -rn "Expr::*" src` | `grep -rn Expr::* src` |
+| `find . -name "*.qubc"` | `find . -name *.qubc` |
 
 ## 메모리 저장할 때
 

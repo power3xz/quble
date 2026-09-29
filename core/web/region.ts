@@ -23,16 +23,20 @@ export type Store = {
   get: (leafIndex: number) => unknown;
   set: (leafIndex: number, value: unknown) => void;
   free: (start: number, size: number) => void;
-  subscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
-  unsubscribe: (leafIndex: number, fn: (v: unknown) => void) => void;
+  subscribe: (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
+  unsubscribe: (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
 };
 
 export type TBranch = {
   nodes: ChildNode[];
   leafIndices: number[];
-  updateFns: Array<(v: unknown) => void>;
+  // updateFns[i]는 leafIndices[i]를 구독한다. 식 하나가 칸 여럿을 읽으면 그 칸들 자리에 같은 함수가 든다.
+  updateFns: Array<(v: unknown, leafIndex: number) => void>;
   childRegionIndices: number[];
   built: boolean;
+  // 한 번이라도 DOM에 붙었나. 처음 붙을 때는 build가 방금 현재 값으로 노드를 채웠으므로 놓친 값을
+  // 따라잡지 않는다(restoreBranchSubs).
+  everAttached: boolean;
   lazyBuild: (() => void) | null;
 };
 
@@ -88,6 +92,7 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     updateFns: [],
     childRegionIndices: [],
     built: false,
+    everAttached: false,
     lazyBuild: null, // runtime.ts가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
   });
 
@@ -100,12 +105,27 @@ const teardownBranchSubs = (store: Store, branch: TBranch): void => {
 };
 
 // 한 가지의 직속 구독만 복원(현재값 갱신 + 재구독)한다(잎 작업). 자식 재귀는 attach 함수 전담.
+//
+// 현재값 갱신은 다시 붙을 때만 한다. `@if (show) { p() { ${count} } }`에서 show가 꺼진 동안 count가
+// 1 -> 5로 바뀌면 떼어 둔 <p>에는 1이 남아 있어, 다시 붙일 때 구독 함수를 5로 불러 고친다. 처음
+// 붙을 때는 build가 방금 현재 값으로 채웠으니 부르지 않는다 - 부르면 같은 값을 두 번 쓴다.
+//
+// 모두 구독한 뒤에 따라잡는다. `${rows[cursor].title}`에서 꺼진 동안 cursor가 바뀌었으면 따라잡는
+// 구독 함수가 READ_LEAF가 읽는 leafIndex가 바뀐 것을 보고 구독을 풀고 다시 건다 - 그 leafIndex들이 이미
+// 구독된 상태여야 맞게 풀린다. 다시 걸면서 branch의 두 배열도 고치므로 따라잡기는 사본으로 돈다.
 const restoreBranchSubs = (store: Store, branch: TBranch): void => {
   const { leafIndices, updateFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
-    updateFns[i](store.get(leafIndices[i])); // 비활성 동안 놓친 값 따라잡기
     store.subscribe(leafIndices[i], updateFns[i]);
   }
+  if (branch.everAttached) {
+    const leaves = [...leafIndices];
+    const fns = [...updateFns];
+    for (let i = 0; i < leaves.length; i++) {
+      fns[i](store.get(leaves[i]), leaves[i]); // 비활성 동안 놓친 값 따라잡기
+    }
+  }
+  branch.everAttached = true;
 };
 
 // 한 가지를 떼어낸다. anchor가 평평한 형제라 자식 swap 노드가 잔류하므로 자식 Region까지 재귀로 뗀다.
