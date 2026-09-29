@@ -9,10 +9,9 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import { compile, type THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
-
-const { compile } = await import("./runtime.ts");
 
 let qubb: Uint8Array;
 before(() => {
@@ -39,13 +38,28 @@ const seed = () => ({
   show: false,
 });
 
+const removeFirstOf =
+  (key: string): THandlers[string] =>
+  (_d, ctx) => {
+    const removeAt = ctx.removeAt as (a: unknown, i: number) => void;
+    removeAt((ctx.store as Record<string, unknown>)[key], 0);
+  };
+
+const handlers: THandlers = {
+  REMOVE_FIRST_ROW: removeFirstOf("rows"),
+  REMOVE_FIRST_SCALAR: removeFirstOf("scalars"),
+};
+
 const instantiate = () => {
-  const inst = compile(qubb)(0)(seed(), {});
+  const inst = compile(qubb)(0)(seed(), handlers);
   const host = mount(inst);
   return {
     host,
     textOf: (cls: string) => (host.querySelector(`.${cls}`) as HTMLElement).textContent,
     set: (leafIndex: number, v: unknown) => inst.store.set(leafIndex, v),
+    has: (cls: string) => host.querySelector(`.${cls}`) !== null,
+    removeFirstRow: () => (host.querySelector(".remove-first-row") as HTMLButtonElement).click(),
+    removeFirstScalar: () => (host.querySelector(".remove-first-scalar") as HTMLButtonElement).click(),
   };
 };
 
@@ -146,4 +160,43 @@ test("가지가 꺼진 동안 인덱스가 바뀌면 다시 켤 때 새 leaf를 
   assert.equal(textOf("shown"), "C2", "새 leaf의 변경이 닿는다");
   set(titleLeaf(0), "A2"); // 꺼지기 전에 읽던 leaf
   assert.equal(textOf("shown"), "C2", "더 이상 안 읽는 leaf가 바뀌어도 그대로다");
+});
+
+// removeAt은 목록만 당기고 요소 leaf를 옮기지 않는다 - 인덱스 값은 그대로인데 rows[cursor]가 가리키는 요소가 바뀐다.
+test("앞 요소가 제거되면 같은 인덱스가 당겨진 요소를 읽는다", () => {
+  const { textOf, set, removeFirstRow } = instantiate();
+  removeFirstRow();
+  assert.equal(textOf("field"), "B", "rows[0]이 이제 B");
+  set(titleLeaf(1), "B2");
+  assert.equal(textOf("field"), "B2", "당겨진 요소의 leaf 변경이 닿는다");
+});
+
+test("앞 요소가 제거되면 연산, 상수 인덱스, 식 인덱스, 속성값도 당겨진 요소를 읽는다", () => {
+  const { host, textOf, removeFirstRow } = instantiate();
+  removeFirstRow(); // rows = [B 20, C 30]
+  assert.equal(textOf("arith"), "40", "rows[0].score * 2");
+  assert.equal(textOf("two"), "50", "rows[0].score + rows[1].score");
+  assert.equal(textOf("shifted"), "C", "rows[0 + 1].title");
+  assert.equal((host.querySelector("[id]") as HTMLElement).id, "B", "id={rows[cursor].title}");
+  assert.equal(textOf("alias"), "40", "rows[0].score + rows[0].score");
+});
+
+test("스칼라 배열도 앞 요소가 제거되면 당겨진 요소를 읽는다", () => {
+  const { textOf, removeFirstScalar } = instantiate();
+  removeFirstScalar(); // scalars = [8, 9]
+  assert.equal(textOf("scalar"), "8", "scalars[0]");
+});
+
+test("@if 안의 인덱스 접근도 앞 요소가 제거되면 당겨진 요소를 읽는다", () => {
+  const { textOf, set, removeFirstRow } = instantiate();
+  set(SHOW, true);
+  removeFirstRow();
+  assert.equal(textOf("shown"), "B");
+});
+
+test("@if 조건의 인덱스 접근도 앞 요소가 제거되면 당겨진 요소로 다시 판정한다", () => {
+  const { has, removeFirstRow } = instantiate();
+  assert.equal(has("high"), false, "rows[0].score = 10");
+  removeFirstRow();
+  assert.equal(has("high"), true, "rows[0].score = 20");
 });

@@ -1295,6 +1295,10 @@ class Interpreter {
     if (info.sizeLeafIndex !== null) {
       this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
     }
+    // 인덱스 접근 식(`${rows[cursor].title}`)은 배열 필드 leaf를 구독한다. 요소가 당겨져 같은 인덱스가 다른
+    // 요소를 가리키게 됐지만, 그 leaf의 값(arrayInfoIndex)은 그대로라 set으로는 구독 함수가 호출되지 않는다.
+    // 호출되면 식이 다시 세어 ELEM_AT이 지금 목록에서 요소를 찾고, READ_LEAF 구독도 그 요소의 leaf에 다시 건다.
+    this.store.notify(array[NODE_BASE]);
   };
 
   // 배열 요소 자리 맞바꾸기 - i번째와 j번째 요소의 고정 블록 값을 칸마다 서로 set한다. 노드를 옮기지

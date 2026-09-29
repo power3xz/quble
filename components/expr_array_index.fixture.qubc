@@ -5,8 +5,14 @@ component ExprArrayIndex {
     cursor: number,
     show: bool
   }
+  events {
+    REMOVE_FIRST_ROW({})
+    REMOVE_FIRST_SCALAR({})
+  }
   template {
     div() {
+      button(class="remove-first-row" @click:REMOVE_FIRST_ROW) { "remove row" }
+      button(class="remove-first-scalar" @click:REMOVE_FIRST_SCALAR) { "remove scalar" }
       p(class="field") { ${rows[cursor].title} }
       p(class="scalar") { ${scalars[cursor]} }
       p(class="arith") { ${rows[cursor].score * 2} }
@@ -16,6 +22,9 @@ component ExprArrayIndex {
       p(class="alias") { ${rows[cursor].score + rows[0].score} }
       @if (show) {
         p(class="shown") { ${rows[cursor].title} }
+      }
+      @if (rows[cursor].score > 15) {
+        p(class="high") { "high" }
       }
     }
   }

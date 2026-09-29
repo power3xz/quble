@@ -3,7 +3,7 @@
 // - store는 타입을 모르는 순수 저장소다(leafIndex가 유일한 접근 축).
 //
 //   createLeafStore(leaves)        -> { get, set }                                 (데이터만)
-//   createLeafStoreSubject(leaves) -> 위 + { subscribe, unsubscribe, alloc, free }  (반응성 + 동적 칸)
+//   createLeafStoreSubject(leaves) -> 위 + { notify, subscribe, unsubscribe, alloc, free }  (반응성 + 동적 칸)
 //
 // runtime.ts의 blueprint가 만들어 인스턴스에 싣는 store가 곧 createLeafStoreSubject의 반환물이다.
 
@@ -38,6 +38,7 @@ export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
+  notify: (leafIndex: LeafIndex) => void;
   alloc: (values: unknown[]) => LeafIndex;
   free: (start: LeafIndex, size: number) => void;
   subscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
@@ -55,8 +56,15 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
       return;
     }
     leafStore.set(leafIndex, value);
+    notify(leafIndex);
+  };
+
+  // leaf의 값은 바꾸지 않고, 그 leaf에 걸린 구독 함수들을 호출한다. set은 값이 같으면 구독 함수를
+  // 호출하지 않아, 값은 그대로인데 구독자가 다시 읽어야 할 때 set 대신 호출한다.
+  const notify = (leafIndex: LeafIndex): void => {
     const subs = subscribers[leafIndex];
     if (subs) {
+      const value = leafStore.get(leafIndex);
       // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
       for (const fn of [...subs]) {
         fn(value, leafIndex);
@@ -103,6 +111,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   return {
     get: leafStore.get,
     set,
+    notify,
     alloc,
     free,
     subscribe,
