@@ -43,6 +43,8 @@
 | O | X |
 |---|---|
 | `구별된다` / `나뉜다` / `달라진다` | `갈린다` |
+| `leafIndex` | `칸` (leaf store 자리의 번호를 가리킬 때) |
+| `leaf` | `칸` (leaf store의 자리나 그 값을 가리킬 때) |
 
 ## Read First (new session / after compact)
 
