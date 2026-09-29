@@ -448,7 +448,7 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
 
 // 식 정의(expr 바이트)당 건너뛰기 표 하나. 같은 식을 쓰는 인스턴스(@for 회차마다 생기는 것)끼리
 // 공유한다. expr 바이트는 decode한 모듈이 들고 있어, 모듈이 버려지면 표도 함께 버려진다.
-const skipTables = new WeakMap<Uint8Array, TExprSkipTable>();
+const skipTables = new WeakMap<Uint8Array, TExprSkipTable | null>();
 
 // 식을 처음 셀 때 runExpr에 넘기는 값 - 아무것도 건너뛰지 않는다.
 const SKIP_NOTHING: TSkipPastOp = {};
@@ -1794,20 +1794,62 @@ class Interpreter {
     return this.subscribeExpr(expr, [...argumentSourcePairs], branch, update);
   };
 
-  // 식을 처음 세고, 식이 읽은 칸마다 구독을 건다. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며
-  // 다시 세어, 값이 지난번과 다를 때만 onValue에 넘긴다. 처음 센 값을 돌려준다. 구독은 branch에
-  // 실어 가지와 생애를 함께 한다.
+  // 식을 처음 세고, 식이 읽은 칸마다 구독을 건다. 칸이 바뀌면 다시 세어, 값이 지난번과 다를 때만
+  // onValue에 넘긴다. 처음 센 값을 돌려준다. 구독은 branch에 실어 가지와 생애를 함께 한다.
   //
-  // 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 칸에 같은 함수를 걸고, 불릴 때
-  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다. 칸마다 함수를 만들면 1만 행 목록에서 함수가
-  // 수만 개 늘어, 메모리가 CPU 캐시를 넘쳐 다시 세기가 오히려 느려진다.
+  // 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 칸에 같은 함수를 건다. 칸마다
+  // 함수를 만들면 1만 행 목록에서 함수가 수만 개 늘어, 메모리가 CPU 캐시를 넘쳐 다시 세기가 오히려
+  // 느려진다.
+  //
+  // 건너뛸 부분식이 있는 식과 없는 식을 메서드로 나눈다. 한 메서드 안에서 나누면 구독 함수가 잡는
+  // 컨텍스트에 다른 쪽 변수의 자리까지 생긴다.
+  subscribeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch, onValue: (v: unknown) => void): unknown => {
+    const table = this.skipTable(expr);
+    return table === null
+      ? this.subscribeWholeExpr(expr, pairs, branch, onValue)
+      : this.subscribePartialExpr(expr, pairs, table, branch, onValue);
+  };
+
+  // 건너뛸 부분식이 없는 식. cache도 건너뛰기 표도 두지 않고, 칸이 바뀌면 처음부터 센다.
+  subscribeWholeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch, onValue: (v: unknown) => void): unknown => {
+    const reads: number[] = [];
+    const value = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
+    const readLeaves: number[] = [];
+    for (let i = 0; i < reads.length; i += 2) {
+      if (!readLeaves.includes(reads[i])) {
+        readLeaves.push(reads[i]);
+      }
+    }
+    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 DOM에 쓰지 않는다.
+    let lastValue = value;
+    const reevalOnChange: TSubscriber = () => {
+      const v = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, null);
+      if (v !== lastValue) {
+        lastValue = v;
+        onValue(v);
+      }
+    };
+    for (const leafIndex of readLeaves) {
+      branch.leafIndices.push(leafIndex);
+      branch.updateFns.push(reevalOnChange);
+    }
+    return value;
+  };
+
+  // 건너뛸 부분식이 있는 식. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 함수는 불릴 때
+  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다.
   //
   // 칸의 건너뛰기 표는 그 칸을 읽는 변수가
   //   하나면   식 정의가 공유하는 표(table.skipPastOpByVar)를 쓴다.
   //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
   //            그 칸이 바뀌면 두 변수가 함께 바뀌므로, 위치를 합쳐 이 인스턴스용 표를 만든다.
-  subscribeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch, onValue: (v: unknown) => void): unknown => {
-    const table = this.skipTable(expr);
+  subscribePartialExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable,
+    branch: TBranch,
+    onValue: (v: unknown) => void,
+  ): unknown => {
     const cache: unknown[] = new Array(table.opCount);
     const { value, readLeaves, varsOfLeaf } = this.evalExpr(expr, pairs, table, cache);
     // readLeaves[k]가 바뀌면 skipPastOpOfLeaf[k]로 건너뛴다.
@@ -1816,7 +1858,6 @@ class Interpreter {
         ? table.skipPastOpByVar[vars[0]]
         : buildSkipPastOp(table, expr, Int32Array.from(vars.flatMap((v) => [...table.positionsByVar[v]])).sort()),
     );
-    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 DOM에 쓰지 않는다.
     let lastValue = value;
     const reevalOnChange: TSubscriber = (_, leafIndex) => {
       const skipPastOp = skipPastOpOfLeaf[readLeaves.indexOf(leafIndex)];
@@ -1833,8 +1874,9 @@ class Interpreter {
     return value;
   };
 
-  // 식 정의당 건너뛰기 표 하나. 같은 expr 바이트면 같은 표를 돌려준다.
-  skipTable = (expr: Uint8Array): TExprSkipTable => {
+  // 식 정의당 건너뛰기 표 하나. 같은 expr 바이트면 같은 표를 돌려준다. 건너뛸 부분식이 없는 식은
+  // null이고, 그것도 담아 두어 다시 판정하지 않는다.
+  skipTable = (expr: Uint8Array): TExprSkipTable | null => {
     let table = skipTables.get(expr);
     if (table === undefined) {
       table = buildSkipTable(expr);
@@ -2521,21 +2563,24 @@ class Interpreter {
   //   - 잎 명령 위치 at에 skipPastOp[at]이 있으면, 그 연산까지를 계산하지 않고 cache에 든 그 연산의
   //     지난번 값을 올린 뒤 그 연산 다음 명령으로 간다.
   //   - 연산 결과는 cache[table.cacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
+  //     건너뛸 부분식이 없는 식은 표도 cache도 없어(null) 쓰지 않는다.
   //   - reads가 있으면 store 칸을 읽을 때마다 leafIndex와 읽은 명령의 위치를 이어 붙인다. a + b에서
   //     a, b가 칸 20, 21이면 [20, 0, 21, 3]. 다시 셀 때는 구독이 이미 걸려 있어 null을 넘긴다.
   runExpr = (
     expr: Uint8Array,
     pairs: TScope,
-    table: TExprSkipTable,
-    cache: unknown[],
+    table: TExprSkipTable | null,
+    cache: unknown[] | null,
     skipPastOp: TSkipPastOp,
     reads: number[] | null,
   ): unknown => {
     const stack: unknown[] = [];
-    // 연산 결과를 스택에 올리고 cache에도 써 둔다.
+    // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
     const pushResult = (at: number, value: unknown) => {
       stack.push(value);
-      cache[table.cacheIndex[at]] = value;
+      if (table !== null && cache !== null) {
+        cache[table.cacheIndex[at]] = value;
+      }
     };
     // 슬롯 하나가 가리키는 값. CONST면 상수풀, STORE면 store 칸.
     const slotValue = (scopeIndex: number, offset: number, at: number): unknown => {
@@ -2549,7 +2594,7 @@ class Interpreter {
     for (let pc = 0; pc < expr.length; ) {
       const at = pc;
       const skipPastOpAt = skipPastOp[at];
-      if (skipPastOpAt !== undefined) {
+      if (skipPastOpAt !== undefined && table !== null && cache !== null) {
         stack.push(cache[table.cacheIndex[skipPastOpAt]]);
         pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
         continue;

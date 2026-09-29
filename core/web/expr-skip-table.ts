@@ -101,7 +101,12 @@ const varKey = (expr: Uint8Array, pc: number) => {
   return (cell << 16) | (expr[pc + 1] << 8) | expr[pc + 2];
 };
 
-export const buildSkipTable = (expr: Uint8Array): TExprSkipTable => {
+// 어느 변수가 바뀌어도 건너뛸 부분식이 없으면 null이다. 런타임은 그런 식을 cache 없이 처음부터
+// 다시 센다.
+//   a - b     어느 쪽이 바뀌어도 a - b 전체를 다시 센다
+//   big > 50  변수가 big 하나라 모든 연산이 big을 품는다
+// 서로 다른 변수가 같은 칸을 가리켜 함께 바뀌어도 바뀐 위치가 늘 뿐이라 여전히 건너뛸 것이 없다.
+export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
   const len = expr.length;
   const sameStartOpChain = new Uint8Array(len).fill(CHAIN_END);
   const cacheIndex = new Uint8Array(len);
@@ -177,6 +182,9 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable => {
     skipPastOpByVar: [],
   };
   table.skipPastOpByVar = table.positionsByVar.map((p) => buildSkipPastOp(table, expr, p));
+  if (table.skipPastOpByVar.every((skipPastOp) => Object.keys(skipPastOp).length === 0)) {
+    return null;
+  }
   return table;
 };
 
