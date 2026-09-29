@@ -1,0 +1,275 @@
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --line: #e3e6eb;
+  --text: #1c2026;
+  --dim: #6b7380;
+  --accent: #2563eb;
+  --accent-soft: #dbe6fd;
+  --good: #15803d;
+  --good-soft: #dcfce7;
+  --warn: #dc2626;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --line: #2a2f3a;
+    --text: #e6e8ec;
+    --dim: #8b93a3;
+    --accent: #60a5fa;
+    --accent-soft: #1e3a5f;
+    --good: #4ade80;
+    --good-soft: #14532d;
+    --warn: #f87171;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+}
+a {
+  color: var(--accent);
+}
+code,
+.mono,
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dim {
+  color: var(--dim);
+}
+.small {
+  font-size: 12px;
+}
+
+/* 컨트롤 */
+.ctl,
+.btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.btn {
+  cursor: pointer;
+}
+.btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 대상 페이지 상단 */
+.hud {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.hud__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.hud__title {
+  margin-right: 8px;
+  font-size: 16px;
+}
+.hud__status {
+  color: var(--dim);
+  font-size: 13px;
+}
+.hud__panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.panel {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow-x: auto;
+}
+.panel h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--dim);
+  font-weight: 600;
+}
+.panel p {
+  margin: 0;
+}
+
+/* 표 */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tbl th,
+.tbl td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.tbl th {
+  color: var(--dim);
+  font-weight: 600;
+}
+.tbl .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tbl__sum td {
+  font-weight: 600;
+}
+
+/* 주문 목록 - 네 대상이 같은 마크업을 그린다 */
+#app {
+  padding: 12px 16px 48px;
+}
+.orders__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.orders__bar button,
+.row__inc {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.orders__info {
+  color: var(--dim);
+}
+.orders__list {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.row {
+  display: grid;
+  grid-template-columns: 64px 80px 48px 1fr 64px 24px 48px;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 10px;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.row__id {
+  color: var(--dim);
+}
+.row__amount {
+  text-align: right;
+}
+.row__warn {
+  visibility: hidden;
+  color: var(--warn);
+  font-weight: 700;
+  text-align: center;
+}
+.row__warn[data-warn="true"] {
+  visibility: visible;
+}
+.row__inc {
+  padding: 0 8px;
+}
+
+/* 비교 표 페이지 */
+.wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+.index h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+.lead {
+  margin: 0 0 12px;
+  color: var(--dim);
+}
+.exprs {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12px;
+  overflow-x: auto;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.caption {
+  margin: 12px 0 6px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.compare td.target {
+  min-width: 150px;
+}
+.compare td.cell {
+  position: relative;
+  min-width: 110px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.compare .bar {
+  position: absolute;
+  inset: 4px auto 4px 0;
+  border-radius: 3px;
+  background: var(--accent-soft);
+}
+.compare td.best .bar {
+  background: var(--good-soft);
+}
+.compare td.best span {
+  color: var(--good);
+  font-weight: 700;
+}
+.compare td.cell span {
+  position: relative;
+}
+.notes {
+  margin-top: 16px;
+  padding-left: 18px;
+  color: var(--dim);
+  font-size: 13px;
+}

@@ -22,7 +22,9 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 
 type TIndexSymbol = `$${TDigitString}`;
 
-import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
+import { EXPR, instrSize } from "./expr-opcode.ts";
+import { buildSkipPastOp, buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
+import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
@@ -176,43 +178,6 @@ const OP = {
   TEXT_EXPR: 0x1f,
   ATTR_G_EXPR: 0x20,
   ATTR_L_EXPR: 0x21,
-} as const;
-
-// 표현식 opcode(BYTECODE.md #4 <EXPR>). OP와 다른 이름공간이다 - 같은 값이 서로 다른 뜻이라
-// 식 바이트를 OP로 읽으면 안 된다.
-//
-// 식은 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다. 타입은 컴파일타임에 검사가 끝나
-// (compiler/src/expr_type.rs) 여기서 타입을 안 본다.
-//
-// 스택에는 값이 오르는 것이 기본이고, ELEM_AT/FIELD_AT만 leafIndex를 올린다 - 요소 위치는
-// 인덱스를 세어 봐야 정해져 컴파일타임에 슬롯으로 접히지 않는다. READ_LEAF가 그 leafIndex를
-// 값으로 바꾸므로 연산자에는 늘 값만 닿는다.
-const EXPR = {
-  LOAD_VAR: 0x00, // scope_index: u8, offset: u8
-  LOAD_CONST: 0x01, // const_index: u16
-  LOAD_ARRAY_LENGTH: 0x02, // scope_index: u8, offset: u8
-  LOAD_STRING_LENGTH: 0x03, // scope_index: u8, offset: u8
-  LOAD_SMALL_INT: 0x04, // value: u8
-  LOAD_TRUE: 0x05,
-  LOAD_FALSE: 0x06,
-  ADD: 0x10,
-  SUB: 0x11,
-  MUL: 0x12,
-  DIV: 0x13,
-  REM: 0x14,
-  EQ: 0x15,
-  NE: 0x16,
-  LT: 0x17,
-  LE: 0x18,
-  GT: 0x19,
-  GE: 0x1a,
-  AND: 0x1b,
-  OR: 0x1c,
-  NOT: 0x1d,
-  NEG: 0x1e,
-  ELEM_AT: 0x1f, // 인덱스와 arrayInfoIndex를 꺼내 elemStartLeafIndices[i]를 올린다
-  FIELD_AT: 0x20, // offset: u8 - leafIndex에 필드 거리를 더한다
-  READ_LEAF: 0x21, // leafIndex를 꺼내 그 칸의 값을 올린다
 } as const;
 
 // opcode의 operand 바이트 수를 돌려준다.
@@ -477,6 +442,13 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
   }
 };
 
+// 식 정의(expr 바이트)당 건너뛰기 표 하나. 같은 식을 쓰는 인스턴스(@for 회차마다 생기는 것)끼리
+// 공유한다. expr 바이트는 decode한 모듈이 들고 있어, 모듈이 버려지면 표도 함께 버려진다.
+const skipTables = new WeakMap<Uint8Array, TExprSkipTable | null>();
+
+// 식을 처음 셀 때 runExpr에 넘기는 값 - 아무것도 건너뛰지 않는다.
+const SKIP_NOTHING: TSkipPastOp = {};
+
 // 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
 // @for 회차/RENDER 재진입은 같은 walkStacks를 이어 쓰고(push/pop 공유), 지연 실행(@if lazyBuild/@for grow)만
 // build 시점 상태를 snapshotStacks로 딥카피해 캡처한다 - 지연 시점엔 원본 스택이 이미 pop돼 있어,
@@ -490,6 +462,17 @@ type TWalkStacks = {
   loopIndexStack: number[];
   activeContexts: number[];
 };
+
+// 템플릿 복제 계획 - 한 범위(startPc~endPc)의 정적 뼈대와 값 자리 목록(templatePlanOf).
+//   template  요소/정적 속성/정적 텍스트만 든 뼈대. 값 자리 텍스트는 빈 텍스트 노드로 자리만 잡는다.
+//   holes     [명령 위치, 노드 번호]를 이어 담은 목록. 노드 번호는 뼈대를 앞순회한 순서다. 노드가
+//             없는 명령(PUSH_PATH_INDEX_SEGMENT)은 -1.
+//
+// li(class="row") { span() { ${row.label} } button(@click:PICK) { "pick" } } 이면
+//   template  <li class="row"><span>""</span><button>"pick"</button></li>
+//   노드 번호  0=li 1=span 2=span 안 텍스트 3=button 4="pick"
+//   holes     [TEXT_VAR 위치, 2, BIND_EVENT 위치, 3]
+type TTemplatePlan = { template: DocumentFragment; holes: number[] };
 
 // 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
 // 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
@@ -1020,6 +1003,9 @@ class Interpreter {
   forEndCache = new Map<number, number>();
   ifRangesCache = new Map<number, { ifBodyEnd: number; elseBodyStart: number; ifEndPc: number }>();
   slotContentEndCache = new Map<number, number>();
+  // 범위 -> 템플릿 복제 계획(복제할 수 없는 범위면 null). 키는 시작 pc - interpret 범위는 끝이 시작에서
+  // 정해진다(@for 본문은 FOR_END, @if 가지는 ELSE/IF_END, 합성은 def 끝).
+  templatePlanCache = new Map<number, TTemplatePlan | null>();
 
   constructor(
     module: TModule,
@@ -1793,8 +1779,7 @@ class Interpreter {
   };
 
   // bindVar의 식 버전 - 연산자가 붙은 값(TEXT_EXPR/ATTR_*_EXPR)을 세어 현재 값을 주고, 식이
-  // 읽는 칸이 바뀌면 다시 세어 update에 넘긴다. 슬롯 하나가 아니라 식 하나를 보므로 읽는 칸이
-  // 여럿일 수 있고, 어느 칸이 바뀌든 하는 일이 같아 함수는 하나만 만들어 칸마다 건다.
+  // 읽는 칸이 바뀌면 다시 세어 update에 넘긴다.
   //
   // IF_EXPR과 달리 파생 칸을 안 잡는다 - 값을 받아 DOM에 바로 쓰므로 중간에 담을 자리가
   // 필요 없다(IF_EXPR은 분기가 조건 칸 하나를 구독하는 구조라 잡는다).
@@ -1802,14 +1787,348 @@ class Interpreter {
     // 다시 셀 때도 이 지점의 슬롯을 봐야 하는데, 공유 pairs는 @for 회차마다 push/pop돼 그때는
     // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
     // (runIfExpr과 같은 관례).
-    const pairs = [...argumentSourcePairs];
-    const recount = () => update(this.evalExpr(expr, pairs).value);
-    const { value, readLeaves } = this.evalExpr(expr, pairs);
+    return this.subscribeExpr(expr, [...argumentSourcePairs], branch, update);
+  };
+
+  // 식을 처음 세고, 식이 읽은 칸마다 구독을 건다. 칸이 바뀌면 다시 세어, 값이 지난번과 다를 때만
+  // onValue에 넘긴다. 처음 센 값을 돌려준다. 구독은 branch에 실어 가지와 생애를 함께 한다.
+  //
+  // 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 칸에 같은 함수를 건다. 칸마다
+  // 함수를 만들면 1만 행 목록에서 함수가 수만 개 늘어, 메모리가 CPU 캐시를 넘쳐 다시 세기가 오히려
+  // 느려진다.
+  //
+  // 건너뛸 부분식이 있는 식과 없는 식을 메서드로 나눈다. 한 메서드 안에서 나누면 구독 함수가 잡는
+  // 컨텍스트에 다른 쪽 변수의 자리까지 생긴다.
+  subscribeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch, onValue: (v: unknown) => void): unknown => {
+    const table = this.skipTable(expr);
+    return table === null
+      ? this.subscribeWholeExpr(expr, pairs, branch, onValue)
+      : this.subscribePartialExpr(expr, pairs, table, branch, onValue);
+  };
+
+  // 건너뛸 부분식이 없는 식. cache도 건너뛰기 표도 두지 않고, 칸이 바뀌면 처음부터 센다.
+  subscribeWholeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch, onValue: (v: unknown) => void): unknown => {
+    const reads: number[] = [];
+    const value = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
+    const readLeaves: number[] = [];
+    for (let i = 0; i < reads.length; i += 2) {
+      if (!readLeaves.includes(reads[i])) {
+        readLeaves.push(reads[i]);
+      }
+    }
+    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 DOM에 쓰지 않는다.
+    let lastValue = value;
+    const reevalOnChange: TSubscriber = () => {
+      const v = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, null);
+      if (v !== lastValue) {
+        lastValue = v;
+        onValue(v);
+      }
+    };
     for (const leafIndex of readLeaves) {
       branch.leafIndices.push(leafIndex);
-      branch.updateFns.push(recount);
+      branch.updateFns.push(reevalOnChange);
     }
     return value;
+  };
+
+  // 건너뛸 부분식이 있는 식. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 함수는 불릴 때
+  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다.
+  //
+  // 칸의 건너뛰기 표는 그 칸을 읽는 변수가
+  //   하나면   식 정의가 공유하는 표(table.skipPastOpByVar)를 쓴다.
+  //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
+  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로, 위치를 합쳐 이 인스턴스용 표를 만든다.
+  subscribePartialExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable,
+    branch: TBranch,
+    onValue: (v: unknown) => void,
+  ): unknown => {
+    const cache: unknown[] = new Array(table.opCount);
+    const { value, readLeaves, varsOfLeaf } = this.evalExpr(expr, pairs, table, cache);
+    // readLeaves[k]가 바뀌면 skipPastOpOfLeaf[k]로 건너뛴다.
+    const skipPastOpOfLeaf = varsOfLeaf.map((vars) =>
+      vars.length === 1
+        ? table.skipPastOpByVar[vars[0]]
+        : buildSkipPastOp(table, expr, Int32Array.from(vars.flatMap((v) => [...table.positionsByVar[v]])).sort()),
+    );
+    let lastValue = value;
+    const reevalOnChange: TSubscriber = (_, leafIndex) => {
+      const skipPastOp = skipPastOpOfLeaf[readLeaves.indexOf(leafIndex)];
+      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOp);
+      if (v !== lastValue) {
+        lastValue = v;
+        onValue(v);
+      }
+    };
+    for (const leafIndex of readLeaves) {
+      branch.leafIndices.push(leafIndex);
+      branch.updateFns.push(reevalOnChange);
+    }
+    return value;
+  };
+
+  // 식 정의당 건너뛰기 표 하나. 같은 expr 바이트면 같은 표를 돌려준다. 건너뛸 부분식이 없는 식은
+  // null이고, 그것도 담아 두어 다시 판정하지 않는다.
+  skipTable = (expr: Uint8Array): TExprSkipTable | null => {
+    let table = skipTables.get(expr);
+    if (table === undefined) {
+      table = buildSkipTable(expr);
+      skipTables.set(expr, table);
+    }
+    return table;
+  };
+
+  // 값 자리 명령 하나(TEXT_VAR, TEXT_EXPR, ATTR_G_VAR, ATTR_L_VAR, ATTR_G_EXPR, ATTR_L_EXPR)를 node에
+  // 건다 - 지금 값을 쓰고, 값이 바뀌면 다시 쓰도록 구독한다. operand는 pc(opcode 다음 바이트)부터 읽는다.
+  // node는 TEXT_*면 텍스트 노드, ATTR_*면 그 속성을 가진 요소다.
+  //
+  // interpret와 cloneTemplate가 함께 쓴다. 해석할 때는 노드를 새로 만들어 넘기고, 복제할 때는 복제본의
+  // 노드를 넘긴다.
+  bindValueSlot = (
+    op: number,
+    pc: number,
+    node: Node,
+    compId: number,
+    argumentSourcePairs: TScope,
+    branch: TBranch,
+  ): void => {
+    const code = this.code;
+    const u16 = (at: number) => code[at] | (code[at + 1] << 8);
+    switch (op) {
+      case OP.TEXT_VAR: {
+        // operand: scope_index, offset
+        node.textContent = this.bindVar(
+          code[pc],
+          code[pc + 1],
+          (v) => (node.textContent = v as string),
+          argumentSourcePairs,
+          branch,
+        ) as string;
+        return;
+      }
+      case OP.TEXT_EXPR: {
+        // operand: expr_index
+        node.textContent = this.bindExpr(
+          this.module.defs[compId].exprs[code[pc]],
+          (v) => (node.textContent = v as string),
+          argumentSourcePairs,
+          branch,
+        ) as string;
+        return;
+      }
+    }
+    // ATTR_*: operand 앞 두 바이트가 속성 이름. G는 전역 속성 표(ATTRS), L은 상수풀.
+    const el = node as HTMLElement;
+    const nameIndex = u16(pc);
+    const name =
+      op === OP.ATTR_G_VAR || op === OP.ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
+    const update = (v: unknown) => el.setAttribute(name, v as string);
+    const v =
+      op === OP.ATTR_G_VAR || op === OP.ATTR_L_VAR
+        ? // 이어서 scope_index, offset
+          this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
+        : // 이어서 expr_index
+          this.bindExpr(this.module.defs[compId].exprs[code[pc + 2]], update, argumentSourcePairs, branch);
+    el.setAttribute(name, v as string);
+  };
+
+  // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
+  //
+  // 범위가 아래 명령만으로 되어 있으면 뼈대를 DOM으로 만들고 값 자리를 적는다. 하나라도 다른 명령
+  // (@if, @for, 합성, 슬롯, @with, LOAD_RES)이 섞이면 null - interpret가 지금처럼 해석한다.
+  //   뼈대      ELEM_OPEN, ATTR_G, ATTR_L, ELEM_CLOSE_OPEN, ELEM_END, TEXT
+  //   값 자리   TEXT_VAR, TEXT_EXPR, ATTR_G_VAR, ATTR_L_VAR, ATTR_G_EXPR, ATTR_L_EXPR, BIND_EVENT
+  //   경로 상태  PUSH_PATH_INDEX_SEGMENT(뒤따르는 BIND_EVENT의 [$n])
+  //
+  // 노드 번호는 노드를 만든 순서다. 요소는 자식보다 먼저, 형제는 앞에서부터 만들므로 이 순서가
+  // 곧 뼈대의 앞순회 순서다 - 복제본을 앞순회로 모으면 같은 번호로 같은 노드를 찾는다.
+  templatePlanOf = (startPc: number, endPc: number): TTemplatePlan | null => {
+    const cached = this.templatePlanCache.get(startPc);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const code = this.code;
+    const u16 = (at: number) => code[at] | (code[at + 1] << 8);
+    const template = document.createDocumentFragment();
+    const parents: Node[] = [template];
+    const holes: number[] = [];
+    let pending: HTMLElement | null = null;
+    let nodeCount = 0;
+    let plan: TTemplatePlan | null = { template, holes };
+    for (let pc = startPc; pc < endPc && plan !== null; ) {
+      const at = pc;
+      const op = code[pc++];
+      switch (op) {
+        case OP.ELEM_OPEN:
+          pending = document.createElement(TAGS[u16(pc)]);
+          nodeCount++;
+          break;
+        case OP.ATTR_G:
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          pending!.setAttribute(ATTRS[u16(pc)], this.module.constpool[u16(pc + 2)] as string);
+          break;
+        case OP.ATTR_L:
+          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          pending!.setAttribute(this.module.constpool[u16(pc)] as string, this.module.constpool[u16(pc + 2)] as string);
+          break;
+        case OP.ATTR_G_VAR:
+        case OP.ATTR_L_VAR:
+        case OP.ATTR_G_EXPR:
+        case OP.ATTR_L_EXPR:
+        case OP.BIND_EVENT:
+          // 여는 중인 요소가 방금 만든 노드다.
+          holes.push(at, nodeCount - 1);
+          break;
+        case OP.ELEM_CLOSE_OPEN:
+          // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+          parents[parents.length - 1].appendChild(pending!);
+          // biome-ignore lint/style/noNonNullAssertion: 바로 위와 같은 pending
+          parents.push(pending!);
+          pending = null;
+          break;
+        case OP.ELEM_END:
+          parents.pop();
+          break;
+        case OP.TEXT:
+          parents[parents.length - 1].appendChild(document.createTextNode(this.module.constpool[u16(pc)] as string));
+          nodeCount++;
+          break;
+        case OP.TEXT_VAR:
+        case OP.TEXT_EXPR:
+          parents[parents.length - 1].appendChild(document.createTextNode(""));
+          holes.push(at, nodeCount);
+          nodeCount++;
+          break;
+        case OP.PUSH_PATH_INDEX_SEGMENT:
+          holes.push(at, -1);
+          break;
+        default:
+          plan = null;
+      }
+      pc += operandLen(op);
+    }
+    this.templatePlanCache.set(startPc, plan);
+    return plan;
+  };
+
+  // 계획의 뼈대를 복제하고 값 자리에 바인딩을 건다. interpret가 계획이 있는 범위에서 해석 대신 부른다.
+  // 값 자리는 interpret와 같은 bindValueSlot/bindEvent로 건다.
+  cloneTemplate = (
+    plan: TTemplatePlan,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    walkStacks: TWalkStacks,
+    branch: TBranch,
+  ): DocumentFragment => {
+    const fragment = plan.template.cloneNode(true) as DocumentFragment;
+    // 복제본의 노드를 앞순회로 모은다 - 계획의 노드 번호와 같은 순서다.
+    const nodes: Node[] = [];
+    const collect = (parent: Node) => {
+      for (let child = parent.firstChild; child !== null; child = child.nextSibling) {
+        nodes.push(child);
+        collect(child);
+      }
+    };
+    collect(fragment);
+
+    const code = this.code;
+    const { holes } = plan;
+    // interpret의 segment와 같다 - PUSH_PATH_INDEX_SEGMENT가 깔고 다음 BIND_EVENT가 소비한다.
+    let segment: string | null = null;
+    for (let h = 0; h < holes.length; h += 2) {
+      const at = holes[h];
+      const node = nodes[holes[h + 1]];
+      const op = code[at];
+      const pc = at + 1;
+      if (op === OP.PUSH_PATH_INDEX_SEGMENT) {
+        segment = `${segment ?? ""}[$${loopIndexBase + (code[pc] | (code[pc + 1] << 8))}]`;
+      } else if (op === OP.BIND_EVENT) {
+        const domEventIndex = code[pc] | (code[pc + 1] << 8);
+        const eventIndex = code[pc + 2] | (code[pc + 3] << 8);
+        this.bindEvent(
+          node as HTMLElement,
+          domEventIndex,
+          eventIndex,
+          segment,
+          compId,
+          pathPrefix,
+          argumentSourcePairs,
+          walkStacks,
+        );
+        segment = null;
+      } else {
+        this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
+      }
+    }
+    return fragment;
+  };
+
+  // el에 DOM 이벤트 바인딩을 심고 document 위임을 켠다(BIND_EVENT).
+  //
+  // interpret 밖에 따로 둔다. 이 본문이 interpret의 switch 안에 있으면 V8이 interpret를 잘 최적화하지
+  // 못해, 1만 행 목록의 mount가 눈에 띄게 느려졌다(작은 도우미 u16at/nodeTop이 인라인되지 않았다).
+  // 어느 V8 제약에 걸리는지는 확인하지 못했다.
+  bindEvent = (
+    el: HTMLElement,
+    domEventIndex: number,
+    eventIndex: number,
+    segment: string | null,
+    compId: number,
+    pathPrefix: string,
+    argumentSourcePairs: TScope,
+    walkStacks: TWalkStacks,
+  ): void => {
+    const domEvent = DOM_EVENTS[domEventIndex];
+    const event = this.componentEvents(compId)[eventIndex];
+    const eventName = this.module.constpool[event.nameConstIndex] as string;
+    // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
+    let eventPrefix = pathPrefix;
+    if (segment !== null) {
+      eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
+    }
+    const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
+    // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
+    // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
+    const payload: TAssembled[] = event.fields.map((field) => ({
+      name: this.module.constpool[field.nameConstIndex] as string,
+      typeRef: field.typeRef,
+      fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
+    }));
+    // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
+    // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 현재 scope로 편다.
+    const props = this.buildProps(this.module.defs[compId].propsTypeRef, argumentSourcePairs);
+    // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
+    // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
+    const contextLeaves: Record<string, TAssembled[]> = {};
+    for (const i of walkStacks.activeContexts) {
+      const created = this.createdContexts[i];
+      contextLeaves[created.name] = created.fields;
+    }
+    // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
+    // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가
+    // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
+    // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
+    const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
+    for (let i = 0; i * 2 < walkStacks.loopIndexStack.length; i++) {
+      loopIndices[`$${i}` as TIndexSymbol] = {
+        kind: walkStacks.loopIndexStack[2 * i],
+        ref: walkStacks.loopIndexStack[2 * i + 1],
+      };
+    }
+    // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
+    // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
+    let bound = this.eventBindings.get(el);
+    if (!bound) {
+      bound = {};
+      this.eventBindings.set(el, bound);
+    }
+    bound[domEvent] = { fullName, payload, contextLeaves, props, loopIndices };
+    this.ensureDelegate(domEvent);
   };
 
   // 한 가지(startPc~endPc)를 build한다 - 노드는 fragment로 반환, 구독은 해당 가지에 쌓는다.
@@ -1839,6 +2158,19 @@ class Interpreter {
     walkStacks: TWalkStacks,
     slotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [],
   ): DocumentFragment => {
+    // 요소/텍스트/값 자리/이벤트만으로 된 범위(@for 회차 본문 등)는 해석하지 않고 뼈대를 복제한다.
+    const plan = this.templatePlanOf(startPc, endPc);
+    if (plan !== null) {
+      return this.cloneTemplate(
+        plan,
+        argumentSourcePairs,
+        compId,
+        pathPrefix,
+        loopIndexBase,
+        walkStacks,
+        this.branchPool.entries[startBranchIndex],
+      );
+    }
     const fragment = document.createDocumentFragment();
     const nodeStack: Node[] = [fragment]; // 노드 스택 - DOM 부모 추적
     let pending: HTMLElement | null = null;
@@ -1899,117 +2231,33 @@ class Interpreter {
           pending!.setAttribute(name, this.module.constpool[u16at()] as string);
           break;
         }
-        case OP.ATTR_G_VAR: {
-          const name = ATTRS[u16at()];
-          const scopeIndex = u8at();
-          const offset = u8at();
-          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindVar(
-            scopeIndex,
-            offset,
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
-          break;
-        }
-        case OP.ATTR_L_VAR: {
-          const name = this.module.constpool[u16at()] as string;
-          const scopeIndex = u8at();
-          const offset = u8at();
-          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindVar(
-            scopeIndex,
-            offset,
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
-          break;
-        }
-        case OP.ATTR_G_EXPR: {
-          const name = ATTRS[u16at()];
-          // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindExpr(
-            this.module.defs[compId].exprs[u8at()],
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
-          break;
-        }
+        case OP.ATTR_G_VAR:
+        case OP.ATTR_L_VAR:
+        case OP.ATTR_G_EXPR:
         case OP.ATTR_L_EXPR: {
-          const name = this.module.constpool[u16at()] as string;
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          const v = this.bindExpr(
-            this.module.defs[compId].exprs[u8at()],
-            (v) => el.setAttribute(name, v as string),
-            argumentSourcePairs,
-            branch,
-          );
-          el.setAttribute(name, v as string);
+          this.bindValueSlot(op, pc, pending!, compId, argumentSourcePairs, branch);
+          pc += operandLen(op);
           break;
         }
         case OP.BIND_EVENT: {
           // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
-          const domEvent = DOM_EVENTS[u16at()];
-          const event = this.componentEvents(compId)[u16at()];
-          const eventName = this.module.constpool[event.nameConstIndex] as string;
-          // fullname = 합성 경로 + (@for 직속 element면 익명 인덱스 세그먼트) + 로컬 이벤트명.
-          // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n](RENDER를 안 거치니 여기서
+          const domEventIndex = u16at();
+          const eventIndex = u16at();
+          this.bindEvent(
+            // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
+            pending!,
+            domEventIndex,
+            eventIndex,
+            segment,
+            compId,
+            pathPrefix,
+            argumentSourcePairs,
+            walkStacks,
+          );
+          // segment는 PUSH_PATH_INDEX_SEGMENT가 이 element에 깐 [$n]이다(RENDER를 안 거치니 여기서
           // 소비). 이벤트 있는 element마다 새로 깔리므로 소비(비움)해도 형제/중첩이 다시 깐다.
-          let eventPrefix = pathPrefix;
-          if (segment !== null) {
-            eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
-            segment = null;
-          }
-          const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
-          // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
-          // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
-          const payload: TAssembled[] = event.fields.map((field) => ({
-            name: this.module.constpool[field.nameConstIndex] as string,
-            typeRef: field.typeRef,
-            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
-          }));
-          // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
-          // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 현재 scope로 편다.
-          const props = this.buildProps(this.module.defs[compId].propsTypeRef, argumentSourcePairs);
-          // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
-          // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
-          const contextLeaves: Record<string, TAssembled[]> = {};
-          for (const i of walkStacks.activeContexts) {
-            const created = this.createdContexts[i];
-            contextLeaves[created.name] = created.fields;
-          }
-          // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
-          // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가
-          // 발화 때 해소하는 이유: array-for(STORE) 인덱스는 그 사이 중간 제거로 뒤 인덱스가 당겨질 수
-          // 있어 발화 시점 store.get이라야 정합하다(count-for RAW는 상수라 아무 때나 같다). fullname [$n]과 짝.
-          const loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }> = {};
-          for (let i = 0; i * 2 < walkStacks.loopIndexStack.length; i++) {
-            loopIndices[`$${i}` as TIndexSymbol] = {
-              kind: walkStacks.loopIndexStack[2 * i],
-              ref: walkStacks.loopIndexStack[2 * i + 1],
-            };
-          }
-          // element별 리스너 대신 발화 바인딩을 WeakMap에 심고 document 위임을 켠다.
-          // 한 element에 DOM 이벤트 타입이 여럿 붙을 수 있어 타입별로 담는다.
-          // biome-ignore lint/style/noNonNullAssertion: BIND_EVENT는 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          const el = pending!;
-          let bound = this.eventBindings.get(el);
-          if (!bound) {
-            bound = {};
-            this.eventBindings.set(el, bound);
-          }
-          bound[domEvent] = { fullName, payload, contextLeaves, props, loopIndices };
-          this.ensureDelegate(domEvent);
+          segment = null;
           break;
         }
         case OP.ELEM_CLOSE_OPEN: {
@@ -2024,28 +2272,11 @@ class Interpreter {
           nodeTop().appendChild(document.createTextNode(this.module.constpool[u16at()] as string));
           break;
         }
-        case OP.TEXT_VAR: {
-          const node = document.createTextNode("");
-          const scopeIndex = u8at();
-          const offset = u8at();
-          node.textContent = this.bindVar(
-            scopeIndex,
-            offset,
-            (v) => (node.textContent = v as string),
-            argumentSourcePairs,
-            branch,
-          ) as string;
-          nodeTop().appendChild(node);
-          break;
-        }
+        case OP.TEXT_VAR:
         case OP.TEXT_EXPR: {
           const node = document.createTextNode("");
-          node.textContent = this.bindExpr(
-            this.module.defs[compId].exprs[u8at()],
-            (v) => (node.textContent = v as string),
-            argumentSourcePairs,
-            branch,
-          ) as string;
+          this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
+          pc += operandLen(op);
           nodeTop().appendChild(node);
           break;
         }
@@ -2294,36 +2525,99 @@ class Interpreter {
     return fragment;
   };
 
-  // 식을 후위 표기로 세어 값과 그 값을 세며 읽은 칸을 낸다(BYTECODE.md #4 <EXPR>).
-  //
-  // 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
+  // 식을 처음부터 센다. 값과 함께, 식이 읽은 칸(readLeaves)과 칸마다 그 칸을 읽은 변수 번호
+  // (varsOfLeaf, 번호는 expr-skip-table.ts의 변수)를 낸다. 연산 결과는 cache에 써 둔다.
   //
   // readLeaves는 구독할 칸이다. 세어 보지 않고는 알 수 없어 값과 함께 나온다 - 인덱스 접근은
   // 어느 요소를 읽는지가 인덱스를 세어 봐야 정해진다. CONST 슬롯은 값이 안 변해 빠지고, 같은
-  // 칸이 두 번 나오면(`a[i] + a[i]`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때 식을 두 번
-  // 다시 센다.
-  evalExpr = (expr: Uint8Array, pairs: TScope): { value: unknown; readLeaves: number[] } => {
-    const stack: unknown[] = [];
+  // 칸이 두 번 나오면(`a + a`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때 식을 두 번 다시 센다.
+  //
+  // ((a + b) * c) - (d + e)에서 a~e가 leafIndex 20~24를 읽는 인스턴스
+  //   readLeaves [20, 21, 22, 23, 24], varsOfLeaf [[0], [1], [2], [3], [4]]
+  // 부모가 d와 e에 같은 칸 23을 넘긴 인스턴스
+  //   readLeaves [20, 21, 22, 23],     varsOfLeaf [[0], [1], [2], [3, 4]]
+  evalExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable,
+    cache: unknown[],
+  ): { value: unknown; readLeaves: number[]; varsOfLeaf: number[][] } => {
+    const reads: number[] = [];
+    const value = this.runExpr(expr, pairs, table, cache, SKIP_NOTHING, reads);
     const readLeaves: number[] = [];
-    const addReadLeaf = (leafIndex: number) => {
-      if (!readLeaves.includes(leafIndex)) {
+    const varsOfLeaf: number[][] = [];
+    for (let i = 0; i < reads.length; i += 2) {
+      const leafIndex = reads[i];
+      let k = readLeaves.indexOf(leafIndex);
+      if (k < 0) {
+        k = readLeaves.length;
         readLeaves.push(leafIndex);
+        varsOfLeaf.push([]);
+      }
+      const varNumber = table.varAt[reads[i + 1]];
+      if (!varsOfLeaf[k].includes(varNumber)) {
+        varsOfLeaf[k].push(varNumber);
+      }
+    }
+    return { value, readLeaves, varsOfLeaf };
+  };
+
+  // 식을 다시 센다. skipPastOp에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다.
+  reevalExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable,
+    cache: unknown[],
+    skipPastOp: TSkipPastOp,
+  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOp, null);
+
+  // 식을 후위 표기로 센다(BYTECODE.md #4 <EXPR>). evalExpr와 reevalExpr가 함께 쓰는 본체다.
+  //
+  // 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
+  //
+  //   - 잎 명령 위치 at에 skipPastOp[at]이 있으면, 그 연산까지를 계산하지 않고 cache에 든 그 연산의
+  //     지난번 값을 올린 뒤 그 연산 다음 명령으로 간다.
+  //   - 연산 결과는 cache[table.cacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
+  //     건너뛸 부분식이 없는 식은 표도 cache도 없어(null) 쓰지 않는다.
+  //   - reads가 있으면 store 칸을 읽을 때마다 leafIndex와 읽은 명령의 위치를 이어 붙인다. a + b에서
+  //     a, b가 칸 20, 21이면 [20, 0, 21, 3]. 다시 셀 때는 구독이 이미 걸려 있어 null을 넘긴다.
+  runExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    table: TExprSkipTable | null,
+    cache: unknown[] | null,
+    skipPastOp: TSkipPastOp,
+    reads: number[] | null,
+  ): unknown => {
+    const stack: unknown[] = [];
+    // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
+    const pushResult = (at: number, value: unknown) => {
+      stack.push(value);
+      if (table !== null && cache !== null) {
+        cache[table.cacheIndex[at]] = value;
       }
     };
     // 슬롯 하나가 가리키는 값. CONST면 상수풀, STORE면 store 칸.
-    const slotValue = (scopeIndex: number, offset: number): unknown => {
+    const slotValue = (scopeIndex: number, offset: number, at: number): unknown => {
       const ref = slotRef(pairs, scopeIndex);
       if (slotKind(pairs, scopeIndex) === CONST) {
         return this.module.constpool[ref];
       }
-      addReadLeaf(ref + offset);
+      reads?.push(ref + offset, at);
       return this.store.get(ref + offset);
     };
     for (let pc = 0; pc < expr.length; ) {
+      const at = pc;
+      const skipPastOpAt = skipPastOp[at];
+      if (skipPastOpAt !== undefined && table !== null && cache !== null) {
+        stack.push(cache[table.cacheIndex[skipPastOpAt]]);
+        pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
+        continue;
+      }
       const op = expr[pc++];
       switch (op) {
         case EXPR.LOAD_VAR: {
-          stack.push(slotValue(expr[pc], expr[pc + 1]));
+          stack.push(slotValue(expr[pc], expr[pc + 1], at));
           pc += 2;
           break;
         }
@@ -2337,7 +2631,7 @@ class Interpreter {
           const info = this.arrayPool.entries[this.store.get(leafIndex) as number];
           if (slotKind(pairs, expr[pc]) !== CONST) {
             info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
-            addReadLeaf(info.sizeLeafIndex);
+            reads?.push(info.sizeLeafIndex, at);
           }
           stack.push(info.elemStartLeafIndices.length);
           pc += 2;
@@ -2345,7 +2639,7 @@ class Interpreter {
         }
         case EXPR.LOAD_STRING_LENGTH: {
           // 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다 - slotValue가 그 칸을 담는다.
-          stack.push(String(slotValue(expr[pc], expr[pc + 1])).length);
+          stack.push(String(slotValue(expr[pc], expr[pc + 1], at)).length);
           pc += 2;
           break;
         }
@@ -2365,37 +2659,37 @@ class Interpreter {
           break;
         // 단항 - 하나 꺼내 하나 넣는다.
         case EXPR.NOT:
-          stack.push(!stack.pop());
+          pushResult(at, !stack.pop());
           break;
         case EXPR.NEG:
-          stack.push(-(stack.pop() as number));
+          pushResult(at, -(stack.pop() as number));
           break;
         // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
         case EXPR.ELEM_AT: {
           const i = stack.pop() as number;
           const info = this.arrayPool.entries[stack.pop() as number];
-          stack.push(info.elemStartLeafIndices[i]);
+          pushResult(at, info.elemStartLeafIndices[i]);
           break;
         }
         case EXPR.FIELD_AT:
-          stack.push((stack.pop() as number) + expr[pc++]);
+          pushResult(at, (stack.pop() as number) + expr[pc++]);
           break;
         case EXPR.READ_LEAF: {
           const leafIndex = stack.pop() as number;
-          addReadLeaf(leafIndex);
-          stack.push(this.store.get(leafIndex));
+          reads?.push(leafIndex, at);
+          pushResult(at, this.store.get(leafIndex));
           break;
         }
         // 이항 - 둘 꺼내 하나 넣는다. 나중에 밀린 것이 오른쪽이라 먼저 꺼내진다.
         default: {
           const right = stack.pop();
           const left = stack.pop();
-          stack.push(applyBinary(op, left, right));
+          pushResult(at, applyBinary(op, left, right));
           break;
         }
       }
     }
-    return { value: stack[0], readLeaves };
+    return stack[0];
   };
 
   // @if opcode 처리 - 조건 슬롯을 그대로 조건 칸으로 쓴다.
@@ -2450,17 +2744,12 @@ class Interpreter {
     // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
     // (@if lazyBuild/@for grow와 같은 관례). runIf는 조건 칸 번호를 지금 뽑아 둬 카피가 필요 없다.
     const pairs = [...argumentSourcePairs];
-    const { value, readLeaves } = this.evalExpr(expr, pairs);
+    // 식이 읽는 칸이 바뀌면 식을 다시 세어 파생 칸(condLeafIndex)에 넣는다. 그 set이 아래
+    // buildIfRegion이 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
+    // 때문이다. 구독은 부모 가지에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 구독 함수는
+    // 칸이 바뀔 때 불리므로, 그때는 아래에서 파생 칸을 이미 잡아 두었다.
+    const value = this.subscribeExpr(expr, pairs, branch, (v) => this.store.set(condLeafIndex, v));
     const condLeafIndex = this.store.alloc([value]);
-    // 식이 읽는 칸이 바뀌면 식 전체를 다시 세어 파생 칸에 넣는다. 그 set이 아래 buildIfRegion이
-    // 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기 때문이다.
-    // 부모 가지 구독에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 어느 칸이 바뀌든 하는
-    // 일이 같아 함수는 하나만 만들고 칸마다 건다 - 끊을 때 (칸, 함수) 짝이 필요해 항목은 칸 수만큼.
-    const recount = () => this.store.set(condLeafIndex, this.evalExpr(expr, pairs).value);
-    for (const leafIndex of readLeaves) {
-      branch.leafIndices.push(leafIndex);
-      branch.updateFns.push(recount);
-    }
     return this.buildIfRegion(
       pc,
       condLeafIndex,
