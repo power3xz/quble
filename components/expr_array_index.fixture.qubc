@@ -2,7 +2,8 @@ component ExprArrayIndex {
   props {
     rows: { title: string, score: number }[],
     scalars: number[],
-    cursor: number
+    cursor: number,
+    show: bool
   }
   template {
     div() {
@@ -12,6 +13,10 @@ component ExprArrayIndex {
       p(class="two") { ${rows[0].score + rows[1].score} }
       p(class="shifted") { ${rows[cursor + 1].title} }
       span(id={rows[cursor].title}) { "attr" }
+      p(class="alias") { ${rows[cursor].score + rows[0].score} }
+      @if (show) {
+        p(class="shown") { ${rows[cursor].title} }
+      }
     }
   }
 }

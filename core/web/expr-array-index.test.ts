@@ -20,12 +20,13 @@ before(() => {
 });
 
 // props 선언 순서가 곧 고정부 leafIndex. 배열은 칸 하나(arrayInfoIndex).
-//   0=rows 1=scalars 2=cursor
-// 요소는 store 끝에 레벨별로 몰린다. rows 요소는 {title, score} 2칸이라 요소 i의 base = 3 + 2*i,
+//   0=rows 1=scalars 2=cursor 3=show
+// 요소는 store 끝에 레벨별로 몰린다. rows 요소는 {title, score} 2칸이라 요소 i의 base = 4 + 2*i,
 // 그 뒤에 scalars 요소 3개가 이어진다.
 const CURSOR = 2;
-const titleLeaf = (i: number) => 3 + 2 * i;
-const scoreLeaf = (i: number) => 4 + 2 * i;
+const SHOW = 3;
+const titleLeaf = (i: number) => 4 + 2 * i;
+const scoreLeaf = (i: number) => 5 + 2 * i;
 
 const seed = () => ({
   rows: [
@@ -35,6 +36,7 @@ const seed = () => ({
   ],
   scalars: [7, 8, 9],
   cursor: 0,
+  show: false,
 });
 
 const instantiate = () => {
@@ -106,4 +108,42 @@ test("인덱스가 바뀐 뒤에는 전에 읽던 요소를 구독하지 않는�
   set(CURSOR, 1);
   set(titleLeaf(0), "A2"); // 더 이상 안 읽는 칸
   assert.equal(textOf("field"), "B", "떠난 칸이 바뀌어도 그대로다");
+});
+
+// rows[cursor].score + rows[0].score - cursor가 0이면 두 인덱스 접근이 같은 칸을 읽는다.
+test("같은 식의 두 인덱스 접근이 한 칸을 읽다가 갈라져도 각자 칸을 따라간다", () => {
+  const { textOf, set } = instantiate();
+  set(scoreLeaf(0), 50);
+  assert.equal(textOf("alias"), "100", "둘 다 score0: 50 + 50");
+
+  set(CURSOR, 1);
+  assert.equal(textOf("alias"), "70", "score1 + score0: 20 + 50");
+  set(scoreLeaf(1), 25);
+  assert.equal(textOf("alias"), "75", "옮겨간 칸 score1의 변경이 닿는다");
+  set(scoreLeaf(0), 5);
+  assert.equal(textOf("alias"), "30", "남은 칸 score0의 변경도 닿는다");
+});
+
+test("같은 식의 다른 인덱스 접근이 읽던 칸으로 옮겨 와도 따라간다", () => {
+  const { textOf, set } = instantiate();
+  set(CURSOR, 1);
+  set(CURSOR, 0);
+  set(scoreLeaf(0), 7);
+  assert.equal(textOf("alias"), "14", "둘 다 score0: 7 + 7");
+  set(scoreLeaf(1), 99); // 이제 아무도 안 읽는 칸
+  assert.equal(textOf("alias"), "14", "떠난 칸이 바뀌어도 그대로다");
+});
+
+test("가지가 꺼진 동안 인덱스가 바뀌면 다시 켤 때 새 칸을 읽고 구독한다", () => {
+  const { textOf, set } = instantiate();
+  set(SHOW, true);
+  assert.equal(textOf("shown"), "A");
+  set(SHOW, false);
+  set(CURSOR, 2);
+  set(SHOW, true);
+  assert.equal(textOf("shown"), "C", "꺼진 동안 바뀐 인덱스를 따라잡는다");
+  set(titleLeaf(2), "C2");
+  assert.equal(textOf("shown"), "C2", "새 칸의 변경이 닿는다");
+  set(titleLeaf(0), "A2"); // 꺼지기 전에 읽던 칸
+  assert.equal(textOf("shown"), "C2", "떠난 칸이 바뀌어도 그대로다");
 });
