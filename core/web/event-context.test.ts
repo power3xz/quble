@@ -4,13 +4,11 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import { compile, type THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
-import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
+import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 
 import type { TTestHandlers } from "./test-helpers/handlers.ts";
-
-const { compile } = await import("./runtime.ts");
-type THandlers = import("./runtime.ts").THandlers;
 
 let qubb: Uint8Array;
 before(() => {

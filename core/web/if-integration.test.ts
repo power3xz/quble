@@ -7,11 +7,9 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import { compile } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
-import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입(첫 import)
-
-// dom.js가 document를 깐 뒤에 runtime.js를 불러야 한다(top-level await import).
-const { compile } = await import("./runtime.ts");
+import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 
 // 픽스처를 한 번 컴파일해 캐시(cargo run은 비싸다).
 const qubb: Record<string, Uint8Array> = {};
