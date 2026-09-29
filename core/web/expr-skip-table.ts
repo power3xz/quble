@@ -62,9 +62,10 @@ export type TExprSkipTable = {
   // 변수 번호 -> 그 변수가 바뀌었을 때의 skipPastOp. 변수가 식에 여러 번 나오면 그 위치들이 함께
   // 바뀐 것으로 본다. c(2)는 { 0: 6, 11: 17 }.
   skipPastOpByVar: TSkipPastOp[];
-  // 변수 번호 -> 그 변수가 바뀌면 READ_LEAF가 읽을 칸이 옮겨가는가. 옮겨가는 READ_LEAF마다, 그
-  // READ_LEAF에 leafIndex를 넘기는 연산(바로 앞 명령)의 위치를 담는다. 런타임은 다시 센 뒤 그 연산의
-  // cache 값으로 READ_LEAF가 새로 읽은 칸을 알고 구독을 옮긴다. 인덱스 접근이 없는 식은 모두 비어 있다.
+  // 변수 번호 -> 그 변수가 바뀌면 READ_LEAF가 읽을 leafIndex가 바뀌는가. leafIndex가 바뀌는 READ_LEAF마다,
+  // 그 READ_LEAF에 leafIndex를 넘기는 연산(바로 앞 명령)의 위치를 담는다. 런타임은 다시 센 뒤 그 연산의
+  // cache 값으로 READ_LEAF가 새로 읽은 leafIndex를 알고 구독을 다시 건다. 인덱스 접근이 없는 식은 모두
+  // 비어 있다.
   //   a[i].b + x   FIELD_AT(7)이 넘긴 leafIndex를 READ_LEAF(9)가 읽는다
   //     a, i -> [7]    READ_LEAF 자신, x -> []
   leafIndexOpsByVar: Int32Array[];
@@ -155,14 +156,8 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     sameStartOpChain[start] = op;
   };
 
-  // 식을 세듯 스택을 쓰되, 값 대신 "그 값을 만든 부분식이 시작하는 위치"를 올린다.
-  //   잎을 만나면 자기 위치를 올린다.
-  //   연산을 만나면 오른쪽 피연산자를 꺼낸다. 남은 왼쪽 피연산자의 시작 위치가 곧 이 연산의 부분식이
-  //   시작하는 위치이므로 그대로 둔다. 단항 연산은 피연산자가 하나라 꺼내지 않는다.
-  //
-  //   위 식에서 위치 6(ADD)에 오면 스택은 [0, 3]이다. b의 3을 꺼내면 0이 남고, a + b는 0에서 시작한다.
   // READ_LEAF에 leafIndex를 넘기는 연산 op와 그 부분식의 시작 start를 받아, 부분식 안(start~op)에서
-  // 읽히는 변수마다 op를 단다. 그 변수가 바뀌면 op의 결과, 곧 READ_LEAF가 읽을 칸이 달라진다.
+  // 읽히는 변수마다 op를 단다. 그 변수가 바뀌면 op의 결과, 곧 READ_LEAF가 읽을 leafIndex가 달라진다.
   const addLeafIndexOp = (start: number, op: number) => {
     for (let v = 0; v < positions.length; v++) {
       if (positions[v].some((p) => start <= p && p <= op)) {
@@ -171,6 +166,12 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     }
   };
 
+  // 식을 세듯 스택을 쓰되, 값 대신 "그 값을 만든 부분식이 시작하는 위치"를 올린다.
+  //   잎을 만나면 자기 위치를 올린다.
+  //   연산을 만나면 오른쪽 피연산자를 꺼낸다. 남은 왼쪽 피연산자의 시작 위치가 곧 이 연산의 부분식이
+  //   시작하는 위치이므로 그대로 둔다. 단항 연산은 피연산자가 하나라 꺼내지 않는다.
+  //
+  //   위 식에서 위치 6(ADD)에 오면 스택은 [0, 3]이다. b의 3을 꺼내면 0이 남고, a + b는 0에서 시작한다.
   const startStack: number[] = [];
   // 바로 앞 명령의 위치. READ_LEAF에서 보면 그 READ_LEAF에 leafIndex를 넘긴 연산이다.
   let prevPc = 0;

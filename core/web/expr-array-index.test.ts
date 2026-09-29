@@ -5,7 +5,7 @@
 //
 // 확인할 것은 둘로 갈린다.
 //   - 요소 값이 바뀌는 경우 - 읽는 칸은 그대로고 그 칸의 값만 바뀐다. 기존 구독으로 닿는다.
-//   - 인덱스가 바뀌는 경우 - 읽는 칸 자체가 옮겨간다. 구독을 떼고 새 칸에 다시 걸어야 한다.
+//   - 인덱스가 바뀌는 경우 - 읽는 leafIndex 자체가 바뀐다. 구독을 떼고 새 leafIndex에 다시 걸어야 한다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
@@ -87,7 +87,7 @@ test("읽고 있는 요소의 값이 바뀌면 따라온다", () => {
   assert.equal(textOf("arith"), "100", "50 * 2");
 });
 
-test("인덱스가 바뀌면 읽는 칸이 옮겨간다", () => {
+test("인덱스가 바뀌면 읽는 leafIndex가 바뀐다", () => {
   const { textOf, set } = instantiate();
   set(CURSOR, 1);
   assert.equal(textOf("field"), "B", "rows[1].title");
@@ -100,7 +100,7 @@ test("인덱스가 바뀐 뒤에는 새로 읽는 요소를 구독한다", () =>
   const { textOf, set } = instantiate();
   set(CURSOR, 1);
   set(titleLeaf(1), "B2");
-  assert.equal(textOf("field"), "B2", "옮겨간 칸의 값 변경이 닿는다");
+  assert.equal(textOf("field"), "B2", "새로 읽는 leaf의 값 변경이 닿는다");
 });
 
 test("인덱스가 바뀐 뒤에는 전에 읽던 요소를 구독하지 않는다", () => {
@@ -110,8 +110,8 @@ test("인덱스가 바뀐 뒤에는 전에 읽던 요소를 구독하지 않는�
   assert.equal(textOf("field"), "B", "떠난 칸이 바뀌어도 그대로다");
 });
 
-// rows[cursor].score + rows[0].score - cursor가 0이면 두 인덱스 접근이 같은 칸을 읽는다.
-test("같은 식의 두 인덱스 접근이 한 칸을 읽다가 갈라져도 각자 칸을 따라간다", () => {
+// rows[cursor].score + rows[0].score - cursor가 0이면 두 인덱스 접근이 같은 leaf를 읽는다.
+test("같은 식의 두 인덱스 접근이 한 leaf를 읽다가 나뉘어도 각자 읽는 leaf를 따라간다", () => {
   const { textOf, set } = instantiate();
   set(scoreLeaf(0), 50);
   assert.equal(textOf("alias"), "100", "둘 다 score0: 50 + 50");
@@ -119,22 +119,22 @@ test("같은 식의 두 인덱스 접근이 한 칸을 읽다가 갈라져도 �
   set(CURSOR, 1);
   assert.equal(textOf("alias"), "70", "score1 + score0: 20 + 50");
   set(scoreLeaf(1), 25);
-  assert.equal(textOf("alias"), "75", "옮겨간 칸 score1의 변경이 닿는다");
+  assert.equal(textOf("alias"), "75", "새로 읽는 leaf score1의 변경이 닿는다");
   set(scoreLeaf(0), 5);
-  assert.equal(textOf("alias"), "30", "남은 칸 score0의 변경도 닿는다");
+  assert.equal(textOf("alias"), "30", "계속 읽는 leaf score0의 변경도 닿는다");
 });
 
-test("같은 식의 다른 인덱스 접근이 읽던 칸으로 옮겨 와도 따라간다", () => {
+test("같은 식의 다른 인덱스 접근이 읽던 leaf를 읽게 되어도 따라간다", () => {
   const { textOf, set } = instantiate();
   set(CURSOR, 1);
   set(CURSOR, 0);
   set(scoreLeaf(0), 7);
   assert.equal(textOf("alias"), "14", "둘 다 score0: 7 + 7");
-  set(scoreLeaf(1), 99); // 이제 아무도 안 읽는 칸
-  assert.equal(textOf("alias"), "14", "떠난 칸이 바뀌어도 그대로다");
+  set(scoreLeaf(1), 99); // 이제 아무도 안 읽는 leaf
+  assert.equal(textOf("alias"), "14", "더 이상 안 읽는 leaf가 바뀌어도 그대로다");
 });
 
-test("가지가 꺼진 동안 인덱스가 바뀌면 다시 켤 때 새 칸을 읽고 구독한다", () => {
+test("가지가 꺼진 동안 인덱스가 바뀌면 다시 켤 때 새 leaf를 읽고 구독한다", () => {
   const { textOf, set } = instantiate();
   set(SHOW, true);
   assert.equal(textOf("shown"), "A");
@@ -143,7 +143,7 @@ test("가지가 꺼진 동안 인덱스가 바뀌면 다시 켤 때 새 칸을 �
   set(SHOW, true);
   assert.equal(textOf("shown"), "C", "꺼진 동안 바뀐 인덱스를 따라잡는다");
   set(titleLeaf(2), "C2");
-  assert.equal(textOf("shown"), "C2", "새 칸의 변경이 닿는다");
-  set(titleLeaf(0), "A2"); // 꺼지기 전에 읽던 칸
-  assert.equal(textOf("shown"), "C2", "떠난 칸이 바뀌어도 그대로다");
+  assert.equal(textOf("shown"), "C2", "새 leaf의 변경이 닿는다");
+  set(titleLeaf(0), "A2"); // 꺼지기 전에 읽던 leaf
+  assert.equal(textOf("shown"), "C2", "더 이상 안 읽는 leaf가 바뀌어도 그대로다");
 });

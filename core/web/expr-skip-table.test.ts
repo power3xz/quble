@@ -85,20 +85,20 @@ test("배열 인덱스 접근의 요소 칸을 읽는 명령(READ_LEAF)도 변�
   assert.deepEqual(table.skipPastOpByVar[3], { 0: 9 });
 });
 
-test("READ_LEAF가 읽을 칸을 정하는 데 쓰인 변수에 그 leafIndex를 넘기는 연산을 단다", () => {
+test("READ_LEAF가 읽을 leafIndex를 정하는 데 쓰인 변수에 그 leafIndex를 넘기는 연산을 단다", () => {
   // a[i].b + x
   //   위치  0          3          6       7          9         10         13
   //         LOAD_VAR a LOAD_VAR i ELEM_AT FIELD_AT 0 READ_LEAF LOAD_VAR x ADD
-  // READ_LEAF(9)는 FIELD_AT(7)이 넘긴 leafIndex의 칸을 읽는다. 그 leafIndex는 a, i로 계산된다.
+  // READ_LEAF(9)는 FIELD_AT(7)이 넘긴 leafIndex의 leaf를 읽는다. 그 leafIndex는 a, i로 계산된다.
   const table = tableOf(bytes(v(0), v(1), EXPR.ELEM_AT, EXPR.FIELD_AT, 0, EXPR.READ_LEAF, v(2), EXPR.ADD));
-  // 변수는 a(0), i(1), READ_LEAF(2), x(3). READ_LEAF 자신과 x는 읽을 칸을 바꾸지 않는다.
+  // 변수는 a(0), i(1), READ_LEAF(2), x(3). READ_LEAF 자신과 x는 읽을 leafIndex를 바꾸지 않는다.
   assert.deepEqual(
     table.leafIndexOpsByVar,
     [[7], [7], [], []].map((p) => Int32Array.from(p)),
   );
 });
 
-test("중첩된 인덱스 접근은 안쪽이 바뀌면 바깥 READ_LEAF가 읽을 칸도 옮겨간다", () => {
+test("중첩된 인덱스 접근은 안쪽이 바뀌면 바깥 READ_LEAF가 읽을 leafIndex도 바뀐다", () => {
   // a[b[k]].q
   //   위치  0          3          6          9       10        11      12         14
   //         LOAD_VAR a LOAD_VAR b LOAD_VAR k ELEM_AT READ_LEAF ELEM_AT FIELD_AT 0 READ_LEAF
@@ -107,14 +107,14 @@ test("중첩된 인덱스 접근은 안쪽이 바뀌면 바깥 READ_LEAF가 읽�
     bytes(v(0), v(1), v(2), EXPR.ELEM_AT, EXPR.READ_LEAF, EXPR.ELEM_AT, EXPR.FIELD_AT, 0, EXPR.READ_LEAF),
   );
   // 변수는 a(0), b(1), k(2), 안쪽 READ_LEAF(3), 바깥 READ_LEAF(4). 안쪽 READ_LEAF가 읽은 값은 바깥의
-  // 인덱스라, 그 칸이 바뀌면 바깥이 읽을 칸이 옮겨간다.
+  // 인덱스라, 그 leaf가 바뀌면 바깥이 읽을 leafIndex가 바뀐다.
   assert.deepEqual(
     table.leafIndexOpsByVar,
     [[12], [9, 12], [9, 12], [12], []].map((p) => Int32Array.from(p)),
   );
 });
 
-test("배열 인덱스 접근이 없는 식은 읽을 칸이 옮겨가는 변수가 없다", () => {
+test("배열 인덱스 접근이 없는 식은 READ_LEAF가 읽을 leafIndex를 바꾸는 변수가 없다", () => {
   assert.deepEqual(
     tableOf(MIXED).leafIndexOpsByVar,
     [[], [], [], [], []].map((p) => Int32Array.from(p)),
