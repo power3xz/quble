@@ -37,17 +37,19 @@ let failure: TDiagnostic | null = null;
 // 파일 목록의 표시(편집 중/미리보기 중/에러)를 지금 상태에 맞춘다. 개수는 안 바뀌므로 행마다
 // 필요한 칸만 set한다 - 목록째 갈아끼우면 안 바뀐 행의 DOM 텍스트까지 다시 쓴다.
 const refreshFiles = ({ store, set, get }: Pick<TCtx, "store" | "set" | "get">) => {
-  const editing = get(store.editingName);
+  const editing = get(store.editing);
+  const previewing = get(store.previewSelected) ? get(store.preview) : -1;
   fileNamesOf({ store, get }).forEach((name, i) => {
     const row = store.files[i];
-    set(row.isEditing, name === editing);
-    set(row.isPreviewing, name === previewingName);
+    set(row.isEditing, i === editing);
+    set(row.isPreviewing, i === previewing);
     set(row.hasError, failure?.path === name);
   });
 };
 
-// 지금 미리보기 중인 파일 - 목록을 다시 그릴 때 표시를 되살리려면 이름으로 들고 있어야 한다.
-let previewingName: string | null = null;
+// 편집 중인 파일의 이름.
+const editingNameOf = ({ store, get }: Pick<TCtx, "store" | "get">) =>
+  get(store.files[get(store.editing) as number].name) as string;
 
 // 지금 미리보기 중인 인스턴스와 그때 만든 Blob URL들 - 다시 컴파일할 때 정리한다.
 // 그중 스타일시트는 LOAD_RES가 document.head에 <link>로 달아 둔 것이라, URL만 revoke하면
@@ -151,7 +153,7 @@ const forScreen = (line: TLine) => ({
 // textarea의 value만 여기서 직접 쓴다 - 초기값은 quble이 넣지만(props의 source) 그 뒤로는
 // uncontrolled라 자식 텍스트를 고쳐도 value가 안 따라온다.
 const showText = (text: string, { store, set, get, setArray }: Pick<TCtx, "store" | "set" | "get" | "setArray">) => {
-  const editing = (get(store.editingName) as string) ?? "";
+  const editing = editingNameOf({ store, get });
   const lines = tokenize(text, editing);
   // 에러 줄 표시는 그 에러가 난 파일을 싣고 있을 때만.
   const marked =
@@ -168,7 +170,7 @@ const openFile = (name: string, ctx: TCtx, caretLine = 0) => {
   closeCompletion(ctx);
   const text = sourceOf(name, ctx);
   // refreshFiles/showText가 store에서 읽으므로 먼저 쓴다.
-  ctx.set(ctx.store.editingName, name);
+  ctx.set(ctx.store.editing, rowOf(name, ctx));
   refreshFiles(ctx);
   showText(text, ctx);
 
@@ -220,15 +222,15 @@ const scheduleDiagnose = (ctx: TCtx) => {
 };
 
 const runDiagnose = async (ctx: TCtx) => {
-  const editing = ctx.get(ctx.store.editingName) as string;
-  if (!editing?.endsWith(".qubc")) {
+  const editing = editingNameOf(ctx);
+  if (!editing.endsWith(".qubc")) {
     return;
   }
   const { diagnose } = await getCompiler();
   const found = diagnose(compilerFiles(ctx), editing);
 
   // 기다리는 동안 사용자가 다른 파일로 갔으면 이 결과는 버린다 - 그 파일에 남의 진단이 붙는다.
-  if ((ctx.get(ctx.store.editingName) as string) !== editing) {
+  if (editingNameOf(ctx) !== editing) {
     return;
   }
   failure = found;
@@ -240,12 +242,9 @@ const runDiagnose = async (ctx: TCtx) => {
 
 // 편집 - textarea의 값이 원본이다. 화면과 캐시를 거기에 맞춘다(value는 이미 사용자가 쳤다).
 const editSource = (_data: unknown, ctx: TCtx) => {
-  const editing = ctx.get(ctx.store.editingName) as string;
-  if (!editing) {
-    return;
-  }
+  const editing = editingNameOf(ctx);
   const area = ctx.event.target as HTMLTextAreaElement;
-  ctx.set(ctx.store.files[rowOf(editing, ctx)].source, area.value);
+  ctx.set(ctx.store.files[ctx.get(ctx.store.editing) as number].source, area.value);
   // 이 파일이 바뀌면 그 엔트리로 뽑아 둔 후보가 낡는다.
   if (editing.endsWith(".qubc")) {
     namesCache.delete(editing);
@@ -519,7 +518,7 @@ const filterCompletion = (area: HTMLTextAreaElement, ctx: TCtx) => {
 
 // 여는 따옴표를 쳤다 - 키 자리면 후보를 뽑아 연다.
 const openCompletion = async (area: HTMLTextAreaElement, ctx: TCtx) => {
-  const entry = entryOf(ctx.get(ctx.store.editingName) as string | null);
+  const entry = entryOf(editingNameOf(ctx));
   if (!entry || !isKeySlot(area.value, area.selectionStart - 1)) {
     return;
   }
@@ -571,10 +570,7 @@ const applyCompletion = (name: string, ctx: TCtx) => {
   }
 
   closeCompletion(ctx);
-  const editing = ctx.get(ctx.store.editingName) as string | null;
-  if (editing) {
-    ctx.set(ctx.store.files[rowOf(editing, ctx)].source, area.value);
-  }
+  ctx.set(ctx.store.files[ctx.get(ctx.store.editing) as number].source, area.value);
   showText(area.value, ctx);
   trackCaret(area, ctx);
   area.focus();
@@ -649,7 +645,7 @@ const runPreview = async (at: number, ctx: TCtx) => {
     // 편집 중에 이미 도는 경로와 같은 것이라, 여기서만 쓰는 갈래를 따로 두지 않는다.
     failure = diagnose(compilerFiles(ctx), entry);
     fail(result.diagnostic);
-    showText(sourceOf((get(store.editingName) as string) ?? "", ctx), ctx);
+    showText(sourceOf(editingNameOf(ctx), ctx), ctx);
     refreshFiles(ctx);
     return;
   }
@@ -688,9 +684,8 @@ const runPreview = async (at: number, ctx: TCtx) => {
   try {
     preview = decodeQubb(result.bytecode, resourceUrls)(0)(initialData, handlers);
     document.getElementById("preview")?.replaceChildren(...preview.nodes);
-    set(store.previewName, entry);
+    set(store.preview, at);
     set(store.previewSelected, true);
-    previewingName = entry;
     refreshFiles(ctx);
   } catch (e) {
     fail(`mount: ${(e as Error).message}`);
