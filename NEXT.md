@@ -8,7 +8,9 @@
 
 ## 하는 중
 
-없음
+- SSR renderer 재작성 - qubb + 루트 props 데이터로 HTML을 낸다. 모든 픽스처에서 JS 런타임
+  DOM과 같은 HTML이 나오는 것이 완료 기준(ROADMAP "SSR 렌더러", ISSUES "renderer(SSR) 보류").
+  실행 재개(resume)는 다음 브랜치. 브랜치 `ssr-renderer`.
 
 ## 할 것
 
