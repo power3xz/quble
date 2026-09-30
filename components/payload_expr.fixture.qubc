@@ -5,7 +5,16 @@ component PayloadExpr {
     cursor: number,
     rows: { title: string, tags: string[] }[]
   }
-  contexts { Area { closed: !open } }
+  contexts {
+    Area {
+      closed: !open,
+      next: n + 1,
+      row: rows[cursor],
+      title: rows[cursor].title,
+      tags: rows[cursor].tags,
+      count: rows.length
+    }
+  }
   events {
     SEND({
       next: n + 1,
@@ -14,11 +23,13 @@ component PayloadExpr {
       tags: rows[cursor].tags,
       count: rows.length
     })
+    PING({})
   }
   template {
     div() {
       @with Area {
         button(class="send" @click:SEND) { "send" }
+        button(class="ping" @click:PING) { "ping" }
       }
       @for (_, i of 3) {
         Pick(num={i} /)
@@ -32,13 +43,16 @@ component PayloadExpr {
 
 component RowItem {
   props { rows: { title: string, tags: string[] }[], at: number }
+  contexts { Cell { row: rows[at] } }
   events {
     TAKE({ row: rows[at] })
     DROP({})
   }
   template {
     div() {
-      button(class="take" @click:TAKE) { "take" }
+      @with Cell {
+        button(class="take" @click:TAKE) { "take" }
+      }
       button(class="drop" @click:DROP) { "drop" }
     }
   }
@@ -46,8 +60,11 @@ component RowItem {
 
 component Pick {
   props { num: number }
+  contexts { Slot { next: num + 1 } }
   events { PICK({ next: num + 1 }) }
   template {
-    button(class="pick" @click:PICK) { ${num} }
+    @with Slot {
+      button(class="pick" @click:PICK) { ${num} }
+    }
   }
 }
