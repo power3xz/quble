@@ -10,7 +10,6 @@ component Playground {
     source: string,
     lines: { tokens: { text: string, cls: string }[], hasError: bool, error: string,
              hasUnderline: bool, underlineStyle: string }[],
-    lineNumbers: string,
     lineCount: number,
     caretLine: string,
     preview: number,
@@ -50,7 +49,11 @@ component Playground {
         header(class="pg__editing") { ${files[editing].name} }
 
         div(class="pg__code") {
-          pre(class="pg__gutter") { ${lineNumbers} }
+          pre(class="pg__gutter") {
+            @for (_, i of lineCount) {
+              div() { ${i + 1} }
+            }
+          }
           div(class="pg__sheet") {
             div(class="pg__caretline" style={caretLine} /)
             pre(class="pg__view") {

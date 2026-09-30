@@ -134,10 +134,6 @@ const lineOf = (tokens: TToken[]): TLine => ({
 /** 줄 수. 거터의 번호 개수이자 textarea의 rows다 - 둘이 같아야 번호가 코드와 맞는다. */
 export const lineCountOf = (text: string) => text.split("\n").length;
 
-/** 거터에 넣을 줄 번호 - 1부터 줄 수까지. */
-export const lineNumbersFor = (text: string) =>
-  Array.from({ length: lineCountOf(text) }, (_, i) => String(i + 1)).join("\n");
-
 // 화면에서 한 글자가 차지하는 칸 수. 폰트가 monospace라 라틴은 1ch, 한글/한자/가나/전각은
 // 2ch다. 컴파일러의 display_width와 같은 목적이지만 기준이 터미널이 아니라 이 편집기다 -
 // 탭은 CSS `tab-size: 2`를 따른다(playground.css의 .pg__view).

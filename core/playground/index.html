@@ -90,7 +90,6 @@
       editing: 0, // 편집 중인 파일 - files의 인덱스
       source: sources[0].source,
       lines: handlers.tokenize(sources[0].source, sources[0].name),
-      lineNumbers: handlers.lineNumbersFor(sources[0].source),
       lineCount: handlers.lineCountOf(sources[0].source),
       caretLine: "transform: translateY(1rem)", // 첫 줄 - .pg__view의 padding-top과 같다
       // 줄의 hasError/error는 tokenize가 꺼진 채로 채운다 - 컴파일 에러가 나면 그때 얹힌다.
