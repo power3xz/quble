@@ -1,7 +1,7 @@
 # 표현식 평가
 
 값 자리 식(텍스트 보간, 속성값)과 `@if` 조건 식을 런타임이 어떻게 세고, 식이 읽는 leaf가 바뀌면
-어떻게 다시 세는지 그림으로 본다. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면 따라 고친다. 바이트
+어떻게 다시 세는지 그림으로 본다. payload/context 값의 식은 발화 때 한 번 세고 구독하지 않는다(2절 끝). 계약이 아니라 현재 구현 설명이라 코드가 바뀌면 따라 고친다. 바이트
 형식은 core/BYTECODE.md #4 `<EXPR>`에 있다.
 
 | 파일 | 맡은 일 |
@@ -114,6 +114,25 @@ leaf마다 그 leaf를 읽은 변수(`varsOfLeaf`)가 나온다. 같은 leaf가 
 |---|---|---|---|
 | 읽은 위치 | 0 | 3 | 9 |
 | 변수 | rows | cursor | READ_LEAF |
+
+### payload/context 값
+
+`SEND({ row: rows[cursor] })`처럼 payload/context 값에 온 식은 이벤트가 발화할 때 `assembledValue`가
+한 번 센다. cache도 reads도 없이 세고 구독하지 않는다 - 핸들러가 받는 것은 발화 시점의 값이다. 바인딩
+때(`toAssembled`)는 식 바이트와 그때의 슬롯(`argumentSourcePairs` 복사본)만 들어 둔다. 슬롯은 leaf를
+가리키므로 인덱스가 나중에 바뀌어도(`set`, `removeAt`이 당긴 회차 번호) 발화 때 현재 값을 읽는다.
+
+결과 타입(field의 `type_ref`)에 따라 식이 끝나는 곳과 발화 때 하는 일이 나뉜다.
+
+| 결과 타입 | 식이 끝나는 곳 | 발화 때 |
+|---|---|---|
+| 원시 | 값(READ_LEAF나 연산자) | 스택에 남은 값을 그대로 넘긴다 |
+| 객체/배열 | leafIndex(ELEM_AT이나 FIELD_AT) | 그 leafIndex부터 leaf 개수만큼을 조립해 넘긴다 |
+
+위 store에서 `row: rows[cursor]`(cursor = 0)는 ELEM_AT에서 끝나 스택에 2가 남는다. 요소 하나가 2칸이라
+leaf 2, 3을 조립해 `{ title: "A", score: 10 }`을 넘긴다.
+
+요소가 없는 인덱스면 ELEM_AT이 `RangeError`를 던지고 핸들러는 호출되지 않는다.
 
 ## 3. 부분 재평가
 

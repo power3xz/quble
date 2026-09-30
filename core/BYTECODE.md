@@ -189,12 +189,15 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
                ref              : <REF>  // 이 field를 채울 값 하나(객체도 슬롯 하나 - 안 펼친다)
              )
 
-  // REF - field 값 하나의 출처. 태그 1바이트로 세 종류를 가른다. 슬롯을 펼치지 않으므로 Scope는
+  // REF - field 값 하나의 출처. 태그 1바이트로 네 종류를 나눈다. 슬롯을 펼치지 않으므로 Scope는
   //   (scope_index, offset) 위치만 담고, 슬롯의 실제 kind(store/const)는 런타임이 정한다.
-  <REF> = tag : u8   // 0=Scope, 1=Const, 2=Raw
+  <REF> = tag : u8   // 0=Scope, 1=Const, 2=Raw, 3=Expr
           tag 0 (Scope) : scope_index:u8, offset:u8  // 부모 scope[scope_index]의 base+offset
           tag 1 (Const) : const_index:u16            // 컴포넌트 상수풀 리터럴
           tag 2 (Raw)   : value:u16                  // @for 런타임 원시값(지금은 @for 인덱스)
+          tag 3 (Expr)  : expr_index:u8              // 컴포넌트 표현식 테이블. 발화 때 평가 -
+                                                     // type_ref가 Scalar면 값, 객체/배열이면
+                                                     // 시작 leafIndex를 낸다
 [ 코드 ]
   len        : u32
   code       : [u8; len]   // 모든 정의의 코드가 이어짐. 테이블의 off/len으로 구획.
