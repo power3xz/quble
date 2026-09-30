@@ -9,11 +9,13 @@ component ExprNestedIndex {
     REMOVE_FIRST_CARD({})
     REPLACE_COLUMNS({})
     SWAP_COLUMNS({})
+    SHRINK_FIRST_COLUMN({})
   }
   template {
     div() {
       button(class="replace-columns" @click:REPLACE_COLUMNS) { "replace columns" }
       button(class="swap-columns" @click:SWAP_COLUMNS) { "swap columns" }
+      button(class="shrink-first-column" @click:SHRINK_FIRST_COLUMN) { "shrink column" }
       button(class="remove-first-column" @click:REMOVE_FIRST_COLUMN) { "remove column" }
       button(class="remove-first-card" @click:REMOVE_FIRST_CARD) { "remove card" }
       p(class="card") { ${columns[lane].cards[seat].title} }

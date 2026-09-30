@@ -595,6 +595,10 @@ const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[]
   if (kind === CONST) {
     return [CONST, slotBase];
   }
+  // RAW 슬롯(개수 반복의 회차 번호를 받은 prop) - 번호 자체가 값이라 그대로 싣는다.
+  if (kind === RAW) {
+    return [RAW, slotBase];
+  }
   // STORE 슬롯 - base(slotRef+offset)부터 leaf 개수만큼 연속 칸을 STORE 쌍으로 펼친다.
   const base = slotBase + ref.offset;
   const pairs: number[] = [];
@@ -694,7 +698,7 @@ const assemble = (
     if (step === STEP_LEAF) {
       const kind = fieldSourcePairs[cursor++];
       const ref = fieldSourcePairs[cursor++];
-      const value = kind === CONST ? module.constpool[ref] : store.get(ref);
+      const value = kind === CONST ? module.constpool[ref] : kind === RAW ? ref : store.get(ref);
       if (key === null) {
         return value; // 루트가 스칼라 - 객체로 안 감싼다
       }
@@ -1398,12 +1402,14 @@ class Interpreter {
   // 자리를 유지한다는 건 i번째 요소 leaf가 다른 값을 갖게 된다는 뜻이다 - push/removeAt의 "값 고정,
   // 위치 이동"과 반대 방향이지만, 전량 교체는 이전 요소와의 대응 자체가 없으므로 이쪽이 맞다.
   setArrayElements = (array: TLeafObject, elems: unknown[]): void => {
-    this.setArrayInto(this.arrayInfoOf(array[NODE_BASE]), elems);
+    this.setArrayInto(array[NODE_BASE], elems);
   };
 
-  // setArray의 본체 - arrayInfo를 직접 받는다(요소 안 중첩 배열은 칸 값이 arrayInfoIndex라
-  // arrayLeafIndex가 없어 여기로 재귀한다).
-  setArrayInto = (info: TArrayInfo, elems: unknown[]): void => {
+  // setArray의 본체 - 배열 필드 leaf를 받는다. 요소나 객체 안의 배열은 overwriteFixedBlock이 그
+  // 필드 leaf로 여기로 재귀한다.
+  setArrayInto = (arrayLeafIndex: number, elems: unknown[]): void => {
+    const info = this.arrayInfoOf(arrayLeafIndex);
+    const shrunk = elems.length < info.elemStartLeafIndices.length;
     const kept = Math.min(info.elemStartLeafIndices.length, elems.length);
     for (let i = 0; i < kept; i++) {
       this.overwriteFixedBlock(info.elemStartLeafIndices[i], info.elemTypeRef, elems[i]);
@@ -1411,7 +1417,7 @@ class Interpreter {
 
     // 꼬리 제거 - 회차 DOM(truncateFor)을 먼저 떼고 요소 leaf를 회수해야 한다. 반대로 하면 떼는 도중
     // 회차가 이미 반납된 leaf를 읽는다.
-    if (elems.length < info.elemStartLeafIndices.length) {
+    if (shrunk) {
       if (info.forRegionIndices.length > 0) {
         for (const forRegionIndex of info.forRegionIndices) {
           truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, kept);
@@ -1438,6 +1444,11 @@ class Interpreter {
     // 값은 덮어쓰기가 이미 발화시켰다.
     if (info.sizeLeafIndex !== null) {
       this.store.set(info.sizeLeafIndex, info.elemStartLeafIndices.length);
+    }
+    // 줄었으면 꼬리 자리를 가리키던 인덱스 접근 식이 다시 세어 범위 밖 에러를 내게 한다. 겹치는 자리는
+    // 값만 덮어써 가리키는 leaf가 그대로라, 같거나 늘면 호출하지 않는다.
+    if (shrunk) {
+      this.store.notify(arrayLeafIndex);
     }
   };
 
@@ -1467,7 +1478,7 @@ class Interpreter {
         return;
       }
       if (t.tag === "array") {
-        this.setArrayInto(this.arrayPool.entries[Number(this.store.get(cursor))], Array.isArray(v) ? v : []);
+        this.setArrayInto(cursor, Array.isArray(v) ? v : []);
       } else {
         this.store.set(cursor, v);
       }
@@ -2555,17 +2566,18 @@ class Interpreter {
           break;
         }
         case OP.FOR_COUNT_VAR: {
-          // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
-          // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다. count가
-          // 필드(a.count)면 base+offset이 그 leaf.
+          // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)와 RAW(바깥 개수 반복의
+          // 회차 번호)는 안 변하니 인라인, STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를
+          // 늘리고 줄인다. count가 필드(a.count)면 base+offset이 그 leaf.
           const scopeIndex = u8at();
           const offset = u8at();
           const ref = slotRef(argumentSourcePairs, scopeIndex);
+          const kind = slotKind(argumentSourcePairs, scopeIndex);
           const bodyStart = pc;
           const forEndPc = this.cachedForEnd(bodyStart);
-          if (slotKind(argumentSourcePairs, scopeIndex) === CONST) {
+          if (kind === CONST || kind === RAW) {
             this.inlineFor(
-              Number(this.module.constpool[ref]) || 0,
+              kind === RAW ? ref : Number(this.module.constpool[ref]) || 0,
               bodyStart,
               forEndPc,
               nodeTop(),
@@ -2697,11 +2709,16 @@ class Interpreter {
         cache[table.cacheIndex[at]] = value;
       }
     };
-    // 슬롯 하나가 가리키는 값. CONST면 상수풀, STORE면 store 칸.
+    // 슬롯 하나가 가리키는 값. CONST면 상수풀, RAW면 ref 자체(개수 반복의 회차 번호), STORE면 store 칸.
+    // CONST와 RAW는 바뀌지 않아 구독하지 않는다.
     const slotValue = (scopeIndex: number, offset: number, at: number): unknown => {
       const ref = slotRef(pairs, scopeIndex);
-      if (slotKind(pairs, scopeIndex) === CONST) {
+      const kind = slotKind(pairs, scopeIndex);
+      if (kind === CONST) {
         return this.module.constpool[ref];
+      }
+      if (kind === RAW) {
+        return ref;
       }
       reads?.push(ref + offset, at);
       return this.store.get(ref + offset);
@@ -2765,10 +2782,15 @@ class Interpreter {
           pushResult(at, -(stack.pop() as number));
           break;
         // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
+        // 요소가 없는 인덱스(범위 밖, 음수, 정수 아님)는 에러다 - 범위는 핸들러 로직이 지킨다.
         case EXPR.ELEM_AT: {
           const i = stack.pop() as number;
           const info = this.arrayPool.entries[stack.pop() as number];
-          pushResult(at, info.elemStartLeafIndices[i]);
+          const start = info.elemStartLeafIndices[i];
+          if (start === undefined) {
+            throw new RangeError(`index ${i} out of range (length ${info.elemStartLeafIndices.length})`);
+          }
+          pushResult(at, start);
           break;
         }
         case EXPR.FIELD_AT:

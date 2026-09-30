@@ -38,19 +38,39 @@ const seed = () => ({
   show: false,
 });
 
+// 핸들러 안에서 난 에러. 클릭으로 부른 핸들러의 에러는 click()까지 올라오지 않아 여기 담아 본다.
+let handlerError: unknown = null;
+
+type THandler = NonNullable<THandlers[string]>;
+
+const catching =
+  (fn: THandler): THandler =>
+  (d, ctx) => {
+    try {
+      fn(d, ctx);
+    } catch (e) {
+      handlerError = e;
+    }
+  };
+
 const removeFirstOf =
-  (key: string): THandlers[string] =>
+  (key: string): THandler =>
   (_d, ctx) => {
     const removeAt = ctx.removeAt as (a: unknown, i: number) => void;
     removeAt((ctx.store as Record<string, unknown>)[key], 0);
   };
 
 const handlers: THandlers = {
-  REMOVE_FIRST_ROW: removeFirstOf("rows"),
-  REMOVE_FIRST_SCALAR: removeFirstOf("scalars"),
+  REMOVE_FIRST_ROW: catching(removeFirstOf("rows")),
+  REMOVE_FIRST_SCALAR: catching(removeFirstOf("scalars")),
+  SET_ONE_ROW: catching((_d, ctx) => {
+    const setArray = ctx.setArray as (a: unknown, elems: unknown[]) => void;
+    setArray((ctx.store as Record<string, unknown>).rows, [{ title: "X", score: 1 }]);
+  }),
 };
 
 const instantiate = () => {
+  handlerError = null;
   const inst = compile(qubb)(0)(seed(), handlers);
   const host = mount(inst);
   return {
@@ -60,6 +80,8 @@ const instantiate = () => {
     has: (cls: string) => host.querySelector(`.${cls}`) !== null,
     removeFirstRow: () => (host.querySelector(".remove-first-row") as HTMLButtonElement).click(),
     removeFirstScalar: () => (host.querySelector(".remove-first-scalar") as HTMLButtonElement).click(),
+    setOneRow: () => (host.querySelector(".set-one-row") as HTMLButtonElement).click(),
+    error: () => handlerError,
   };
 };
 
@@ -153,13 +175,13 @@ test("가지가 꺼진 동안 인덱스가 바뀌면 다시 켤 때 새 leaf를 
   set(SHOW, true);
   assert.equal(textOf("shown"), "A");
   set(SHOW, false);
-  set(CURSOR, 2);
+  set(CURSOR, 1);
   set(SHOW, true);
-  assert.equal(textOf("shown"), "C", "꺼진 동안 바뀐 인덱스를 따라잡는다");
-  set(titleLeaf(2), "C2");
-  assert.equal(textOf("shown"), "C2", "새 leaf의 변경이 닿는다");
+  assert.equal(textOf("shown"), "B", "꺼진 동안 바뀐 인덱스를 따라잡는다");
+  set(titleLeaf(1), "B2");
+  assert.equal(textOf("shown"), "B2", "새 leaf의 변경이 닿는다");
   set(titleLeaf(0), "A2"); // 꺼지기 전에 읽던 leaf
-  assert.equal(textOf("shown"), "C2", "더 이상 안 읽는 leaf가 바뀌어도 그대로다");
+  assert.equal(textOf("shown"), "B2", "더 이상 안 읽는 leaf가 바뀌어도 그대로다");
 });
 
 // removeAt은 목록만 당기고 요소 leaf를 옮기지 않는다 - 인덱스 값은 그대로인데 rows[cursor]가 가리키는 요소가 바뀐다.
@@ -199,4 +221,24 @@ test("@if 조건의 인덱스 접근도 앞 요소가 제거되면 당겨진 요
   assert.equal(has("high"), false, "rows[0].score = 10");
   removeFirstRow();
   assert.equal(has("high"), true, "rows[0].score = 20");
+});
+
+// 요소가 없는 인덱스는 에러다 - 범위는 핸들러 로직이 지킨다.
+test("인덱스가 범위 밖으로 바뀌면 에러다", () => {
+  const { set } = instantiate();
+  assert.throws(() => set(CURSOR, 3), RangeError);
+});
+
+test("setArray로 배열이 줄어 인덱스가 범위 밖이 되면 에러다", () => {
+  const { setOneRow, error } = instantiate();
+  setOneRow(); // rows = [X] - rows[0 + 1], rows[1]이 범위 밖
+  assert.ok(error() instanceof RangeError);
+});
+
+test("removeAt으로 배열이 줄어 인덱스가 범위 밖이 되면 에러다", () => {
+  const { removeFirstRow, error } = instantiate();
+  removeFirstRow(); // rows = [B, C]
+  assert.equal(error(), null);
+  removeFirstRow(); // rows = [C] - rows[0 + 1], rows[1]이 범위 밖
+  assert.ok(error() instanceof RangeError);
 });

@@ -31,6 +31,9 @@ const seed = () => ({
   seat: 0,
 });
 
+// 핸들러 안에서 난 에러. 클릭으로 부른 핸들러의 에러는 click()까지 올라오지 않아 여기 담아 본다.
+let handlerError: unknown = null;
+
 const handlers: THandlers = {
   REMOVE_FIRST_COLUMN: (_d, ctx) => {
     const removeAt = ctx.removeAt as (a: unknown, i: number) => void;
@@ -52,9 +55,20 @@ const handlers: THandlers = {
     const swapAt = ctx.swapAt as (a: unknown, i: number, j: number) => void;
     swapAt((ctx.store as Record<string, unknown>).columns, 0, 1);
   },
+  // 첫 열을 객체째 바꿔 cards를 하나로 줄인다. 바깥 columns 목록은 그대로다.
+  SHRINK_FIRST_COLUMN: (_d, ctx) => {
+    const setObject = ctx.setObject as (node: unknown, value: unknown) => void;
+    const columns = (ctx.store as Record<string, unknown[]>).columns;
+    try {
+      setObject(columns[0], { name: "L0", cards: [{ title: "z" }] });
+    } catch (e) {
+      handlerError = e;
+    }
+  },
 };
 
 const instantiate = () => {
+  handlerError = null;
   const inst = compile(qubb)(0)(seed(), handlers);
   const host = mount(inst);
   return {
@@ -64,6 +78,8 @@ const instantiate = () => {
     removeFirstCard: () => (host.querySelector(".remove-first-card") as HTMLButtonElement).click(),
     replaceColumns: () => (host.querySelector(".replace-columns") as HTMLButtonElement).click(),
     swapColumns: () => (host.querySelector(".swap-columns") as HTMLButtonElement).click(),
+    shrinkFirstColumn: () => (host.querySelector(".shrink-first-column") as HTMLButtonElement).click(),
+    error: () => handlerError,
   };
 };
 
@@ -135,4 +151,11 @@ test("바깥 배열의 앞 요소가 제거되면 같은 인덱스가 당겨진 
   assert.equal(card(), "c");
   set(titleLeaf(1, 0), "c2");
   assert.equal(card(), "c2", "당겨진 요소의 leaf 변경이 닿는다");
+});
+
+test("setObject로 안쪽 배열이 줄어 인덱스가 범위 밖이 되면 에러다", () => {
+  const { set, shrinkFirstColumn, error } = instantiate();
+  set(SEAT, 1);
+  shrinkFirstColumn(); // columns[0].cards = [z] - cards[1]이 범위 밖
+  assert.ok(error() instanceof RangeError);
 });
