@@ -1,10 +1,10 @@
 import { compile } from "@quble-web/runtime.ts";
-import { nextRate, nextThreshold, runTarget, type TData } from "./harness.ts";
+import { nextPivot, nextRate, nextThreshold, runTarget, type TData } from "./harness.ts";
 
 type TCtx = {
   get: (leafIndex: number) => number;
   set: (leafIndex: number, value: unknown) => void;
-  store: { rows: { qty: number }[]; rate: number; threshold: number };
+  store: { rows: { qty: number; price: number }[]; rate: number; threshold: number; pivot: number };
   $0: number;
 };
 
@@ -18,6 +18,13 @@ const handlers = {
   },
   THRESHOLD: (_data: unknown, ctx: TCtx) => {
     ctx.set(ctx.store.threshold, nextThreshold(ctx.get(ctx.store.threshold)));
+  },
+  PIVOT: (_data: unknown, ctx: TCtx) => {
+    ctx.set(ctx.store.pivot, nextPivot(ctx.get(ctx.store.pivot), ctx.store.rows.length));
+  },
+  PIVOT_PRICE: (_data: unknown, ctx: TCtx) => {
+    const price = ctx.store.rows[ctx.get(ctx.store.pivot)].price;
+    ctx.set(price, ctx.get(price) + 1);
   },
 };
 

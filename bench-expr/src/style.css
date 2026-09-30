@@ -177,7 +177,7 @@ pre {
 }
 .row {
   display: grid;
-  grid-template-columns: 64px 80px 48px 1fr 64px 24px 48px;
+  grid-template-columns: 64px 80px 48px 1fr 64px 72px 24px 48px;
   gap: 8px;
   align-items: center;
   padding: 2px 10px;
@@ -188,6 +188,9 @@ pre {
   color: var(--dim);
 }
 .row__amount {
+  text-align: right;
+}
+.row__diff {
   text-align: right;
 }
 .row__warn {

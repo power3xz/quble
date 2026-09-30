@@ -3,19 +3,24 @@ component Orders {
     rows: { id: number, price: number, qty: number, discount: number, stock: number }[],
     rate: number,
     tax: number,
-    threshold: number
+    threshold: number,
+    pivot: number
   }
   events {
     INC({})
     RATE({})
     THRESHOLD({})
+    PIVOT({})
+    PIVOT_PRICE({})
   }
   template {
     div(class="orders") {
       div(class="orders__bar") {
         button(id="btn-rate" @click:RATE) { "환율 변경" }
         button(id="btn-threshold" @click:THRESHOLD) { "기준 변경" }
-        span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } " / 기준 " span(class="orders__threshold") { ${threshold} } }
+        button(id="btn-pivot" @click:PIVOT) { "기준 행 이동" }
+        button(id="btn-pivot-price" @click:PIVOT_PRICE) { "기준 행 가격 변경" }
+        span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } " / 기준 " span(class="orders__threshold") { ${threshold} } " / 기준 행 " span(class="orders__pivot") { ${pivot} } }
       }
       div(class="orders__list") {
         @for (row of rows) {
@@ -25,6 +30,7 @@ component Orders {
             span(class="row__qty") { ${row.qty} }
             span(class="row__amount") { ${(row.price * row.qty - row.discount) * (100 + tax) / 100 * rate} }
             span(class="row__left") { ${row.stock - row.qty} }
+            span(class="row__diff") { ${row.price - rows[pivot].price} }
             span(class="row__warn" data-warn={row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold}) { "!" }
             button(class="row__inc" @click:INC) { "+1" }
           }

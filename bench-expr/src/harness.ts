@@ -7,11 +7,13 @@
 //   - 결과를 localStorage에 넣어 index 페이지의 비교 표가 읽게 한다.
 
 export type TRow = { id: number; price: number; qty: number; discount: number; stock: number };
-export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number };
+export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number };
 
 // 버튼이 오가는 값. 환율은 매번 바꿔 모든 행 금액이 바뀌고, 기준은 1만 움직여 경고가 거의 안 바뀐다.
 export const nextRate = (rate: number) => (rate === 1300 ? 1350 : 1300);
 export const nextThreshold = (threshold: number) => (threshold === 30000 ? 30001 : 30000);
+// 기준 행은 매번 다음 행으로 옮겨, 모든 행의 비교 식(row.price - rows[pivot].price)이 다른 행을 읽게 한다.
+export const nextPivot = (pivot: number, length: number) => (pivot + 1) % length;
 
 type TTarget<P> = {
   id: string;
@@ -39,6 +41,8 @@ export const SCENARIOS = [
   { key: "inc", label: "행 +1", desc: "행 하나의 수량을 올린다" },
   { key: "rate", label: "환율 변경", desc: "모든 행의 금액 식이 바뀐다" },
   { key: "threshold", label: "기준 변경", desc: "모든 행의 경고 식을 다시 세지만 값은 거의 그대로" },
+  { key: "pivot", label: "기준 행 이동", desc: "모든 행의 비교 식이 인덱스가 바뀌어 다른 행을 읽는다" },
+  { key: "pivotPrice", label: "기준 행 가격 변경", desc: "모든 행의 비교 식이 읽는 기준 행 가격 하나가 바뀐다" },
 ] as const;
 
 export const TARGETS = [
@@ -57,7 +61,8 @@ export const ENCODINGS = [
 
 const WARMUP = 5;
 const RUNS = 30;
-export const STORAGE_KEY = "bench-expr";
+// 식이나 시나리오가 바뀌면 키를 바꿔 옛 결과와 섞지 않는다.
+export const STORAGE_KEY = "bench-expr-pivot";
 
 export const currentN = () => {
   const n = Number(new URLSearchParams(location.search).get("n"));
@@ -138,12 +143,18 @@ const statOf = (timings: TTiming[]): TStat => {
 };
 
 // 시나리오마다 누를 버튼. 행 +1은 매번 다른 행을 고른다(같은 행만 누르면 캐시가 유리해진다).
+const BUTTON_OF: Record<string, string> = {
+  rate: "#btn-rate",
+  threshold: "#btn-threshold",
+  pivot: "#btn-pivot",
+  pivotPrice: "#btn-pivot-price",
+};
 const buttonFor = (root: HTMLElement, key: string, k: number): HTMLElement => {
   if (key === "inc") {
     const rows = root.querySelectorAll<HTMLElement>(".row__inc");
     return rows[(k * 7919) % rows.length];
   }
-  return root.querySelector<HTMLElement>(key === "rate" ? "#btn-rate" : "#btn-threshold")!;
+  return root.querySelector<HTMLElement>(BUTTON_OF[key])!;
 };
 
 const collectFiles = (): TFile[] => {

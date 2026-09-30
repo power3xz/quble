@@ -16,6 +16,6 @@ for (const n of [1000, 5000, 10000]) {
     const qty = int(0, 10);
     rows.push({ id: i + 1, price: int(100, 10000), qty, discount: int(0, 500), stock: qty + int(0, 20) });
   }
-  const data = { rows, rate: 1300, tax: 10, threshold: 30000 };
+  const data = { rows, rate: 1300, tax: 10, threshold: 30000, pivot: 0 };
   writeFileSync(new URL(`./public/data-${n}.json`, import.meta.url), JSON.stringify(data));
 }

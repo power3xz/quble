@@ -2,15 +2,16 @@
 import { useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { nextRate, nextThreshold, runTarget } from "./harness.ts";
+import { nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
 
-const Row = ({ row, rate, tax, threshold, onInc }) => (
+const Row = ({ row, rows, pivot, rate, tax, threshold, onInc }) => (
   <div className="row">
     <span className="row__id">{row.id}</span>
     <span className="row__price">{row.price}</span>
     <span className="row__qty">{row.qty}</span>
     <span className="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax)) / 100) * rate}</span>
     <span className="row__left">{row.stock - row.qty}</span>
+    <span className="row__diff">{row.price - rows[pivot].price}</span>
     <span className="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold)}>
       !
     </span>
@@ -24,6 +25,7 @@ const App = ({ data }) => {
   const [rows, setRows] = useState(data.rows);
   const [rate, setRate] = useState(data.rate);
   const [threshold, setThreshold] = useState(data.threshold);
+  const [pivot, setPivot] = useState(data.pivot);
   const tax = data.tax;
   return (
     <div className="orders">
@@ -34,8 +36,18 @@ const App = ({ data }) => {
         <button id="btn-threshold" onClick={() => setThreshold(nextThreshold)}>
           기준 변경
         </button>
+        <button id="btn-pivot" onClick={() => setPivot((p) => nextPivot(p, rows.length))}>
+          기준 행 이동
+        </button>
+        <button
+          id="btn-pivot-price"
+          onClick={() => setRows((rs) => rs.map((r, j) => (j === pivot ? { ...r, price: r.price + 1 } : r)))}
+        >
+          기준 행 가격 변경
+        </button>
         <span className="orders__info">
-          환율 <span className="orders__rate">{rate}</span> / 기준 <span className="orders__threshold">{threshold}</span>
+          환율 <span className="orders__rate">{rate}</span> / 기준 <span className="orders__threshold">{threshold}</span> / 기준 행{" "}
+          <span className="orders__pivot">{pivot}</span>
         </span>
       </div>
       <div className="orders__list">
@@ -43,6 +55,8 @@ const App = ({ data }) => {
           <Row
             key={row.id}
             row={row}
+            rows={rows}
+            pivot={pivot}
             rate={rate}
             tax={tax}
             threshold={threshold}
