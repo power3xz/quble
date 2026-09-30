@@ -595,6 +595,10 @@ const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[]
   if (kind === CONST) {
     return [CONST, slotBase];
   }
+  // RAW 슬롯(개수 반복의 회차 번호를 받은 prop) - 번호 자체가 값이라 그대로 싣는다.
+  if (kind === RAW) {
+    return [RAW, slotBase];
+  }
   // STORE 슬롯 - base(slotRef+offset)부터 leaf 개수만큼 연속 칸을 STORE 쌍으로 펼친다.
   const base = slotBase + ref.offset;
   const pairs: number[] = [];
@@ -694,7 +698,7 @@ const assemble = (
     if (step === STEP_LEAF) {
       const kind = fieldSourcePairs[cursor++];
       const ref = fieldSourcePairs[cursor++];
-      const value = kind === CONST ? module.constpool[ref] : store.get(ref);
+      const value = kind === CONST ? module.constpool[ref] : kind === RAW ? ref : store.get(ref);
       if (key === null) {
         return value; // 루트가 스칼라 - 객체로 안 감싼다
       }
@@ -2555,17 +2559,18 @@ class Interpreter {
           break;
         }
         case OP.FOR_COUNT_VAR: {
-          // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인,
-          // STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를 늘리고 줄인다. count가
-          // 필드(a.count)면 base+offset이 그 leaf.
+          // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)와 RAW(바깥 개수 반복의
+          // 회차 번호)는 안 변하니 인라인, STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를
+          // 늘리고 줄인다. count가 필드(a.count)면 base+offset이 그 leaf.
           const scopeIndex = u8at();
           const offset = u8at();
           const ref = slotRef(argumentSourcePairs, scopeIndex);
+          const kind = slotKind(argumentSourcePairs, scopeIndex);
           const bodyStart = pc;
           const forEndPc = this.cachedForEnd(bodyStart);
-          if (slotKind(argumentSourcePairs, scopeIndex) === CONST) {
+          if (kind === CONST || kind === RAW) {
             this.inlineFor(
-              Number(this.module.constpool[ref]) || 0,
+              kind === RAW ? ref : Number(this.module.constpool[ref]) || 0,
               bodyStart,
               forEndPc,
               nodeTop(),
@@ -2697,11 +2702,16 @@ class Interpreter {
         cache[table.cacheIndex[at]] = value;
       }
     };
-    // 슬롯 하나가 가리키는 값. CONST면 상수풀, STORE면 store 칸.
+    // 슬롯 하나가 가리키는 값. CONST면 상수풀, RAW면 ref 자체(개수 반복의 회차 번호), STORE면 store 칸.
+    // CONST와 RAW는 바뀌지 않아 구독하지 않는다.
     const slotValue = (scopeIndex: number, offset: number, at: number): unknown => {
       const ref = slotRef(pairs, scopeIndex);
-      if (slotKind(pairs, scopeIndex) === CONST) {
+      const kind = slotKind(pairs, scopeIndex);
+      if (kind === CONST) {
         return this.module.constpool[ref];
+      }
+      if (kind === RAW) {
+        return ref;
       }
       reads?.push(ref + offset, at);
       return this.store.get(ref + offset);

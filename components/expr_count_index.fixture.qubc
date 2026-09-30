@@ -1,0 +1,35 @@
+component ExprCountIndex {
+  props {
+    base: number,
+    n: number,
+    items: string[]
+  }
+  template {
+    div() {
+      @for (x, i of 3) {
+        p(class="lit-plain") { ${i} }
+        p(class="lit-add") { ${i + 1} }
+        span(class="lit-attr" id={i * 10}) { "attr" }
+        @if (i > 1) {
+          p(class="lit-if") { "if" }
+        }
+        p(class="lit-item") { ${items[i]} }
+        Pick(num={i} /)
+        @for (y of i) {
+          span(class="raw-for") { "y" }
+        }
+      }
+      @for (x, i of n) {
+        p(class="var-add") { ${i + 1} }
+      }
+    }
+  }
+}
+
+component Pick {
+  props { num: number }
+  events { PICK({ num }) }
+  template {
+    button(class="pick" @click:PICK) { ${num + 1} }
+  }
+}
