@@ -1671,6 +1671,66 @@ mod tests {
         }
     }
 
+    /// payload/context 값에 식이 오면 표현식 테이블에 싣고 Expr ref로 가리킨다. 결과 타입이
+    /// Scalar면 값까지 내고(끝이 ReadLeaf나 연산자), 객체/배열이면 시작 leafIndex까지만 낸다.
+    #[test]
+    fn payload_and_context_expr_values() {
+        use bytecode::{decode, ExprOp, FieldValue, TypeEntry};
+
+        let src = r#"
+            component C {
+              props {
+                n: number,
+                open: bool,
+                cursor: number,
+                rows: { title: string, tags: string[] }[]
+              }
+              contexts { Area { closed: !open } }
+              events {
+                E({
+                  next: n + 1,
+                  row: rows[cursor],
+                  title: rows[cursor].title,
+                  tags: rows[cursor].tags
+                })
+              }
+              template { @with Area { button(@click:E) { "x" } } }
+            }
+        "#;
+        let bytes = compile(src).unwrap();
+        let module = decode(&bytes).unwrap();
+        let def = module.def(0).unwrap();
+        // Expr ref면 (식 바이트의 마지막 명령, 결과 타입 엔트리)를 준다.
+        let expr_of = |field: &bytecode::Field| match field.value {
+            FieldValue::Expr(i) => (
+                *def.exprs[i as usize].last().unwrap(),
+                module.types[field.type_ref as usize].clone(),
+            ),
+            other => panic!("식 값이라 Expr ref여야: {other:?}"),
+        };
+        let fields = &def.events[0].fields;
+        assert_eq!(expr_of(&fields[0]), (ExprOp::Add as u8, TypeEntry::Scalar));
+        let (last, ty) = expr_of(&fields[1]);
+        assert_eq!(last, ExprOp::ElemAt as u8);
+        assert!(matches!(ty, TypeEntry::Object(_)));
+        assert_eq!(
+            expr_of(&fields[2]),
+            (ExprOp::ReadLeaf as u8, TypeEntry::Scalar)
+        );
+        let (_, ty) = expr_of(&fields[3]);
+        assert!(matches!(ty, TypeEntry::Array(_)));
+        // `FieldAt`은 거리 operand 하나가 뒤에 붙어 마지막 바이트가 operand다 - 그 앞을 본다.
+        let tags_expr = match fields[3].value {
+            FieldValue::Expr(i) => &def.exprs[i as usize],
+            _ => unreachable!(),
+        };
+        assert_eq!(tags_expr[tags_expr.len() - 2], ExprOp::FieldAt as u8);
+        assert_eq!(
+            expr_of(&def.contexts[0].fields[0]),
+            (ExprOp::Not as u8, TypeEntry::Scalar)
+        );
+    }
+
     /// 리터럴은 소스의 타입대로 상수풀에 들어간다 - 숫자는 Const::Num, 불리언은 Const::Bool,
     /// 문자열은 Const::Str. 런타임이 인덱스로 꺼내면 이미 올바른 값이 되도록.
     #[test]
