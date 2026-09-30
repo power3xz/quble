@@ -8,12 +8,7 @@
 
 ## 하는 중
 
-식 평가 버그 둘 (브랜치 `fix-expr-count-index-push`)
-
-- 개수 반복(`@for (i of 3)`)의 회차 변수를 식에서 읽으면 RAW 슬롯을 leafIndex로 읽는다 -
-  `${i + 1}`이 store 0~2번 leaf 값에 1을 더한 값이 된다.
-- 범위 밖 인덱스(`${rows[cursor].t}`, cursor가 길이 이상)가 push로 범위 안이 돼도 다시
-  계산되지 않는다 - push는 배열 필드 leaf에 notify를 호출하지 않는다.
+없음
 
 ## 할 것
 
