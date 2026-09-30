@@ -8,7 +8,8 @@
 
 ## 하는 중
 
-없음
+- payload/context 값 자리에 식 허용 - 연산자와 인덱스 접근을 표현식 테이블에 싣고 발화 때 평가
+  (ROADMAP "합성 인자/payload 값 자리"의 payload/context 쪽). 브랜치 `payload-expr`.
 
 ## 할 것
 
