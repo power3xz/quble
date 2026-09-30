@@ -1,0 +1,53 @@
+component PayloadExpr {
+  props {
+    n: number,
+    open: bool,
+    cursor: number,
+    rows: { title: string, tags: string[] }[]
+  }
+  contexts { Area { closed: !open } }
+  events {
+    SEND({
+      next: n + 1,
+      row: rows[cursor],
+      title: rows[cursor].title,
+      tags: rows[cursor].tags,
+      count: rows.length
+    })
+  }
+  template {
+    div() {
+      @with Area {
+        button(class="send" @click:SEND) { "send" }
+      }
+      @for (_, i of 3) {
+        Pick(num={i} /)
+      }
+      @for (r, i of rows) {
+        Item: RowItem(rows={rows} at={i} /)
+      }
+    }
+  }
+}
+
+component RowItem {
+  props { rows: { title: string, tags: string[] }[], at: number }
+  events {
+    TAKE({ row: rows[at] })
+    DROP({})
+  }
+  template {
+    div() {
+      button(class="take" @click:TAKE) { "take" }
+      button(class="drop" @click:DROP) { "drop" }
+    }
+  }
+}
+
+component Pick {
+  props { num: number }
+  events { PICK({ next: num + 1 }) }
+  template {
+    button(class="pick" @click:PICK) { ${num} }
+  }
+}

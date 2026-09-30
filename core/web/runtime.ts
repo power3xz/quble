@@ -504,6 +504,7 @@ const snapshotStacks = (walkStacks: TWalkStacks): TWalkStacks => ({
 const FV_SCOPE = 0;
 const FV_CONST = 1;
 const FV_RAW = 2;
+const FV_EXPR = 3;
 
 // 타입 테이블 엔트리 태그(BYTECODE.md #4). Rust read_type 대칭.
 const TYPE_SCALAR = 0;
@@ -537,10 +538,11 @@ const readType = (reader: Reader): TType => {
 };
 
 // field ref 하나를 읽는다 - 태그 1바이트 + payload(Rust read_ref 대칭). Scope는 부모 슬롯
-// 위치(scopeIndex, offset), Const/Raw는 값 하나(u16). offset은 Scope만 의미 있어 나머진 0.
+// 위치(scopeIndex, offset), Const/Raw는 값 하나(u16), Expr는 exprIndex(u8). offset은 Scope만
+// 의미 있어 나머진 0.
 //
 // @param r Reader
-// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값
+// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=exprIndex
 const readRef = (reader: Reader): TRef => {
   const tag = reader.u8();
   if (tag === FV_SCOPE) {
@@ -551,6 +553,9 @@ const readRef = (reader: Reader): TRef => {
   }
   if (tag === FV_RAW) {
     return { kind: FV_RAW, ref: reader.u16(), offset: 0 };
+  }
+  if (tag === FV_EXPR) {
+    return { kind: FV_EXPR, ref: reader.u8(), offset: 0 };
   }
   throw new Error(`bad ref tag ${tag}`);
 };
@@ -600,7 +605,11 @@ const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[]
     return [RAW, slotBase];
   }
   // STORE 슬롯 - base(slotRef+offset)부터 leaf 개수만큼 연속 칸을 STORE 쌍으로 펼친다.
-  const base = slotBase + ref.offset;
+  return storeSourcePairs(slotBase + ref.offset, leafCount);
+};
+
+// base부터 leaf 개수만큼 연속 칸을 STORE 쌍으로 편다.
+const storeSourcePairs = (base: number, leafCount: number): number[] => {
   const pairs: number[] = [];
   for (let i = 0; i < leafCount; i++) {
     pairs.push(STORE, base + i);
@@ -952,7 +961,10 @@ type TModule = {
   defs: TDef[];
 };
 // 발생 시점에 조립할 준비물(payload/컨텍스트 공용) - field.refs를 바인딩 때 flat sourcePairs로 미리 푼 것.
-type TAssembled = { name: string; typeRef: number; fieldSourcePairs: number[] };
+// 식 필드는 식 바이트와 바인딩 때의 슬롯을 들고 발생 시점에 평가한다.
+type TAssembled =
+  | { name: string; typeRef: number; fieldSourcePairs: number[] }
+  | { name: string; typeRef: number; expr: Uint8Array; pairs: TScope };
 // ENTER_CONTEXT가 만든 컨텍스트 인스턴스. createdContexts에 append된다.
 type TCreatedContext = { name: string; fields: TAssembled[] };
 // 핸들러 맵(fullName -> 핸들러). 핸들러 인자 계약은 dispatchBinding이 조립해 넘긴다.
@@ -1151,29 +1163,48 @@ class Interpreter {
   // 호출부가 NODE_BASE로 칸을 꺼내 넘긴다(노드가 그 칸을 싣고 있다).
   arrayInfoOf = (arrayLeafIndex: number): TArrayInfo => this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
 
+  // 바인딩 때 필드 하나를 발생 시점에 조립할 준비물로 푼다(payload/컨텍스트 공용).
+  toAssembled = (compId: number, field: TFieldEntry, argumentSourcePairs: TScope): TAssembled => {
+    const name = this.module.constpool[field.nameConstIndex] as string;
+    if (field.ref.kind === FV_EXPR) {
+      // 슬롯 배열은 @for가 push/pop하는 가변이라 지금 모습을 복사해 둔다.
+      const expr = this.module.defs[compId].exprs[field.ref.ref];
+      return { name, typeRef: field.typeRef, expr, pairs: [...argumentSourcePairs] };
+    }
+    const leafCount = leafCountOf(this.module, field.typeRef);
+    return {
+      name,
+      typeRef: field.typeRef,
+      fieldSourcePairs: refToSourcePairs(field.ref, leafCount, argumentSourcePairs),
+    };
+  };
+
+  // 발생 시점에 필드 하나의 값을 낸다. 식 필드는 여기서 평가한다 - 결과가 원시면 그 값,
+  // 객체/배열이면 그 시작 leafIndex부터 조립한다.
+  assembledValue = (p: TAssembled): unknown => {
+    const steps = compiledStepsOf(this.module, p.typeRef);
+    if (!("expr" in p)) {
+      return assemble(steps, p.fieldSourcePairs, this.store, this.module, this.arrayPool);
+    }
+    const result = this.runExpr(p.expr, p.pairs, null, null, SKIP_NOTHING, null);
+    if (this.module.types[p.typeRef].tag === "scalar") {
+      return result;
+    }
+    const pairs = storeSourcePairs(result as number, leafCountOf(this.module, p.typeRef));
+    return assemble(steps, pairs, this.store, this.module, this.arrayPool);
+  };
+
   // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
   dispatch = (binding: TBinding, domEventObject: Event) => {
     const data: Record<string, unknown> = {};
     for (const p of binding.payload) {
-      data[p.name] = assemble(
-        compiledStepsOf(this.module, p.typeRef),
-        p.fieldSourcePairs,
-        this.store,
-        this.module,
-        this.arrayPool,
-      );
+      data[p.name] = this.assembledValue(p);
     }
     const context: Record<string, Record<string, unknown>> = {};
     for (const ctxName in binding.contextLeaves) {
       const values: Record<string, unknown> = {};
       for (const p of binding.contextLeaves[ctxName]) {
-        values[p.name] = assemble(
-          compiledStepsOf(this.module, p.typeRef),
-          p.fieldSourcePairs,
-          this.store,
-          this.module,
-          this.arrayPool,
-        );
+        values[p.name] = this.assembledValue(p);
       }
       context[ctxName] = values;
     }
@@ -2205,11 +2236,7 @@ class Interpreter {
     const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
     // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
     // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
-    const payload: TAssembled[] = event.fields.map((field) => ({
-      name: this.module.constpool[field.nameConstIndex] as string,
-      typeRef: field.typeRef,
-      fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
-    }));
+    const payload = event.fields.map((field) => this.toAssembled(compId, field, argumentSourcePairs));
     // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
     // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 현재 scope로 편다.
     const props = this.buildProps(this.module.defs[compId].propsTypeRef, argumentSourcePairs);
@@ -2437,11 +2464,7 @@ class Interpreter {
           const contextDef = this.componentContexts(compId)[u16at()];
           const name = this.module.constpool[contextDef.nameConstIndex as number] as string;
           // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
-          const fields: TAssembled[] = contextDef.fields.map((field) => ({
-            name: this.module.constpool[field.nameConstIndex] as string,
-            typeRef: field.typeRef,
-            fieldSourcePairs: refToSourcePairs(field.ref, leafCountOf(this.module, field.typeRef), argumentSourcePairs),
-          }));
+          const fields = contextDef.fields.map((field) => this.toAssembled(compId, field, argumentSourcePairs));
           // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
           // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
           if (walkStacks.activeContexts.some((i) => this.createdContexts[i].name === name)) {
