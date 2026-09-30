@@ -7,6 +7,8 @@ use crate::pool::ConstPool;
 ///   - 부모가 그 슬롯을 어디서 받았느냐에 달려 컴파일이 못 박는다. object/array면 base+offset.
 /// - Const: 컴포넌트 상수풀 인덱스. 리터럴 값(payload에 직접 박힘).
 /// - Raw: @for 등이 런타임에 만든 원시값. 지금은 number only(@for 인덱스). 실사용은 @for 착수 때.
+/// - Expr: 컴포넌트 표현식 테이블 인덱스. 연산자나 인덱스 접근이 낀 값을 발화 때 평가한다.
+///   type_ref가 Scalar면 식이 값을, 객체/배열이면 그 시작 leafIndex를 낸다.
 ///
 /// 직렬화는 태그 1바이트 + payload(serialize.rs). variant가 곧 태그라 enum엔 태그 필드가 없다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,6 +16,7 @@ pub enum FieldValue {
     Scope(/* scope_index */ u8, /* offset */ u8),
     Const(/* const_index */ u16),
     Raw(/* value */ u16),
+    Expr(/* expr_index */ u8),
 }
 
 /// payload/context가 담는 객체 타입의 구조. 모듈 전역 테이블(Module.types)에 dedup 저장.
