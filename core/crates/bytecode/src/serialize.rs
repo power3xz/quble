@@ -20,6 +20,7 @@ const TAG_ARRAY: u8 = 2;
 const TAG_SCOPE: u8 = 0;
 const TAG_CONST: u8 = 1;
 const TAG_RAW: u8 = 2;
+const TAG_EXPR: u8 = 3;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -159,7 +160,8 @@ fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
     }
 }
 
-/// field ref 하나 - 태그 1바이트 + payload. Scope는 (scope_index, offset) 두 u8, Const/Raw는 u16.
+/// field ref 하나 - 태그 1바이트 + payload. Scope는 (scope_index, offset) 두 u8, Const/Raw는 u16,
+/// Expr는 expr_index u8.
 fn put_ref(out: &mut Vec<u8>, value: &FieldValue) {
     match value {
         FieldValue::Scope(scope_index, offset) => {
@@ -174,6 +176,10 @@ fn put_ref(out: &mut Vec<u8>, value: &FieldValue) {
         FieldValue::Raw(value) => {
             out.push(TAG_RAW);
             put_u16(out, *value);
+        }
+        FieldValue::Expr(index) => {
+            out.push(TAG_EXPR);
+            out.push(*index);
         }
     }
 }
@@ -300,6 +306,7 @@ fn read_ref(r: &mut Reader) -> Result<FieldValue, DecodeError> {
         TAG_SCOPE => Ok(FieldValue::Scope(r.u8()?, r.u8()?)),
         TAG_CONST => Ok(FieldValue::Const(r.u16()?)),
         TAG_RAW => Ok(FieldValue::Raw(r.u16()?)),
+        TAG_EXPR => Ok(FieldValue::Expr(r.u8()?)),
         other => Err(DecodeError::BadRefTag(other)),
     }
 }

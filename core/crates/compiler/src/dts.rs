@@ -12,6 +12,7 @@
 //! 있어야 하므로 타입에 드러낸다.
 
 use crate::ast::{Component, Expr, Lit, LitValue, Node, Prop, Type};
+use crate::expr_type::{expr_type, path_type};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::CompileError;
 
@@ -237,33 +238,20 @@ fn value_type(v: &Expr, props: &[Prop]) -> String {
             },
             _,
         ) => b.to_string(),
-        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => match var_ref_type(v, props) {
-            Some(ty) => type_to_ts(ty),
-            None => "unknown".to_string(),
-        },
-        // 연산자가 붙은 식과 배열은 이 자리에서 codegen이 거른다.
-        // d.ts는 컴파일 실패 중에도 불리므로 에러 대신 unknown으로 낸다.
-        Expr::List(..) | Expr::Unary(..) | Expr::Binary(..) => "unknown".to_string(),
+        // codegen expr_field_value와 같은 기준 - 연산자 식은 결과가 늘 원시고, 참조 경로는
+        // 객체/배열에도 도달한다. 타입이 안 맞으면 codegen이 거르는 몫이다 - d.ts는 편집기가
+        // 컴파일 실패 중에도 부르므로 에러 대신 unknown으로 낸다.
+        Expr::Unary(..) | Expr::Binary(..) => ts_or_unknown(expr_type(v, props, &[])),
+        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => ts_or_unknown(path_type(v, props, &[])),
+        // 배열은 이 자리에서 codegen이 거른다.
+        Expr::List(..) => "unknown".to_string(),
     }
 }
 
-/// 참조 체인이 가리키는 선언 타입. 못 찾으면 None - codegen이 UnknownProp/UnknownField로
-/// 거르는 몫이라 여기서 에러를 내지 않는다(d.ts는 편집기가 컴파일 실패 중에도 부른다).
-fn var_ref_type<'a>(expr: &Expr, props: &'a [Prop]) -> Option<&'a Type> {
-    match expr {
-        Expr::Var(name, _) => props.iter().find(|p| p.name == *name).map(|p| &p.type_),
-        Expr::Field(owner, field, _) => match var_ref_type(owner, props)? {
-            Type::Object(fields) => fields
-                .iter()
-                .find(|(name, _)| name == field)
-                .map(|(_, t)| t),
-            _ => None,
-        },
-        Expr::Index(arr, _, _) => match var_ref_type(arr, props)? {
-            Type::Array(elem) => Some(elem),
-            _ => None,
-        },
-        _ => None,
+fn ts_or_unknown<E>(ty: Result<Type, E>) -> String {
+    match ty {
+        Ok(ty) => type_to_ts(&ty),
+        Err(_) => "unknown".to_string(),
     }
 }
 
@@ -887,6 +875,24 @@ mod tests {
         "#);
         assert!(
             out.contains("THandler<{ n: number; b: boolean; s: string }"),
+            "실제 출력:\n{out}"
+        );
+    }
+
+    /// payload 식 필드는 식의 결과 타입으로 나온다 - 연산자는 원시, 인덱스 접근은 요소 구조 통째.
+    #[test]
+    fn payload_expr_uses_result_type() {
+        let out = dts(r#"
+            component C {
+              props { n: number, cursor: number, rows: { title: string }[] }
+              events { E({ next: n + 1, big: n > 9, row: rows[cursor], count: rows.length }) }
+              template { button(@click:E /) }
+            }
+        "#);
+        assert!(
+            out.contains(
+                "THandler<{ next: number; big: boolean; row: { title: string }; count: number }"
+            ),
             "실제 출력:\n{out}"
         );
     }

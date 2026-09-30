@@ -185,6 +185,38 @@ mod tests {
         assert_eq!(back.def(0).unwrap().exprs, vec![gt, and]);
     }
 
+    /// 필드 ref 네 종류가 왕복하는지. 이벤트와 컨텍스트가 같은 인코딩이라 둘 다 싣는다.
+    #[test]
+    fn roundtrip_field_refs() {
+        let field = |value| Field {
+            name_const_index: 0,
+            type_ref: 0,
+            value,
+        };
+        let defs = vec![CompDef {
+            name_const_index: 0,
+            props_type_ref: 0,
+            code_off: 0,
+            code_len: 0,
+            events: vec![EventDef {
+                name_const_index: 0,
+                fields: vec![
+                    field(FieldValue::Scope(1, 2)),
+                    field(FieldValue::Const(3)),
+                    field(FieldValue::Raw(4)),
+                    field(FieldValue::Expr(5)),
+                ],
+            }],
+            contexts: vec![ContextDef {
+                name_const_index: 0,
+                fields: vec![field(FieldValue::Expr(6))],
+            }],
+            exprs: vec![],
+        }];
+        let m = Module::new(ConstPool::new(), vec![], defs, vec![]);
+        assert_eq!(decode(&encode(&m)).unwrap(), m);
+    }
+
     /// 알 수 없는 타입 태그는 BadTypeTag로 거부한다.
     #[test]
     fn decode_rejects_bad_type_tag() {

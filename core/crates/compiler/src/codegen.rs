@@ -5,7 +5,7 @@ use crate::ast::{
     UnaryOp,
 };
 use crate::expr_type::{
-    path_type, require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind,
+    expr_type, path_type, require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind,
 };
 use crate::flatten::{FlatComp, Sourced};
 use crate::scope::{
@@ -75,8 +75,7 @@ pub enum CodegenErrorKind {
         comp: String,
         slot_placeholder: Option<String>,
     },
-    /// 값 자리에 연산자가 붙은 식이 왔다. 지금 식을 평가하는 건 `@if` 조건뿐이고
-    /// 나머지 값 자리(속성값/합성 인자/payload/context)는 잎 하나만 받는다.
+    /// 합성 인자에 연산자나 인덱스 접근이 낀 식이 왔다. 합성 인자는 잎 하나만 받는다.
     UnsupportedValueExpr,
     /// 속성값 리터럴이 문자열이 아니다(`width={100}`). DOM 속성값은 문자열이라 갈 곳이 없다.
     AttrValueNotString,
@@ -428,7 +427,9 @@ fn generate_comp(
                 let fields = e
                     .payload
                     .iter()
-                    .map(|(field, value)| arg_to_field(field, value, &comp.props, pool, types))
+                    .map(|(field, value)| {
+                        arg_to_field(field, value, &comp.props, pool, types, &mut exprs)
+                    })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(EventDef {
                     name_const_index: pool.intern_str(&e.name),
@@ -444,7 +445,9 @@ fn generate_comp(
                 let fields = c
                     .fields
                     .iter()
-                    .map(|(field, value)| arg_to_field(field, value, &comp.props, pool, types))
+                    .map(|(field, value)| {
+                        arg_to_field(field, value, &comp.props, pool, types, &mut exprs)
+                    })
                     .collect::<Result<Vec<_>, CodegenError>>()?;
                 Ok(ContextDef {
                     name_const_index: pool.intern_str(&c.name),
@@ -540,25 +543,20 @@ impl TypeTable {
 }
 
 /// payload/context field 명세 하나 = 필드명 + 조립 구조(type_ref) + 채울 값 하나(ref).
-/// Var는 도달 타입을 테이블에 intern하고 그 슬롯 위치(scope_index, offset)를 Scope ref로 싣는다
-/// (안 펼쳐 객체도 하나). Literal은 스칼라 type_ref + Const ref 하나(객체 리터럴은 문법상 없다).
+/// 슬롯 하나로 접히는 참조는 도달 타입을 테이블에 intern하고 그 슬롯 위치(scope_index, offset)를
+/// Scope ref로 싣는다(안 펼쳐 객체도 하나). Literal은 스칼라 type_ref + Const ref 하나(객체
+/// 리터럴은 문법상 없다). 나머지 식은 표현식 테이블에 싣고 Expr ref로 가리킨다 - 결과가 원시면
+/// 값까지, 객체/배열이면 시작 leafIndex까지 내고 런타임이 거기서부터 조립한다.
 fn arg_to_field(
     field: &str,
     value: &Expr,
     props: &[Prop],
     pool: &mut ConstPool,
     types: &mut TypeTable,
+    exprs: &mut Vec<Vec<u8>>,
 ) -> Result<Field, CodegenError> {
+    // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
     let (type_ref, ref_value) = match value {
-        Expr::Var(..) | Expr::Field(..) => {
-            // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
-            let (scope_index, offset, ty) = match fixed_ref_of(value, props, &[])? {
-                Some(found) => found,
-                None => unreachable!("참조 체인은 늘 슬롯으로 접힌다"),
-            };
-            let type_ref = types.intern(ty, pool);
-            (type_ref, FieldValue::Scope(scope_index, offset))
-        }
         Expr::Lit(lit, _) => {
             // 리터럴은 항상 스칼라(객체 리터럴 없음). Scalar 엔트리 하나를 intern해 공유.
             let type_ref = types.intern(&lit_type(&lit.value), pool);
@@ -571,16 +569,45 @@ fn arg_to_field(
         Expr::List(_, range) => {
             return Err(CodegenErrorKind::ListNotAllowed.at(range.0));
         }
-        // payload/context 값은 아직 참조 체인뿐 - 연산자와 인덱스 접근은 ROADMAP에 남아 있다.
-        Expr::Unary(..) | Expr::Binary(..) | Expr::Index(..) => {
-            return Err(CodegenErrorKind::UnsupportedValueExpr.at(value.range().0));
-        }
+        _ => match fixed_ref_of(value, props, &[])? {
+            Some((scope_index, offset, ty)) => {
+                (types.intern(ty, pool), FieldValue::Scope(scope_index, offset))
+            }
+            None => expr_field_value(value, props, pool, types, exprs)?,
+        },
     };
     Ok(Field {
         name_const_index: pool.intern_str(field),
         type_ref,
         value: ref_value,
     })
+}
+
+/// 슬롯 하나로 접히지 않는 값(연산자, 인덱스 접근, `.length`)을 표현식 테이블에 싣는다.
+/// 결과가 원시면 값까지, 객체/배열이면 시작 leafIndex까지 낸다 - 런타임이 거기서부터 조립한다.
+fn expr_field_value(
+    value: &Expr,
+    props: &[Prop],
+    pool: &mut ConstPool,
+    types: &mut TypeTable,
+    exprs: &mut Vec<Vec<u8>>,
+) -> Result<(u16, FieldValue), CodegenError> {
+    // 연산자 식은 결과가 늘 원시다. 참조 경로는 객체/배열에도 도달한다.
+    let ty = match value {
+        Expr::Unary(..) | Expr::Binary(..) => expr_type(value, props, &[])?,
+        _ => path_type(value, props, &[])?,
+    };
+    let mut bytes = Vec::new();
+    match ty {
+        Type::Bool | Type::Number | Type::String => {
+            emit_expr_postfix(value, props, &[], pool, &mut bytes)?;
+        }
+        _ => {
+            emit_ref_path(value, props, &[], pool, &mut bytes)?;
+        }
+    }
+    let index = intern_expr(exprs, bytes, value.range().0)?;
+    Ok((types.intern(&ty, pool), FieldValue::Expr(index)))
 }
 
 /// class 배열 요소를 공백으로 이어 하나의 값으로. ["card", "lg"] -> "card lg".
