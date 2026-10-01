@@ -99,6 +99,16 @@ clear.addEventListener("click", () => {
   render();
 });
 
-document.getElementById("controls")!.append(...controls(render), metricSelect, clear);
+// 지금 보이는 표를 캡션과 함께 탭으로 나눈 텍스트로 복사한다. 셀 안의 줄바꿈(대상 이름 아래 측정 시각)은 공백으로 잇는다.
+const copy = document.createElement("button");
+copy.className = "btn";
+copy.textContent = "표 복사";
+copy.addEventListener("click", () => {
+  const table = document.getElementById("compare") as HTMLTableElement;
+  const lines = [...table.rows].map((tr) => [...tr.cells].map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("\t"));
+  void navigator.clipboard.writeText([document.getElementById("caption")!.textContent, ...lines].join("\n"));
+});
+
+document.getElementById("controls")!.append(...controls(render), metricSelect, copy, clear);
 addEventListener("storage", render);
 render();
