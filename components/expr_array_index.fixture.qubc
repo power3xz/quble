@@ -15,6 +15,7 @@ component ExprArrayIndex {
       button(class="remove-first-row" @click:REMOVE_FIRST_ROW) { "remove row" }
       button(class="remove-first-scalar" @click:REMOVE_FIRST_SCALAR) { "remove scalar" }
       button(class="set-one-row" @click:SET_ONE_ROW) { "set one row" }
+      p(class="lifted") { ${100 + rows[cursor].score} }
       p(class="field") { ${rows[cursor].title} }
       p(class="scalar") { ${scalars[cursor]} }
       p(class="arith") { ${rows[cursor].score * 2} }

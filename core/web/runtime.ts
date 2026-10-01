@@ -1023,6 +1023,9 @@ class Interpreter {
   // 정해진다(@for 본문은 FOR_END, @if 가지는 ELSE/IF_END, 합성은 def 끝).
   templatePlanCache = new Map<number, TTemplatePlan | null>();
 
+  // 식 평가 스택. runExpr마다 새로 만들지 않고 이것을 다시 쓴다.
+  exprStack: unknown[] = [];
+
   constructor(
     module: TModule,
     handlers: THandlers,
@@ -2724,42 +2727,26 @@ class Interpreter {
     skipPastOp: TSkipPastOp,
     reads: number[] | null,
   ): unknown => {
-    const stack: unknown[] = [];
-    // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
-    const pushResult = (at: number, value: unknown) => {
-      stack.push(value);
-      if (table !== null && cache !== null) {
-        cache[table.cacheIndex[at]] = value;
-      }
-    };
-    // 슬롯 하나가 가리키는 값. CONST면 상수풀, RAW면 ref 자체(개수 반복의 회차 번호), STORE면 store 칸.
-    // CONST와 RAW는 바뀌지 않아 구독하지 않는다.
-    const slotValue = (scopeIndex: number, offset: number, at: number): unknown => {
-      const ref = slotRef(pairs, scopeIndex);
-      const kind = slotKind(pairs, scopeIndex);
-      if (kind === CONST) {
-        return this.module.constpool[ref];
-      }
-      if (kind === RAW) {
-        return ref;
-      }
-      reads?.push(ref + offset, at);
-      return this.store.get(ref + offset);
-    };
+    const stack = this.exprStack;
+    // 스택 높이. 0부터 센다 - 앞선 평가가 ELEM_AT의 RangeError로 중간에 멈췄으면 배열에 그때 값이
+    // 남아 있다. 배열 길이를 0으로 비우지 않는 것은 V8이 저장 공간을 놓아 다음에 다시 할당하기 때문이다.
+    let sp = 0;
     for (let pc = 0; pc < expr.length; ) {
       const at = pc;
       const skipPastOpAt = skipPastOp[at];
       if (skipPastOpAt !== undefined && table !== null && cache !== null) {
-        stack.push(cache[table.cacheIndex[skipPastOpAt]]);
+        stack[sp++] = cache[table.cacheIndex[skipPastOpAt]];
         pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
         continue;
       }
       const op = expr[pc++];
+      // 연산의 결과. 값을 올리기만 하는 명령은 직접 올리고 다음 명령으로 넘어간다.
+      let result: unknown;
       switch (op) {
         case EXPR.LOAD_VAR: {
-          stack.push(slotValue(expr[pc], expr[pc + 1], at));
+          stack[sp++] = this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads);
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_ARRAY_LENGTH: {
           // 배열 칸의 값이 arrayInfoIndex - 요소 수는 그 arrayInfo가 든다.
@@ -2773,68 +2760,88 @@ class Interpreter {
             info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
             reads?.push(info.sizeLeafIndex, at);
           }
-          stack.push(info.elemStartLeafIndices.length);
+          stack[sp++] = info.elemStartLeafIndices.length;
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_STRING_LENGTH: {
           // 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다 - slotValue가 그 칸을 담는다.
-          stack.push(String(slotValue(expr[pc], expr[pc + 1], at)).length);
+          stack[sp++] = String(this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads)).length;
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_CONST: {
-          stack.push(this.module.constpool[expr[pc] | (expr[pc + 1] << 8)]);
+          stack[sp++] = this.module.constpool[expr[pc] | (expr[pc + 1] << 8)];
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_SMALL_INT:
-          stack.push(expr[pc++]);
-          break;
+          stack[sp++] = expr[pc++];
+          continue;
         case EXPR.LOAD_TRUE:
-          stack.push(true);
-          break;
+          stack[sp++] = true;
+          continue;
         case EXPR.LOAD_FALSE:
-          stack.push(false);
-          break;
+          stack[sp++] = false;
+          continue;
         // 단항 - 하나 꺼내 하나 넣는다.
         case EXPR.NOT:
-          pushResult(at, !stack.pop());
+          result = !stack[--sp];
           break;
         case EXPR.NEG:
-          pushResult(at, -(stack.pop() as number));
+          result = -(stack[--sp] as number);
           break;
         // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
         // 요소가 없는 인덱스(범위 밖, 음수, 정수 아님)는 에러다 - 범위는 핸들러 로직이 지킨다.
         case EXPR.ELEM_AT: {
-          const i = stack.pop() as number;
-          const info = this.arrayPool.entries[stack.pop() as number];
+          const i = stack[--sp] as number;
+          const info = this.arrayPool.entries[stack[--sp] as number];
           const start = info.elemStartLeafIndices[i];
           if (start === undefined) {
             throw new RangeError(`index ${i} out of range (length ${info.elemStartLeafIndices.length})`);
           }
-          pushResult(at, start);
+          result = start;
           break;
         }
         case EXPR.FIELD_AT:
-          pushResult(at, (stack.pop() as number) + expr[pc++]);
+          result = (stack[--sp] as number) + expr[pc++];
           break;
         case EXPR.READ_LEAF: {
-          const leafIndex = stack.pop() as number;
+          const leafIndex = stack[--sp] as number;
           reads?.push(leafIndex, at);
-          pushResult(at, this.store.get(leafIndex));
+          result = this.store.get(leafIndex);
           break;
         }
         // 이항 - 둘 꺼내 하나 넣는다. 나중에 밀린 것이 오른쪽이라 먼저 꺼내진다.
         default: {
-          const right = stack.pop();
-          const left = stack.pop();
-          pushResult(at, applyBinary(op, left, right));
+          const right = stack[--sp];
+          const left = stack[--sp];
+          result = applyBinary(op, left, right);
           break;
         }
       }
+      // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
+      stack[sp++] = result;
+      if (table !== null && cache !== null) {
+        cache[table.cacheIndex[at]] = result;
+      }
     }
     return stack[0];
+  };
+
+  // 슬롯 하나가 가리키는 값. CONST면 상수풀, RAW면 ref 자체(개수 반복의 회차 번호), STORE면 store 칸.
+  // CONST와 RAW는 바뀌지 않아 구독하지 않는다. STORE 칸을 읽으면 reads에 leafIndex와 읽은 위치(at)를 붙인다.
+  slotValue = (pairs: TScope, scopeIndex: number, offset: number, at: number, reads: number[] | null): unknown => {
+    const ref = slotRef(pairs, scopeIndex);
+    const kind = slotKind(pairs, scopeIndex);
+    if (kind === CONST) {
+      return this.module.constpool[ref];
+    }
+    if (kind === RAW) {
+      return ref;
+    }
+    reads?.push(ref + offset, at);
+    return this.store.get(ref + offset);
   };
 
   // @if opcode 처리 - 조건 슬롯을 그대로 조건 칸으로 쓴다.
