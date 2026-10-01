@@ -27,8 +27,14 @@ let metric: TMetric = "dom";
 const render = () => {
   const n = currentN();
   const enc = currentEnc();
-  const all = loadResults();
-  const results = TARGETS.map((t) => ({ target: t, result: all[`${t.id}|${n}|${enc}`] }));
+  const all = Object.values(loadResults());
+  // 대상마다 tag 없는 결과 다음에 tag 붙은 결과를 잰 순서대로 한 행씩. tag 필드가 생기기 전 결과는 tag가 없다.
+  const results = TARGETS.flatMap((t) => {
+    const mine = all
+      .filter((r) => r.id === t.id && r.n === n && r.enc === enc)
+      .sort((a, b) => Number(Boolean(a.tag)) - Number(Boolean(b.tag)));
+    return mine.length > 0 ? mine.map((r) => ({ target: t, result: r as TResult | undefined })) : [{ target: t, result: undefined }];
+  });
   const cols = columns(metric);
 
   const head = document.createElement("tr");
@@ -36,7 +42,10 @@ const render = () => {
 
   const rows = results.map(({ target, result }) => {
     const tr = document.createElement("tr");
-    const link = `<a href="./${target.id}.html?n=${n}" target="_blank" rel="noopener">${target.label}</a>`;
+    const tag = result?.tag ?? "";
+    const link = tag
+      ? `<a href="./${target.id}.html?n=${n}&tag=${encodeURIComponent(tag)}" target="_blank" rel="noopener">${target.label} (${tag})</a>`
+      : `<a href="./${target.id}.html?n=${n}" target="_blank" rel="noopener">${target.label}</a>`;
     const cells = cols.map((c) => {
       const v = result ? c.value(result) : undefined;
       if (v === undefined) {

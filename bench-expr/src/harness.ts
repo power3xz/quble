@@ -31,6 +31,7 @@ export type TResult = {
   label: string;
   n: number;
   enc: string;
+  tag: string;
   files: TFile[];
   load: { fetched: number; mounted: number; painted: number };
   clicks: Record<string, TStat>;
@@ -69,6 +70,9 @@ export const currentN = () => {
   return SIZES.includes(n) ? n : SIZES[0];
 };
 
+// 같은 대상을 구현을 바꿔 가며 잴 때 결과를 나눠 담는 이름. quble.html?n=10000&tag=before -> "before"
+export const currentTag = (): string => new URLSearchParams(location.search).get("tag") ?? "";
+
 export const currentEnc = () => {
   const m = document.cookie.match(/(?:^|; )enc=(\w+)/);
   return m && ENCODINGS.some((e) => e.key === m[1]) ? m[1] : "none";
@@ -89,7 +93,7 @@ export const loadResults = (): Record<string, TResult> => {
 const saveResult = (r: TResult) => {
   try {
     const all = loadResults();
-    all[`${r.id}|${r.n}|${r.enc}`] = r;
+    all[r.tag ? `${r.id}|${r.n}|${r.enc}|${r.tag}` : `${r.id}|${r.n}|${r.enc}`] = r;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   } catch {
     // 저장이 막힌 브라우저면 이 탭에만 보인다.
@@ -248,7 +252,9 @@ const renderClicks = (clicks: Record<string, TStat>) =>
 export const runTarget = async <P>(target: TTarget<P>) => {
   const n = currentN();
   const enc = currentEnc();
-  document.title = `${target.label} - 식 벤치`;
+  const tag = currentTag();
+  const title = tag ? `${target.label} (${tag})` : target.label;
+  document.title = `${title} - 식 벤치`;
 
   const status = el("span", { class: "hud__status" }, "로드 중");
   const runButton = el("button", { class: "btn btn--primary", disabled: "" }, "측정") as HTMLButtonElement;
@@ -261,7 +267,7 @@ export const runTarget = async <P>(target: TTarget<P>) => {
       "div",
       { class: "hud__bar" },
       el("a", { class: "hud__back", href: `./?n=${n}` }, "<- 비교 표"),
-      el("strong", { class: "hud__title" }, target.label),
+      el("strong", { class: "hud__title" }, title),
       ...controls(),
       runButton,
       status,
@@ -290,6 +296,7 @@ export const runTarget = async <P>(target: TTarget<P>) => {
     label: target.label,
     n,
     enc,
+    tag,
     files,
     load: { fetched, mounted: mounted - fetched, painted },
     clicks: {},
