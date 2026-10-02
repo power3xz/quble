@@ -8,8 +8,7 @@
 
 ## 하는 중
 
-- krausest js-framework-benchmark에 quble(non-keyed) 구현을 붙여 vanillajs, svelte, react-hooks,
-  solid와 비교 (`bench-krausest/`)
+없음
 
 ## 할 것
 
