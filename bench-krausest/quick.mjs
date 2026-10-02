@@ -7,9 +7,8 @@
 // krausest의 script 구간과 같은 범위다. 교차 출처 격리가 없어 performance.now()가 0.1ms 단위로 거칠다.
 // 힙은 1k 생성 후 GC를 강제하고 읽는다(krausest 22_run-memory와 같은 시점).
 //
-// 사용: node bench-krausest/quick.mjs 이름=번들.js [이름=번들.js ...]
-//   node bench-krausest/quick.mjs base=/tmp/base.js new=bench-krausest/quble/dist/main.js
-// 번들은 ./bench-krausest.sh 3단계와 같은 esbuild 명령으로 만든다.
+// 보통 ./bench-krausest-quick.sh가 번들을 만들어 부른다. 번들을 직접 넘길 때:
+//   node bench-krausest/quick.mjs 이름=번들.js [이름=번들.js ...]
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 
