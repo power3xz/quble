@@ -72,6 +72,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 | `npm run lint` | `npm ci` |
 | `node core/build/build-playground.mjs` | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |
 | `./bench-expr.sh` | 없음 - 스크립트가 의존 설치와 `cargo build --bin quble`을 먼저 돌린다 |
+| `./bench-krausest.sh` | 포트 8080이 비어 있을 것. 나머지는 스크립트가 krausest clone, 의존 설치, `cargo build --bin quble`을 먼저 돌린다 |
 | `npm run install-local --prefix editors/vscode` | `build:wasm` - 확장은 `core/wasm-compiler/`의 wasm을 복사한다. 플레이그라운드 빌드는 `core/target/`에만 내므로 그것으로는 안 갱신된다 |
 
 루트 `npm test`는 `npm test --workspaces`라 멤버마다 선행 조건이 다르다. 한 멤버만 돌릴 때는
