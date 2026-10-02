@@ -1934,9 +1934,10 @@ class Interpreter {
       // 바뀐 leaf의 변수가 READ_LEAF가 읽을 leafIndex를 정하는 데 쓰였으면, 그 READ_LEAF에 leafIndex를 넘긴
       // 연산의 cache 값이 방금 읽은 leafIndex다.
       //
-      // 다시 걸기가 varsOfLeafForResubscribe[k]를 고칠 수 있어(변수를 빼거나 끝에 붙인다), 돌 변수는 돌기
-      // 전에 정해 둔다. 변수가 하나면(거의 모든 경우) 사본 없이 첫 원소 하나만 돈다. 여럿이면 변수 번호를
-      // 떠 둔다. 연산 위치는 변수마다 식 정의의 표를 바로 돈다 - 그 표는 다시 걸기가 고치지 않는다.
+      // 다시 걸기가 vars를 고칠 수 있어 여럿이면 복사본을 돈다.
+      //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽어 vars = [안쪽, 바깥]이다.
+      //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮기며 vars에서 빼, vars[1]이 사라진다.
+      // 하나면 고쳐지기 전에 읽으므로 복사하지 않는다.
       if (varsOfLeafForResubscribe !== null) {
         const vars = varsOfLeafForResubscribe[k];
         const changedVars = vars.length === 1 ? vars : [...vars];
