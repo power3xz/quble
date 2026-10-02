@@ -324,21 +324,23 @@ const branchTailNode = (
   return last;
 };
 
-// anchor.after는 늘 anchor 바로 뒤에 끼워 순서가 뒤집힌다 - 마지막 회차의 끝 노드 뒤에 붙여야
-// 회차 순서가 유지된다. 회차가 없으면 anchor 뒤, 있으면 직전 회차의 실제 끝 노드 뒤가 기준점이다
-// (branch.nodes만 보면 회차 안 @if 컨텐츠를 건너뛰어 역순이 된다).
-export const attachForIteration = (
+// @for grow로 늘어난 회차들을 붙인다. 앞의 alreadyAttachedCount개는 이미 DOM에 있고 그 뒤가 새 회차다.
+//   branchIndices [b0, b1, b2], alreadyAttachedCount 1이면 b1, b2를 붙인다.
+// 첫 새 회차는 마지막으로 붙어 있던 회차의 실제 끝 노드 뒤에(붙은 회차가 없으면 anchor 뒤), 그다음부터는
+// attachFor처럼 직전 회차가 실제로 남긴 끝 뒤에 잇는다(회차 안 @if 컨텐츠까지 - branch.nodes만 보면 역순).
+export const attachGrownIterations = (
   store: Store,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
-  branchIndex: number,
+  alreadyAttachedCount: number,
 ): void => {
   const region = regionPool.entries[regionIndex];
-  const slot = region.branchIndices.indexOf(branchIndex);
-  const prev = slot > 0 ? branchPool.entries[region.branchIndices[slot - 1]] : null;
-  const after = prev ? branchTailNode(regionPool, branchPool, prev, region.anchor) : region.anchor;
-  attachOneBranch(store, regionPool, branchPool, after, branchIndex);
+  const prev = alreadyAttachedCount > 0 ? branchPool.entries[region.branchIndices[alreadyAttachedCount - 1]] : null;
+  let tail = prev ? branchTailNode(regionPool, branchPool, prev, region.anchor) : region.anchor;
+  for (let i = alreadyAttachedCount; i < region.branchIndices.length; i++) {
+    tail = attachOneBranch(store, regionPool, branchPool, tail, region.branchIndices[i]);
+  }
 };
 
 // branch(branchIndex)와 그 자식 region들을 리프까지 재귀로 free해 칸을 반납한다. detach(DOM/구독
