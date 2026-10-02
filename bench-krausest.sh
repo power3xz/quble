@@ -5,7 +5,8 @@
 # krausest는 bench-krausest/js-framework-benchmark에 받는다(gitignore). quble 번들은 레포의 core/web 런타임과
 # quble 바이너리로 만든다 - 둘 다 지금 체크아웃된 코드 그대로다.
 #
-# 측정 중 runner가 Chrome 창을 띄운다. 창이 가려지면 paint 이벤트가 빠져 수치가 틀어진다.
+# 측정 중 runner가 Chrome 창을 띄운다. 창이 가려지면 paint 이벤트가 빠져 수치가 틀어진다 - 측정은
+# caffeinate -d로 감싸 화면 보호기와 디스플레이 꺼짐을 막는다.
 #
 # 사용: ./bench-krausest.sh [runner 인자...]   예: ./bench-krausest.sh --benchmark 01_ 02_ --count 3
 set -euo pipefail
@@ -74,6 +75,6 @@ echo "[bench-krausest] 6/7 quble 검사(smoketest, keyed 판정)"
 ( cd "$JFB/webdriver-ts" && npm run isKeyed -- --headless true non-keyed/quble )
 
 echo "[bench-krausest] 7/7 측정과 결과 표"
-( cd "$JFB" && npm run bench -- "$@" --framework non-keyed/quble "${COMPARE[@]}" )
+( cd "$JFB" && caffeinate -d npm run bench -- "$@" --framework non-keyed/quble "${COMPARE[@]}" )
 ( cd "$JFB" && npm run results )
 echo "[bench-krausest] 결과: $JFB/webdriver-ts/results, 표: http://localhost:$PORT/webdriver-ts-results/dist/index.html"
