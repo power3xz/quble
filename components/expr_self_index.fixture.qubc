@@ -1,0 +1,6 @@
+component ExprSelfIndex {
+  props { nums: number[] }
+  template {
+    p(class="self") { ${nums[nums[0]]} }
+  }
+}
