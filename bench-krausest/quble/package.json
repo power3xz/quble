@@ -1,0 +1,15 @@
+{
+  "name": "js-framework-benchmark-non-keyed-quble",
+  "version": "0.0.1",
+  "description": "Quble demo",
+  "js-framework-benchmark": {
+    "frameworkVersion": "",
+    "frameworkHomeURL": "",
+    "language": "TypeScript"
+  },
+  "scripts": {
+    "dev": "echo 0",
+    "build-prod": "echo 0"
+  },
+  "license": "Apache-2.0"
+}
