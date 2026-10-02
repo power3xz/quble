@@ -8,3 +8,5 @@ dist/
 *.vsix
 .env
 bench-krausest/js-framework-benchmark/
+bench-expr/dist-quick/
+bench-results/

@@ -119,7 +119,7 @@ store의 leaf 배치다. rows 필드 leaf에는 요소가 아니라 arrayInfoInd
 
 `SEND({ row: rows[cursor] })`처럼 payload/context 값에 온 식은 이벤트가 발화할 때 `assembledValue`가
 한 번 센다. cache도 reads도 없이 세고 구독하지 않는다 - 핸들러가 받는 것은 발화 시점의 값이다. 바인딩
-때(`toAssembled`)는 식 바이트와 그때의 슬롯(`argumentSourcePairs` 복사본)만 들어 둔다. 슬롯은 leaf를
+때(`toAssembled`)는 식 바이트와 그때의 슬롯(`argumentSourcePairs` - 만든 뒤 바뀌지 않아 참조로 든다)만 들어 둔다. 슬롯은 leaf를
 가리키므로 인덱스가 나중에 바뀌어도(`set`, `removeAt`이 당긴 회차 번호) 발화 때 현재 값을 읽는다.
 
 결과 타입(field의 `type_ref`)에 따라 식이 끝나는 곳과 발화 때 하는 일이 나뉜다.

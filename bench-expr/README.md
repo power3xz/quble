@@ -16,6 +16,22 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 같은 대상을 구현만 바꿔 잴 때는 URL에 `tag`를 붙여 결과를 나눠 담는다(`quble.html?n=10000&tag=before`).
 비교 표가 같은 대상의 tag별 결과를 나란히 보여 준다.
 
+### 빠른 측정 - `./bench-expr-quick.sh [git ref]`
+
+커밋 하나(기본 HEAD)의 quble 런타임을 headless Chromium으로 재고 기록으로 남긴다. 1분 안쪽에 끝나고 창이
+뜨지 않는다.
+
+- 커밋을 임시 worktree로 꺼내 그 `core/web`으로 빌드해 서버(8144)에 띄운다. 작업 트리의 커밋 안 한 변경은
+  재지 않는다. `orders.qubb`와 데이터는 지금 컴파일러로 만든다.
+- `bench-expr/quick.mjs`가 `quble.html?n=10000`을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 다섯의
+  DOM 반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
+- 기록은 `bench-results/<커밋>.expr.json`에 남는다. 커밋끼리는 `node bench-compare.mjs expr <ref> <ref>`로
+  견준다.
+
+클릭은 하네스 그대로 누르므로 클릭마다 다음 프레임을 기다린다. 측정 시간 대부분이 여기서 든다.
+
+따로 잰 기록끼리 견주므로 잰 시각 사이의 기계 상태 차이가 섞인다. 견줄 커밋은 이어서 잰다.
+
 ## 재는 앱
 
 주문 목록 N행(`quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte`). 행마다 단순 값
@@ -36,6 +52,7 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 - 네트워크: 대상 페이지가 받은 파일별 바이트(전송, 압축된 본문, 원본 본문). 서버(`serve.mjs`)가 고른 압축으로
   응답하고 캐시를 끈다.
 - mount 시간과 첫 paint까지의 시간.
+- mount 뒤 JS 힙 - 빠른 측정만 잰다.
 
 **클릭** - 버튼 다섯을 각각 예열 5회 뒤 30회 눌러 중앙값과 p90을 낸다.
 
