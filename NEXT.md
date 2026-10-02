@@ -8,9 +8,7 @@
 
 ## 하는 중
 
-- 인스턴스의 JS 배열 줄이기 - 부분 재평가 식이 leaf 기준 배열(`readLeaves`, `varsOfLeaf`,
-  `skipPastOpOfLeaf`) 대신 변수 기준 배열(`leafOfVar`) 하나를 든다. bench-expr 10000행 힙 스냅샷에서
-  JS arrays가 React보다 크게 많다
+- 가지의 `leafIndices`, `updateFns`가 push로 커서 용량이 길이보다 크게 남는 것 줄이기
 
 ## 할 것
 
