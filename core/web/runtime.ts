@@ -407,6 +407,21 @@ type TScope = number[];
 const slotKind = (scope: TScope, o: number): number => scope[2 * o];
 const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
 
+// i번째를 뺀다. 빈자리에는 마지막 원소를 옮겨 오므로 순서가 바뀐다.
+// [a, b, c, d]에서 swapDeleteAt(_, 1)이면 [a, d, c]
+//
+// 순서를 유지해야 하는 배열에는 쓰지 않는다. 예를 들어 elemStartLeafIndices는 순서가 곧 요소의
+// 인덱스라 이것으로 지우면 rows[1]이 다른 요소를 가리킨다. 순서가 무의미하고 찾을 때 indexOf만 쓰는
+// 배열에만 쓴다. 같은 자리 번호로 짝지은 배열 여럿(readLeaves와 varsOfLeaf처럼)은 모두 같은 i로
+// 지워야 짝이 유지된다.
+//
+// splice(i, 1)는 뺀 원소를 담은 배열을 매번 새로 만들고 뒤를 당긴다. 이것은 원소 하나만 옮기고
+// 아무것도 만들지 않는다.
+export const swapDeleteAt = (items: unknown[], i: number): void => {
+  items[i] = items[items.length - 1];
+  items.pop();
+};
+
 // 이항 연산자 하나를 적용한다. 피연산자 타입은 컴파일타임에 맞춰져(compiler/src/expr_type.rs)
 // 여기서 검사하지 않는다 - 산술/비교는 number, 논리는 bool, `==`/`!=`는 양쪽이 같은 타입이다.
 const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
@@ -1984,16 +1999,31 @@ class Interpreter {
     }
 
     const oldVars = varsOfLeaf[oldK];
-    oldVars.splice(oldVars.indexOf(varNumber), 1);
+    // 흔한 경우 - 옛 leaf는 이 변수만 읽었고 새 leaf는 아무도 안 읽는다. 옛 leaf를 빼고 새 leaf를 끝에
+    // 붙이는 대신 같은 자리를 덮어쓴다. varsOfLeaf[oldK]는 이미 [varNumber]이고 skipPastOpOfLeaf[oldK]는
+    // 이 변수의 표라 그대로 둔다. 가지 목록도 같은 자리의 leafIndex만 바꾼다.
+    if (oldVars.length === 1 && !readLeaves.includes(newLeafIndex)) {
+      readLeaves[oldK] = newLeafIndex;
+      this.store.unsubscribe(oldLeafIndex, subscriber);
+      this.store.subscribe(newLeafIndex, subscriber);
+      for (let i = 0; i < branch.leafIndices.length; i++) {
+        if (branch.leafIndices[i] === oldLeafIndex && branch.updateFns[i] === subscriber) {
+          branch.leafIndices[i] = newLeafIndex;
+          break;
+        }
+      }
+      return;
+    }
+    swapDeleteAt(oldVars, oldVars.indexOf(varNumber));
     if (oldVars.length === 0) {
-      readLeaves.splice(oldK, 1);
-      varsOfLeaf.splice(oldK, 1);
-      skipPastOpOfLeaf.splice(oldK, 1);
+      swapDeleteAt(readLeaves, oldK);
+      swapDeleteAt(varsOfLeaf, oldK);
+      swapDeleteAt(skipPastOpOfLeaf, oldK);
       this.store.unsubscribe(oldLeafIndex, subscriber);
       for (let i = 0; i < branch.leafIndices.length; i++) {
         if (branch.leafIndices[i] === oldLeafIndex && branch.updateFns[i] === subscriber) {
-          branch.leafIndices.splice(i, 1);
-          branch.updateFns.splice(i, 1);
+          swapDeleteAt(branch.leafIndices, i);
+          swapDeleteAt(branch.updateFns, i);
           break;
         }
       }
