@@ -8,7 +8,7 @@
 
 ## 하는 중
 
-- 가지의 `leafIndices`, `updateFns`가 push로 커서 용량이 길이보다 크게 남는 것 줄이기
+없음
 
 ## 할 것
 
