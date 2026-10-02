@@ -107,8 +107,8 @@ store의 leaf 배치다. rows 필드 leaf에는 요소가 아니라 arrayInfoInd
 |---|---|---|---|---|
 | cache | 2 | 3 | 10 | 20 |
 
-**reads** - 읽은 leaf와 읽은 명령의 위치. 처음 셀 때만 모은다. 여기서 구독할 leaf 목록(`readLeaves`)과
-leaf마다 그 leaf를 읽은 변수(`varsOfLeaf`)가 나온다. 같은 leaf가 두 번 나오면(`a + a`) 한 번만 담는다.
+**reads** - 읽은 leaf와 읽은 명령의 위치. 처음 셀 때만 모은다. 여기서 변수마다 읽은 leaf(`leafOfVar`)가
+나온다. 못 읽은 변수(범위 밖 에러로 식이 중간에 멈춘 경우)는 -1이다.
 
 | 읽은 leaf | 0 | 1 | 3 |
 |---|---|---|---|
@@ -204,8 +204,13 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 |---|---|
 | cache | 연산 수 |
 | 구독 함수 | 하나(4절) |
-| `readLeaves`, `skipPastOpOfLeaf` | 읽은 leaf 수. `skipPastOpOfLeaf`는 대개 정의의 표를 가리키기만 한다 |
+| `leafOfVar` | 변수 수. 변수마다 읽는 leafIndex |
 | 지난번 결과 | 값 하나. 다시 센 값이 같으면 DOM에 반영하지 않는다 |
+
+인스턴스는 leaf 기준(leaf마다 읽는 변수 목록과 건너뛸 표)이 아니라 변수 기준으로 든다. 변수 수는 식
+정의가 정해 배열을 처음부터 맞는 크기로 잡고, 건너뛸 표는 정의의 것을 그대로 쓴다. 행마다 다른 것은
+읽는 leafIndex뿐이다. leaf 기준으로 들면 leaf마다 작은 배열이 생기고, 빈 배열에 push로 채운 배열은
+V8이 늘어날 몫까지 잡아 많은 행에서 쓰지 않는 용량이 크게 남는다.
 
 어느 변수가 바뀌어도 건너뛸 부분식이 없으면(`a - b`, `big > 50`) 표가 null이다. 이런 식은
 `subscribeWholeExpr`로 가서 cache도 leaf마다 표도 없이, leaf가 바뀌면 처음부터 센다.
@@ -218,15 +223,15 @@ leafIndex로 그 leaf의 건너뛸 표를 고른다.
 ```
 leaf 0 (rows)    --\
 leaf 1 (cursor)  ---+--> reevalOnChange(value, leafIndex)
-leaf 3 (score)   --/       k = readLeaves.indexOf(leafIndex)
-                           reeval with skipPastOpOfLeaf[k]
+leaf 3 (score)   --/       v = leafOfVar.indexOf(leafIndex)
+                           reeval with skipPastOpByVar[v]
 ```
 
 다시 센 값이 지난번과 같으면 DOM에 반영하지 않는다.
 
 leaf마다 함수를 따로 두면 많은 행에서 함수가 수만 개 늘어, 명령 수가 아니라 메모리가 CPU 캐시를
 넘쳐 다시 세기가 처음부터 세기보다 느려졌다. 같은 이유로 구독 함수가 잡는 변수도 줄인다 - 건너뛸
-것이 있는 식과 없는 식을 메서드로 나누고, `varsOfLeaf`는 인덱스 접근이 있는 식에서만 남긴다.
+것이 있는 식과 없는 식을 메서드로 나눈다.
 
 **`runExpr`는 런타임이 가진 스택 하나를 다시 쓴다.** 호출마다 스택 배열과 클로저를 만들면 모든 행이
 다시 세는 갱신에서 행 수만큼 객체가 생겼다 버려진다. 없애도 클릭 시간은 그대로였고 할당량만 줄었다.
@@ -236,11 +241,11 @@ leaf마다 함수를 따로 두면 많은 행에서 함수가 수만 개 늘어,
 부모가 x, y로 같은 leaf 23을 넘기면
 
 ```
-readLeaves   [23]
-varsOfLeaf   [[x, y]]
+leafOfVar   [23, 23]    x, y
 ```
 
-leaf 23이 바뀌면 x, y가 함께 바뀌므로, 두 변수의 위치를 합쳐 이 인스턴스용 표를 새로 만든다.
+leaf 23은 한 번만 구독한다. leaf 23이 바뀌면 x, y가 함께 바뀌므로, 두 변수의 위치를 합쳐 표를 새로
+만든다. 드문 경우라 인스턴스에 담아 두지 않고 그때마다 만든다.
 
 **가지를 떼고 붙일 때** - 구독은 식이 놓인 가지(`TBranch`)의 목록에 함께 담긴다.
 
@@ -253,7 +258,7 @@ branch.updateFns     [fn, fn, fn]
 - 가지를 붙이면 목록대로 모두 건 뒤, 목록의 사본을 돌며 떼어져 있던 동안 놓친 값을 따라잡는다.
 
 모두 건 뒤에 따라잡는 이유는, 따라잡는 구독 함수가 인덱스 접근의 구독을 다시 걸며 목록을 고칠 수
-있어서다(5절). 사본에 남은 옛 leafIndex로 함수가 다시 호출되면, 그 leafIndex는 `readLeaves`에 없으므로
+있어서다(5절). 사본에 남은 옛 leafIndex로 함수가 다시 호출되면, 그 leafIndex는 `leafOfVar`에 없으므로
 함수가 바로 끝난다.
 
 ## 5. 인덱스 접근과 구독 다시 걸기
@@ -285,18 +290,17 @@ branch.updateFns     [fn, fn, fn]
 1. cursor 변수의 건너뛸 표로 다시 센다. `cache[FIELD_AT]`이 5가 된다.
 2. `leafIndexOpsByVar[cursor]`가 `[7]`이다.
 3. `cache[FIELD_AT(7)]`의 5가 `READ_LEAF`가 방금 읽은 leafIndex다.
-4. `resubscribeReadLeaf`가 지금 구독하는 3과 5를 비교한다. 다르므로
-   - 3을 읽는 변수가 더 없으니 3의 구독을 풀고 가지 목록에서 뺀다.
-   - 5는 처음 읽으니 5에 구독을 걸고 가지 목록에 더한다.
+4. `resubscribeReadLeaf`가 `leafOfVar[READ_LEAF]`의 3과 5를 비교한다. 다르므로 5로 바꾸고
+   - 3을 읽는 변수가 더 없으니 3의 구독을 푼다.
+   - 5는 처음 읽으니 5에 구독을 건다.
 
-새 leaf를 이미 다른 변수가 읽고 있으면, 구독을 새로 걸지 않고 두 변수의 위치를 합쳐 그 leaf의 건너뛸
-표를 새로 만든다(`${rows[cursor].score + rows[0].score}`에서 cursor가 0이 된 경우).
+새 leaf를 이미 다른 변수가 읽고 있으면 구독을 새로 걸지 않는다(`${rows[cursor].score + rows[0].score}`에서
+cursor가 0이 된 경우). 그 leaf가 바뀌면 두 변수의 위치를 합친 표로 센다(4절).
 
-위 예처럼 옛 leaf를 이 변수만 읽었고 새 leaf를 아무도 안 읽으면(대부분이 이 경우다), 옛 leaf를 빼고
-새 leaf를 끝에 붙이는 대신 같은 자리를 새 leaf로 덮어쓴다. 그 밖의 경우 빼는 것은 `swapDeleteAt`으로
-한다 - 빈자리에 마지막 원소를 옮겨 와 순서가 바뀌지만, `readLeaves`와 가지 목록은 순서를 쓰지 않는다.
-`splice`는 쓰지 않는다. 뺀 원소를 담은 배열을 매번 만들어, 많은 행이 함께 다시 걸면 버려지는 배열이
-행 수만큼 생긴다.
+가지 목록은 위 예처럼 옛 leaf를 빼고 새 leaf를 더하면(대부분이 이 경우다) 같은 자리를 새 leaf로
+덮어쓴다. 빼기만 할 때는 `swapDeleteAt`으로 한다 - 빈자리에 마지막 원소를 옮겨 와 순서가 바뀌지만, 가지
+목록은 순서를 쓰지 않는다. `splice`는 쓰지 않는다. 뺀 원소를 담은 배열을 매번 만들어, 많은 행이 함께
+다시 걸면 버려지는 배열이 행 수만큼 생긴다.
 
 **중첩은 따로 다룰 것이 없다.** 안쪽 부분식이 바깥 구간에 통째로 들어가, 안쪽을 정하는 변수는 두
 연산에 모두 달린다.

@@ -118,6 +118,16 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
   for (let i = 0; i < leafIndices.length; i++) {
     store.subscribe(leafIndices[i], updateFns[i]);
   }
+  if (!branch.everAttached) {
+    // build 중 push로 커진 배열은 V8이 늘어날 몫까지 잡아 둔다. 용량이 모자라면 원소 n + n/2 + 16개
+    // 분으로 늘린다(n은 필요한 길이). 다 채운 뒤라 길이만큼의 사본으로 바꾼다.
+    //   [] 에 1개째 push   용량 1 + 0 + 16  = 17
+    //   18개째 push        용량 18 + 9 + 16 = 43 (길이 18)
+    //   slice()            용량 18
+    // https://chromium.googlesource.com/v8/v8/+/4b215c76384844d8ec20114bf116ced0088047b3/src/objects/js-objects.h#687
+    branch.leafIndices = leafIndices.slice();
+    branch.updateFns = updateFns.slice();
+  }
   if (branch.everAttached) {
     const leaves = [...leafIndices];
     const fns = [...updateFns];
