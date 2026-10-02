@@ -402,10 +402,24 @@ const RAW = 2;
 //
 //   [ kind0, ref0 | kind1, ref1 | ... ]      슬롯 o -> [2o]=kind, [2o+1]=ref
 //     +-- 슬롯 0 --+  +-- 슬롯 1 --+
-type TScope = number[];
+//
+// 만든 뒤 바꾸지 않는다 - @for 회차는 바깥 스코프 뒤에 회차변수 슬롯을 붙인 새 배열을 받는다.
+// 그래서 식/이벤트/지연 build가 나중에 슬롯을 다시 읽어도 복사 없이 참조로 들고 있으면 된다.
+type TScope = readonly number[];
 
 const slotKind = (scope: TScope, o: number): number => scope[2 * o];
 const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
+
+// 바깥 스코프 뒤에 회차변수 슬롯 2칸(item, index)을 붙인 새 스코프. 배열 하나로 concat해야 빈칸
+// 없는(PACKED) 배열이 딱 맞는 크기로 나온다 - new Array(n)와 값 여럿 concat은 빈칸 있는(HOLEY) 배열이
+// 되고, spread는 저장 공간을 넉넉히 잡아 두 배 넘게 크다.
+const scopeWithIteration = (
+  scope: TScope,
+  itemKind: number,
+  itemRef: number,
+  indexKind: number,
+  indexRef: number,
+): TScope => scope.concat([itemKind, itemRef, indexKind, indexRef]);
 
 // i번째를 뺀다. 빈자리에는 마지막 원소를 옮겨 오므로 순서가 바뀐다.
 // [a, b, c, d]에서 swapDeleteAt(_, 1)이면 [a, d, c]
@@ -468,9 +482,8 @@ const SKIP_NOTHING: TSkipPastOp = {};
 // @for 회차/RENDER 재진입은 같은 walkStacks를 이어 쓰고(push/pop 공유), 지연 실행(@if lazyBuild/@for grow)만
 // build 시점 상태를 snapshotStacks로 딥카피해 캡처한다 - 지연 시점엔 원본 스택이 이미 pop돼 있어,
 // 카피 없이는 회차 인덱스($n)/컨텍스트를 잃는다.
-// (pathPrefix/loopIndexBase는 불변 값이라 여기 안 담고 파라미터로 흐른다 - 클로저가 값을 캡처.
-//  argumentSourcePairs도 가변(같은 push/pop 성질)이라 지연 실행은 pairs까지 딥카피한다 - 단
-//  RENDER마다 새 배열로 교체되는 다른 생애라 여기 안 묶고 나란히 흐른다.)
+// (pathPrefix/loopIndexBase/argumentSourcePairs는 불변 값이라 여기 안 담고 파라미터로 흐른다 -
+//  클로저가 값을 캡처.)
 //   loopIndexStack: @for 회차 인덱스 소스 누적(인터리브 kind,ref). buildIteration이 push/pop.
 //   activeContexts: @with 컨텍스트 누적(createdContexts 인덱스). ENTER/EXIT_CONTEXT가 push/pop.
 type TWalkStacks = {
@@ -492,10 +505,11 @@ type TTemplatePlan = { template: DocumentFragment; holes: number[] };
 // 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
 // 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
 // 보간/이벤트 경로는 콘텐츠를 쓴 곳(부모) 기준이다(SYNTAX #3.3).
-// argumentSourcePairs/walkStacks는 카피 - 이 구조체가 담는 건 "이 자리에서 본 부모 컨텍스트"라
-// 값이어야 한다. 가변 배열을 참조로 들면 부모가 이후 push/pop한 상태가 비쳐 들어와, 담은 것이
-// 그 시점의 컨텍스트가 아니게 된다. 지금은 실행이 pop 전(즉시)이거나 이미 카피본 위(@if
-// lazyBuild)라 참조로도 값이 같지만, 그건 호출 경로가 우연히 그런 것이고 이 값의 계약이 아니다.
+// walkStacks는 카피 - 이 구조체가 담는 건 "이 자리에서 본 부모 컨텍스트"라 값이어야 한다. 가변
+// 배열을 참조로 들면 부모가 이후 push/pop한 상태가 비쳐 들어와, 담은 것이 그 시점의 컨텍스트가
+// 아니게 된다. 지금은 실행이 pop 전(즉시)이거나 이미 카피본 위(@if lazyBuild)라 참조로도 값이
+// 같지만, 그건 호출 경로가 우연히 그런 것이고 이 값의 계약이 아니다. argumentSourcePairs는
+// 불변(TScope)이라 참조로 든다.
 type TSlotPlaceholderContent = {
   startPc: number;
   endPc: number;
@@ -1190,9 +1204,8 @@ class Interpreter {
   toAssembled = (compId: number, field: TFieldEntry, argumentSourcePairs: TScope): TAssembled => {
     const name = this.module.constpool[field.nameConstIndex] as string;
     if (field.ref.kind === FV_EXPR) {
-      // 슬롯 배열은 @for가 push/pop하는 가변이라 지금 모습을 복사해 둔다.
       const expr = this.module.defs[compId].exprs[field.ref.ref];
-      return { name, typeRef: field.typeRef, expr, pairs: [...argumentSourcePairs] };
+      return { name, typeRef: field.typeRef, expr, pairs: argumentSourcePairs };
     }
     const leafCount = leafCountOf(this.module, field.typeRef);
     return {
@@ -1628,7 +1641,6 @@ class Interpreter {
     walkStacks: TWalkStacks,
   ) => {
     for (let i = 0; i < count; i++) {
-      argumentSourcePairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)/index 모두 [RAW,i](리터럴은 반응성 없어 상수)
       parent.appendChild(
         this.buildIteration(
           RAW,
@@ -1636,17 +1648,13 @@ class Interpreter {
           bodyStart,
           forEndPc,
           startBranchIndex,
-          argumentSourcePairs,
+          scopeWithIteration(argumentSourcePairs, RAW, i, RAW, i), // item(회차값)/index 모두 [RAW,i](리터럴은 반응성 없어 상수)
           compId,
           pathPrefix,
           loopIndexBase,
           walkStacks,
         ),
       );
-      argumentSourcePairs.pop(); // index ref
-      argumentSourcePairs.pop(); // index kind
-      argumentSourcePairs.pop(); // item ref
-      argumentSourcePairs.pop(); // item kind
     }
   };
 
@@ -1672,20 +1680,18 @@ class Interpreter {
     branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
     parent.appendChild(region.anchor);
 
-    // grow(onCount 발화)는 지연 실행이라 그 시점 공유 pairs/walkStacks는 이 @for 지점을 지나 이미 pop돼
+    // grow(onCount 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
     // 있다(@if lazyBuild와 동형). build 시점 상태를 딥카피해 addIterationBranch가 캡처한다 - 초기
     // 회차도 같은 스냅샷을 쓴다(build 시점이라 값 동일, push/pop도 스냅샷에만 가 원본 무오염).
-    const pairs = [...argumentSourcePairs];
     const stacks = snapshotStacks(walkStacks);
 
     // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
     // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
     // 새 회차의 전역 branchIndex를 돌려준다.
-    // 몸체 `${i}`가 읽을 회차변수(인덱스) 슬롯을 [RAW, i]로 밀고 build 후 되돌린다
-    // (array-for와 같은 push/pop 규칙). 슬롯 번호는 그 시점 pairs 길이/2 = props+바깥 회차변수 뒤.
+    // 몸체 `${i}`가 읽을 회차변수(인덱스) 슬롯 [RAW, i]를 바깥 스코프 뒤에 붙인다. 슬롯 번호 =
+    // props+바깥 회차변수 뒤.
     const addIterationBranch = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
-      pairs.push(RAW, i, RAW, i); // 슬롯 2칸 - item(회차값)/index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
       this.branchPool.entries[newBranchIndex].nodes = Array.from(
         this.buildIteration(
           RAW,
@@ -1693,17 +1699,13 @@ class Interpreter {
           bodyStart,
           forEndPc,
           newBranchIndex,
-          pairs,
+          scopeWithIteration(argumentSourcePairs, RAW, i, RAW, i), // item(회차값)/index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
           compId,
           pathPrefix,
           loopIndexBase,
           stacks,
         ).childNodes,
       );
-      pairs.pop(); // index ref
-      pairs.pop(); // index kind
-      pairs.pop(); // item ref
-      pairs.pop(); // item kind
       return newBranchIndex;
     };
 
@@ -1768,19 +1770,17 @@ class Interpreter {
     branch.childRegionIndices.push(forRegionIndex);
     parent.appendChild(region.anchor);
 
-    // grow(onSize 발화)는 지연 실행이라 그 시점 공유 pairs/walkStacks는 이 @for 지점을 지나 이미 pop돼
+    // grow(onSize 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
     // 있다(@if lazyBuild와 동형). build 시점 상태를 딥카피해 addIterationBranch가 캡처한다 - 초기
     // 회차도 같은 스냅샷을 쓴다(build 시점이라 값 동일, push/pop도 스냅샷에만 가 원본 무오염).
-    const pairs = [...argumentSourcePairs];
     const stacks = snapshotStacks(walkStacks);
 
-    // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를
-    // (count-for의 [RAW,i]와 같은 push/pop 규칙), 인덱스 슬롯은 몸체 ${i}가 읽는다. 인덱스 leaf는 발화 시
-    // $n으로도 해소되게 loopIndexStack에 (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
+    // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를,
+    // 인덱스 슬롯은 몸체 ${i}가 읽는다. 인덱스 leaf는 발화 시 $n으로도 해소되게 loopIndexStack에
+    // (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
     const addIterationBranch = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
-      pairs.push(STORE, info.elemStartLeafIndices[i], STORE, indexLeaf);
       this.branchPool.entries[newBranchIndex].nodes = Array.from(
         this.buildIteration(
           STORE,
@@ -1788,17 +1788,13 @@ class Interpreter {
           bodyStart,
           forEndPc,
           newBranchIndex,
-          pairs,
+          scopeWithIteration(argumentSourcePairs, STORE, info.elemStartLeafIndices[i], STORE, indexLeaf),
           compId,
           pathPrefix,
           loopIndexBase,
           stacks,
         ).childNodes,
       );
-      pairs.pop(); // 인덱스 ref
-      pairs.pop(); // 인덱스 kind
-      pairs.pop(); // 요소 ref
-      pairs.pop(); // 요소 kind
       return newBranchIndex;
     };
 
@@ -1864,10 +1860,7 @@ class Interpreter {
   // IF_EXPR과 달리 파생 칸을 안 잡는다 - 값을 받아 DOM에 바로 쓰므로 중간에 담을 자리가
   // 필요 없다(IF_EXPR은 분기가 조건 칸 하나를 구독하는 구조라 잡는다).
   bindExpr = (expr: Uint8Array, update: (v: unknown) => void, argumentSourcePairs: TScope, branch: TBranch) => {
-    // 다시 셀 때도 이 지점의 슬롯을 봐야 하는데, 공유 pairs는 @for 회차마다 push/pop돼 그때는
-    // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
-    // (runIfExpr과 같은 관례).
-    return this.subscribeExpr(expr, [...argumentSourcePairs], branch, update);
+    return this.subscribeExpr(expr, argumentSourcePairs, branch, update);
   };
 
   // 식을 처음 세고, 식이 읽은 칸마다 구독을 건다. 칸이 바뀌면 다시 세어, 값이 지난번과 다를 때만
@@ -2291,7 +2284,7 @@ class Interpreter {
       eventPrefix = eventPrefix ? `${eventPrefix}.${segment}` : segment;
     }
     const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
-    // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
+    // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회). steps(조립
     // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
     const payload =
       event.fields.length === 0
@@ -2299,7 +2292,7 @@ class Interpreter {
         : event.fields.map((field) => this.toAssembled(compId, field, argumentSourcePairs));
     // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
     // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 이 scope로 dispatch가 편다.
-    const scope = [...argumentSourcePairs];
+    const scope = argumentSourcePairs;
     // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
     // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
     let contextLeaves: Record<string, TAssembled[]> | null = null;
@@ -2549,7 +2542,7 @@ class Interpreter {
           pendingSlotPlaceholderContents[slotPlaceholderIndex] = {
             startPc: contentStart,
             endPc: contentEndPc,
-            argumentSourcePairs: [...argumentSourcePairs],
+            argumentSourcePairs,
             compId,
             pathPrefix,
             loopIndexBase,
@@ -2942,15 +2935,11 @@ class Interpreter {
     parent: Node,
   ): number => {
     const expr = this.module.defs[compId].exprs[this.code[pc++]];
-    // 다시 셀 때도 이 지점의 슬롯을 봐야 하는데, 공유 pairs는 @for 회차마다 push/pop돼 그때는
-    // 다른 회차의 것이거나 이미 pop된 상태다. build 시점 상태를 딥카피해 클로저가 캡처한다
-    // (@if lazyBuild/@for grow와 같은 관례). runIf는 조건 칸 번호를 지금 뽑아 둬 카피가 필요 없다.
-    const pairs = [...argumentSourcePairs];
     // 식이 읽는 칸이 바뀌면 식을 다시 세어 파생 칸(condLeafIndex)에 넣는다. 그 set이 아래
     // buildIfRegion이 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
     // 때문이다. 구독은 부모 가지에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 구독 함수는
     // 칸이 바뀔 때 불리므로, 그때는 아래에서 파생 칸을 이미 잡아 두었다.
-    const value = this.subscribeExpr(expr, pairs, branch, (v) => this.store.set(condLeafIndex, v));
+    const value = this.subscribeExpr(expr, argumentSourcePairs, branch, (v) => this.store.set(condLeafIndex, v));
     const condLeafIndex = this.store.alloc([value]);
     return this.buildIfRegion(
       pc,
@@ -3009,16 +2998,15 @@ class Interpreter {
     const { ifBodyEnd, elseBodyStart, ifEndPc } = this.cachedIfRanges(ifBodyStart);
 
     // 비활성 가지는 lazyBuild로 심어만 뒀다 나중(조건 swap)에 실행된다. 그 지연 시점의 공유
-    // pairs/walkStacks는 이 @if를 지나 이미 pop된 상태라, build 시점 상태를 딥카피해 캡처한다 - 카피
-    // 없이는 회차변수 슬롯/회차 인덱스($n)/컨텍스트를 잃는다. then/else 중 하나만 실행되니
-    // 스냅샷 하나를 공유 캡처한다(reactive @for grow의 addIterationBranch와 같은 관례).
-    const pairs = [...argumentSourcePairs];
+    // walkStacks는 이 @if를 지나 이미 pop된 상태라, build 시점 상태를 딥카피해 캡처한다 - 카피
+    // 없이는 회차 인덱스($n)/컨텍스트를 잃는다. then/else 중 하나만 실행되니 스냅샷 하나를 공유
+    // 캡처한다(reactive @for grow의 addIterationBranch와 같은 관례).
     const stacks = snapshotStacks(walkStacks);
 
     // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
     const buildThen = () => {
       const f = this.interpret(
-        pairs,
+        argumentSourcePairs,
         compId,
         ifBodyStart,
         ifBodyEnd,
@@ -3033,7 +3021,16 @@ class Interpreter {
       const f =
         elseBodyStart === -1
           ? document.createDocumentFragment() // else 없는 if - 빈 가지
-          : this.interpret(pairs, compId, elseBodyStart, ifEndPc, elseBranchIndex, pathPrefix, loopIndexBase, stacks);
+          : this.interpret(
+              argumentSourcePairs,
+              compId,
+              elseBodyStart,
+              ifEndPc,
+              elseBranchIndex,
+              pathPrefix,
+              loopIndexBase,
+              stacks,
+            );
       elseBranch.nodes = Array.from(f.childNodes);
     };
     thenBranch.lazyBuild = buildThen;
