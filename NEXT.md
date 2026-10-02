@@ -8,11 +8,11 @@
 
 ## 하는 중
 
-없음
+- 인스턴스의 JS 배열 줄이기 - 부분 재평가 식이 leaf 기준 배열(`readLeaves`, `varsOfLeaf`,
+  `skipPastOpOfLeaf`) 대신 변수 기준 배열(`leafOfVar`) 하나를 든다. bench-expr 10000행 힙 스냅샷에서
+  JS arrays가 React보다 크게 많다
 
 ## 할 것
 
 - 한 `@for` 회차 안의 식들이 스코프 복사본(`[...argumentSourcePairs]`) 하나를 공유
-- 인스턴스의 JS 배열 줄이기 - bench-expr 10000행 힙 스냅샷에서 JS arrays가 React보다 크게 많다(식
-  인스턴스마다 cache, `readLeaves`, `varsOfLeaf`)
 - 힙 스냅샷의 non-JS 몫(DOM, 레이아웃)이 같은 코드에서도 스냅샷마다 크게 다른 원인 확인
