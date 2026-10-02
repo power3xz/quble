@@ -1,4 +1,4 @@
-// quble krausest 번들 여럿의 동작별 스크립트 시간과 힙을 headless Chromium에서 빠르게 비교한다.
+// quble krausest 번들 하나의 동작별 스크립트 시간과 힙을 headless Chromium에서 재고 기록으로 남긴다.
 //
 // 수정 전후 비교용이다. krausest와 달리 paint는 재지 않고(같은 DOM을 그리면 수정과 무관하게 같다) 창을
 // 띄우지 않는다. 최종 수치는 ./bench-krausest.sh로 확인한다.
@@ -7,9 +7,9 @@
 // krausest의 script 구간과 같은 범위다. 교차 출처 격리가 없어 performance.now()가 0.1ms 단위로 거칠다.
 // 힙은 1k 생성 후 GC를 강제하고 읽는다(krausest 22_run-memory와 같은 시점).
 //
-// 보통 ./bench-krausest-quick.sh가 번들을 만들어 부른다. 번들을 직접 넘길 때:
-//   node bench-krausest/quick.mjs 이름=번들.js [이름=번들.js ...]
-import { readFileSync } from "node:fs";
+// 보통 ./bench-krausest-quick.sh가 번들을 만들어 부른다. 직접 부를 때:
+//   node bench-krausest/quick.mjs 번들.js 기록.json
+import { readFileSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 
 const ROUNDS = 15;
@@ -31,14 +31,14 @@ const OPS = [
   { name: "clear", setup: ["#run"], measure: "#clear" },
 ];
 
-const targets = process.argv.slice(2).map((arg) => {
-  const [name, path] = arg.split("=");
-  return { name, code: readFileSync(path, "utf8"), times: OPS.map(() => []), heaps: [] };
-});
-if (targets.length === 0) {
-  console.error("사용: node bench-krausest/quick.mjs 이름=번들.js [이름=번들.js ...]");
+const [bundlePath, outPath] = process.argv.slice(2);
+if (!outPath) {
+  console.error("사용: node bench-krausest/quick.mjs 번들.js 기록.json");
   process.exit(1);
 }
+const code = readFileSync(bundlePath, "utf8");
+const times = OPS.map(() => []);
+const heaps = [];
 
 const click = (page, selectors) =>
   page.evaluate((list) => {
@@ -55,7 +55,7 @@ const timeClick = (page, selector) =>
     return performance.now() - start;
   }, selector);
 
-const openPage = async (browser, code) => {
+const openPage = async (browser) => {
   const page = await browser.newPage();
   await page.setContent(HTML);
   await page.addScriptTag({ content: code });
@@ -64,56 +64,27 @@ const openPage = async (browser, code) => {
 
 const browser = await chromium.launch({ headless: true });
 for (let round = 0; round < ROUNDS; round++) {
-  // 회차마다 번들을 번갈아 재 시간에 따른 흔들림이 한쪽에만 쏠리지 않게 한다.
-  for (const t of targets) {
-    for (let i = 0; i < OPS.length; i++) {
-      const page = await openPage(browser, t.code);
-      for (let w = 0; w < WARMUP; w++) {
-        await click(page, ["#run", "#clear"]);
-      }
-      await click(page, OPS[i].setup);
-      t.times[i].push(await timeClick(page, OPS[i].measure));
-      await page.close();
+  for (let i = 0; i < OPS.length; i++) {
+    const page = await openPage(browser);
+    for (let w = 0; w < WARMUP; w++) {
+      await click(page, ["#run", "#clear"]);
     }
-    const page = await openPage(browser, t.code);
-    await click(page, ["#run"]);
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("HeapProfiler.collectGarbage");
-    const { usedSize } = await cdp.send("Runtime.getHeapUsage");
-    t.heaps.push(usedSize / 1024 / 1024);
+    await click(page, OPS[i].setup);
+    times[i].push(await timeClick(page, OPS[i].measure));
     await page.close();
   }
+  const page = await openPage(browser);
+  await click(page, ["#run"]);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("HeapProfiler.collectGarbage");
+  const { usedSize } = await cdp.send("Runtime.getHeapUsage");
+  heaps.push(usedSize / 1024 / 1024);
+  await page.close();
 }
 await browser.close();
 
-const median = (xs) => {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
-const cell = (xs, digits) => {
-  const s = [...xs].sort((a, b) => a - b);
-  return `${median(xs).toFixed(digits)} (${s[0].toFixed(digits)}~${s[s.length - 1].toFixed(digits)})`;
-};
-// 첫 번들 대비 중앙값 차이.
-const diff = (xs, base) => {
-  const d = ((median(xs) - median(base)) / median(base)) * 100;
-  return `${d >= 0 ? "+" : ""}${d.toFixed(0)}%`;
-};
-
-const rows = [["", ...targets.map((t) => t.name)]];
-OPS.forEach((op, i) => {
-  rows.push([
-    `${op.name} (ms)`,
-    ...targets.map((t, k) => cell(t.times[i], 2) + (k > 0 ? ` ${diff(t.times[i], targets[0].times[i])}` : "")),
-  ]);
-});
-rows.push([
-  "heap after 1k (MB)",
-  ...targets.map((t, k) => cell(t.heaps, 3) + (k > 0 ? ` ${diff(t.heaps, targets[0].heaps)}` : "")),
-]);
-const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
-console.log(`${ROUNDS}회 중앙값 (최소~최대)`);
-for (const r of rows) {
-  console.log(r.map((v, c) => v.padEnd(widths[c])).join("  "));
-}
+const rows = [
+  ...OPS.map((op, i) => ({ label: `${op.name} (ms)`, digits: 2, values: times[i] })),
+  { label: "heap after 1k (MB)", digits: 3, values: heaps },
+];
+writeFileSync(outPath, JSON.stringify({ at: new Date().toISOString(), rounds: ROUNDS, rows }, null, 2));
