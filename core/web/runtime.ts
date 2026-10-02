@@ -992,8 +992,9 @@ export type THandlers = Record<
 // 것이라 여기 안 싣는다.
 type TBinding = {
   fullName: string;
-  payload: TAssembled[];
-  contextLeaves: Record<string, TAssembled[]>;
+  // 필드 없는 이벤트, 활성 컨텍스트 없는 바인딩은 null - 행마다 빈 배열/객체를 만들지 않는다.
+  payload: TAssembled[] | null;
+  contextLeaves: Record<string, TAssembled[]> | null;
   compId: number;
   // props를 펼 scope의 바인딩 시점 복사본(@for가 원본을 회차마다 push/pop한다). props는 첫 발화 때 편다 -
   // 바인딩은 행마다 생기지만 발화는 드물어 미리 펴면 대부분 버려진다.
@@ -1219,16 +1220,20 @@ class Interpreter {
   // 한 바인딩을 발화한다 - data/context 조립 + 핸들러 호출. 인스턴스 상태는 this에서 꺼낸다.
   dispatch = (binding: TBinding, domEventObject: Event) => {
     const data: Record<string, unknown> = {};
-    for (const p of binding.payload) {
-      data[p.name] = this.assembledValue(p);
+    if (binding.payload !== null) {
+      for (const p of binding.payload) {
+        data[p.name] = this.assembledValue(p);
+      }
     }
     const context: Record<string, Record<string, unknown>> = {};
-    for (const ctxName in binding.contextLeaves) {
-      const values: Record<string, unknown> = {};
-      for (const p of binding.contextLeaves[ctxName]) {
-        values[p.name] = this.assembledValue(p);
+    if (binding.contextLeaves !== null) {
+      for (const ctxName in binding.contextLeaves) {
+        const values: Record<string, unknown> = {};
+        for (const p of binding.contextLeaves[ctxName]) {
+          values[p.name] = this.assembledValue(p);
+        }
+        context[ctxName] = values;
       }
-      context[ctxName] = values;
     }
     // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
     // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
@@ -2288,15 +2293,19 @@ class Interpreter {
     const fullName = eventPrefix ? `${eventPrefix}.${eventName}` : eventName;
     // fields의 leaf를 flat 값-소스로 미리 푼다(바인딩 때 1회, argumentSourcePairs 불변). steps(조립
     // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
-    const payload = event.fields.map((field) => this.toAssembled(compId, field, argumentSourcePairs));
+    const payload =
+      event.fields.length === 0
+        ? null
+        : event.fields.map((field) => this.toAssembled(compId, field, argumentSourcePairs));
     // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
     // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 이 scope로 dispatch가 편다.
     const scope = [...argumentSourcePairs];
     // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
     // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
-    const contextLeaves: Record<string, TAssembled[]> = {};
+    let contextLeaves: Record<string, TAssembled[]> | null = null;
     for (const i of walkStacks.activeContexts) {
       const created = this.createdContexts[i];
+      contextLeaves ??= {};
       contextLeaves[created.name] = created.fields;
     }
     // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
