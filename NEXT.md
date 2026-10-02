@@ -8,9 +8,11 @@
 
 ## 하는 중
 
-- `runExpr` 호출마다 생기는 할당(스택 배열, 클로저 둘) 제거 - bench-expr로 최적화 전후 비교
-  (EXPR-EVAL.md 8절 "모든 행의 값이 바뀌는 갱신")
+없음
 
 ## 할 것
 
 - 한 `@for` 회차 안의 식들이 스코프 복사본(`[...argumentSourcePairs]`) 하나를 공유
+- 인스턴스의 JS 배열 줄이기 - bench-expr 10000행 힙 스냅샷에서 JS arrays가 React보다 크게 많다(식
+  인스턴스마다 cache, `readLeaves`, `varsOfLeaf`)
+- 힙 스냅샷의 non-JS 몫(DOM, 레이아웃)이 같은 코드에서도 스냅샷마다 크게 다른 원인 확인
