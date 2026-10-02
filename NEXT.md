@@ -10,6 +10,8 @@
 
 - 한 `@for` 회차 안의 식/이벤트/`@if`가 스코프(`argumentSourcePairs`) 하나를 공유 - 회차마다 새
   배열을 만들고 push/pop과 지점별 복사를 없앤다. bench-krausest-quick, bench-expr로 전후 비교
+- bench-expr 빠른 비교 추가 - `./bench-expr-quick.sh [기준 ref]`로 기준과 작업 트리의 quble mount 시간,
+  mount 후 힙, 클릭 시간을 headless로 비교
 
 ## 할 것
 
