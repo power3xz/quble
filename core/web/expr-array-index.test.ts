@@ -229,6 +229,17 @@ test("인덱스가 범위 밖으로 바뀌면 에러다", () => {
   assert.throws(() => set(CURSOR, 3), RangeError);
 });
 
+// lifted(`100 + rows[cursor].score`)는 cursor를 구독하는 식 중 맨 앞이라 cursor가 3이 되면 가장 먼저
+// 던진다. 그때 스택에는 ELEM_AT 아래의 100이 남는다.
+test("식이 범위 밖 에러로 중간에 멈춘 뒤에도 다음 평가는 맞다", () => {
+  const { textOf, set } = instantiate();
+  assert.throws(() => set(CURSOR, 3), RangeError);
+  set(CURSOR, 1);
+  assert.equal(textOf("lifted"), "120", "100 + rows[1].score");
+  assert.equal(textOf("field"), "B", "rows[1].title");
+  assert.equal(textOf("arith"), "40", "rows[1].score * 2");
+});
+
 test("setArray로 배열이 줄어 인덱스가 범위 밖이 되면 에러다", () => {
   const { setOneRow, error } = instantiate();
   setOneRow(); // rows = [X] - rows[0 + 1], rows[1]이 범위 밖

@@ -1,0 +1,6 @@
+component ExprIndexAliasPair {
+  props { rows: { score: number }[], i: number, j: number }
+  template {
+    p(class="index-pair") { ${rows[i].score + rows[j].score} }
+  }
+}

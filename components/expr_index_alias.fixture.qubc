@@ -1,0 +1,13 @@
+use ExprIndexAliasPair from "./expr_index_alias_pair.fixture.qubc"
+
+component ExprIndexAlias {
+  props {
+    rows: { score: number }[],
+    cursor: number
+  }
+  template {
+    div() {
+      ExprIndexAliasPair(rows={rows} i={cursor} j={cursor} /)
+    }
+  }
+}

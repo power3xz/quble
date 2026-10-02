@@ -407,6 +407,21 @@ type TScope = number[];
 const slotKind = (scope: TScope, o: number): number => scope[2 * o];
 const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
 
+// i번째를 뺀다. 빈자리에는 마지막 원소를 옮겨 오므로 순서가 바뀐다.
+// [a, b, c, d]에서 swapDeleteAt(_, 1)이면 [a, d, c]
+//
+// 순서를 유지해야 하는 배열에는 쓰지 않는다. 예를 들어 elemStartLeafIndices는 순서가 곧 요소의
+// 인덱스라 이것으로 지우면 rows[1]이 다른 요소를 가리킨다. 순서가 무의미하고 찾을 때 indexOf만 쓰는
+// 배열에만 쓴다. 같은 자리 번호로 짝지은 배열 여럿(readLeaves와 varsOfLeaf처럼)은 모두 같은 i로
+// 지워야 짝이 유지된다.
+//
+// splice(i, 1)는 뺀 원소를 담은 배열을 매번 새로 만들고 뒤를 당긴다. 이것은 원소 하나만 옮기고
+// 아무것도 만들지 않는다.
+export const swapDeleteAt = (items: unknown[], i: number): void => {
+  items[i] = items[items.length - 1];
+  items.pop();
+};
+
 // 이항 연산자 하나를 적용한다. 피연산자 타입은 컴파일타임에 맞춰져(compiler/src/expr_type.rs)
 // 여기서 검사하지 않는다 - 산술/비교는 number, 논리는 bool, `==`/`!=`는 양쪽이 같은 타입이다.
 const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
@@ -1022,6 +1037,9 @@ class Interpreter {
   // 범위 -> 템플릿 복제 계획(복제할 수 없는 범위면 null). 키는 시작 pc - interpret 범위는 끝이 시작에서
   // 정해진다(@for 본문은 FOR_END, @if 가지는 ELSE/IF_END, 합성은 def 끝).
   templatePlanCache = new Map<number, TTemplatePlan | null>();
+
+  // 식 평가 스택. runExpr마다 새로 만들지 않고 이것을 다시 쓴다.
+  exprStack: unknown[] = [];
 
   constructor(
     module: TModule,
@@ -1914,27 +1932,32 @@ class Interpreter {
       }
       const v = this.reevalExpr(expr, pairs, table, cache, skipPastOpOfLeaf[k]);
       // 바뀐 leaf의 변수가 READ_LEAF가 읽을 leafIndex를 정하는 데 쓰였으면, 그 READ_LEAF에 leafIndex를 넘긴
-      // 연산의 cache 값이 방금 읽은 leafIndex다. 다시 걸다 varsOfLeafForResubscribe[k]가 바뀔 수 있어 연산을
-      // 먼저 모은다.
+      // 연산의 cache 값이 방금 읽은 leafIndex다.
+      //
+      // 다시 걸기가 vars를 고칠 수 있어 여럿이면 복사본을 돈다.
+      //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽어 vars = [안쪽, 바깥]이다.
+      //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮기며 vars에서 빼, vars[1]이 사라진다.
+      // 하나면 고쳐지기 전에 읽으므로 복사하지 않는다.
       if (varsOfLeafForResubscribe !== null) {
-        const leafIndexOps: number[] = [];
-        for (const changedVar of varsOfLeafForResubscribe[k]) {
-          leafIndexOps.push(...table.leafIndexOpsByVar[changedVar]);
-        }
-        for (const op of leafIndexOps) {
-          const readLeafVar = table.varAt[op + instrSize(expr[op])];
-          const newLeafIndex = cache[table.cacheIndex[op]] as number;
-          this.resubscribeReadLeaf(
-            expr,
-            table,
-            readLeaves,
-            varsOfLeafForResubscribe,
-            skipPastOpOfLeaf,
-            branch,
-            reevalOnChange,
-            readLeafVar,
-            newLeafIndex,
-          );
+        const vars = varsOfLeafForResubscribe[k];
+        const changedVars = vars.length === 1 ? vars : [...vars];
+        const count = changedVars.length;
+        for (let n = 0; n < count; n++) {
+          for (const op of table.leafIndexOpsByVar[changedVars[n]]) {
+            const readLeafVar = table.varAt[op + instrSize(expr[op])];
+            const newLeafIndex = cache[table.cacheIndex[op]] as number;
+            this.resubscribeReadLeaf(
+              expr,
+              table,
+              readLeaves,
+              varsOfLeafForResubscribe,
+              skipPastOpOfLeaf,
+              branch,
+              reevalOnChange,
+              readLeafVar,
+              newLeafIndex,
+            );
+          }
         }
       }
       if (v !== lastValue) {
@@ -1981,16 +2004,31 @@ class Interpreter {
     }
 
     const oldVars = varsOfLeaf[oldK];
-    oldVars.splice(oldVars.indexOf(varNumber), 1);
+    // 흔한 경우 - 옛 leaf는 이 변수만 읽었고 새 leaf는 아무도 안 읽는다. 옛 leaf를 빼고 새 leaf를 끝에
+    // 붙이는 대신 같은 자리를 덮어쓴다. varsOfLeaf[oldK]는 이미 [varNumber]이고 skipPastOpOfLeaf[oldK]는
+    // 이 변수의 표라 그대로 둔다. 가지 목록도 같은 자리의 leafIndex만 바꾼다.
+    if (oldVars.length === 1 && !readLeaves.includes(newLeafIndex)) {
+      readLeaves[oldK] = newLeafIndex;
+      this.store.unsubscribe(oldLeafIndex, subscriber);
+      this.store.subscribe(newLeafIndex, subscriber);
+      for (let i = 0; i < branch.leafIndices.length; i++) {
+        if (branch.leafIndices[i] === oldLeafIndex && branch.updateFns[i] === subscriber) {
+          branch.leafIndices[i] = newLeafIndex;
+          break;
+        }
+      }
+      return;
+    }
+    swapDeleteAt(oldVars, oldVars.indexOf(varNumber));
     if (oldVars.length === 0) {
-      readLeaves.splice(oldK, 1);
-      varsOfLeaf.splice(oldK, 1);
-      skipPastOpOfLeaf.splice(oldK, 1);
+      swapDeleteAt(readLeaves, oldK);
+      swapDeleteAt(varsOfLeaf, oldK);
+      swapDeleteAt(skipPastOpOfLeaf, oldK);
       this.store.unsubscribe(oldLeafIndex, subscriber);
       for (let i = 0; i < branch.leafIndices.length; i++) {
         if (branch.leafIndices[i] === oldLeafIndex && branch.updateFns[i] === subscriber) {
-          branch.leafIndices.splice(i, 1);
-          branch.updateFns.splice(i, 1);
+          swapDeleteAt(branch.leafIndices, i);
+          swapDeleteAt(branch.updateFns, i);
           break;
         }
       }
@@ -2724,42 +2762,26 @@ class Interpreter {
     skipPastOp: TSkipPastOp,
     reads: number[] | null,
   ): unknown => {
-    const stack: unknown[] = [];
-    // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
-    const pushResult = (at: number, value: unknown) => {
-      stack.push(value);
-      if (table !== null && cache !== null) {
-        cache[table.cacheIndex[at]] = value;
-      }
-    };
-    // 슬롯 하나가 가리키는 값. CONST면 상수풀, RAW면 ref 자체(개수 반복의 회차 번호), STORE면 store 칸.
-    // CONST와 RAW는 바뀌지 않아 구독하지 않는다.
-    const slotValue = (scopeIndex: number, offset: number, at: number): unknown => {
-      const ref = slotRef(pairs, scopeIndex);
-      const kind = slotKind(pairs, scopeIndex);
-      if (kind === CONST) {
-        return this.module.constpool[ref];
-      }
-      if (kind === RAW) {
-        return ref;
-      }
-      reads?.push(ref + offset, at);
-      return this.store.get(ref + offset);
-    };
+    const stack = this.exprStack;
+    // 스택 높이. 0부터 센다 - 앞선 평가가 ELEM_AT의 RangeError로 중간에 멈췄으면 배열에 그때 값이
+    // 남아 있다. 배열 길이를 0으로 비우지 않는 것은 V8이 저장 공간을 놓아 다음에 다시 할당하기 때문이다.
+    let sp = 0;
     for (let pc = 0; pc < expr.length; ) {
       const at = pc;
       const skipPastOpAt = skipPastOp[at];
       if (skipPastOpAt !== undefined && table !== null && cache !== null) {
-        stack.push(cache[table.cacheIndex[skipPastOpAt]]);
+        stack[sp++] = cache[table.cacheIndex[skipPastOpAt]];
         pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
         continue;
       }
       const op = expr[pc++];
+      // 연산의 결과. 값을 올리기만 하는 명령은 직접 올리고 다음 명령으로 넘어간다.
+      let result: unknown;
       switch (op) {
         case EXPR.LOAD_VAR: {
-          stack.push(slotValue(expr[pc], expr[pc + 1], at));
+          stack[sp++] = this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads);
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_ARRAY_LENGTH: {
           // 배열 칸의 값이 arrayInfoIndex - 요소 수는 그 arrayInfo가 든다.
@@ -2773,68 +2795,88 @@ class Interpreter {
             info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
             reads?.push(info.sizeLeafIndex, at);
           }
-          stack.push(info.elemStartLeafIndices.length);
+          stack[sp++] = info.elemStartLeafIndices.length;
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_STRING_LENGTH: {
           // 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다 - slotValue가 그 칸을 담는다.
-          stack.push(String(slotValue(expr[pc], expr[pc + 1], at)).length);
+          stack[sp++] = String(this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads)).length;
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_CONST: {
-          stack.push(this.module.constpool[expr[pc] | (expr[pc + 1] << 8)]);
+          stack[sp++] = this.module.constpool[expr[pc] | (expr[pc + 1] << 8)];
           pc += 2;
-          break;
+          continue;
         }
         case EXPR.LOAD_SMALL_INT:
-          stack.push(expr[pc++]);
-          break;
+          stack[sp++] = expr[pc++];
+          continue;
         case EXPR.LOAD_TRUE:
-          stack.push(true);
-          break;
+          stack[sp++] = true;
+          continue;
         case EXPR.LOAD_FALSE:
-          stack.push(false);
-          break;
+          stack[sp++] = false;
+          continue;
         // 단항 - 하나 꺼내 하나 넣는다.
         case EXPR.NOT:
-          pushResult(at, !stack.pop());
+          result = !stack[--sp];
           break;
         case EXPR.NEG:
-          pushResult(at, -(stack.pop() as number));
+          result = -(stack[--sp] as number);
           break;
         // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
         // 요소가 없는 인덱스(범위 밖, 음수, 정수 아님)는 에러다 - 범위는 핸들러 로직이 지킨다.
         case EXPR.ELEM_AT: {
-          const i = stack.pop() as number;
-          const info = this.arrayPool.entries[stack.pop() as number];
+          const i = stack[--sp] as number;
+          const info = this.arrayPool.entries[stack[--sp] as number];
           const start = info.elemStartLeafIndices[i];
           if (start === undefined) {
             throw new RangeError(`index ${i} out of range (length ${info.elemStartLeafIndices.length})`);
           }
-          pushResult(at, start);
+          result = start;
           break;
         }
         case EXPR.FIELD_AT:
-          pushResult(at, (stack.pop() as number) + expr[pc++]);
+          result = (stack[--sp] as number) + expr[pc++];
           break;
         case EXPR.READ_LEAF: {
-          const leafIndex = stack.pop() as number;
+          const leafIndex = stack[--sp] as number;
           reads?.push(leafIndex, at);
-          pushResult(at, this.store.get(leafIndex));
+          result = this.store.get(leafIndex);
           break;
         }
         // 이항 - 둘 꺼내 하나 넣는다. 나중에 밀린 것이 오른쪽이라 먼저 꺼내진다.
         default: {
-          const right = stack.pop();
-          const left = stack.pop();
-          pushResult(at, applyBinary(op, left, right));
+          const right = stack[--sp];
+          const left = stack[--sp];
+          result = applyBinary(op, left, right);
           break;
         }
       }
+      // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
+      stack[sp++] = result;
+      if (table !== null && cache !== null) {
+        cache[table.cacheIndex[at]] = result;
+      }
     }
     return stack[0];
+  };
+
+  // 슬롯 하나가 가리키는 값. CONST면 상수풀, RAW면 ref 자체(개수 반복의 회차 번호), STORE면 store 칸.
+  // CONST와 RAW는 바뀌지 않아 구독하지 않는다. STORE 칸을 읽으면 reads에 leafIndex와 읽은 위치(at)를 붙인다.
+  slotValue = (pairs: TScope, scopeIndex: number, offset: number, at: number, reads: number[] | null): unknown => {
+    const ref = slotRef(pairs, scopeIndex);
+    const kind = slotKind(pairs, scopeIndex);
+    if (kind === CONST) {
+      return this.module.constpool[ref];
+    }
+    if (kind === RAW) {
+      return ref;
+    }
+    reads?.push(ref + offset, at);
+    return this.store.get(ref + offset);
   };
 
   // @if opcode 처리 - 조건 슬롯을 그대로 조건 칸으로 쓴다.
