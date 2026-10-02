@@ -7,3 +7,4 @@ dist/
 *.wasm
 *.vsix
 .env
+bench-krausest/js-framework-benchmark/
