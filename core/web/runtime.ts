@@ -32,7 +32,7 @@ import {
   appendBranchOfForRegion,
   appendForRegion,
   appendIfRegion,
-  attachForIteration,
+  attachGrownIterations,
   ELSE_INDEX,
   freeArrayInfo,
   removeBranchAt,
@@ -1706,7 +1706,10 @@ class Interpreter {
       const next = Number(v) || 0;
       const cur = region.branchIndices.length;
       for (let i = cur; i < next; i++) {
-        attachForIteration(this.store, this.regionPool, this.branchPool, forRegionIndex, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+        addIterationBranch(i); // 늘어난 꼬리만 build
+      }
+      if (next > cur) {
+        attachGrownIterations(this.store, this.regionPool, this.branchPool, forRegionIndex, cur);
       }
       if (next < cur) {
         truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
@@ -1797,7 +1800,10 @@ class Interpreter {
       const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
       const cur = region.branchIndices.length;
       for (let i = cur; i < next; i++) {
-        attachForIteration(this.store, this.regionPool, this.branchPool, forRegionIndex, addIterationBranch(i)); // 늘어난 꼬리만 build+attach
+        addIterationBranch(i); // 늘어난 꼬리만 build
+      }
+      if (next > cur) {
+        attachGrownIterations(this.store, this.regionPool, this.branchPool, forRegionIndex, cur);
       }
       if (next < cur) {
         truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
