@@ -8,8 +8,9 @@
 
 ## 하는 중
 
-없음
+- 한 `@for` 회차 안의 식/이벤트/`@if`가 스코프(`argumentSourcePairs`) 하나를 공유 - 회차마다 새
+  배열을 만들고 push/pop과 지점별 복사를 없앤다. bench-krausest-quick, bench-expr로 전후 비교
 
 ## 할 것
 
-- 한 `@for` 회차 안의 식들이 스코프 복사본(`[...argumentSourcePairs]`) 하나를 공유
+없음
