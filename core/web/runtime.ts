@@ -1934,13 +1934,14 @@ class Interpreter {
       // 바뀐 leaf의 변수가 READ_LEAF가 읽을 leafIndex를 정하는 데 쓰였으면, 그 READ_LEAF에 leafIndex를 넘긴
       // 연산의 cache 값이 방금 읽은 leafIndex다. 다시 걸다 varsOfLeafForResubscribe[k]가 바뀔 수 있어 연산을
       // 먼저 정해 둔다. 변수가 하나면(거의 모든 경우) 식 정의의 표를 그대로 돈다 - 그 표는 다시 걸기가
-      // 고치지 않아 새 배열을 만들지 않아도 된다.
+      // 고치지 않아 새 배열을 만들지 않아도 된다. 여럿이면 모아 새 배열로 만든다. 표의 원소가 Int32Array라
+      // 펼쳐 넣는다 - flatMap은 일반 배열만 펼치고 Int32Array는 원소 하나로 넣는다.
       if (varsOfLeafForResubscribe !== null) {
         const changedVars = varsOfLeafForResubscribe[k];
         const leafIndexOps =
           changedVars.length === 1
             ? table.leafIndexOpsByVar[changedVars[0]]
-            : changedVars.flatMap((changedVar) => table.leafIndexOpsByVar[changedVar]);
+            : changedVars.flatMap((changedVar) => [...table.leafIndexOpsByVar[changedVar]]);
         for (const op of leafIndexOps) {
           const readLeafVar = table.varAt[op + instrSize(expr[op])];
           const newLeafIndex = cache[table.cacheIndex[op]] as number;
