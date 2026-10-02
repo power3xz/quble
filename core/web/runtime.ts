@@ -994,7 +994,11 @@ type TBinding = {
   fullName: string;
   payload: TAssembled[];
   contextLeaves: Record<string, TAssembled[]>;
-  props: Record<string, unknown>;
+  compId: number;
+  // props를 펼 scope의 바인딩 시점 복사본(@for가 원본을 회차마다 push/pop한다). props는 첫 발화 때 편다 -
+  // 바인딩은 행마다 생기지만 발화는 드물어 미리 펴면 대부분 버려진다.
+  scope: TScope;
+  props: Record<string, unknown> | null;
   loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
 };
 
@@ -1105,7 +1109,7 @@ class Interpreter {
     return this.module.defs[componentId].contexts;
   };
 
-  // 발화 comp의 props를 이름->leafIndex 중첩 객체로 편다(BIND_EVENT에서 1회). props는 이 comp가
+  // 발화 comp의 props를 이름->leafIndex 중첩 객체로 편다(바인딩의 첫 발화 때 1회). props는 이 comp가
   // 받은 값의 주소라, scope 슬롯 i(=prop 선언 순서)의 (kind, base)를 argumentSourcePairs에서 읽는다.
   // STORE 슬롯만 담는다 - CONST(리터럴 바인딩)는 주소가 없어(get/set 대상 아님) 제외. 스칼라는
   // base 하나, 객체는 base부터 필드 offset 누적해 하위까지 편다(잎=leafIndex). 배열은 칸 leafIndex
@@ -1235,6 +1239,7 @@ class Interpreter {
         currentIndices[key] = src.kind === STORE ? (this.store.get(src.ref) as number) : src.ref;
       }
     }
+    binding.props ??= this.buildProps(this.module.defs[binding.compId].propsTypeRef, binding.scope);
     this.handlers[binding.fullName]?.(data, {
       event: domEventObject,
       set: this.store.set,
@@ -2285,8 +2290,8 @@ class Interpreter {
     // 구조)는 발생 때 lazy 컴파일. 스칼라 field는 leaf 하나, 객체는 leaf 여럿(깊이우선).
     const payload = event.fields.map((field) => this.toAssembled(compId, field, argumentSourcePairs));
     // props: 발화 comp가 선언한 props 전체를 이름->leafIndex 중첩 객체로(payload에 실었는지와
-    // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 현재 scope로 편다.
-    const props = this.buildProps(this.module.defs[compId].propsTypeRef, argumentSourcePairs);
+    // 무관 - payload는 data 값, props는 상태 주소). propsTypeRef + 이 scope로 dispatch가 편다.
+    const scope = [...argumentSourcePairs];
     // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
     // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
     const contextLeaves: Record<string, TAssembled[]> = {};
@@ -2312,7 +2317,7 @@ class Interpreter {
       bound = {};
       this.eventBindings.set(el, bound);
     }
-    bound[domEvent] = { fullName, payload, contextLeaves, props, loopIndices };
+    bound[domEvent] = { fullName, payload, contextLeaves, compId, scope, props: null, loopIndices };
     this.ensureDelegate(domEvent);
   };
 
