@@ -1933,12 +1933,14 @@ class Interpreter {
       const v = this.reevalExpr(expr, pairs, table, cache, skipPastOpOfLeaf[k]);
       // 바뀐 leaf의 변수가 READ_LEAF가 읽을 leafIndex를 정하는 데 쓰였으면, 그 READ_LEAF에 leafIndex를 넘긴
       // 연산의 cache 값이 방금 읽은 leafIndex다. 다시 걸다 varsOfLeafForResubscribe[k]가 바뀔 수 있어 연산을
-      // 먼저 모은다.
+      // 먼저 정해 둔다. 변수가 하나면(거의 모든 경우) 식 정의의 표를 그대로 돈다 - 그 표는 다시 걸기가
+      // 고치지 않아 새 배열을 만들지 않아도 된다.
       if (varsOfLeafForResubscribe !== null) {
-        const leafIndexOps: number[] = [];
-        for (const changedVar of varsOfLeafForResubscribe[k]) {
-          leafIndexOps.push(...table.leafIndexOpsByVar[changedVar]);
-        }
+        const changedVars = varsOfLeafForResubscribe[k];
+        const leafIndexOps =
+          changedVars.length === 1
+            ? table.leafIndexOpsByVar[changedVars[0]]
+            : changedVars.flatMap((changedVar) => table.leafIndexOpsByVar[changedVar]);
         for (const op of leafIndexOps) {
           const readLeafVar = table.varAt[op + instrSize(expr[op])];
           const newLeafIndex = cache[table.cacheIndex[op]] as number;
