@@ -2714,7 +2714,7 @@ class Interpreter {
   //   leafOfVar [20, 21, 22, 23, 23]
   //
   // leaf 기준(leaf마다 읽는 변수 목록)이 아니라 변수 기준이라, 길이가 식 정의로 정해져 처음부터 맞게
-  // 잡는다. 빈 배열에 push로 채우면 V8이 늘어날 몫까지 잡아 1만 행에서 빈 칸이 크게 남는다.
+  // 잡는다. 빈 배열에 push로 채우면 V8이 늘어날 몫까지 잡아 1만 행에서 쓰지 않는 용량이 크게 남는다.
   evalExpr = (
     expr: Uint8Array,
     pairs: TScope,
