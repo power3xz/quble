@@ -412,7 +412,7 @@ const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
 //
 // 순서를 유지해야 하는 배열에는 쓰지 않는다. 예를 들어 elemStartLeafIndices는 순서가 곧 요소의
 // 인덱스라 이것으로 지우면 rows[1]이 다른 요소를 가리킨다. 순서가 무의미하고 찾을 때 indexOf만 쓰는
-// 배열에만 쓴다. 같은 자리 번호로 짝지은 배열 여럿(readLeaves와 varsOfLeaf처럼)은 모두 같은 i로
+// 배열에만 쓴다. 같은 자리 번호로 짝지은 배열 여럿(가지의 leafIndices와 updateFns처럼)은 모두 같은 i로
 // 지워야 짝이 유지된다.
 //
 // splice(i, 1)는 뺀 원소를 담은 배열을 매번 새로 만들고 뒤를 당긴다. 이것은 원소 하나만 옮기고
@@ -1897,12 +1897,10 @@ class Interpreter {
   };
 
   // 건너뛸 부분식이 있는 식. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 함수는 불릴 때
-  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다.
+  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다(skipPastOpOfLeaf).
   //
-  // 칸의 건너뛰기 표는 그 칸을 읽는 변수가
-  //   하나면   식 정의가 공유하는 표(table.skipPastOpByVar)를 쓴다.
-  //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
-  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로, 위치를 합쳐 이 인스턴스용 표를 만든다.
+  // 인스턴스가 드는 것은 cache와 leafOfVar(변수마다 읽는 leafIndex) 둘이다. 건너뛰기 표는 식 정의가
+  // 공유하고, 행마다 다른 것은 읽는 leafIndex뿐이다.
   //
   // `${rows[cursor].title}`에서 cursor가 바뀌면 READ_LEAF가 읽는 leafIndex가 바뀐다. 다시 센 뒤 구독을
   // 그 READ_LEAF가 방금 읽은 leafIndex에 다시 건다(resubscribeReadLeaf).
@@ -1914,49 +1912,36 @@ class Interpreter {
     onValue: (v: unknown) => void,
   ): unknown => {
     const cache: unknown[] = new Array(table.opCount);
-    const { value, readLeaves, varsOfLeaf } = this.evalExpr(expr, pairs, table, cache);
-    // readLeaves[k]가 바뀌면 skipPastOpOfLeaf[k]로 건너뛴다.
-    const skipPastOpOfLeaf = varsOfLeaf.map((vars) => this.skipPastOpForVars(expr, table, vars));
-    // 인덱스 접근이 있는 식만 varsOfLeaf를 남긴다 - 인덱스가 바뀌어 구독을 다시 걸 때 쓴다. 인덱스 접근이
-    // 있으면 배열 변수가 READ_LEAF가 읽을 leafIndex를 정하므로 leafIndexOpsByVar 어딘가가 비어 있지 않다.
-    // 나머지 식은 null이라 varsOfLeaf가 버려진다 - 구독 함수가 잡아 두면 1만 행에서 leaf마다 작은 배열이
-    // 남아 힙이 크게 는다.
-    const varsOfLeafForResubscribe = table.leafIndexOpsByVar.some((ops) => ops.length > 0) ? varsOfLeaf : null;
+    const { value, leafOfVar } = this.evalExpr(expr, pairs, table, cache);
+    // 인덱스 접근이 있으면 배열 변수가 READ_LEAF가 읽을 leafIndex를 정하므로 leafIndexOpsByVar 어딘가가
+    // 비어 있지 않다.
+    const hasIndexAccess = table.leafIndexOpsByVar.some((ops) => ops.length > 0);
     let lastValue = value;
     const reevalOnChange: TSubscriber = (_, leafIndex) => {
-      const k = readLeaves.indexOf(leafIndex);
+      const skipPastOp = this.skipPastOpOfLeaf(expr, table, leafOfVar, leafIndex);
       // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
       // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
-      if (k < 0) {
+      if (skipPastOp === null) {
         return;
       }
-      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOpOfLeaf[k]);
-      // 바뀐 leaf의 변수가 READ_LEAF가 읽을 leafIndex를 정하는 데 쓰였으면, 그 READ_LEAF에 leafIndex를 넘긴
-      // 연산의 cache 값이 방금 읽은 leafIndex다.
-      //
-      // 다시 걸기가 vars를 고칠 수 있어 여럿이면 복사본을 돈다.
-      //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽어 vars = [안쪽, 바깥]이다.
-      //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮기며 vars에서 빼, vars[1]이 사라진다.
-      // 하나면 고쳐지기 전에 읽으므로 복사하지 않는다.
-      if (varsOfLeafForResubscribe !== null) {
-        const vars = varsOfLeafForResubscribe[k];
-        const changedVars = vars.length === 1 ? vars : [...vars];
-        const count = changedVars.length;
-        for (let n = 0; n < count; n++) {
-          for (const op of table.leafIndexOpsByVar[changedVars[n]]) {
-            const readLeafVar = table.varAt[op + instrSize(expr[op])];
-            const newLeafIndex = cache[table.cacheIndex[op]] as number;
-            this.resubscribeReadLeaf(
-              expr,
-              table,
-              readLeaves,
-              varsOfLeafForResubscribe,
-              skipPastOpOfLeaf,
-              branch,
-              reevalOnChange,
-              readLeafVar,
-              newLeafIndex,
-            );
+      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOp);
+      // 다시 걸기가 leafOfVar를 고쳐, 바뀐 leaf를 읽는 변수가 여럿이면 먼저 모아 둔다.
+      //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
+      //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, leafOfVar로는 바깥이 안 보인다.
+      // 하나면 고쳐지기 전에 읽으므로 모으지 않는다.
+      if (hasIndexAccess) {
+        const first = leafOfVar.indexOf(leafIndex);
+        if (leafOfVar.indexOf(leafIndex, first + 1) < 0) {
+          this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, reevalOnChange, first);
+        } else {
+          const changedVars: number[] = [];
+          for (let n = first; n < leafOfVar.length; n++) {
+            if (leafOfVar[n] === leafIndex) {
+              changedVars.push(n);
+            }
+          }
+          for (const varNumber of changedVars) {
+            this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, reevalOnChange, varNumber);
           }
         }
       }
@@ -1965,88 +1950,106 @@ class Interpreter {
         onValue(v);
       }
     };
-    for (const leafIndex of readLeaves) {
-      branch.leafIndices.push(leafIndex);
-      branch.updateFns.push(reevalOnChange);
+    // 같은 leaf를 읽는 변수가 여럿이면 한 번만 건다 - 두 번 걸면 한 번 바뀔 때 식을 두 번 다시 센다.
+    for (let n = 0; n < leafOfVar.length; n++) {
+      const leafIndex = leafOfVar[n];
+      if (leafIndex >= 0 && leafOfVar.indexOf(leafIndex) === n) {
+        branch.leafIndices.push(leafIndex);
+        branch.updateFns.push(reevalOnChange);
+      }
     }
     return value;
   };
 
-  // leaf 하나를 읽는 변수들(vars)의 건너뛰기 표. 변수가 하나면 식 정의가 공유하는 표이고, 둘 이상이면
-  // 위치를 합쳐 새로 만든다.
-  skipPastOpForVars = (expr: Uint8Array, table: TExprSkipTable, vars: number[]): TSkipPastOp =>
-    vars.length === 1
-      ? table.skipPastOpByVar[vars[0]]
-      : buildSkipPastOp(table, expr, Int32Array.from(vars.flatMap((v) => [...table.positionsByVar[v]])).sort());
-
-  // READ_LEAF 변수(varNumber) 하나가 읽는 leafIndex가 newLeafIndex로 바뀌었으면 구독을 다시 건다.
-  // 인스턴스의 readLeaves, varsOfLeaf, skipPastOpOfLeaf를 제자리에서 고치고, 아무 변수도 읽지 않게 된
-  // leafIndex는 구독을 풀어 branch에서 빼며, 처음 읽는 leafIndex는 구독해 branch에 더한다. leafIndex가
-  // 그대로면 아무것도 하지 않는다.
-  //
-  // `${rows[cursor].score + rows[0].score}`에서 cursor가 1 -> 0이면 앞 READ_LEAF도 뒤 READ_LEAF가 읽는
-  // leaf를 읽어, 두 변수가 한 leaf를 읽는다. 그 leaf가 바뀌면 둘이 함께 바뀌므로 건너뛰기 표를 다시 만든다.
-  resubscribeReadLeaf = (
+  // leafIndex를 읽는 변수들의 건너뛰기 표. 읽는 변수가
+  //   없으면   null이다. 구독을 다시 걸며 이미 뺀 leafIndex다.
+  //   하나면   식 정의가 공유하는 표(table.skipPastOpByVar)다.
+  //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
+  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로 위치를 합쳐 새로 만든다. 드물어 담아 두지 않는다.
+  skipPastOpOfLeaf = (
     expr: Uint8Array,
     table: TExprSkipTable,
-    readLeaves: number[],
-    varsOfLeaf: number[][],
-    skipPastOpOfLeaf: TSkipPastOp[],
+    leafOfVar: number[],
+    leafIndex: number,
+  ): TSkipPastOp | null => {
+    const first = leafOfVar.indexOf(leafIndex);
+    if (first < 0) {
+      return null;
+    }
+    if (leafOfVar.indexOf(leafIndex, first + 1) < 0) {
+      return table.skipPastOpByVar[first];
+    }
+    const positions: number[] = [];
+    for (let n = first; n < leafOfVar.length; n++) {
+      if (leafOfVar[n] === leafIndex) {
+        positions.push(...table.positionsByVar[n]);
+      }
+    }
+    return buildSkipPastOp(table, expr, Int32Array.from(positions).sort());
+  };
+
+  // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.
+  // READ_LEAF에 leafIndex를 넘긴 연산의 cache 값이 방금 읽은 leafIndex다.
+  resubscribeReadLeavesDependingOn = (
+    expr: Uint8Array,
+    table: TExprSkipTable,
+    cache: unknown[],
+    leafOfVar: number[],
+    branch: TBranch,
+    subscriber: TSubscriber,
+    varNumber: number,
+  ): void => {
+    for (const op of table.leafIndexOpsByVar[varNumber]) {
+      const readLeafVar = table.varAt[op + instrSize(expr[op])];
+      const newLeafIndex = cache[table.cacheIndex[op]] as number;
+      this.resubscribeReadLeaf(leafOfVar, branch, subscriber, readLeafVar, newLeafIndex);
+    }
+  };
+
+  // READ_LEAF 변수(varNumber) 하나가 읽는 leafIndex를 newLeafIndex로 옮긴다. 옛 leafIndex를 읽는 변수가
+  // 더 없으면 구독을 풀어 branch에서 빼고, 새 leafIndex를 읽던 변수가 없었으면 구독해 branch에 더한다.
+  // leafIndex가 그대로면 아무것도 하지 않는다.
+  //
+  // `${rows[cursor].score + rows[0].score}`에서 cursor가 1 -> 0이면 두 변수가 rows[0].score를 읽게 돼
+  // 구독은 그대로 하나다.
+  resubscribeReadLeaf = (
+    leafOfVar: number[],
     branch: TBranch,
     subscriber: TSubscriber,
     varNumber: number,
     newLeafIndex: number,
   ): void => {
-    const oldK = varsOfLeaf.findIndex((vars) => vars.includes(varNumber));
-    const oldLeafIndex = readLeaves[oldK];
+    const oldLeafIndex = leafOfVar[varNumber];
     if (oldLeafIndex === newLeafIndex) {
       return;
     }
-
-    const oldVars = varsOfLeaf[oldK];
-    // 흔한 경우 - 옛 leaf는 이 변수만 읽었고 새 leaf는 아무도 안 읽는다. 옛 leaf를 빼고 새 leaf를 끝에
-    // 붙이는 대신 같은 자리를 덮어쓴다. varsOfLeaf[oldK]는 이미 [varNumber]이고 skipPastOpOfLeaf[oldK]는
-    // 이 변수의 표라 그대로 둔다. 가지 목록도 같은 자리의 leafIndex만 바꾼다.
-    if (oldVars.length === 1 && !readLeaves.includes(newLeafIndex)) {
-      readLeaves[oldK] = newLeafIndex;
+    const newAlreadyRead = leafOfVar.includes(newLeafIndex);
+    leafOfVar[varNumber] = newLeafIndex;
+    const oldDropped = oldLeafIndex >= 0 && !leafOfVar.includes(oldLeafIndex);
+    if (oldDropped) {
       this.store.unsubscribe(oldLeafIndex, subscriber);
-      this.store.subscribe(newLeafIndex, subscriber);
-      for (let i = 0; i < branch.leafIndices.length; i++) {
-        if (branch.leafIndices[i] === oldLeafIndex && branch.updateFns[i] === subscriber) {
-          branch.leafIndices[i] = newLeafIndex;
-          break;
-        }
-      }
-      return;
     }
-    swapDeleteAt(oldVars, oldVars.indexOf(varNumber));
-    if (oldVars.length === 0) {
-      swapDeleteAt(readLeaves, oldK);
-      swapDeleteAt(varsOfLeaf, oldK);
-      swapDeleteAt(skipPastOpOfLeaf, oldK);
-      this.store.unsubscribe(oldLeafIndex, subscriber);
-      for (let i = 0; i < branch.leafIndices.length; i++) {
-        if (branch.leafIndices[i] === oldLeafIndex && branch.updateFns[i] === subscriber) {
-          swapDeleteAt(branch.leafIndices, i);
-          swapDeleteAt(branch.updateFns, i);
-          break;
-        }
-      }
-    } else {
-      skipPastOpOfLeaf[oldK] = this.skipPastOpForVars(expr, table, oldVars);
+    if (!newAlreadyRead) {
+      this.store.subscribe(newLeafIndex, subscriber);
     }
 
-    const newK = readLeaves.indexOf(newLeafIndex);
-    if (newK < 0) {
-      readLeaves.push(newLeafIndex);
-      varsOfLeaf.push([varNumber]);
-      skipPastOpOfLeaf.push(table.skipPastOpByVar[varNumber]);
-      this.store.subscribe(newLeafIndex, subscriber);
+    // 가지 목록. 옛 것을 빼고 새 것을 더할 때는 같은 자리를 덮어쓴다.
+    if (oldDropped) {
+      for (let i = 0; i < branch.leafIndices.length; i++) {
+        if (branch.leafIndices[i] === oldLeafIndex && branch.updateFns[i] === subscriber) {
+          if (newAlreadyRead) {
+            swapDeleteAt(branch.leafIndices, i);
+            swapDeleteAt(branch.updateFns, i);
+          } else {
+            branch.leafIndices[i] = newLeafIndex;
+          }
+          return;
+        }
+      }
+    }
+    if (!newAlreadyRead) {
       branch.leafIndices.push(newLeafIndex);
       branch.updateFns.push(subscriber);
-    } else {
-      varsOfLeaf[newK].push(varNumber);
-      skipPastOpOfLeaf[newK] = this.skipPastOpForVars(expr, table, varsOfLeaf[newK]);
     }
   };
 
@@ -2698,41 +2701,33 @@ class Interpreter {
     return fragment;
   };
 
-  // 식을 처음부터 센다. 값과 함께, 식이 읽은 칸(readLeaves)과 칸마다 그 칸을 읽은 변수 번호
-  // (varsOfLeaf, 번호는 expr-skip-table.ts의 변수)를 낸다. 연산 결과는 cache에 써 둔다.
+  // 식을 처음부터 센다. 값과 함께, 변수(expr-skip-table.ts)마다 읽은 leafIndex(leafOfVar)를 낸다.
+  // 연산 결과는 cache에 써 둔다.
   //
-  // readLeaves는 구독할 칸이다. 세어 보지 않고는 알 수 없어 값과 함께 나온다 - 인덱스 접근은
-  // 어느 요소를 읽는지가 인덱스를 세어 봐야 정해진다. CONST 슬롯은 값이 안 변해 빠지고, 같은
-  // 칸이 두 번 나오면(`a + a`) 한 번만 담는다 - 두 번 구독하면 한 번 바뀔 때 식을 두 번 다시 센다.
+  // 읽은 leafIndex는 구독할 칸이다. 세어 보지 않고는 알 수 없어 값과 함께 나온다 - 인덱스 접근은
+  // 어느 요소를 읽는지가 인덱스를 세어 봐야 정해진다. 범위 밖 에러로 식이 중간에 멈추면 못 읽은
+  // 변수는 -1이다.
   //
   // ((a + b) * c) - (d + e)에서 a~e가 leafIndex 20~24를 읽는 인스턴스
-  //   readLeaves [20, 21, 22, 23, 24], varsOfLeaf [[0], [1], [2], [3], [4]]
+  //   leafOfVar [20, 21, 22, 23, 24]
   // 부모가 d와 e에 같은 칸 23을 넘긴 인스턴스
-  //   readLeaves [20, 21, 22, 23],     varsOfLeaf [[0], [1], [2], [3, 4]]
+  //   leafOfVar [20, 21, 22, 23, 23]
+  //
+  // leaf 기준(leaf마다 읽는 변수 목록)이 아니라 변수 기준이라, 길이가 식 정의로 정해져 처음부터 맞게
+  // 잡는다. 빈 배열에 push로 채우면 V8이 늘어날 몫까지 잡아 1만 행에서 빈 칸이 크게 남는다.
   evalExpr = (
     expr: Uint8Array,
     pairs: TScope,
     table: TExprSkipTable,
     cache: unknown[],
-  ): { value: unknown; readLeaves: number[]; varsOfLeaf: number[][] } => {
+  ): { value: unknown; leafOfVar: number[] } => {
     const reads: number[] = [];
     const value = this.runExpr(expr, pairs, table, cache, SKIP_NOTHING, reads);
-    const readLeaves: number[] = [];
-    const varsOfLeaf: number[][] = [];
+    const leafOfVar: number[] = new Array(table.positionsByVar.length).fill(-1);
     for (let i = 0; i < reads.length; i += 2) {
-      const leafIndex = reads[i];
-      let k = readLeaves.indexOf(leafIndex);
-      if (k < 0) {
-        k = readLeaves.length;
-        readLeaves.push(leafIndex);
-        varsOfLeaf.push([]);
-      }
-      const varNumber = table.varAt[reads[i + 1]];
-      if (!varsOfLeaf[k].includes(varNumber)) {
-        varsOfLeaf[k].push(varNumber);
-      }
+      leafOfVar[table.varAt[reads[i + 1]]] = reads[i];
     }
-    return { value, readLeaves, varsOfLeaf };
+    return { value, leafOfVar };
   };
 
   // 식을 다시 센다. skipPastOp에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다.
