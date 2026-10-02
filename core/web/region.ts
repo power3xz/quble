@@ -118,6 +118,11 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
   for (let i = 0; i < leafIndices.length; i++) {
     store.subscribe(leafIndices[i], updateFns[i]);
   }
+  if (!branch.everAttached) {
+    // build 중 push로 커진 배열은 V8이 늘어날 몫까지 잡아 둔다. 다 채운 뒤라 맞는 크기 사본으로 바꾼다.
+    branch.leafIndices = leafIndices.slice();
+    branch.updateFns = updateFns.slice();
+  }
   if (branch.everAttached) {
     const leaves = [...leafIndices];
     const fns = [...updateFns];
