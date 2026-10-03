@@ -8,10 +8,10 @@
 
 | 자리 | 하는 일 |
 |---|---|
-| `qubc-plugin.ts` | vite 플러그인. `x.qubc?qubb` import를 quble 바이너리로 컴파일하고, 런타임 `compile` 결과를 default export한다. 스타일 리소스는 `?url`로 싣는다 |
+| `qubc-plugin.ts` | vite 플러그인. `x.qubc?qubb`는 컴파일된 컴포넌트로, `x.qubc`는 story 모듈로 바꾼다 |
 | `stories/mount.ts` | story의 render. 컴포넌트를 마운트하고, 모든 fullname을 Actions 패널에 남긴 뒤 짝 핸들러를 부른다 |
-| `stories/*.stories.ts` | story. `FileRow`는 playground 셸 컴포넌트를 Controls로, `Todo`는 짝 data와 핸들러로 띄운다 |
-| `.storybook/main.ts` | 플러그인 등록과 레포 루트 파일 서빙 허용 |
+| `stories/*.stories.ts` | 손으로 쓴 story. `FileRow`는 playground 셸 컴포넌트의 상태별 모습을 나눠 띄운다 |
+| `.storybook/main.ts` | 지정 디렉터리의 `.qubc`를 story로 싣는 indexer, 플러그인 등록, 레포 루트 파일 서빙 허용 |
 
 의존 방향은 이 디렉터리에서 기존 코드 쪽으로만 난다. 생성물은 모두 `dist/`(gitignore)에 둔다. 걷어 낼 때는 이
 디렉터리를 지우고 WORKSPACES.md experiments 목록에서 `storybook`을 빼면 된다.
@@ -22,10 +22,24 @@
 
 - 의존: `npm install --prefix experiments/storybook`
 - 개발 서버: `npm run storybook --prefix experiments/storybook` -> http://localhost:8151
+  - 띄울 디렉터리: `QUBLE_STORY_DIRS=components,core/playground npm run storybook --prefix experiments/storybook`.
+    레포 루트 기준이고 쉼표로 나눈다. 안 주면 `components`다.
 - 정적 빌드: `npm run build --prefix experiments/storybook` -> `dist/storybook-static`
 - 타입 검사: `npm run typecheck --prefix experiments/storybook`
 
-## 쓰는 법
+## 디렉터리의 .qubc를 story로
+
+`QUBLE_STORY_DIRS`의 디렉터리마다 `*.qubc` 하나가 story 하나(`Default`)가 된다. story 파일을 쓰지 않는다.
+
+- 루트 컴포넌트는 그 파일의 첫 컴포넌트다(qubb ID 0).
+- 짝 `x.data.json`이 있으면 args로 쓴다. Controls에서 고치면 다시 마운트한다. 없으면 빈 data로 마운트한다.
+- 짝 `x.qubc.handlers.ts`(또는 `.js`)가 있으면 싣는다. 생성된 story 모듈은 이 실험의 타입 검사 대상이 아니라,
+  ts-plugin이 타입을 주입하는 핸들러 파일도 실린다.
+- 짝 data가 없는 컴포넌트는 빈 data로 마운트된다. 이때 `@for`가 0회로 돌거나 `@if`가 거짓이 되어 화면이 비거나,
+  빈 배열에 인덱스로 접근해 RangeError가 날 수 있다. qubb에는 props의 구조만 남고 string/number/bool 구분이 없어
+  기본값을 자동으로 채우지 않는다.
+
+## 손으로 쓰는 story
 
 ```ts
 import TodoList from "../../../components/todo_list.qubc?qubb";
@@ -36,8 +50,8 @@ export const Todo = { render: () => mount(TodoList, data, handlers) };
 
 - `?qubb`를 붙인다. `.qubc` 옆에 생성되는 `.qubc.d.ts`(핸들러 타입)가 import 타입을 가리지 않게 하려는 것이다.
 - args를 data로 넘기면 Controls로 props를 바꿀 때마다 다시 마운트한다. 이전 인스턴스는 `destroy`로 해체한다.
-- 짝 핸들러는 ctx 타입을 직접 적은 것만 싣는다. ts-plugin이 타입을 주입해야 하는 핸들러 파일은 이 실험의 타입
-  검사를 통과하지 못한다.
+- 손으로 쓴 story에서는 ctx 타입을 직접 적은 핸들러만 싣는다. ts-plugin이 타입을 주입해야 하는 핸들러 파일은
+  이 실험의 타입 검사를 통과하지 못한다.
 
 ## 제약
 
