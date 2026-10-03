@@ -1,0 +1,83 @@
+/* NativeDemo - RN 산출 확인용. rem은 1rem=10px로 바뀐다. Pressable의 글자 스타일은 안쪽 Text로
+   내려가지 않으므로 글자 색과 크기는 button 안 span에 둔다. */
+.demo {
+  flex: 1;
+  padding: 1.6rem;
+  background: #fff;
+}
+
+.demo__title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1f2328;
+  margin-bottom: 1.2rem;
+}
+
+.demo__input {
+  border: 1px solid #cdd5df;
+  border-radius: 6px;
+  padding: 0.8rem 1.2rem;
+  font-size: 1.4rem;
+  margin-bottom: 0.8rem;
+}
+
+.demo__add {
+  align-self: flex-start;
+  padding: 0.8rem 1.2rem;
+  background: #eef2f7;
+  border: 1px solid #cdd5df;
+  border-radius: 6px;
+  margin-bottom: 1.2rem;
+}
+
+.demo__addtext {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #34537a;
+}
+
+.demo__row {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 0;
+}
+
+.demo__num {
+  width: 2.4rem;
+  color: #5a6675;
+}
+
+.demo__text {
+  flex: 1;
+  font-size: 1.4rem;
+  color: #1f2328;
+}
+
+.demo__done {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.demo__open {
+  color: #9a6700;
+}
+
+.demo__btn {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #cdd5df;
+  border-radius: 6px;
+}
+
+.demo__btntext {
+  font-size: 1.2rem;
+  color: #34537a;
+}
+
+.good {
+  color: #1a7f37;
+}
+
+.bad {
+  color: #c0392b;
+}

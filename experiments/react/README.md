@@ -15,6 +15,9 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
 | `playground/` | playground 셸(`core/playground/playground.qubc`)의 React 판. 핸들러는 qubb 셸과 같은 파일이다 |
 | `bench/` | bench-expr의 주문 목록 React 판. 하네스, 핸들러, 스타일, 데이터는 bench-expr의 것을 쓴다 |
 | `next/` | playground 셸의 Next.js(Pages Router) 판. 첫 화면을 서버에서 그리고 브라우저가 hydrate한다 |
+| `rn_style.rs` | React Native 산출이 쓰는 CSS -> RN 스타일 변환기. `react.rs`가 모듈로 싣는다 |
+| `native-web/` | `fixtures/native_demo.qubc`의 React Native 산출을 react-native-web으로 브라우저에 그리는 확인 셸 |
+| `native-app/` | 같은 산출을 Android 앱으로 말아 주는 Expo 프로젝트. `android/`는 `native-android.sh`가 만든다 |
 
 의존 방향은 이 디렉터리에서 기존 코드 쪽으로만 난다. 생성물은 모두 `dist/`(gitignore)에 둔다. 자기
 `package.json`과 `node_modules`(React, vite)를 갖고, 패키지 이름이 `quble-react`라 이 디렉터리 안 파일은
@@ -32,6 +35,66 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
 - playground: `experiments/react/playground.sh` -> http://localhost:8147
 - bench: `experiments/react/bench.sh` -> http://localhost:8148/?n=10000
 - Next.js: `experiments/react/next.sh` -> http://localhost:8150
+- React Native(react-native-web): `experiments/react/native-web.sh` -> http://localhost:8151
+- Android APK: `experiments/react/native-android.sh` -> `native-app/android/app/build/outputs/apk/release/app-release.apk`
+- RN 산출만 내기: `quble-react <comp.qubc> --native --out <file.tsx>`
+
+## React Native 타겟
+
+같은 `.qubc`를 `--native`로 React Native 모듈로 낸다. 런타임(`runtime/index.ts`)은 웹 산출과 같은 것을 쓰고,
+RN 전용으로 `cls`(동적 class의 시트 조회)와 `textEvent`(`onChangeText`의 문자열을 `event.target.value` 모양으로
+감쌈)만 더했다. 산출기는 `react_native_tsx`, 검사에서 걸러진 입력은 `NativeError`다.
+
+| quble | RN 산출 |
+|---|---|
+| `div` `section` `ul` `li` 등 | `View`. `@click`이 달리면 `Pressable` |
+| `span` `p` `h1`~`h6` `a` `label` `strong` 등 | `Text` |
+| `button` | `Pressable` |
+| `input` `textarea` | `TextInput`(textarea는 `multiline`, 자식 텍스트는 `defaultValue`) |
+| `img` | `Image`(`src`는 `source={{ uri }}`) |
+| 맨 텍스트와 `${}` | 가장 가까운 감싸는 요소가 `Text`가 아니면 `<Text>`로 감쌈 |
+| `@click` `@input` `@change` `@focus` `@blur` `@submit` | `onPress` `onChangeText` `onChangeText` `onFocus` `onBlur` `onSubmitEditing` |
+| `use "./x.css"` | `StyleSheet.create` 상수(`$css0`...). import하지 않는다 |
+| `class="a b"` | `style={[$css0["a"], $css0["b"]]}`. 그 클래스를 가진 시트마다 `use` 순서로 깐다 |
+| `class={x}` | `style={$q.cls([$css0, ...], x)}` |
+| `style="..."` 리터럴 | 컴파일 타임에 객체로 변환해 `class` 뒤에 둔다 |
+| `id` `src` `alt` `aria-label` `value` `placeholder` `maxlength` | `nativeID` `source` `accessibilityLabel` `accessibilityLabel` `value` `placeholder` `maxLength` |
+
+CSS 변환은 `.name` 단일 클래스 선택자만 받는다. `px`와 `rem`(1rem=10px, 웹 `global.css`의 `html { font-size: 62.5% }`)은
+수로 바꾸고, `margin`/`padding`/`border`/`border-radius` 약식은 풀어서 낸다. `cursor`와 `display: flex`는 RN에
+의미가 없어 버린다. 단위 없는 `line-height`는 같은 클래스의 `font-size`와 곱해 px로 바꾼다.
+
+### Android 앱
+
+`native-app/`은 Expo(SDK 57) 프로젝트다. `App.tsx`가 산출 `dist/native/native_demo.tsx`를 `QubleRoot`로 그리고,
+핸들러와 초기 데이터는 `native-web/src`의 것과 같은 파일이다. `native-android.sh`가 컴파일, `expo prebuild`,
+`gradle assembleRelease`를 차례로 돌려 APK를 낸다.
+
+- release로 낸다. debug APK는 JS를 PC의 Metro 서버에서 받아 단독 설치하면 실행이 안 된다. release는 JS 번들이
+  APK 안에 들어가고, Expo 템플릿이 debug 키스토어로 서명해 바로 설치된다(스토어 배포용이 아니다).
+- `metro.config.js`가 앱 밖의 `runtime`, `dist`, `native-web`을 싣고 `quble-react`를 `runtime/index.ts`로 잇는다.
+  상위 `experiments/react/node_modules`에 웹용 React가 따로 있어, 모듈 탐색을 `native-app/node_modules` 하나로 고정해
+  React가 두 벌 실리지 않게 한다.
+- `react`와 `react-native`는 Expo SDK 57이 정한 버전(19.2.3, 0.86.3)에 정확히 맞춘다. SDK를 올릴 때 같이 바꾼다.
+
+### 에러로 막는 것
+
+조용히 빼면 화면이 웹과 달라지는 것을 모르므로 컴파일 에러로 낸다.
+
+- 태그: `table` 계열, `br`, `hr`, `select`, `option`, `video`, `audio`, `canvas`
+- 이벤트: 위 표 밖(`scroll`, `keydown`, `mouseenter` 등)
+- 속성: 위 표 밖, 그리고 리터럴이 아닌 `style={x}`
+- 선택자: `.a:hover`, `.a .b`, `span.dark`, `.a, .b`, `@media`
+- 선언: `box-shadow`, `em`, `calc()`, `var()`, 위에서 다루지 않은 속성
+- 클래스: 이 컴포넌트가 `use`한 CSS 어디에도 없는 이름
+
+### 웹과 다른 점
+
+- RN은 글자 스타일을 `View`에서 `Text`로 상속하지 않는다. `button(class="btn") { "x" }`에서 `.btn`의 `color`와
+  `font-size`는 안쪽 `Text`에 닿지 않으므로, 글자 스타일은 `button` 안에 `span`을 두고 거기에 준다.
+- 기본 스타일이 없다. 브라우저가 주는 `h1`의 굵기나 `button`의 테두리는 RN에서 나오지 않는다.
+- `TextInput`은 uncontrolled다. 핸들러가 `ctx.set`으로 값을 되먹여도 입력창 글자는 바뀌지 않는다.
+- 이 확인은 react-native-web이다. 실기기(Expo 등)에서 글꼴, 그림자, 터치 동작이 같은지는 따로 봐야 한다.
 
 ## Next.js 판
 
