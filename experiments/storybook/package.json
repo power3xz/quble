@@ -1,0 +1,18 @@
+{
+  "name": "quble-storybook",
+  "private": true,
+  "type": "module",
+  "description": "qubb 컴포넌트를 Storybook(html-vite)에 올리는 실험(README.md).",
+  "scripts": {
+    "storybook": "storybook dev -c .storybook -p 8151 --no-open",
+    "build": "storybook build -c .storybook -o dist/storybook-static",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@storybook/html-vite": "^10.6.1",
+    "@types/node": "^26.6.4",
+    "storybook": "^10.6.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  }
+}
