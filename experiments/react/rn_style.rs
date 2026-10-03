@@ -4,7 +4,7 @@
 /// 클래스 이름 -> (RN 스타일 속성 이름, JS 리터럴) 목록. 선언 순서를 유지한다.
 pub type TClassStyles = Vec<(String, Vec<(String, String)>)>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CssError {
     /// `.a:hover`, `span.dark`, `.a, .b`, `@media`처럼 단일 클래스가 아닌 선택자
     UnsupportedSelector(String),
