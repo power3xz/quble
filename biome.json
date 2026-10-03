@@ -18,6 +18,8 @@
       "experiments/**",
       "!**/node_modules",
       "!**/dist",
+      "!experiments/react/native-app/android",
+      "!experiments/react/native-app/.expo",
       "!**/*.qubc.d.ts"
     ]
   },
