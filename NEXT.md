@@ -8,7 +8,10 @@
 
 ## 하는 중
 
-없음
+**React Native 컴파일 타겟 실험** (`experiments/react`의 산출기에 RN 타겟 추가, 브랜치
+`experiment/react-native`). HTML 태그를 RN 컴포넌트로 매핑하고, `class`는 CSS를
+`StyleSheet`로 변환한다. 범위는 단일 클래스 선택자와 변환 가능한 선언뿐이다. 확인은
+react-native-web(브라우저)과 Expo(실기기, 사용자 확인)로 한다.
 
 ## 할 것
 
