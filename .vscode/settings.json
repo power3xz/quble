@@ -1,4 +1,18 @@
 {
-  "cSpell.words": ["codegen", "constpool", "qubb", "qubc", "Quble"],
+  "cSpell.words": [
+    "caretkey",
+    "caretline",
+    "codegen",
+    "constpool",
+    "dedup",
+    "elems",
+    "freelist",
+    "hrefs",
+    "qubb",
+    "qubc",
+    "Quble",
+    "reeval",
+    "rowspan"
+  ],
   "cSpell.diagnosticLevel": "Hint"
 }
