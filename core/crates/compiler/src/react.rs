@@ -1,9 +1,11 @@
 //! React 산출기. 평탄화한 컴포넌트를 React 컴포넌트(TSX) 한 모듈로 낸다(docs/react-target.draft.md).
 //! 입력은 qubb codegen의 검증을 통과한 것이라 여기서는 에러를 내지 않는다.
 
-use crate::ast::{BinaryOp, Component, Expr, ForCount, Lit, Node, UnaryOp};
+use crate::ast::{BinaryOp, Component, Expr, ForCount, Lit, Node, Type, UnaryOp};
 use crate::dts::type_to_ts;
+use crate::expr_type::{expr_type, path_type};
 use crate::flatten::FlatComp;
+use crate::scope::ForVar;
 
 /// 런타임(`core/react`)은 `$q`로 싣는다 - 사용자 컴포넌트 이름(`Segment`, `String`)과 부딪히지 않게.
 /// 컴포넌트 안에서 props는 `p`, 런타임 손잡이는 `q`다. 컴포넌트 이름은 대문자로 시작해 둘과 안 겹친다.
@@ -62,13 +64,14 @@ fn line(out: &mut String, depth: usize, text: &str) {
     out.push('\n');
 }
 
-/// vars는 감싼 @for들이 연 변수 이름이다. 식에서 이 이름은 prop(`p.이름`)이 아니라 콜백 인자(`이름$`)다.
-fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: &mut String) {
+/// vars는 감싼 @for들이 연 변수다. 식에서 이 이름은 prop(`p.이름`)이 아니라 콜백 인자(`이름$`)다.
+fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: &mut String) {
     let js_expr = |expr: &Expr| js_expr(expr, vars);
     match node {
         Node::Text(s) => line(out, depth, &format!("{{{}}}", js_str(s))),
-        // React는 boolean을 안 찍는다. qubb처럼 "true"/"false"로 찍으려고 문자열로 바꾼다.
-        Node::Interpolation(expr) => line(out, depth, &format!("{{$q.str({})}}", js_expr(expr))),
+        Node::Interpolation(expr) => {
+            line(out, depth, &format!("{{{}}}", js_text(expr, comp, vars)))
+        }
         Node::Element {
             tag,
             attrs,
@@ -77,7 +80,11 @@ fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: 
         } => {
             let mut open = format!("<{}", tag.name);
             for (name, value) in attrs {
-                open.push_str(&format!(" {}={{{}}}", attr_name(name), attr_value(value, vars)));
+                let react_name = attr_name(name);
+                open.push_str(&format!(
+                    " {react_name}={{{}}}",
+                    attr_value(react_name, value, comp, vars)
+                ));
             }
             for (dom_event, event_name) in event_bindings {
                 let event = comp
@@ -96,6 +103,24 @@ fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: 
                     react_event_prop(dom_event),
                     js_str(&event.name)
                 ));
+            }
+            // textarea의 자식 텍스트는 초기값이다. React는 그것을 defaultValue로 받는다.
+            // textarea() { "> " ${text} } -> defaultValue={"> " + $q.str(p.text)}
+            let text_only = children
+                .iter()
+                .all(|c| matches!(c, Node::Text(_) | Node::Interpolation(_)));
+            if tag.name == "textarea" && !children.is_empty() && text_only {
+                let parts = children
+                    .iter()
+                    .map(|c| match c {
+                        Node::Text(s) => js_str(s),
+                        Node::Interpolation(expr) => format!("$q.str({})", js_expr(expr)),
+                        _ => unreachable!("위에서 텍스트만 걸렀다"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" + ");
+                line(out, depth, &format!("{open} defaultValue={{{parts}}} />"));
+                return;
             }
             if children.is_empty() {
                 line(out, depth, &format!("{open} />"));
@@ -193,10 +218,20 @@ fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: 
                     js_str(&item.name)
                 ),
             );
+            // 수를 돌면 item이 회차 번호고, 배열을 돌면 요소다.
+            let item_type = match count {
+                ForCount::Literal(_) => Type::Number,
+                ForCount::Var(expr) => {
+                    match path_type(expr, &comp.props, vars).expect("codegen이 검사한 대상") {
+                        Type::Array(elem) => *elem,
+                        _ => Type::Number,
+                    }
+                }
+            };
             let mut inner = vars.to_vec();
-            inner.push(item.name.clone());
+            inner.push(for_var(&item.name, item_type));
             if let Some(index) = index {
-                inner.push(index.name.clone());
+                inner.push(for_var(&index.name, Type::Number));
             }
             emit_fragment(body, comp, &inner, depth + 1, out);
             line(out, depth, "))}");
@@ -226,12 +261,30 @@ fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: 
     }
 }
 
-fn emit_fragment(nodes: &[Node], comp: &Component, vars: &[String], depth: usize, out: &mut String) {
+fn emit_fragment(nodes: &[Node], comp: &Component, vars: &[ForVar], depth: usize, out: &mut String) {
     line(out, depth, "<>");
     for node in nodes {
         emit_node(node, comp, vars, depth + 1, out);
     }
     line(out, depth, "</>");
+}
+
+/// 타입 조회용 @for 변수. offset은 qubb 슬롯 자리라 여기서는 안 쓴다.
+fn for_var(name: &str, type_: Type) -> ForVar {
+    ForVar {
+        name: Some(name.to_string()),
+        offset: 0,
+        type_,
+    }
+}
+
+/// 보간 값. React는 boolean을 안 찍으므로 bool만 qubb처럼 "true"/"false"로 바꾼다.
+/// 문자열과 수는 그대로 둔다 - React가 수를 String()과 같게 찍는다.
+fn js_text(expr: &Expr, comp: &Component, vars: &[ForVar]) -> String {
+    match expr_type(expr, &comp.props, vars).expect("codegen이 검사한 식") {
+        Type::Bool => format!("$q.str({})", js_expr(expr, vars)),
+        _ => js_expr(expr, vars),
+    }
 }
 
 /// 참조의 주소. user.name -> q.at("user", "name")
@@ -258,18 +311,61 @@ fn ref_segments(expr: &Expr) -> Vec<String> {
     }
 }
 
-/// JSX 속성 이름. JS 예약어와 겹치는 둘만 React 이름으로 바꾼다.
+/// JSX 속성 이름. React가 다른 이름으로 받는 HTML 속성만 바꾼다. 나머지(`id`, `data-*`,
+/// `aria-*`)는 그대로다.
 fn attr_name(name: &str) -> &str {
     match name {
         "class" => "className",
         "for" => "htmlFor",
+        "tabindex" => "tabIndex",
+        "readonly" => "readOnly",
+        "maxlength" => "maxLength",
+        "minlength" => "minLength",
+        "colspan" => "colSpan",
+        "rowspan" => "rowSpan",
+        "contenteditable" => "contentEditable",
+        "autocomplete" => "autoComplete",
+        "autofocus" => "autoFocus",
+        "accesskey" => "accessKey",
+        "crossorigin" => "crossOrigin",
+        "datetime" => "dateTime",
+        "enctype" => "encType",
+        "inputmode" => "inputMode",
+        "novalidate" => "noValidate",
+        "spellcheck" => "spellCheck",
+        "srcset" => "srcSet",
+        "usemap" => "useMap",
         _ => name,
     }
 }
 
+/// React 타입이 number만 받는 속성(React 이름). @types/react의 `?: number | undefined` 속성들.
+const NUMBER_ATTRS: &[&str] = &[
+    "tabIndex",
+    "results",
+    "cols",
+    "colSpan",
+    "high",
+    "low",
+    "marginHeight",
+    "marginWidth",
+    "maxLength",
+    "minLength",
+    "optimum",
+    "rows",
+    "rowSpan",
+    "size",
+    "span",
+    "start",
+    "border",
+];
+
 /// 속성값. 배열은 class에서만 오고 qubb처럼 컴파일타임에 공백으로 잇는다.
 /// ["card", "lg"] -> "card lg"
-fn attr_value(value: &Expr, vars: &[String]) -> String {
+///
+/// 식은 React 속성 타입에 맞춘다. number만 받는 속성에는 수를 그대로, 나머지에는 문자열로 낸다.
+/// 어느 쪽이든 DOM에 찍히는 글자는 qubb와 같다.
+fn attr_value(react_name: &str, value: &Expr, comp: &Component, vars: &[ForVar]) -> String {
     match value {
         Expr::Lit(..) => js_expr(value, vars),
         Expr::List(items, _) => {
@@ -286,7 +382,11 @@ fn attr_value(value: &Expr, vars: &[String]) -> String {
                 .join(" ");
             js_str(&joined)
         }
-        _ => format!("$q.str({})", js_expr(value, vars)),
+        _ => match expr_type(value, &comp.props, vars).expect("codegen이 검사한 식") {
+            Type::String => js_expr(value, vars),
+            Type::Number if NUMBER_ATTRS.contains(&react_name) => js_expr(value, vars),
+            _ => format!("$q.str({})", js_expr(value, vars)),
+        },
     }
 }
 
@@ -326,10 +426,12 @@ fn js_object(fields: impl Iterator<Item = (String, String)>) -> String {
 /// 식 -> JS 식. 연산자 가지는 괄호로 감싸 우선순위를 원본 트리 그대로 둔다.
 /// count * (a + 1) -> (p.count * (p.a + 1))
 /// @for 변수는 콜백 인자로 읽는다. @for (row of rows)의 row.title -> row$.title
-fn js_expr(expr: &Expr, vars: &[String]) -> String {
+fn js_expr(expr: &Expr, vars: &[ForVar]) -> String {
     let js_expr = |expr: &Expr| js_expr(expr, vars);
     match expr {
-        Expr::Var(name, _) if vars.contains(name) => format!("{name}$"),
+        Expr::Var(name, _) if vars.iter().any(|v| v.name.as_ref() == Some(name)) => {
+            format!("{name}$")
+        }
         Expr::Var(name, _) => format!("p.{name}"),
         Expr::Lit(lit, _) => match &lit.value {
             Lit::Str(s) => js_str(s),
@@ -393,10 +495,11 @@ mod tests {
               props { label: string, on: bool }
               events { TOGGLE({ label, on: !on }) }
               template {
-                button(class="btn" @click:TOGGLE) { "x: " ${label} }
+                button(class="btn" title={on} tabindex={1 + 1} @click:TOGGLE) { "x: " ${label} ${on} }
               }
             }
         "#);
+        // 문자열과 수는 그대로 낸다. bool만 qubb처럼 "true"/"false"로 찍게 감싼다.
         assert_eq!(
             out,
             r#"import * as $q from "quble-react";
@@ -405,9 +508,10 @@ export const Toggle = (p: { label: string; on: boolean }) => {
   const q = $q.useQ();
   return (
     <>
-      <button className={"btn"} onClick={(e) => q.emit("TOGGLE", { label: p.label, on: (!p.on) }, e)}>
+      <button className={"btn"} title={$q.str(p.on)} tabIndex={(1 + 1)} onClick={(e) => q.emit("TOGGLE", { label: p.label, on: (!p.on) }, e)}>
         {"x: "}
-        {$q.str(p.label)}
+        {p.label}
+        {$q.str(p.on)}
       </button>
     </>
   );
@@ -473,12 +577,26 @@ export const Label = (p: { text: string }) => {
   return (
     <>
       <span>
-        {$q.str(p.text)}
+        {p.text}
       </span>
     </>
   );
 };
 "#
+        );
+    }
+
+    #[test]
+    fn textarea_children_to_default_value() {
+        let out = tsx(r#"
+            component Editor {
+              props { text: string, n: number }
+              template { textarea(rows={n}) { "> " ${text} } }
+            }
+        "#);
+        assert!(
+            out.contains(r#"<textarea rows={p.n} defaultValue={"> " + $q.str(p.text)} />"#),
+            "{out}"
         );
     }
 
@@ -508,7 +626,7 @@ export const Label = (p: { text: string }) => {
           "Header": q.slot(
             <>
               <h1>
-                {$q.str(p.title)}
+                {p.title}
               </h1>
             </>
           ),
@@ -594,8 +712,8 @@ export const Label = (p: { text: string }) => {
       {q.each(p.rows, q.at("rows"), "row", "i", (q, row$, i$) => (
         <>
           <button onClick={(e) => q.emit("PICK", {}, e)}>
-            {$q.str(i$)}
-            {$q.str(row$.title)}
+            {i$}
+            {row$.title}
           </button>
           <$q.Segment name="Item" props={{ text: q.at("row", "title") }}>
             <Cell text={row$.title} />
@@ -605,7 +723,7 @@ export const Label = (p: { text: string }) => {
       {q.each(2, null, "n", null, (q, n$) => (
         <>
           <span>
-            {$q.str((n$ * 2))}
+            {(n$ * 2)}
           </span>
         </>
       ))}
