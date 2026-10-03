@@ -28,9 +28,11 @@ fi
 # 이미 받았으면 바로 끝난다.
 npx --prefix "$APP" playwright install chromium
 
-echo "[bench-expr-quick] 2/5 orders.qubc 컴파일, 데이터 생성"
-cargo build --manifest-path "$ROOT/core/Cargo.toml" --bin quble
+echo "[bench-expr-quick] 2/5 orders.qubc 컴파일(qubb, React), 데이터 생성"
+cargo build --manifest-path "$ROOT/core/Cargo.toml" --bin quble --bin quble-react
 "$ROOT/core/target/debug/quble" "$APP/quble/orders.qubc" --out-dir "$APP/public"
+mkdir -p "$APP/gen"
+"$ROOT/core/target/debug/quble-react" "$APP/quble/orders.qubc" > "$APP/gen/orders.tsx"
 node "$APP/gen-data.mjs"
 
 echo "[bench-expr-quick] 3/5 빌드: $REF($SHA)"
@@ -52,8 +54,9 @@ if [ ! -f "$TREE/bench-expr/src/quble.ts" ]; then
 fi
 # worktree의 vite 설정이 그 worktree의 core/web을 싣는다. 의존은 작업 트리 것을 함께 쓴다.
 ln -s "$APP/node_modules" "$TREE/bench-expr/node_modules"
-mkdir -p "$TREE/bench-expr/public"
+mkdir -p "$TREE/bench-expr/public" "$TREE/bench-expr/gen"
 cp "$APP/public/"* "$TREE/bench-expr/public/"
+cp "$APP/gen/"* "$TREE/bench-expr/gen/"
 npm run --prefix "$TREE/bench-expr" build -- --outDir "$APP/$OUT/$SHA" --emptyOutDir --logLevel error
 
 echo "[bench-expr-quick] 4/5 서버 기동: $PORT"

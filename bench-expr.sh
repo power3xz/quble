@@ -21,9 +21,11 @@ else
   echo "[bench-expr] 1/4 의존 확인됨"
 fi
 
-echo "[bench-expr] 2/4 orders.qubc 컴파일, 데이터 생성"
-cargo build --manifest-path "$ROOT/core/Cargo.toml" --bin quble
+echo "[bench-expr] 2/4 orders.qubc 컴파일(qubb, React), 데이터 생성"
+cargo build --manifest-path "$ROOT/core/Cargo.toml" --bin quble --bin quble-react
 "$ROOT/core/target/debug/quble" "$APP/quble/orders.qubc" --out-dir "$APP/public"
+mkdir -p "$APP/gen"
+"$ROOT/core/target/debug/quble-react" "$APP/quble/orders.qubc" > "$APP/gen/orders.tsx"
 node "$APP/gen-data.mjs"
 
 echo "[bench-expr] 3/4 릴리즈 빌드"
