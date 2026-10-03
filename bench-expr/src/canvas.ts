@@ -1,5 +1,9 @@
 // canvas 실험의 메인 스레드 쪽. canvas를 Worker(canvas-worker.ts)에 넘기고 클릭, 휠, 크기 변경만 전한다.
 // Worker가 알려 주는 mount 시간과 프레임 시간을 위쪽 막대에 보인다.
+
+// vite의 ?raw import 타입(bench-expr에는 tsconfig가 없다)
+/// <reference types="vite/client" />
+
 import { currentN } from "./harness.ts";
 // DOM 페이지와 같은 스타일. Worker가 해석해 canvas에 맞춘다.
 import css from "./style.css?raw";
