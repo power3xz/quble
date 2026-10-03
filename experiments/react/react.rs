@@ -9,6 +9,9 @@ use crate::scope::ForVar;
 use crate::{codegen, fs_loader, CompileError};
 use std::path::Path;
 
+#[path = "rn_style.rs"]
+mod rn_style;
+
 /// 엔트리 소스를 React 컴포넌트 모듈(TSX)로 낸다. 검증은 qubb codegen이 하고 바이트코드는 버린다 -
 /// 같은 소스가 qubb에서 에러면 여기서도 같은 에러다.
 ///
