@@ -18,11 +18,12 @@ exclude: `crates/renderer`
 
 ## JS - 루트 `package.json`
 
-workspaces: `core/web`, `core/playground`, `core/wasm-compiler`, `editors/ts-plugin`
+workspaces: `core/web`, `core/react`, `core/playground`, `core/wasm-compiler`, `editors/ts-plugin`
 
 | 멤버 | 이름 | 의존 |
 |---|---|---|
 | `core/web` | `quble-web` | 없음 |
+| `core/react` | `quble-react` | `react`. 테스트는 `quble-web`(상대경로 import, 미선언)과 비교한다 |
 | `core/playground` | `quble-playground` | `quble-wasm-compiler`, `quble-web`(상대경로 import, 미선언) |
 | `core/wasm-compiler` | `quble-wasm-compiler` | 없음 |
 | `editors/ts-plugin` | `quble-ts-plugin` | `quble-wasm-compiler` |
@@ -87,6 +88,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 | 멤버 | 먼저 필요한 것 |
 |---|---|
 | `core/web` | 없음 - 자기 `test`가 `cargo build --bin quble`을 먼저 돌린다 |
+| `core/react` | 없음 - 자기 `test`가 `cargo build --bin quble --bin quble-react`를 먼저 돌린다 |
 | `core/playground` | 없음 |
 | `core/wasm-compiler` | `build:wasm` - 테스트가 `.wasm`을 읽는다 |
 | `editors/ts-plugin` | `build:wasm` - `quble-wasm-compiler`를 거쳐 `.wasm`을 읽는다 |
