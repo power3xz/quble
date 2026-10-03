@@ -45,6 +45,10 @@ export type TBox = {
   // 이 상자를 계산할 때 받은 너비. 같으면 다시 계산하지 않는다(-1은 내용만큼).
   availW: number;
   style: TStyle | null;
+  // 너비를 받은 요소의 자식이 텍스트뿐이면 글자 폭을 재지 않고 둔다. 칸 크기는 받은 너비로 정해지므로
+  // 글자 폭은 정렬 위치에만 쓰이고, 그것은 렌더러가 그릴 때 화면에 보이는 것만 잰다. 그동안 자식 텍스트
+  // 상자의 w는 -1이다.
+  lazyText: boolean;
 };
 
 export type TLayoutEnv = {
@@ -74,10 +78,42 @@ export const markDirty = (node: SNode): void => {
 const boxOf = (node: SNode): TBox => {
   let box = node.layout as TBox | null;
   if (box === null) {
-    box = { x: 0, y: 0, w: 0, h: 0, dirty: true, availW: Number.NaN, style: null };
+    box = { x: 0, y: 0, w: 0, h: 0, dirty: true, availW: Number.NaN, style: null, lazyText: false };
     node.layout = box;
   }
   return box;
+};
+
+const onlyText = (el: SElement): boolean => {
+  for (let c = el.firstChild; c !== null; c = c.nextSibling) {
+    if (c.nodeType !== TEXT_NODE) {
+      return false;
+    }
+  }
+  return true;
+};
+
+// lazyText 요소의 자식 텍스트에 글자 폭과 정렬된 x를 채운다. 렌더러가 그 요소를 그리기 직전에 부른다.
+export const placeLazyText = (env: Pick<TLayoutEnv, "measure">, el: SElement, bold: boolean): void => {
+  const box = el.layout as TBox;
+  const style = box.style as TStyle;
+  const [, pr, , pl] = style.padding ?? NO_PADDING;
+  const bw = style.border === undefined ? 0 : 1;
+  const textBold = style.bold ?? bold;
+  let total = 0;
+  for (let c = el.firstChild; c !== null; c = c.nextSibling) {
+    const cb = c.layout as TBox;
+    const data = (c as SText).data;
+    cb.w = data === "" ? 0 : env.measure(data, textBold);
+    total += cb.w;
+  }
+  const room = box.w - pl - pr - 2 * bw - total;
+  let x = pl + bw + (style.align === "right" ? room : style.align === "center" ? room / 2 : 0);
+  for (let c = el.firstChild; c !== null; c = c.nextSibling) {
+    const cb = c.layout as TBox;
+    cb.x = x;
+    x += cb.w;
+  }
 };
 
 // node의 상자를 계산해 돌려준다. availW는 줄 수 있는 너비이고 -1이면 내용만큼이다. bold는 조상에게서
@@ -114,8 +150,24 @@ export const layout = (env: TLayoutEnv, node: SNode, availW: number, bold: boole
   const innerAvail = availW < 0 ? -1 : Math.max(0, availW - pl - pr - 2 * bw);
   let contentW = 0;
   let contentH = 0;
+  box.lazyText = display === "inline" && availW >= 0 && el.firstChild !== null && onlyText(el);
 
-  if (display === "block") {
+  if (box.lazyText) {
+    // 폭이 정해진 칸 안의 텍스트(lazyText 설명 참고). 높이만 정한다.
+    for (let c = el.firstChild; c !== null; c = c.nextSibling) {
+      const cb = boxOf(c);
+      cb.dirty = false;
+      cb.availW = -1;
+      cb.w = -1;
+      cb.h = (c as SText).data === "" ? 0 : env.lineHeight;
+      cb.x = left;
+      contentH = Math.max(contentH, cb.h);
+    }
+    for (let c = el.firstChild; c !== null; c = c.nextSibling) {
+      const cb = c.layout as TBox;
+      cb.y = top + (contentH - cb.h) / 2;
+    }
+  } else if (display === "block") {
     let y = 0;
     for (let c = el.firstChild; c !== null; c = c.nextSibling) {
       if (c.nodeType === COMMENT_NODE) {
@@ -198,7 +250,7 @@ export const layout = (env: TLayoutEnv, node: SNode, availW: number, bold: boole
   box.h = contentH + pt + pb + 2 * bw + bbw;
   // 받은 너비가 내용보다 넓으면 정렬대로 내용을 민다(block은 받은 너비를 다 쓰므로 뺀다).
   const shift =
-    display === "block"
+    display === "block" || box.lazyText
       ? 0
       : style.align === "right"
         ? box.w - naturalW

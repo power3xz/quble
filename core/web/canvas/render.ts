@@ -3,7 +3,7 @@
 //
 // 2D 컨텍스트만 받으므로 일반 canvas와 Worker의 OffscreenCanvas 어느 쪽에서도 돈다.
 
-import { hitTest, layout, markDirty, type TBox, type TStyle } from "./layout.ts";
+import { hitTest, layout, markDirty, placeLazyText, type TBox, type TStyle } from "./layout.ts";
 import { ELEMENT_NODE, type SDocument, type SElement, type SNode, type SText, TEXT_NODE } from "./scene.ts";
 
 type TContext2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -94,6 +94,9 @@ export const createRenderer = (doc: SDocument, ctx: TContext2D, opts: TRenderOpt
     }
     const childColor = style.color ?? color;
     const childBold = style.bold ?? bold;
+    if (box.lazyText) {
+      placeLazyText(env, node as SElement, bold);
+    }
     for (let c = node.firstChild; c !== null; c = c.nextSibling) {
       drawNode(c, x, y, childColor, childBold);
     }

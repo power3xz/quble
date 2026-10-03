@@ -11,6 +11,10 @@ const worker = new Worker(new URL("./canvas-worker.ts", import.meta.url), { type
 const offscreen = canvas.transferControlToOffscreen();
 worker.postMessage({ type: "init", canvas: offscreen, n, base: location.href, ...size() }, [offscreen]);
 
+worker.onerror = (e) => {
+  info.textContent = `Worker 오류: ${e.message}`;
+};
+
 let mountMs = 0;
 worker.onmessage = (e: MessageEvent) => {
   const msg = e.data;
