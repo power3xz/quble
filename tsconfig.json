@@ -33,8 +33,7 @@
     "core/web/**/*.ts",
     "core/playground/**/*.ts",
     "core/wasm-compiler/**/*.ts",
-    "editors/vscode/src/**/*.ts",
-    "experiments/**/*.ts"
+    "editors/vscode/src/**/*.ts"
   ],
   // include 패턴에 멤버 밑 node_modules가 걸리므로 명시로 끊는다. exclude를 두면 tsc의
   // 기본 제외가 덮이니 여기에 적힌 것이 전부다 - 항목을 더할 때 node_modules를 지우지 않는다.

@@ -195,7 +195,7 @@ fn leaf_tree_to_ts(ty: &Type) -> String {
 }
 
 /// prop 선언 타입 -> TS 타입 문자열. 원시는 이름 매핑, 배열은 `T[]`, 객체는 `{ k: T; ... }`.
-fn type_to_ts(ty: &Type) -> String {
+pub(crate) fn type_to_ts(ty: &Type) -> String {
     match ty {
         Type::Bool => "boolean".to_string(),
         Type::Number => "number".to_string(),

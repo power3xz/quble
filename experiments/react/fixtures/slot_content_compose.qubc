@@ -1,0 +1,28 @@
+component Page {
+  props { label: string }
+  contexts { Area { label: label } }
+  template {
+    @with Area {
+      Box() {
+        Inner: Btn(label={label} /)
+      }
+    }
+  }
+}
+
+component Box {
+  contexts { Area { label: "box" } }
+  template {
+    @with Area {
+      div(class="box") { @slot() }
+    }
+  }
+}
+
+component Btn {
+  props { label: string }
+  events { TAP({ label }) }
+  template {
+    button(@click:TAP) { ${label} }
+  }
+}

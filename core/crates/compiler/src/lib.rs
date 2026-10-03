@@ -13,6 +13,14 @@ mod parse;
 mod scope;
 mod src_range;
 
+// React 산출 실험. 코드는 experiments/react에 있고, 컴파일러 내부(AST, 평탄화)를 써야 해서 이 크레이트의
+// 모듈로 끼워 넣는다. 실험을 걷어 낼 때는 이 넷과 Cargo.toml의 feature를 지운다.
+#[cfg(feature = "experimental-react")]
+#[path = "../../../../experiments/react/react.rs"]
+mod react;
+#[cfg(feature = "experimental-react")]
+pub use react::{react_tsx, react_tsx_from_path};
+
 pub use diagnostic::{locate_utf16, Utf16Location};
 pub use dts::{handler_names, handlers_dts, handlers_dts_from_path};
 pub use flatten::{FlattenError, SourceLoader, TypeError, TypeErrorKind, UseError, UseErrorKind};

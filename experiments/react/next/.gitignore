@@ -1,0 +1,3 @@
+# next.sh와 next build가 만드는 것. 빌드 산출물은 ../dist/next-build에 둔다.
+public/
+next-env.d.ts

@@ -1,4 +1,5 @@
-// quble 대상의 이벤트 핸들러. DOM 페이지(quble.ts)와 canvas 실험(canvas-worker.ts)이 함께 쓴다.
+// quble 대상의 이벤트 핸들러. quble 페이지(quble.ts)가 쓰고, 같은 앱을 다른 방식으로 그리는 실험
+// (experiments/)도 가져다 쓴다.
 import { nextPivot, nextRate, nextThreshold } from "./harness.ts";
 
 type TCtx = {

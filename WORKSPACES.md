@@ -35,11 +35,12 @@ workspaces: `core/web`, `core/playground`, `core/wasm-compiler`, `editors/ts-plu
 `devDependencies`에 둔다.
 
 `bench-expr`(식 갱신 벤치)도 워크스페이스 밖이다. 자기 `package.json`과 `node_modules`(vite, React,
-Svelte)를 갖는다. quble 런타임은 vite alias로 `core/web`을 직접 싣는다. canvas 데모는 같은 방식으로
-`experiments`도 싣는다.
+Svelte)를 갖는다. quble 런타임은 vite alias로 `core/web`을 직접 싣는다.
 
-`experiments`(실험 코드)도 워크스페이스 밖이다. 자기 `package.json`이 없고 루트의 `node_modules`(jsdom)를 쓴다.
-루트 tsconfig와 biome은 보지만 `npm test`는 돌지 않는다 - 실행 명령은 실험마다 README에 있다.
+`experiments`(실험 코드)도 워크스페이스 밖이다. 의존과 실행 방법은 실험마다 README에 있다.
+
+- `canvas` - DOM 대신 canvas에 그리는 렌더 실험
+- `react` - `.qubc`를 React 컴포넌트로 내는 컴파일 타겟 실험
 
 ## lock 파일
 
