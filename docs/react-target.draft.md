@@ -40,7 +40,9 @@ ROADMAP "컴파일 타겟"의 React 판. 같은 `.qubc`를 qubb 대신 React 컴
 - 검증은 qubb codegen이 한다. React 산출기는 codegen을 통과한 FlatComp만 받으므로 에러를 안 낸다.
 - `react_tsx(entry_path, src, loader)`, `react_tsx_from_path(path)` - `lib.rs`
 - `react.rs`: `generate(comps) -> String`
-- 바이너리 `quble-react <component.qubc>` - TSX를 stdout으로 낸다(`quble-dts`와 같은 꼴).
+- 바이너리 `quble-react <component.qubc> [--out <file.tsx>]` - `--out`이 없으면 stdout으로 낸다.
+- `use "./x.css"` 리소스는 산출 파일 위치에서 본 상대 경로로 import한다(`import "../x.css"`).
+  stdout으로 내면 현재 디렉터리가 기준이다.
 
 값 표기:
 
@@ -51,6 +53,7 @@ ROADMAP "컴파일 타겟"의 React 판. 같은 `.qubc`를 qubb 대신 React 컴
   나머지에는 문자열로 낸다. 속성 이름은 React 이름으로 바꾼다(`class` -> `className`,
   `tabindex` -> `tabIndex`).
 - textarea의 자식 텍스트는 `defaultValue`로 낸다.
+- `style`은 CSS 선언 문자열을 `$q.style`이 객체로 바꾼다(`"top: 1px"` -> `{ top: "1px" }`).
 - `==`/`!=`는 `===`/`!==`로, 인덱스 접근은 범위 밖에서 RangeError를 내는 `$q.idx`로 낸다.
 
 ## 런타임 `quble-react` (`core/react`)
@@ -77,4 +80,8 @@ DOM(`innerHTML`, 주석 제외)과 핸들러가 받은 인자(fullname, data, co
 ## 제약
 
 - 이름에 `-`가 든 prop/필드/`@for` 변수(`my-x`)는 깨진 JS를 낸다(`p.my-x`).
-- `style` 속성 문자열은 React가 객체만 받아 안 된다.
+
+## 쓰는 곳
+
+- `bench-expr`의 quble -> React 대상 - `orders.qubc`를 산출해 quble 대상과 같은 핸들러로 잰다.
+- `playground-react` - playground 셸(`playground.qubc`)을 산출해 기존 셸 핸들러로 띄운다. 미리보기는 qubb다.

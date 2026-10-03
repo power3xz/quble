@@ -40,6 +40,10 @@ Svelte)를 갖는다. quble 런타임은 vite alias로 `core/web`을 직접 싣�
 `experiments`도 싣는다. quble -> React 페이지는 `core/react`를 싣고, react는 `resolve.dedupe`로 bench-expr의
 것 하나만 쓴다.
 
+`playground-react`(playground 셸의 React 판)도 워크스페이스 밖이다. 자기 `package.json`과 `node_modules`(vite,
+React)를 갖는다. 셸 핸들러는 `core/playground`의 것을 상대 경로로, React 런타임은 vite alias로 `core/react`를
+싣고, react는 `resolve.dedupe`로 이 앱의 것 하나만 쓴다.
+
 `experiments`(실험 코드)도 워크스페이스 밖이다. 자기 `package.json`이 없고 루트의 `node_modules`(jsdom)를 쓴다.
 루트 tsconfig와 biome은 보지만 `npm test`는 돌지 않는다 - 실행 명령은 실험마다 README에 있다.
 
@@ -78,6 +82,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 | `npm run lint` | `npm ci` |
 | `node core/build/build-playground.mjs` | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |
 | `./bench-expr.sh` | 없음 - 스크립트가 의존 설치와 `cargo build --bin quble`을 먼저 돌린다 |
+| `./quble-playground-react.sh` | 포트 8147. 나머지는 스크립트가 의존 설치, wasm 컴파일러와 `quble-react` 빌드를 먼저 돌린다 |
 | `./bench-expr-quick.sh` | 포트 8144가 비어 있을 것. 나머지는 스크립트가 의존과 playwright Chromium 설치, `cargo build --bin quble`을 먼저 돌린다 |
 | `./bench-krausest.sh` | 포트 8080이 비어 있을 것. 나머지는 스크립트가 krausest clone, 의존 설치, `cargo build --bin quble`을 먼저 돌린다 |
 | `./bench-krausest-quick.sh` | 없음 - 스크립트가 의존과 playwright Chromium 설치, `cargo build --bin quble`을 먼저 돌린다 |
