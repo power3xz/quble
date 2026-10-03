@@ -8,7 +8,7 @@
 
 ## 하는 중
 
-없음
+Storybook에 qubb 컴포넌트 올리기 실험 - 브랜치 `storybook`. 내용은 experiments/storybook/README.md.
 
 ## 할 것
 
