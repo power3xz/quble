@@ -1,7 +1,7 @@
 # canvas 렌더 실험
 
 quble 런타임을 고치지 않고 DOM 대신 canvas에 그릴 수 있는지 본 실험이다. 결론과 얻은 것을 남긴다. 실험
-코드라 `npm test`와 머지 훅에 들지 않는다.
+코드라 `npm test`와 머지 훅에 들지 않는다. 자기 `package.json`이 없고 루트의 `node_modules`(jsdom)를 쓴다.
 
 ## 구조
 
