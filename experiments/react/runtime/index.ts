@@ -343,6 +343,22 @@ export const style = (text: string): CSSProperties => {
   return out;
 };
 
+// RN 산출의 동적 class. 공백으로 나눈 이름마다 그 이름을 가진 시트의 스타일을 시트 순서로 모은다
+// (뒤 시트가 위에 덮는다). 어느 시트에도 없는 이름은 CSS처럼 건너뛴다.
+//   cls([a, b], "x y") -> [a.x, b.x, a.y]
+export const cls = (sheets: readonly Record<string, unknown>[], value: string): unknown[] =>
+  value
+    .split(/\s+/)
+    .filter((name) => name !== "")
+    .flatMap((name) => sheets.filter((sheet) => Object.hasOwn(sheet, name)).map((sheet) => sheet[name]));
+
+// RN의 onChangeText는 이벤트가 아니라 문자열을 준다. 핸들러가 qubb처럼 event.target.value로 읽게
+// q.emit이 받는 모양으로 감싼다. nativeEvent는 DOM Event가 아니라 target.value만 가진 객체다.
+export const textEvent = (text: string): { stopPropagation(): void; nativeEvent: Event } => ({
+  stopPropagation: () => {},
+  nativeEvent: { target: { value: text } } as unknown as Event,
+});
+
 // 배열 인덱스 접근. 요소가 없는 인덱스는 qubb처럼 RangeError를 낸다.
 export const idx = <T>(array: readonly T[], index: number): T => {
   if (!Number.isInteger(index) || index < 0 || index >= array.length) {
