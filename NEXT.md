@@ -8,7 +8,8 @@
 
 ## 하는 중
 
-없음
+- canvas 렌더 실험 - 런타임이 쓰는 DOM API만 흉내 낸 장면 트리를 `document` 자리에 넣고, 그 트리를
+  레이아웃해 canvas에 그린다(`core/web/canvas/`). 런타임은 고치지 않는다. 데모는 bench-expr Orders
 
 ## 할 것
 
