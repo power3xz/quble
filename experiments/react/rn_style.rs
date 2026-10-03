@@ -18,6 +18,24 @@ pub enum CssError {
     Syntax(String),
 }
 
+impl std::fmt::Display for CssError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CssError::UnsupportedSelector(selector) => {
+                write!(f, "단일 클래스가 아닌 선택자: {selector}")
+            }
+            CssError::UnsupportedDeclaration { class, prop, value } => {
+                write!(f, ".{class}의 `{prop}: {value}`는 RN 스타일로 바꿀 수 없다")
+            }
+            CssError::LineHeightWithoutFontSize(class) => write!(
+                f,
+                ".{class}의 단위 없는 line-height는 같은 클래스에 px나 rem font-size가 있어야 바꿀 수 있다"
+            ),
+            CssError::Syntax(msg) => write!(f, "CSS 문법 오류: {msg}"),
+        }
+    }
+}
+
 pub fn css_to_styles(css: &str) -> Result<TClassStyles, CssError> {
     let mut rest = strip_comments(css);
     let mut out: TClassStyles = Vec::new();

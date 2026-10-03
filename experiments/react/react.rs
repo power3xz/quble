@@ -46,6 +46,26 @@ pub enum NativeError {
     UnknownClass(String),
 }
 
+/// `Compile`은 위치가 든 진단이라 여기서 글로 풀지 않는다(호출한 쪽이 `compile_error_text`로 낸다).
+impl std::fmt::Display for NativeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NativeError::Compile(e) => write!(f, "{e:?}"),
+            NativeError::UnsupportedTag(tag) => {
+                write!(f, "RN에 대응하는 컴포넌트가 없는 태그: {tag}")
+            }
+            NativeError::UnsupportedEvent(event) => write!(f, "RN이 받지 않는 이벤트: @{event}"),
+            NativeError::UnsupportedAttr { tag, attr } => {
+                write!(f, "<{tag}>의 `{attr}` 속성은 RN으로 낼 수 없다")
+            }
+            NativeError::Css { path, error } => write!(f, "{path}: {error}"),
+            NativeError::UnknownClass(class) => {
+                write!(f, "이 컴포넌트가 use한 CSS에 없는 클래스: {class}")
+            }
+        }
+    }
+}
+
 /// 엔트리 소스를 React Native 컴포넌트 모듈(TSX)로 낸다. `react_tsx`와 같은 검증을 거친 뒤, RN이
 /// 못 받는 태그/이벤트/속성은 에러로 낸다.
 pub fn react_native_tsx(
@@ -1254,6 +1274,62 @@ export const Card = (p: {}) => {
             native_err("component A { template { div(style=\"box-shadow: 0 0 red\" /) } }"),
             NativeError::Css { .. }
         ));
+    }
+
+    #[test]
+    fn native_errors_say_what_to_fix() {
+        let text = |e: NativeError| e.to_string();
+        assert_eq!(
+            text(NativeError::UnsupportedTag("table".to_string())),
+            "RN에 대응하는 컴포넌트가 없는 태그: table"
+        );
+        assert_eq!(
+            text(NativeError::UnsupportedEvent("scroll".to_string())),
+            "RN이 받지 않는 이벤트: @scroll"
+        );
+        assert_eq!(
+            text(NativeError::UnsupportedAttr {
+                tag: "div".to_string(),
+                attr: "title".to_string()
+            }),
+            "<div>의 `title` 속성은 RN으로 낼 수 없다"
+        );
+        assert_eq!(
+            text(NativeError::UnknownClass("nope".to_string())),
+            "이 컴포넌트가 use한 CSS에 없는 클래스: nope"
+        );
+        assert_eq!(
+            text(NativeError::Css {
+                path: "/p/a.css".to_string(),
+                error: CssError::UnsupportedSelector(".a:hover".to_string()),
+            }),
+            "/p/a.css: 단일 클래스가 아닌 선택자: .a:hover"
+        );
+        assert_eq!(
+            text(NativeError::Css {
+                path: "/p/a.css".to_string(),
+                error: CssError::UnsupportedDeclaration {
+                    class: "a".to_string(),
+                    prop: "box-shadow".to_string(),
+                    value: "0 0 red".to_string(),
+                },
+            }),
+            "/p/a.css: .a의 `box-shadow: 0 0 red`는 RN 스타일로 바꿀 수 없다"
+        );
+        assert_eq!(
+            text(NativeError::Css {
+                path: "/p/a.css".to_string(),
+                error: CssError::LineHeightWithoutFontSize("a".to_string()),
+            }),
+            "/p/a.css: .a의 단위 없는 line-height는 같은 클래스에 px나 rem font-size가 있어야 바꿀 수 있다"
+        );
+        assert_eq!(
+            text(NativeError::Css {
+                path: "/p/a.css".to_string(),
+                error: CssError::Syntax("'}'가 없다".to_string()),
+            }),
+            "/p/a.css: CSS 문법 오류: '}'가 없다"
+        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! .qubc 소스를 React 컴포넌트 모듈(TSX)로 컴파일한다.
 //! `use "./x.css"` 리소스는 산출 파일 위치에서 본 상대 경로로 import한다.
-//! 사용: quble-react <component.qubc> [--out <file.tsx>]
+//! 사용: quble-react <component.qubc> [--native] [--out <file.tsx>]
 //!   --out이 없으면 stdout으로 내고, 리소스 경로는 현재 디렉터리 기준이다.
+//!   --native는 React Native 모듈로 낸다. CSS는 StyleSheet 상수로 바뀌어 산출에 들어가므로 import하지 않는다.
 
 use std::io::Write;
 use std::path::Path;
@@ -11,8 +12,11 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mut path = None;
     let mut out = None;
+    let mut native = false;
     while let Some(arg) = args.next() {
-        if arg == "--out" {
+        if arg == "--native" {
+            native = true;
+        } else if arg == "--out" {
             match args.next() {
                 Some(file) => out = Some(file),
                 None => {
@@ -28,7 +32,7 @@ fn main() -> ExitCode {
         }
     }
     let Some(path) = path else {
-        eprintln!("usage: quble-react <component.qubc> [--out <file.tsx>]");
+        eprintln!("usage: quble-react <component.qubc> [--native] [--out <file.tsx>]");
         return ExitCode::FAILURE;
     };
 
@@ -57,11 +61,25 @@ fn main() -> ExitCode {
         }
     };
 
-    let tsx = match compiler::react_tsx_from_path(&path, &out_dir) {
-        Ok(tsx) => tsx,
-        Err(e) => {
-            eprintln!("{}", quble::compile_error_text(&path, &e));
-            return ExitCode::FAILURE;
+    let tsx = if native {
+        match compiler::react_native_tsx_from_path(&path, &out_dir) {
+            Ok(tsx) => tsx,
+            Err(compiler::NativeError::Compile(e)) => {
+                eprintln!("{}", quble::compile_error_text(&path, &e));
+                return ExitCode::FAILURE;
+            }
+            Err(e) => {
+                eprintln!("{path}: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match compiler::react_tsx_from_path(&path, &out_dir) {
+            Ok(tsx) => tsx,
+            Err(e) => {
+                eprintln!("{}", quble::compile_error_text(&path, &e));
+                return ExitCode::FAILURE;
+            }
         }
     };
 
