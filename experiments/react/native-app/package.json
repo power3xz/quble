@@ -1,0 +1,16 @@
+{
+  "name": "quble-native-app",
+  "private": true,
+  "version": "0.0.0",
+  "main": "index.ts",
+  "description": "React Native 산출을 Android 앱으로 말아 보는 Expo 프로젝트(../README.md). native-android.sh가 쓴다.",
+  "scripts": {
+    "export:android": "expo export --platform android",
+    "prebuild:android": "expo prebuild --platform android --no-install"
+  },
+  "dependencies": {
+    "expo": "~57.0.26",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
+  }
+}

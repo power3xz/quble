@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { NativeDemo } from "../../dist/native/native_demo.tsx";
 import { handlers } from "./handlers.ts";
+import { initial } from "./initial.ts";
 
 const root = document.getElementById("root");
 if (!root) {
@@ -14,14 +15,7 @@ if (!root) {
 createRoot(root).render(
   createElement(QubleRoot<Parameters<typeof NativeDemo>[0]>, {
     component: NativeDemo,
-    initial: {
-      todos: [
-        { text: "문서 작성", done: false },
-        { text: "리뷰 반영", done: true },
-        { text: "배포", done: false },
-      ],
-      tone: "good",
-    },
+    initial,
     handlers,
   }),
 );

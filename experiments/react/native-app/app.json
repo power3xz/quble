@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "quble-native",
+    "slug": "quble-native",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "android": {
+      "package": "dev.quble.nativedemo"
+    }
+  }
+}

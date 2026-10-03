@@ -17,6 +17,7 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
 | `next/` | playground 셸의 Next.js(Pages Router) 판. 첫 화면을 서버에서 그리고 브라우저가 hydrate한다 |
 | `rn_style.rs` | React Native 산출이 쓰는 CSS -> RN 스타일 변환기. `react.rs`가 모듈로 싣는다 |
 | `native-web/` | `fixtures/native_demo.qubc`의 React Native 산출을 react-native-web으로 브라우저에 그리는 확인 셸 |
+| `native-app/` | 같은 산출을 Android 앱으로 말아 주는 Expo 프로젝트. `android/`는 `native-android.sh`가 만든다 |
 
 의존 방향은 이 디렉터리에서 기존 코드 쪽으로만 난다. 생성물은 모두 `dist/`(gitignore)에 둔다. 자기
 `package.json`과 `node_modules`(React, vite)를 갖고, 패키지 이름이 `quble-react`라 이 디렉터리 안 파일은
@@ -35,6 +36,7 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
 - bench: `experiments/react/bench.sh` -> http://localhost:8148/?n=10000
 - Next.js: `experiments/react/next.sh` -> http://localhost:8150
 - React Native(react-native-web): `experiments/react/native-web.sh` -> http://localhost:8151
+- Android APK: `experiments/react/native-android.sh` -> `native-app/android/app/build/outputs/apk/release/app-release.apk`
 - RN 산출만 내기: `quble-react <comp.qubc> --native --out <file.tsx>`
 
 ## React Native 타겟
@@ -61,6 +63,19 @@ RN 전용으로 `cls`(동적 class의 시트 조회)와 `textEvent`(`onChangeTex
 CSS 변환은 `.name` 단일 클래스 선택자만 받는다. `px`와 `rem`(1rem=10px, 웹 `global.css`의 `html { font-size: 62.5% }`)은
 수로 바꾸고, `margin`/`padding`/`border`/`border-radius` 약식은 풀어서 낸다. `cursor`와 `display: flex`는 RN에
 의미가 없어 버린다. 단위 없는 `line-height`는 같은 클래스의 `font-size`와 곱해 px로 바꾼다.
+
+### Android 앱
+
+`native-app/`은 Expo(SDK 57) 프로젝트다. `App.tsx`가 산출 `dist/native/native_demo.tsx`를 `QubleRoot`로 그리고,
+핸들러와 초기 데이터는 `native-web/src`의 것과 같은 파일이다. `native-android.sh`가 컴파일, `expo prebuild`,
+`gradle assembleRelease`를 차례로 돌려 APK를 낸다.
+
+- release로 낸다. debug APK는 JS를 PC의 Metro 서버에서 받아 단독 설치하면 실행이 안 된다. release는 JS 번들이
+  APK 안에 들어가고, Expo 템플릿이 debug 키스토어로 서명해 바로 설치된다(스토어 배포용이 아니다).
+- `metro.config.js`가 앱 밖의 `runtime`, `dist`, `native-web`을 싣고 `quble-react`를 `runtime/index.ts`로 잇는다.
+  상위 `experiments/react/node_modules`에 웹용 React가 따로 있어, 모듈 탐색을 `native-app/node_modules` 하나로 고정해
+  React가 두 벌 실리지 않게 한다.
+- `react`와 `react-native`는 Expo SDK 57이 정한 버전(19.2.3, 0.86.3)에 정확히 맞춘다. SDK를 올릴 때 같이 바꾼다.
 
 ### 에러로 막는 것
 
