@@ -157,9 +157,10 @@ fn emit_node(node: &Node, comp: &Component, depth: usize, out: &mut String) {
                 depth,
                 &format!("<$q.With name={} value={{{value}}}>", js_str(&def.name)),
             );
-            for child in children {
-                emit_node(child, comp, depth + 1, out);
-            }
+            // 안쪽 요소가 이 컨텍스트를 보는 q를 쓰도록 With가 넘기는 q로 바깥 q를 가린다.
+            line(out, depth + 1, "{(q) => (");
+            emit_fragment(children, comp, depth + 2, out);
+            line(out, depth + 1, ")}");
             line(out, depth, "</$q.With>");
         }
     }
@@ -372,17 +373,21 @@ export const Page = (p: { user: { name: string }; n: number }) => {
   return (
     <>
       <$q.With name="Area" value={{ section: "top", n: p.n }}>
-        {(p.n > 0) ? (
+        {(q) => (
           <>
-            <$q.Segment name="First" props={{ text: q.at("user", "name") }}>
-              <Label text={p.user.name} />
-            </$q.Segment>
-          </>
-        ) : (
-          <>
-            <$q.Segment name="Label" props={{ text: q.lit("none") }}>
-              <Label text={"none"} />
-            </$q.Segment>
+            {(p.n > 0) ? (
+              <>
+                <$q.Segment name="First" props={{ text: q.at("user", "name") }}>
+                  <Label text={p.user.name} />
+                </$q.Segment>
+              </>
+            ) : (
+              <>
+                <$q.Segment name="Label" props={{ text: q.lit("none") }}>
+                  <Label text={"none"} />
+                </$q.Segment>
+              </>
+            )}
           </>
         )}
       </$q.With>
