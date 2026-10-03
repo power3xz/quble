@@ -18,7 +18,8 @@ type TContexts = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 export type TSlots = Readonly<Record<string, ReactNode>>;
 
 // 핸들러가 get/set에 넘기는 주소. 필드와 인덱스로 내려간다. props.rows[0].title
-export type TAddrNode = { readonly [key: string]: TAddrNode };
+// 배열의 length는 지금 길이다.
+export type TAddrNode = { readonly [key: string]: TAddrNode } & { readonly length: number };
 
 export type THandlerCtx = {
   event: Event;
@@ -154,15 +155,26 @@ const qOf = (frame: TFrame): TQ => {
 const ADDR = Symbol("addr");
 
 // 핸들러가 `props.user.name`처럼 필드로 내려가 주소를 집게 한다. 내려갈 때마다 마디가 붙는다.
-const addrNode = (addr: TAddr): TAddrNode =>
+// 배열의 length만 주소가 아니라 지금 길이다(qubb와 같다). read는 주소의 지금 값을 읽는다.
+const addrNode = (addr: TAddr, read: (addr: TAddr) => unknown): TAddrNode =>
   new Proxy(
-    {},
+    // 모든 키를 get 트랩이 내므로 대상은 빈 객체다.
+    {} as TAddrNode,
     {
       get: (_target, key) => {
         if (key === ADDR) {
           return addr;
         }
-        return typeof key === "string" ? addrNode(descend(addr, [key])) : undefined;
+        if (typeof key !== "string") {
+          return undefined;
+        }
+        if (key === "length") {
+          const value = read(addr);
+          if (Array.isArray(value)) {
+            return value.length;
+          }
+        }
+        return addrNode(descend(addr, [key]), read);
       },
     },
   );
@@ -208,14 +220,14 @@ const fire = (frame: TFrame, event: string, data: Record<string, unknown>, domEv
       listener();
     }
   };
-  const props = Object.fromEntries(Object.entries(frame.props).map(([name, addr]) => [name, addrNode(addr)]));
+  const read = (addr: TAddr) => ("path" in addr ? readPath(store.state, addr.path) : addr.lit);
+  const props = Object.fromEntries(
+    Object.entries(frame.props).map(([name, addr]) => [name, addrNode(addr, read)]),
+  ) as TAddrNode;
   const loopIndices = Object.fromEntries(frame.loops.map((i, depth) => [`$${depth}`, i]));
   handler(data, {
     event: domEvent,
-    get: (node) => {
-      const addr = addrOf(node);
-      return "path" in addr ? readPath(store.state, addr.path) : addr.lit;
-    },
+    get: (node) => read(addrOf(node)),
     set: (node, value) => update(node, () => value),
     // 안 준 필드는 undefined다 - 합치지 않고 통째로 바꾼다.
     setObject: (node, value) => update(node, () => value),
@@ -229,7 +241,7 @@ const fire = (frame: TFrame, event: string, data: Record<string, unknown>, domEv
         return swapped;
       }),
     props,
-    store: addrNode({ path: [] }),
+    store: addrNode({ path: [] }, read),
     context: frame.contexts,
     ...loopIndices,
   });

@@ -225,6 +225,22 @@ const forCases: [string, TCase][] = [
     },
   ],
   [
+    "배열 주소의 length는 지금 길이",
+    {
+      fixture: "for_array_index_del",
+      values: { tags: ["a", "b"] },
+      clicks: [
+        [".add", 0],
+        [".del", 0],
+        [".add", 0],
+      ],
+      handlers: {
+        ADD: (_data, { push, props }) => push(props.tags, `n${props.tags.length}`),
+        "[$0].DEL": (_data, { removeAt, props, $0 }) => removeAt(props.tags, $0),
+      },
+    },
+  ],
+  [
     "중첩 @for 안쪽 배열에서 removeAt",
     {
       fixture: "for_nested_index_del",
