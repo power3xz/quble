@@ -22,7 +22,34 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 
 type TIndexSymbol = `$${TDigitString}`;
 
-import { EXPR, instrSize } from "./expr-opcode.ts";
+import {
+  EXPR_ADD,
+  EXPR_AND,
+  EXPR_DIV,
+  EXPR_ELEM_AT,
+  EXPR_EQ,
+  EXPR_FIELD_AT,
+  EXPR_GE,
+  EXPR_GT,
+  EXPR_LE,
+  EXPR_LOAD_ARRAY_LENGTH,
+  EXPR_LOAD_CONST,
+  EXPR_LOAD_FALSE,
+  EXPR_LOAD_SMALL_INT,
+  EXPR_LOAD_STRING_LENGTH,
+  EXPR_LOAD_TRUE,
+  EXPR_LOAD_VAR,
+  EXPR_LT,
+  EXPR_MUL,
+  EXPR_NE,
+  EXPR_NEG,
+  EXPR_NOT,
+  EXPR_OR,
+  EXPR_READ_LEAF,
+  EXPR_REM,
+  EXPR_SUB,
+  instrSize,
+} from "./expr-opcode.ts";
 import { buildSkipPastOp, buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
@@ -143,42 +170,40 @@ const DOM_EVENTS = [
   "scroll",
 ] as const;
 
-const OP = {
-  HALT: 0x00,
-  ELEM_OPEN: 0x01,
-  ATTR_G: 0x02,
-  ELEM_CLOSE_OPEN: 0x03,
-  TEXT: 0x04,
-  ELEM_END: 0x05,
-  RENDER: 0x06,
-  ATTR_L: 0x07,
-  TEXT_VAR: 0x08,
-  ATTR_G_VAR: 0x09,
-  ATTR_L_VAR: 0x0a,
-  PUSH_THROUGH: 0x0b,
-  IF: 0x0c,
-  ELSE: 0x0d,
-  IF_END: 0x0e,
-  LOAD_RES: 0x0f,
-  BIND_EVENT: 0x10,
-  PUSH_ARG_LIT: 0x11,
-  PUSH_PATH_SEGMENT: 0x12,
-  ENTER_CONTEXT: 0x13,
-  EXIT_CONTEXT: 0x14,
-  FOR_RAW: 0x15,
-  FOR_COUNT_VAR: 0x16,
-  FOR_END: 0x17,
-  PUSH_PATH_INDEX_SEGMENT: 0x18,
-  PUSH_FIELD: 0x19,
-  FOR_ARRAY_VAR: 0x1a,
-  PUSH_SLOT_PLACEHOLDER_CONTENT: 0x1b,
-  SLOT_PLACEHOLDER_CONTENT_END: 0x1c,
-  FILL_SLOT_PLACEHOLDER: 0x1d,
-  IF_EXPR: 0x1e,
-  TEXT_EXPR: 0x1f,
-  ATTR_G_EXPR: 0x20,
-  ATTR_L_EXPR: 0x21,
-} as const;
+const OP_HALT = 0x00;
+const OP_ELEM_OPEN = 0x01;
+const OP_ATTR_G = 0x02;
+const OP_ELEM_CLOSE_OPEN = 0x03;
+const OP_TEXT = 0x04;
+const OP_ELEM_END = 0x05;
+const OP_RENDER = 0x06;
+const OP_ATTR_L = 0x07;
+const OP_TEXT_VAR = 0x08;
+const OP_ATTR_G_VAR = 0x09;
+const OP_ATTR_L_VAR = 0x0a;
+const OP_PUSH_THROUGH = 0x0b;
+const OP_IF = 0x0c;
+const OP_ELSE = 0x0d;
+const OP_IF_END = 0x0e;
+const OP_LOAD_RES = 0x0f;
+const OP_BIND_EVENT = 0x10;
+const OP_PUSH_ARG_LIT = 0x11;
+const OP_PUSH_PATH_SEGMENT = 0x12;
+const OP_ENTER_CONTEXT = 0x13;
+const OP_EXIT_CONTEXT = 0x14;
+const OP_FOR_RAW = 0x15;
+const OP_FOR_COUNT_VAR = 0x16;
+const OP_FOR_END = 0x17;
+const OP_PUSH_PATH_INDEX_SEGMENT = 0x18;
+const OP_PUSH_FIELD = 0x19;
+const OP_FOR_ARRAY_VAR = 0x1a;
+const OP_PUSH_SLOT_PLACEHOLDER_CONTENT = 0x1b;
+const OP_SLOT_PLACEHOLDER_CONTENT_END = 0x1c;
+const OP_FILL_SLOT_PLACEHOLDER = 0x1d;
+const OP_IF_EXPR = 0x1e;
+const OP_TEXT_EXPR = 0x1f;
+const OP_ATTR_G_EXPR = 0x20;
+const OP_ATTR_L_EXPR = 0x21;
 
 // opcode의 operand 바이트 수를 돌려준다.
 //
@@ -189,44 +214,44 @@ const OP = {
 // @returns  operand 바이트 수(0/2/4)
 const operandLen = (op: number) => {
   switch (op) {
-    case OP.HALT:
-    case OP.ELEM_CLOSE_OPEN:
-    case OP.ELEM_END:
-    case OP.ELSE:
-    case OP.IF_END:
-    case OP.EXIT_CONTEXT:
-    case OP.FOR_END:
-    case OP.SLOT_PLACEHOLDER_CONTENT_END:
+    case OP_HALT:
+    case OP_ELEM_CLOSE_OPEN:
+    case OP_ELEM_END:
+    case OP_ELSE:
+    case OP_IF_END:
+    case OP_EXIT_CONTEXT:
+    case OP_FOR_END:
+    case OP_SLOT_PLACEHOLDER_CONTENT_END:
       return 0;
-    case OP.PUSH_THROUGH: // scope_index: u8
-    case OP.IF_EXPR: // expr_index: u8
-    case OP.TEXT_EXPR: // expr_index: u8
+    case OP_PUSH_THROUGH: // scope_index: u8
+    case OP_IF_EXPR: // expr_index: u8
+    case OP_TEXT_EXPR: // expr_index: u8
       return 1;
-    case OP.ELEM_OPEN:
-    case OP.TEXT:
-    case OP.TEXT_VAR: // scope_index: u8, offset: u8
-    case OP.RENDER:
-    case OP.PUSH_FIELD: // scope_index: u8, offset: u8
-    case OP.PUSH_ARG_LIT:
-    case OP.PUSH_PATH_SEGMENT:
-    case OP.IF: // scope_index: u8, offset: u8
-    case OP.LOAD_RES:
-    case OP.ENTER_CONTEXT:
-    case OP.FOR_RAW:
-    case OP.FOR_COUNT_VAR: // scope_index: u8, offset: u8
-    case OP.FOR_ARRAY_VAR: // scope_index: u8, offset: u8
-    case OP.PUSH_PATH_INDEX_SEGMENT:
-    case OP.PUSH_SLOT_PLACEHOLDER_CONTENT:
-    case OP.FILL_SLOT_PLACEHOLDER:
+    case OP_ELEM_OPEN:
+    case OP_TEXT:
+    case OP_TEXT_VAR: // scope_index: u8, offset: u8
+    case OP_RENDER:
+    case OP_PUSH_FIELD: // scope_index: u8, offset: u8
+    case OP_PUSH_ARG_LIT:
+    case OP_PUSH_PATH_SEGMENT:
+    case OP_IF: // scope_index: u8, offset: u8
+    case OP_LOAD_RES:
+    case OP_ENTER_CONTEXT:
+    case OP_FOR_RAW:
+    case OP_FOR_COUNT_VAR: // scope_index: u8, offset: u8
+    case OP_FOR_ARRAY_VAR: // scope_index: u8, offset: u8
+    case OP_PUSH_PATH_INDEX_SEGMENT:
+    case OP_PUSH_SLOT_PLACEHOLDER_CONTENT:
+    case OP_FILL_SLOT_PLACEHOLDER:
       return 2;
-    case OP.ATTR_G_EXPR: // name: u16, expr_index: u8
-    case OP.ATTR_L_EXPR: // name: u16, expr_index: u8
+    case OP_ATTR_G_EXPR: // name: u16, expr_index: u8
+    case OP_ATTR_L_EXPR: // name: u16, expr_index: u8
       return 3;
-    case OP.ATTR_G:
-    case OP.ATTR_L:
-    case OP.ATTR_G_VAR: // name: u16, scope_index: u8, offset: u8
-    case OP.ATTR_L_VAR: // name: u16, scope_index: u8, offset: u8
-    case OP.BIND_EVENT:
+    case OP_ATTR_G:
+    case OP_ATTR_L:
+    case OP_ATTR_G_VAR: // name: u16, scope_index: u8, offset: u8
+    case OP_ATTR_L_VAR: // name: u16, scope_index: u8, offset: u8
+    case OP_BIND_EVENT:
       return 4;
     default:
       throw new Error(`bad opcode 0x${op.toString(16)}`);
@@ -248,15 +273,15 @@ const skipBranch = (code: Uint8Array, startPc: number) => {
     const markerPc = pc;
     const op = code[pc++];
     // IF_EXPR도 IF와 같은 분기다 - 깊이를 안 세면 중첩 안쪽의 IF_END를 이 가지 끝으로 오인한다.
-    if (op === OP.IF || op === OP.IF_EXPR) {
+    if (op === OP_IF || op === OP_IF_EXPR) {
       depth += 1;
       pc += operandLen(op);
-    } else if (op === OP.IF_END) {
+    } else if (op === OP_IF_END) {
       if (depth === 0) {
         return markerPc;
       }
       depth -= 1;
-    } else if (op === OP.ELSE && depth === 0) {
+    } else if (op === OP_ELSE && depth === 0) {
       return markerPc;
     } else {
       pc += operandLen(op);
@@ -278,10 +303,10 @@ const forBodyEnd = (code: Uint8Array, bodyStart: number) => {
   while (pc < code.length) {
     const markerPc = pc;
     const op = code[pc++];
-    if (op === OP.FOR_RAW || op === OP.FOR_COUNT_VAR || op === OP.FOR_ARRAY_VAR) {
+    if (op === OP_FOR_RAW || op === OP_FOR_COUNT_VAR || op === OP_FOR_ARRAY_VAR) {
       depth += 1;
       pc += operandLen(op);
-    } else if (op === OP.FOR_END) {
+    } else if (op === OP_FOR_END) {
       if (depth === 0) {
         return markerPc;
       }
@@ -306,10 +331,10 @@ const slotPlaceholderContentEnd = (code: Uint8Array, contentStart: number) => {
   while (pc < code.length) {
     const markerPc = pc;
     const op = code[pc++];
-    if (op === OP.PUSH_SLOT_PLACEHOLDER_CONTENT) {
+    if (op === OP_PUSH_SLOT_PLACEHOLDER_CONTENT) {
       depth += 1;
       pc += operandLen(op);
-    } else if (op === OP.SLOT_PLACEHOLDER_CONTENT_END) {
+    } else if (op === OP_SLOT_PLACEHOLDER_CONTENT_END) {
       if (depth === 0) {
         return markerPc;
       }
@@ -331,7 +356,7 @@ const slotPlaceholderContentEnd = (code: Uint8Array, contentStart: number) => {
 // 마커는 skipBranch로 찾고 호출자가 소비한다.
 const ifBranchRanges = (code: Uint8Array, ifBodyStart: number) => {
   const ifBodyEnd = skipBranch(code, ifBodyStart); // ELSE 또는 IF_END
-  if (code[ifBodyEnd] === OP.ELSE) {
+  if (code[ifBodyEnd] === OP_ELSE) {
     const elseBodyStart = ifBodyEnd + 1;
     return { ifBodyEnd, elseBodyStart, ifEndPc: skipBranch(code, elseBodyStart) };
   }
@@ -440,31 +465,31 @@ export const swapDeleteAt = (items: unknown[], i: number): void => {
 // 여기서 검사하지 않는다 - 산술/비교는 number, 논리는 bool, `==`/`!=`는 양쪽이 같은 타입이다.
 const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
   switch (op) {
-    case EXPR.ADD:
+    case EXPR_ADD:
       return (left as number) + (right as number);
-    case EXPR.SUB:
+    case EXPR_SUB:
       return (left as number) - (right as number);
-    case EXPR.MUL:
+    case EXPR_MUL:
       return (left as number) * (right as number);
-    case EXPR.DIV:
+    case EXPR_DIV:
       return (left as number) / (right as number);
-    case EXPR.REM:
+    case EXPR_REM:
       return (left as number) % (right as number);
-    case EXPR.EQ:
+    case EXPR_EQ:
       return left === right;
-    case EXPR.NE:
+    case EXPR_NE:
       return left !== right;
-    case EXPR.LT:
+    case EXPR_LT:
       return (left as number) < (right as number);
-    case EXPR.LE:
+    case EXPR_LE:
       return (left as number) <= (right as number);
-    case EXPR.GT:
+    case EXPR_GT:
       return (left as number) > (right as number);
-    case EXPR.GE:
+    case EXPR_GE:
       return (left as number) >= (right as number);
-    case EXPR.AND:
+    case EXPR_AND:
       return (left as boolean) && (right as boolean);
-    case EXPR.OR:
+    case EXPR_OR:
       return (left as boolean) || (right as boolean);
     default:
       throw new Error(`bad expr opcode 0x${op.toString(16)}`);
@@ -2090,7 +2115,7 @@ class Interpreter {
     const code = this.code;
     const u16 = (at: number) => code[at] | (code[at + 1] << 8);
     switch (op) {
-      case OP.TEXT_VAR: {
+      case OP_TEXT_VAR: {
         // operand: scope_index, offset
         node.textContent = this.bindVar(
           code[pc],
@@ -2101,7 +2126,7 @@ class Interpreter {
         ) as string;
         return;
       }
-      case OP.TEXT_EXPR: {
+      case OP_TEXT_EXPR: {
         // operand: expr_index
         node.textContent = this.bindExpr(
           this.module.defs[compId].exprs[code[pc]],
@@ -2116,10 +2141,10 @@ class Interpreter {
     const el = node as HTMLElement;
     const nameIndex = u16(pc);
     const name =
-      op === OP.ATTR_G_VAR || op === OP.ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
+      op === OP_ATTR_G_VAR || op === OP_ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
     const update = (v: unknown) => el.setAttribute(name, v as string);
     const v =
-      op === OP.ATTR_G_VAR || op === OP.ATTR_L_VAR
+      op === OP_ATTR_G_VAR || op === OP_ATTR_L_VAR
         ? // 이어서 scope_index, offset
           this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
         : // 이어서 expr_index
@@ -2154,47 +2179,47 @@ class Interpreter {
       const at = pc;
       const op = code[pc++];
       switch (op) {
-        case OP.ELEM_OPEN:
+        case OP_ELEM_OPEN:
           pending = document.createElement(TAGS[u16(pc)]);
           nodeCount++;
           break;
-        case OP.ATTR_G:
+        case OP_ATTR_G:
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           pending!.setAttribute(ATTRS[u16(pc)], this.module.constpool[u16(pc + 2)] as string);
           break;
-        case OP.ATTR_L:
+        case OP_ATTR_L:
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           pending!.setAttribute(this.module.constpool[u16(pc)] as string, this.module.constpool[u16(pc + 2)] as string);
           break;
-        case OP.ATTR_G_VAR:
-        case OP.ATTR_L_VAR:
-        case OP.ATTR_G_EXPR:
-        case OP.ATTR_L_EXPR:
-        case OP.BIND_EVENT:
+        case OP_ATTR_G_VAR:
+        case OP_ATTR_L_VAR:
+        case OP_ATTR_G_EXPR:
+        case OP_ATTR_L_EXPR:
+        case OP_BIND_EVENT:
           // 여는 중인 요소가 방금 만든 노드다.
           holes.push(at, nodeCount - 1);
           break;
-        case OP.ELEM_CLOSE_OPEN:
+        case OP_ELEM_CLOSE_OPEN:
           // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           parents[parents.length - 1].appendChild(pending!);
           // biome-ignore lint/style/noNonNullAssertion: 바로 위와 같은 pending
           parents.push(pending!);
           pending = null;
           break;
-        case OP.ELEM_END:
+        case OP_ELEM_END:
           parents.pop();
           break;
-        case OP.TEXT:
+        case OP_TEXT:
           parents[parents.length - 1].appendChild(document.createTextNode(this.module.constpool[u16(pc)] as string));
           nodeCount++;
           break;
-        case OP.TEXT_VAR:
-        case OP.TEXT_EXPR:
+        case OP_TEXT_VAR:
+        case OP_TEXT_EXPR:
           parents[parents.length - 1].appendChild(document.createTextNode(""));
           holes.push(at, nodeCount);
           nodeCount++;
           break;
-        case OP.PUSH_PATH_INDEX_SEGMENT:
+        case OP_PUSH_PATH_INDEX_SEGMENT:
           holes.push(at, -1);
           break;
         default:
@@ -2237,9 +2262,9 @@ class Interpreter {
       const node = nodes[holes[h + 1]];
       const op = code[at];
       const pc = at + 1;
-      if (op === OP.PUSH_PATH_INDEX_SEGMENT) {
+      if (op === OP_PUSH_PATH_INDEX_SEGMENT) {
         segment = `${segment ?? ""}[$${loopIndexBase + (code[pc] | (code[pc + 1] << 8))}]`;
-      } else if (op === OP.BIND_EVENT) {
+      } else if (op === OP_BIND_EVENT) {
         const domEventIndex = code[pc] | (code[pc + 1] << 8);
         const eventIndex = code[pc + 2] | (code[pc + 3] << 8);
         this.bindEvent(
@@ -2388,11 +2413,11 @@ class Interpreter {
     while (pc < endPc) {
       const op = this.code[pc++];
       switch (op) {
-        case OP.HALT: {
+        case OP_HALT: {
           pc = endPc;
           break;
         }
-        case OP.LOAD_RES: {
+        case OP_LOAD_RES: {
           // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
           // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
           // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
@@ -2407,32 +2432,32 @@ class Interpreter {
           }
           break;
         }
-        case OP.ELEM_OPEN: {
+        case OP_ELEM_OPEN: {
           pending = document.createElement(TAGS[u16at()]);
           break;
         }
-        case OP.ATTR_G: {
+        case OP_ATTR_G: {
           const name = ATTRS[u16at()];
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           pending!.setAttribute(name, this.module.constpool[u16at()] as string);
           break;
         }
-        case OP.ATTR_L: {
+        case OP_ATTR_L: {
           const name = this.module.constpool[u16at()] as string;
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           pending!.setAttribute(name, this.module.constpool[u16at()] as string);
           break;
         }
-        case OP.ATTR_G_VAR:
-        case OP.ATTR_L_VAR:
-        case OP.ATTR_G_EXPR:
-        case OP.ATTR_L_EXPR: {
+        case OP_ATTR_G_VAR:
+        case OP_ATTR_L_VAR:
+        case OP_ATTR_G_EXPR:
+        case OP_ATTR_L_EXPR: {
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           this.bindValueSlot(op, pc, pending!, compId, argumentSourcePairs, branch);
           pc += operandLen(op);
           break;
         }
-        case OP.BIND_EVENT: {
+        case OP_BIND_EVENT: {
           // 지금 여는 요소(pending)에 리스너를 단다. event_type=DOM 이벤트, event_idx=이 def의 이벤트.
           const domEventIndex = u16at();
           const eventIndex = u16at();
@@ -2452,7 +2477,7 @@ class Interpreter {
           segment = null;
           break;
         }
-        case OP.ELEM_CLOSE_OPEN: {
+        case OP_ELEM_CLOSE_OPEN: {
           // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
           nodeTop().appendChild(pending!);
           // biome-ignore lint/style/noNonNullAssertion: 바로 위와 같은 pending
@@ -2460,30 +2485,30 @@ class Interpreter {
           pending = null;
           break;
         }
-        case OP.TEXT: {
+        case OP_TEXT: {
           nodeTop().appendChild(document.createTextNode(this.module.constpool[u16at()] as string));
           break;
         }
-        case OP.TEXT_VAR:
-        case OP.TEXT_EXPR: {
+        case OP_TEXT_VAR:
+        case OP_TEXT_EXPR: {
           const node = document.createTextNode("");
           this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
           pc += operandLen(op);
           nodeTop().appendChild(node);
           break;
         }
-        case OP.ELEM_END: {
+        case OP_ELEM_END: {
           nodeStack.pop();
           break;
         }
-        case OP.PUSH_THROUGH: {
+        case OP_PUSH_THROUGH: {
           // 경로 없는 참조 - 부모 슬롯 (kind, ref)를 편집 없이 그대로 자식에 넘긴다. kind를
           // 보존해 부모가 리터럴로 받은 CONST 슬롯도 그대로 아래로 흐른다.
           const scopeIndex = u8at();
           args.push(slotKind(argumentSourcePairs, scopeIndex), slotRef(argumentSourcePairs, scopeIndex));
           break;
         }
-        case OP.PUSH_FIELD: {
+        case OP_PUSH_FIELD: {
           // 필드 참조 - 부모 슬롯 base에 offset을 더해 자식에 넘긴다. kind는 그대로 전파,
           // 위치만 옮긴다. CONST 슬롯은 필드가 없어(리터럴은 객체 아님) FIELD로 오지 않는다.
           const scopeIndex = u8at();
@@ -2491,19 +2516,19 @@ class Interpreter {
           args.push(slotKind(argumentSourcePairs, scopeIndex), slotRef(argumentSourcePairs, scopeIndex) + offset);
           break;
         }
-        case OP.PUSH_ARG_LIT: {
+        case OP_PUSH_ARG_LIT: {
           // 리터럴 인자(불변): 상수풀 인덱스를 CONST 슬롯으로 자식에 넘긴다. store에 심지
           // 않는다 - 소비 지점(bindVar)이 CONST를 보고 pool을 직접 읽고 구독을 스킵한다.
           args.push(CONST, u16at());
           break;
         }
-        case OP.PUSH_PATH_SEGMENT: {
+        case OP_PUSH_PATH_SEGMENT: {
           // 다음 RENDER가 자식 경로 prefix에 이을 세그먼트(자식 type-name). 합성당 하나라
           // 단일 변수로 적재 - args(여럿 누적)와 달리 RENDER가 하나만 소비한다.
           segment = this.module.constpool[u16at()] as string;
           break;
         }
-        case OP.PUSH_PATH_INDEX_SEGMENT: {
+        case OP_PUSH_PATH_INDEX_SEGMENT: {
           // @for 인덱스 세그먼트를 정적 fullname에 접미한다. 직전 이름 세그먼트가 있으면
           // Row[$0], 없으면(element 직속) 익명 [$0]. operand는 컴포넌트-로컬 깊이라 use-site에서
           // 물려받은 깊이(loopIndexStack.length)를 base로 더해 누적 표기($1...)로 만든다 - 자식
@@ -2512,7 +2537,7 @@ class Interpreter {
           segment = (segment ?? "") + token;
           break;
         }
-        case OP.ENTER_CONTEXT: {
+        case OP_ENTER_CONTEXT: {
           // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
           // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
           const contextDef = this.componentContexts(compId)[u16at()];
@@ -2528,12 +2553,12 @@ class Interpreter {
           this.createdContexts.push({ name, fields });
           break;
         }
-        case OP.EXIT_CONTEXT: {
+        case OP_EXIT_CONTEXT: {
           // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
           walkStacks.activeContexts.pop();
           break;
         }
-        case OP.PUSH_SLOT_PLACEHOLDER_CONTENT: {
+        case OP_PUSH_SLOT_PLACEHOLDER_CONTENT: {
           // 콘텐츠 구간을 재서 담아두기만 한다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서.
           // 지금 컨텍스트(부모)를 함께 캡처한다: 콘텐츠는 부모 def 안이라 부모 scope/path로 읽힌다.
           const slotPlaceholderIndex = u16at();
@@ -2552,7 +2577,7 @@ class Interpreter {
           pc = contentEndPc + 1; // SLOT_PLACEHOLDER_CONTENT_END 마커 소비
           break;
         }
-        case OP.FILL_SLOT_PLACEHOLDER: {
+        case OP_FILL_SLOT_PLACEHOLDER: {
           // `@slot` 자리(정의쪽). 부모가 안 채웠으면 구멍이라 아무것도 안 넣는다(미채움 허용).
           const content = slotPlaceholderContents[u16at()];
           if (content === undefined) {
@@ -2573,7 +2598,7 @@ class Interpreter {
           nodeTop().appendChild(slotFragment);
           break;
         }
-        case OP.RENDER: {
+        case OP_RENDER: {
           const childCompId = u16at();
           const childArgumentSourcePairs = args;
           args = [];
@@ -2605,11 +2630,11 @@ class Interpreter {
           nodeTop().appendChild(childFragment);
           break;
         }
-        case OP.IF: {
+        case OP_IF: {
           pc = this.runIf(pc, argumentSourcePairs, compId, pathPrefix, loopIndexBase, walkStacks, branch, nodeTop());
           break;
         }
-        case OP.IF_EXPR: {
+        case OP_IF_EXPR: {
           pc = this.runIfExpr(
             pc,
             argumentSourcePairs,
@@ -2622,7 +2647,7 @@ class Interpreter {
           );
           break;
         }
-        case OP.FOR_RAW: {
+        case OP_FOR_RAW: {
           // 소스에 박힌 리터럴 횟수 - 안 변하니 지금 가지(startRegion/Branch)에 count회 인라인.
           const count = Number(u16at()) || 0;
           const bodyStart = pc;
@@ -2642,7 +2667,7 @@ class Interpreter {
           pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
           break;
         }
-        case OP.FOR_COUNT_VAR: {
+        case OP_FOR_COUNT_VAR: {
           // 숫자 count slot(@if 조건과 동형). CONST(부모가 리터럴로 준 prop)와 RAW(바깥 개수 반복의
           // 회차 번호)는 안 변하니 인라인, STORE는 count leaf에 구독을 걸어 값이 바뀌면 꼬리 회차를
           // 늘리고 줄인다. count가 필드(a.count)면 base+offset이 그 leaf.
@@ -2682,7 +2707,7 @@ class Interpreter {
           pc = forEndPc + 1; // FOR_END 마커 소비 - @for 다음으로.
           break;
         }
-        case OP.FOR_ARRAY_VAR: {
+        case OP_FOR_ARRAY_VAR: {
           // 배열 count slot. 배열 칸에 든 arrayInfoIndex로 요소 수/요소 위치를 얻어, 회차마다
           // 회차변수(item) slot을 그 요소 leaf로 바인딩하며 반복한다. item slot은 codegen과 같은
           // 규칙(props 슬롯 수 + 현재 @for 깊이)으로 계산한다. base+offset이 배열 칸의 leaf.
@@ -2786,12 +2811,12 @@ class Interpreter {
       // 연산의 결과. 값을 올리기만 하는 명령은 직접 올리고 다음 명령으로 넘어간다.
       let result: unknown;
       switch (op) {
-        case EXPR.LOAD_VAR: {
+        case EXPR_LOAD_VAR: {
           stack[sp++] = this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads);
           pc += 2;
           continue;
         }
-        case EXPR.LOAD_ARRAY_LENGTH: {
+        case EXPR_LOAD_ARRAY_LENGTH: {
           // 배열 칸의 값이 arrayInfoIndex - 요소 수는 그 arrayInfo가 든다.
           //
           // 구독은 배열 칸이 아니라 길이 칸(sizeLeafIndex)에 건다 - 배열 칸의 값은 요소가 늘고
@@ -2807,36 +2832,36 @@ class Interpreter {
           pc += 2;
           continue;
         }
-        case EXPR.LOAD_STRING_LENGTH: {
+        case EXPR_LOAD_STRING_LENGTH: {
           // 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다 - slotValue가 그 칸을 담는다.
           stack[sp++] = String(this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads)).length;
           pc += 2;
           continue;
         }
-        case EXPR.LOAD_CONST: {
+        case EXPR_LOAD_CONST: {
           stack[sp++] = this.module.constpool[expr[pc] | (expr[pc + 1] << 8)];
           pc += 2;
           continue;
         }
-        case EXPR.LOAD_SMALL_INT:
+        case EXPR_LOAD_SMALL_INT:
           stack[sp++] = expr[pc++];
           continue;
-        case EXPR.LOAD_TRUE:
+        case EXPR_LOAD_TRUE:
           stack[sp++] = true;
           continue;
-        case EXPR.LOAD_FALSE:
+        case EXPR_LOAD_FALSE:
           stack[sp++] = false;
           continue;
         // 단항 - 하나 꺼내 하나 넣는다.
-        case EXPR.NOT:
+        case EXPR_NOT:
           result = !stack[--sp];
           break;
-        case EXPR.NEG:
+        case EXPR_NEG:
           result = -(stack[--sp] as number);
           break;
         // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
         // 요소가 없는 인덱스(범위 밖, 음수, 정수 아님)는 에러다 - 범위는 핸들러 로직이 지킨다.
-        case EXPR.ELEM_AT: {
+        case EXPR_ELEM_AT: {
           const i = stack[--sp] as number;
           const info = this.arrayPool.entries[stack[--sp] as number];
           const start = info.elemStartLeafIndices[i];
@@ -2846,10 +2871,10 @@ class Interpreter {
           result = start;
           break;
         }
-        case EXPR.FIELD_AT:
+        case EXPR_FIELD_AT:
           result = (stack[--sp] as number) + expr[pc++];
           break;
-        case EXPR.READ_LEAF: {
+        case EXPR_READ_LEAF: {
           const leafIndex = stack[--sp] as number;
           reads?.push(leafIndex, at);
           result = this.store.get(leafIndex);
