@@ -8,7 +8,7 @@
 
 ## 하는 중
 
-React 컴파일 타겟 실험 (ROADMAP 컴파일 타겟) - 브랜치 `react-target`. 내용은 experiments/react/README.md.
+없음
 
 ## 할 것
 
