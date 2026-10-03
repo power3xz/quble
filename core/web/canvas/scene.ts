@@ -25,6 +25,8 @@ export class SNode {
   lastChild: SNode | null = null;
   nextSibling: SNode | null = null;
   previousSibling: SNode | null = null;
+  // 렌더러가 레이아웃 결과를 붙여 둔다(layout.ts의 TBox). 트리는 내용을 모른다.
+  layout: unknown = null;
 
   constructor(nodeType: number, ownerDocument: SDocument | null) {
     this.nodeType = nodeType;
@@ -200,8 +202,6 @@ export class SElement extends SNode {
   localName: string;
   // 이름 -> 값. 넣은 순서를 지킨다(직렬화 순서가 DOM과 같도록).
   attributes = new Map<string, string>();
-  // 렌더러가 레이아웃 결과를 붙여 둔다. 트리는 내용을 모른다.
-  layout: unknown = null;
 
   constructor(localName: string, ownerDocument: SDocument) {
     super(ELEMENT_NODE, ownerDocument);
