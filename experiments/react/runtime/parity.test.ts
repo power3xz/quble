@@ -21,11 +21,12 @@ type TCase = {
   handlers?: TAnyHandlers;
 };
 
-const checkParity = async ({ fixture, values, clicks = [], handlers = {} }: TCase) => {
+// ssr이면 React 쪽을 서버에서 HTML로 그린 뒤 hydrate한다.
+const checkParity = async ({ fixture, values, clicks = [], handlers = {} }: TCase, ssr = false) => {
   const qubb = recorder(handlers);
   const react = recorder(handlers);
   const qubbHost = renderQubb(fixture, structuredClone(values), qubb.handlers);
-  const reactHost = await renderReact(fixture, structuredClone(values), react.handlers);
+  const reactHost = await renderReact(fixture, structuredClone(values), react.handlers, ssr);
   assert.equal(html(reactHost), html(qubbHost), "첫 화면");
   for (const [selector, index] of clicks) {
     await click(qubbHost, selector, index);
@@ -419,4 +420,9 @@ test("산출 TSX가 strict 타입 검사를 통과한다", () => {
 
 for (const [name, c] of cases) {
   test(`${name} (${c.fixture})`, () => checkParity(c));
+}
+
+// 서버 HTML에 hydrate해도 화면과 핸들러 인자가 같다. hydration 불일치는 renderReact가 실패로 낸다.
+for (const [name, c] of [...cases, ...forCases, ...slotCases]) {
+  test(`SSR: ${name} (${c.fixture})`, () => checkParity(c, true));
 }

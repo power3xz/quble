@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { QubleRoot, type THandlerCtx, type THandlers } from "quble-react";
 import { act, createElement, type FC } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import ts from "typescript";
 import { compile, type THandlers as TQubbHandlers } from "../../../../core/web/runtime.ts";
 
@@ -99,13 +100,31 @@ const loadReact = async (fixture: string): Promise<FC<TValues>> => {
   return mod[root];
 };
 
-export const renderReact = async (fixture: string, values: TValues, handlers: TAnyHandlers): Promise<HTMLElement> => {
+// ssr이면 서버에서 HTML로 그려 host에 넣고 hydrate한다. hydration 불일치는 에러로 낸다.
+export const renderReact = async (
+  fixture: string,
+  values: TValues,
+  handlers: TAnyHandlers,
+  ssr = false,
+): Promise<HTMLElement> => {
   const component = await loadReact(fixture);
+  const element = createElement(QubleRoot<TValues>, { component, initial: values, handlers });
   const host = appendHost();
-  const root = createRoot(host);
+  if (!ssr) {
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(element);
+    });
+    return host;
+  }
+  host.innerHTML = renderToString(element);
+  const errors: unknown[] = [];
   await act(async () => {
-    root.render(createElement(QubleRoot<TValues>, { component, initial: values, handlers }));
+    hydrateRoot(host, element, { onRecoverableError: (error) => errors.push(error) });
   });
+  if (errors.length > 0) {
+    throw new Error(`hydration 불일치: ${errors.map(String).join("; ")}`);
+  }
   return host;
 };
 

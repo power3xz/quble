@@ -311,6 +311,8 @@ export const QubleRoot = <T extends Record<string, unknown>>({
       return () => store.listeners.delete(listener);
     },
     () => store.state,
+    // 서버 렌더와 hydrate 첫 렌더는 initial을 그린다.
+    () => store.state,
   );
   const props = Object.fromEntries(Object.keys(state).map((name) => [name, { path: [name] }]));
   return createElement(
