@@ -3,7 +3,15 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { click, html, recorder, renderQubb, renderReact, type TAnyHandlers } from "./test-helpers/render.ts";
+import {
+  click,
+  html,
+  recorder,
+  renderQubb,
+  renderReact,
+  type TAnyHandlers,
+  typeErrors,
+} from "./test-helpers/render.ts";
 
 type TCase = {
   fixture: string;
@@ -110,6 +118,250 @@ const cases: [string, TCase][] = [
     },
   ],
 ];
+
+// @for. 핸들러는 상태를 두지 않는다 - 같은 표를 두 런타임이 함께 쓴다.
+const forCases: [string, TCase][] = [
+  ["배열 @for", { fixture: "for_array_scalar", values: { tags: ["a", "b", "c"] } }],
+  ["객체 필드 수만큼 @for", { fixture: "for_obj_field", values: { c: { count: 2 } } }],
+  ["@for 안 @if", { fixture: "for_if_count", values: { n: 3, flag: false } }],
+  [
+    "@for 요소를 자식에 넘긴다",
+    {
+      fixture: "for_item_object_to_child",
+      values: {
+        items: [
+          { tag: "a", detail: { label: "A", value: "1" } },
+          { tag: "b", detail: { label: "B", value: "2" } },
+        ],
+      },
+    },
+  ],
+  [
+    "수 @for의 회차가 늘어난다",
+    {
+      fixture: "for_count_index",
+      values: { count: 2 },
+      clicks: [
+        [".add", 0],
+        [".add", 0],
+      ],
+      handlers: {
+        ADD: (_data, { get, set, props }) => {
+          set(props.count, (get(props.count) as number) + 1);
+        },
+      },
+    },
+  ],
+  [
+    "@for 직속 요소는 익명 회차 마디",
+    {
+      fixture: "for_event_element",
+      values: {},
+      clicks: [
+        ["button", 0],
+        ["button", 2],
+      ],
+    },
+  ],
+  [
+    "@for 안 합성은 이름 뒤에 회차 마디",
+    {
+      fixture: "for_event_component",
+      values: {},
+      clicks: [
+        ["button", 1],
+        ["button", 2],
+      ],
+    },
+  ],
+  [
+    "합성을 건너 회차 깊이가 쌓인다",
+    {
+      fixture: "for_nested_render",
+      values: {},
+      clicks: [
+        ["button", 0],
+        ["button", 5],
+        ["button", 11],
+      ],
+    },
+  ],
+  [
+    "@for 안 자식이 자기 props 주소로 쓴다",
+    {
+      fixture: "for_item_props_set",
+      values: {
+        items: [
+          { tag: "a", detail: { label: "A", value: "1" } },
+          { tag: "b", detail: { label: "B", value: "2" } },
+        ],
+      },
+      clicks: [[".card", 1]],
+      handlers: {
+        "Card[$0].BUMP": (_data, { set, props, $0 }) => {
+          set(props.info.value, `v${$0}`);
+        },
+      },
+    },
+  ],
+  [
+    "push와 중간 removeAt - 회차 번호가 당겨진다",
+    {
+      fixture: "for_array_index_del",
+      values: { tags: ["a", "b", "c"] },
+      clicks: [
+        [".del", 1],
+        [".add", 0],
+        [".del", 0],
+      ],
+      handlers: {
+        ADD: (_data, { push, props }) => push(props.tags, "n"),
+        "[$0].DEL": (_data, { removeAt, props, $0 }) => removeAt(props.tags, $0),
+      },
+    },
+  ],
+  [
+    "중첩 @for 안쪽 배열에서 removeAt",
+    {
+      fixture: "for_nested_index_del",
+      values: {
+        rows: [
+          { label: "r0", cells: ["a", "b", "c"] },
+          { label: "r1", cells: ["d", "e"] },
+        ],
+      },
+      clicks: [
+        [".delcell", 1],
+        [".delcell", 3],
+      ],
+      handlers: {
+        "[$0][$1].DEL_CELL": (_data, { removeAt, props, $0, $1 }) => removeAt(props.rows[$0].cells, $1),
+      },
+    },
+  ],
+  [
+    "객체 요소 push와 swapAt",
+    {
+      fixture: "for_array_push_obj",
+      values: {
+        stats: [
+          { label: "a", value: "1" },
+          { label: "b", value: "2" },
+        ],
+      },
+      clicks: [
+        [".add", 0],
+        [".add", 0],
+      ],
+      handlers: {
+        // 길이는 payload로 읽는다 - qubb의 get은 배열 주소에 배열 값을 돌려주지 않는다.
+        ADD: (data, { push, swapAt, props }) => {
+          if ((data.stats as unknown[]).length < 3) {
+            push(props.stats, { label: "c", value: "3" });
+          } else {
+            swapAt(props.stats, 0, 2);
+          }
+        },
+      },
+    },
+  ],
+  [
+    "중첩 배열 요소 push와 removeAt",
+    {
+      fixture: "for_array_nested_edit",
+      values: { rows: [{ label: "r0", cells: ["a"] }] },
+      clicks: [
+        [".add", 0],
+        [".del", 0],
+      ],
+      handlers: {
+        ADD: (_data, { push, props }) => push(props.rows, { label: "r1", cells: ["b", "c"] }),
+        DEL: (_data, { removeAt, props }) => removeAt(props.rows, 0),
+      },
+    },
+  ],
+  [
+    "setArray로 통째 교체",
+    {
+      fixture: "for_array_replace",
+      values: {
+        rows: [
+          { label: "r0", cells: ["a"] },
+          { label: "r1", cells: ["b", "c"] },
+        ],
+      },
+      clicks: [
+        [".pick", 1],
+        [".replace", 0],
+        [".pick", 0],
+      ],
+      handlers: {
+        REPLACE: (_data, { setArray, props }) => setArray(props.rows, [{ label: "x", cells: ["y", "z"] }]),
+      },
+    },
+  ],
+  [
+    "한 배열을 두 @for가 돈다",
+    {
+      fixture: "for_shared_array",
+      values: { tags: ["a", "b", "c"] },
+      clicks: [[".del", 0]],
+      handlers: {
+        DEL: (_data, { removeAt, props }) => removeAt(props.tags, 1),
+      },
+    },
+  ],
+  [
+    "@for 안 @if와 push",
+    {
+      fixture: "for_if_push_order",
+      values: { tags: ["a"], flag: true },
+      clicks: [[".add", 0]],
+      handlers: {
+        ADD: (_data, { push, props }) => push(props.tags, "b"),
+      },
+    },
+  ],
+  [
+    "setObject로 객체 통째 교체",
+    {
+      fixture: "set_object",
+      values: {
+        title: "T",
+        user: {
+          name: "N",
+          age: 1,
+          tags: ["x", "y"],
+          posts: [{ title: "P", marks: ["m1", "m2"] }],
+          contact: { email: "E" },
+        },
+      },
+      clicks: [["h1", 0]],
+      handlers: {
+        SWAP: (_data, { setObject, props }) =>
+          setObject(props.user, {
+            name: "N2",
+            age: 2,
+            tags: ["z"],
+            posts: [
+              { title: "P2", marks: [] },
+              { title: "P3", marks: ["m3"] },
+            ],
+            contact: { email: "E2" },
+          }),
+      },
+    },
+  ],
+];
+
+for (const [name, c] of forCases) {
+  test(`${name} (${c.fixture})`, () => checkParity(c));
+}
+
+test("산출 TSX가 strict 타입 검사를 통과한다", () => {
+  const fixtures = [...new Set([...cases, ...forCases].map(([, c]) => c.fixture))];
+  assert.deepEqual(typeErrors(fixtures), []);
+});
 
 for (const [name, c] of cases) {
   test(`${name} (${c.fixture})`, () => checkParity(c));

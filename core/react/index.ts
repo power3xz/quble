@@ -14,13 +14,22 @@ export type TAddr = { readonly path: readonly string[] } | { readonly lit: unkno
 
 type TContexts = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 
+// 핸들러가 get/set에 넘기는 주소. 필드와 인덱스로 내려간다. props.rows[0].title
+export type TAddrNode = { readonly [key: string]: TAddrNode };
+
 export type THandlerCtx = {
   event: Event;
-  get: (node: unknown) => unknown;
-  set: (node: unknown, value: unknown) => void;
-  props: Record<string, unknown>;
-  store: Record<string, unknown>;
+  get: (node: TAddrNode) => unknown;
+  set: (node: TAddrNode, value: unknown) => void;
+  setObject: (node: TAddrNode, value: unknown) => void;
+  setArray: (node: TAddrNode, elems: readonly unknown[]) => void;
+  push: (node: TAddrNode, elem: unknown) => void;
+  removeAt: (node: TAddrNode, i: number) => void;
+  swapAt: (node: TAddrNode, i: number, j: number) => void;
+  props: TAddrNode;
+  store: TAddrNode;
   context: TContexts;
+  [loopIndex: `$${number}`]: number;
 };
 
 export type THandlers = Record<string, (data: Record<string, unknown>, ctx: THandlerCtx) => void>;
@@ -37,7 +46,21 @@ type TFrame = {
   contexts: TContexts;
   // 이 프레임 아래 컴포넌트가 받은 props의 주소. 이름 -> 주소.
   props: Readonly<Record<string, TAddr>>;
+  // 감싼 @for들의 회차 번호. 바깥 컴포넌트의 @for까지 쌓인다. 핸들러의 $0, $1...이 된다.
+  loops: readonly number[];
+  // 이 컴포넌트에 들어올 때의 loops 길이. 그 뒤로 쌓인 회차는 아직 경로 마디에 안 붙었다.
+  base: number;
+  // 이 컴포넌트 안 @for 변수의 주소. 이름 -> 주소.
+  vars: Readonly<Record<string, TAddr>>;
 };
+
+// 경로 마디에 아직 안 붙은 회차 표기. 바깥에서 @for 하나를 거쳐 들어온 컴포넌트가 자기 @for
+// 하나를 더 돌면 base 1, loops [2, 0] -> "[$1]"
+const loopSuffix = (frame: TFrame): string =>
+  frame.loops
+    .slice(frame.base)
+    .map((_, k) => `[$${frame.base + k}]`)
+    .join("");
 
 const Frame = createContext<TFrame | null>(null);
 
@@ -64,6 +87,24 @@ export type TQ = {
   ) => void;
   at: (name: string, ...fields: string[]) => TAddr;
   lit: (value: unknown) => TAddr;
+  // @for. source가 수면 0..source-1을, 배열이면 요소를 돈다. 회차마다 그 회차를 보는 q를 넘긴다.
+  // addr는 배열의 주소다 - 요소를 자식에 넘기면 그 주소 아래 회차 번호가 요소의 주소가 된다.
+  each: {
+    (
+      source: number,
+      addr: TAddr | null,
+      item: string,
+      index: string | null,
+      render: (q: TQ, item: number, index: number) => ReactNode,
+    ): ReactNode[];
+    <T>(
+      source: readonly T[],
+      addr: TAddr | null,
+      item: string,
+      index: string | null,
+      render: (q: TQ, item: T, index: number) => ReactNode,
+    ): ReactNode[];
+  };
 };
 
 export const useQ = (): TQ => qOf(useFrame());
@@ -75,15 +116,39 @@ const qOf = (frame: TFrame): TQ => {
       domEvent.stopPropagation();
       fire(frame, event, data, domEvent.nativeEvent);
     },
-    at: (name, ...fields) => descend(frame.props[name], fields),
+    // @for 변수와 prop은 이름이 겹치지 않는다(codegen이 거른다).
+    at: (name, ...fields) => descend(frame.vars[name] ?? frame.props[name], fields),
     lit: (value) => ({ lit: value }),
+    each: (
+      source: number | readonly unknown[],
+      addr: TAddr | null,
+      item: string,
+      index: string | null,
+      render: (q: TQ, item: never, index: number) => ReactNode,
+    ) => {
+      const count = typeof source === "number" ? source : source.length;
+      const rounds: ReactNode[] = [];
+      for (let i = 0; i < count; i++) {
+        const value = typeof source === "number" ? i : source[i];
+        const vars: Record<string, TAddr> = {
+          ...frame.vars,
+          [item]: addr === null || typeof source === "number" ? { lit: value } : descend(addr, [String(i)]),
+        };
+        if (index !== null) {
+          vars[index] = { lit: i };
+        }
+        const round: TFrame = { ...frame, loops: [...frame.loops, i], vars };
+        rounds.push(createElement(Frame.Provider, { key: i, value: round }, render(qOf(round), value as never, i)));
+      }
+      return rounds;
+    },
   };
 };
 
 const ADDR = Symbol("addr");
 
 // 핸들러가 `props.user.name`처럼 필드로 내려가 주소를 집게 한다. 내려갈 때마다 마디가 붙는다.
-const addrNode = (addr: TAddr): unknown =>
+const addrNode = (addr: TAddr): TAddrNode =>
   new Proxy(
     {},
     {
@@ -96,7 +161,7 @@ const addrNode = (addr: TAddr): unknown =>
     },
   );
 
-const addrOf = (node: unknown): TAddr => {
+const addrOf = (node: TAddrNode): TAddr => {
   const addr = (node as Record<symbol, TAddr | undefined>)[ADDR];
   if (!addr) {
     throw new TypeError("get/set에는 props나 store에서 집은 주소를 넘긴다");
@@ -120,30 +185,47 @@ const writePath = (state: unknown, path: readonly string[], value: unknown): unk
 
 const fire = (frame: TFrame, event: string, data: Record<string, unknown>, domEvent: Event) => {
   const { store } = frame;
-  const handler = store.handlers[[...frame.path, event].join(".")];
+  // @for 직속 요소에서 나면 회차 표기가 익명 마디가 된다. "[$0].SELECT"
+  const suffix = loopSuffix(frame);
+  const path = suffix ? [...frame.path, suffix] : frame.path;
+  const handler = store.handlers[[...path, event].join(".")];
   if (!handler) {
     return;
   }
+  const update = (node: TAddrNode, next: (current: unknown) => unknown) => {
+    const addr = addrOf(node);
+    if (!("path" in addr)) {
+      throw new TypeError("리터럴 인자는 바꿀 수 없다");
+    }
+    store.state = writePath(store.state, addr.path, next(readPath(store.state, addr.path))) as Record<string, unknown>;
+    for (const listener of store.listeners) {
+      listener();
+    }
+  };
   const props = Object.fromEntries(Object.entries(frame.props).map(([name, addr]) => [name, addrNode(addr)]));
+  const loopIndices = Object.fromEntries(frame.loops.map((i, depth) => [`$${depth}`, i]));
   handler(data, {
     event: domEvent,
     get: (node) => {
       const addr = addrOf(node);
       return "path" in addr ? readPath(store.state, addr.path) : addr.lit;
     },
-    set: (node, value) => {
-      const addr = addrOf(node);
-      if (!("path" in addr)) {
-        throw new TypeError("리터럴 인자는 바꿀 수 없다");
-      }
-      store.state = writePath(store.state, addr.path, value) as Record<string, unknown>;
-      for (const listener of store.listeners) {
-        listener();
-      }
-    },
+    set: (node, value) => update(node, () => value),
+    // 안 준 필드는 undefined다 - 합치지 않고 통째로 바꾼다.
+    setObject: (node, value) => update(node, () => value),
+    setArray: (node, elems) => update(node, () => [...elems]),
+    push: (node, elem) => update(node, (array) => [...(array as unknown[]), elem]),
+    removeAt: (node, i) => update(node, (array) => (array as unknown[]).filter((_, k) => k !== i)),
+    swapAt: (node, i, j) =>
+      update(node, (array) => {
+        const swapped = (array as unknown[]).slice();
+        [swapped[i], swapped[j]] = [swapped[j], swapped[i]];
+        return swapped;
+      }),
     props,
-    store: addrNode({ path: [] }) as Record<string, unknown>,
+    store: addrNode({ path: [] }),
     context: frame.contexts,
+    ...loopIndices,
   });
 };
 
@@ -153,7 +235,16 @@ export const Segment: FC<{ name: string; props: Record<string, TAddr>; children:
   children,
 }) => {
   const parent = useFrame();
-  return createElement(Frame.Provider, { value: { ...parent, path: [...parent.path, name], props } }, children);
+  // @for 안 합성이면 회차 표기가 이 마디에 붙는다. "Item[$0]"
+  // 자식은 자기 @for를 여기서부터 센다.
+  const frame: TFrame = {
+    ...parent,
+    path: [...parent.path, name + loopSuffix(parent)],
+    props,
+    base: parent.loops.length,
+    vars: {},
+  };
+  return createElement(Frame.Provider, { value: frame }, children);
 };
 
 // 같은 이름이 이미 있으면 통째로 덮는다(필드를 합치지 않는다).
@@ -197,7 +288,7 @@ export const QubleRoot = <T extends Record<string, unknown>>({
   const props = Object.fromEntries(Object.keys(state).map((name) => [name, { path: [name] }]));
   return createElement(
     Frame.Provider,
-    { value: { store, path: [], contexts: {}, props } },
+    { value: { store, path: [], contexts: {}, props, loops: [], base: 0, vars: {} } },
     createElement(component, state as T),
   );
 };
