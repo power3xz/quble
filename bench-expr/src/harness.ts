@@ -338,7 +338,8 @@ export const runTarget = async <P>(target: TTarget<P>) => {
       ),
     ),
   );
-  saveResult(result);
+  // 측정을 마쳐야 저장한다 - 새로고침만으로 지난 측정의 클릭 결과를 덮지 않고, 저장된 로드와 클릭이
+  // 늘 같은 페이지 로드에서 나온다.
   status.textContent = "준비됨 - 측정 중에는 이 탭을 앞에 둔다(뒤로 가면 rAF가 멈춘다)";
   runButton.disabled = false;
 

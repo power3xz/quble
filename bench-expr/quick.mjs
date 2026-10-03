@@ -32,7 +32,6 @@ for (let round = 0; round < ROUNDS; round++) {
   const page = await browser.newPage();
   await page.goto(`${url}/quble.html?n=${N}`);
   await page.waitForSelector(".btn--primary:not([disabled])");
-  mount.push((await readResult(page)).load.mounted);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("HeapProfiler.collectGarbage");
   const { usedSize } = await cdp.send("Runtime.getHeapUsage");
@@ -41,7 +40,9 @@ for (let round = 0; round < ROUNDS; round++) {
   await page.waitForFunction(() => document.querySelector(".hud__status")?.textContent?.startsWith("완료"), null, {
     timeout: 300000,
   });
+  // 하네스는 측정을 마쳐야 로드와 클릭을 함께 저장한다.
   const result = await readResult(page);
+  mount.push(result.load.mounted);
   SCENARIOS.forEach((key, i) => {
     clicks[i].push(result.clicks[key].dom);
   });
