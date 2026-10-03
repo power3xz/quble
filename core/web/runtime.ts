@@ -3166,7 +3166,24 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
         rootRegion.anchor.remove();
         interpreter.removeDelegates();
       };
-      return { nodes, regionPool, branchPool, arrayPool, store, destroy };
+      // 루트 props의 지금 값. mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다(핸들러 payload와 같은 조립).
+      // 루트 슬롯 base는 rootFlat의 [STORE, base] 쌍에 루트 props 필드 순서로 놓여 있다.
+      const snapshot = (): Record<string, unknown> => {
+        const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
+        const value: Record<string, unknown> = {};
+        rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
+          const pairs = storeSourcePairs(rootFlat[i * 2 + 1], leafCountOf(module, typeRef));
+          value[module.constpool[nameConstIndex] as string] = assemble(
+            compiledStepsOf(module, typeRef),
+            pairs,
+            store,
+            module,
+            arrayPool,
+          );
+        });
+        return value;
+      };
+      return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
     };
 };
 

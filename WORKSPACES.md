@@ -41,6 +41,7 @@ Svelte)를 갖는다. quble 런타임은 vite alias로 `core/web`을 직접 싣�
 
 - `canvas` - DOM 대신 canvas에 그리는 렌더 실험
 - `react` - `.qubc`를 React 컴포넌트로 내는 컴파일 타겟 실험
+- `storybook` - qubb 컴포넌트를 Storybook에 올리는 실험
 
 ## lock 파일
 

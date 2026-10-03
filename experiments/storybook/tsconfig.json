@@ -1,0 +1,17 @@
+{
+  // 이 실험은 자기 node_modules(storybook)를 갖는다. 루트 tsconfig는 experiments를 보지 않고, 여기서 따로 본다.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "strict": true,
+    // storybook 타입이 이 실험에 없는 react 쪽 패키지를 참조한다.
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [".storybook/*.ts", "stories/*.ts", "*.ts"]
+}
