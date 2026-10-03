@@ -8,8 +8,7 @@
 
 ## 하는 중
 
-- 런타임 번들 크기 줄이기 - opcode 표를 최상위 const로, `Interpreter` 멤버를 `#private`로 바꿔 minify
-  뒤에 남는 이름을 없앤다
+없음
 
 ## 할 것
 
