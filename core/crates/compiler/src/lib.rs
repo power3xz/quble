@@ -58,22 +58,25 @@ pub fn compile_src(
 
 /// 엔트리 소스를 React 컴포넌트 모듈(TSX)로 낸다. 검증은 qubb codegen이 하고 바이트코드는 버린다 -
 /// 같은 소스가 qubb에서 에러면 여기서도 같은 에러다.
+///
+/// out_dir는 산출 TSX가 놓일 디렉터리다. `use "./x.css"` 리소스를 거기서 본 상대 경로로 import한다.
 pub fn react_tsx(
     entry_path: &str,
     src: &str,
     loader: &impl SourceLoader,
+    out_dir: &str,
 ) -> Result<String, CompileError> {
     let comps = flatten::flatten(entry_path, src, loader).map_err(CompileError::Flatten)?;
     codegen::generate(&comps).map_err(CompileError::Codegen)?;
-    Ok(react::generate(&comps))
+    Ok(react::generate(&comps, out_dir))
 }
 
 /// 파일 경로로 React 모듈을 낸다. 엔트리를 읽고 fs loader로 use를 해소한다.
-pub fn react_tsx_from_path(path: &str) -> Result<String, CompileError> {
+pub fn react_tsx_from_path(path: &str, out_dir: &str) -> Result<String, CompileError> {
     let not_found = || CompileError::EntryNotFound(path.to_string());
     let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
     let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
-    react_tsx(&entry.to_string_lossy(), &src, &fs_loader)
+    react_tsx(&entry.to_string_lossy(), &src, &fs_loader, out_dir)
 }
 
 /// 컴파일 에러를 CLI에 그대로 찍을 진단 텍스트로 만든다(끝에 개행 없음).

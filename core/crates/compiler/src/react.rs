@@ -6,16 +6,47 @@ use crate::dts::type_to_ts;
 use crate::expr_type::{expr_type, path_type};
 use crate::flatten::FlatComp;
 use crate::scope::ForVar;
+use std::path::Path;
 
 /// 런타임(`core/react`)은 `$q`로 싣는다 - 사용자 컴포넌트 이름(`Segment`, `String`)과 부딪히지 않게.
 /// 컴포넌트 안에서 props는 `p`, 런타임 손잡이는 `q`다. 컴포넌트 이름은 대문자로 시작해 둘과 안 겹친다.
-pub fn generate(comps: &[FlatComp]) -> String {
+///
+/// `use "./x.css"` 리소스는 산출 파일(out_dir)에서 본 상대 경로로 import한다. 같은 파일은 한 번만 싣는다.
+pub fn generate(comps: &[FlatComp], out_dir: &str) -> String {
     let mut out = String::from("import * as $q from \"quble-react\";\n");
+    let mut seen: Vec<&str> = Vec::new();
+    for res in comps.iter().flat_map(|fc| &fc.resources) {
+        if seen.contains(&res.as_str()) {
+            continue;
+        }
+        seen.push(res);
+        out.push_str(&format!("import {};\n", js_str(&relative_path(out_dir, res))));
+    }
     for fc in comps {
         out.push('\n');
         emit_comp(&fc.comp, &mut out);
     }
     out
+}
+
+/// from 디렉터리에서 to 파일로 가는 상대 경로. 둘 다 정규화된 절대 경로다.
+/// ("/proj/gen", "/proj/app/page.css") -> "../app/page.css"
+fn relative_path(from: &str, to: &str) -> String {
+    let from = Path::new(from).components().collect::<Vec<_>>();
+    let to = Path::new(to).components().collect::<Vec<_>>();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut parts = vec![".."; from.len() - common];
+    let rest = to[common..]
+        .iter()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>();
+    parts.extend(rest.iter().map(|s| s.as_ref()));
+    let joined = parts.join("/");
+    if joined.starts_with("..") {
+        joined
+    } else {
+        format!("./{joined}")
+    }
 }
 
 fn emit_comp(comp: &Component, out: &mut String) {
@@ -489,7 +520,35 @@ mod tests {
     use crate::react_tsx;
 
     fn tsx(src: &str) -> String {
-        react_tsx("entry", src, &(|_: &str, _: &str| None)).unwrap()
+        react_tsx("entry", src, &(|_: &str, _: &str| None), "/").unwrap()
+    }
+
+    #[test]
+    fn resources_import_relative_to_out_dir() {
+        let src = r#"
+            use "./page.css"
+            use Card from "./card.qubc"
+            component Page { template { Card( /) } }
+        "#;
+        let card = r#"
+            use "../shared/card.css"
+            use "./page.css"
+            component Card { template { div( /) } }
+        "#;
+        let loader = |_base: &str, target: &str| match target {
+            "./page.css" => Some(("/proj/app/page.css".to_string(), String::new())),
+            "./card.qubc" => Some(("/proj/app/card.qubc".to_string(), card.to_string())),
+            "../shared/card.css" => Some(("/proj/shared/card.css".to_string(), String::new())),
+            _ => None,
+        };
+        let out = react_tsx("/proj/app/page.qubc", src, &loader, "/proj/gen").unwrap();
+        // 같은 파일은 한 번만, 등장 순서대로 싣는다.
+        assert!(
+            out.starts_with(
+                "import * as $q from \"quble-react\";\nimport \"../app/page.css\";\nimport \"../shared/card.css\";\n\n"
+            ),
+            "{out}"
+        );
     }
 
     #[test]
