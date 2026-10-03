@@ -1,7 +1,7 @@
 //! React 산출기. 평탄화한 컴포넌트를 React 컴포넌트(TSX) 한 모듈로 낸다(docs/react-target.draft.md).
 //! 입력은 qubb codegen의 검증을 통과한 것이라 여기서는 에러를 내지 않는다.
 
-use crate::ast::{BinaryOp, Component, Expr, ForCount, Lit, Node, Type, UnaryOp};
+use crate::ast::{BinaryOp, Component, Expr, ForCount, Lit, Node, UnaryOp};
 use crate::dts::type_to_ts;
 use crate::flatten::FlatComp;
 
@@ -17,16 +17,23 @@ pub fn generate(comps: &[FlatComp]) -> String {
 }
 
 fn emit_comp(comp: &Component, out: &mut String) {
-    let props_ty = Type::Object(
-        comp.props
-            .iter()
-            .map(|p| (p.name.clone(), p.type_.clone()))
-            .collect(),
-    );
+    let mut fields = comp
+        .props
+        .iter()
+        .map(|p| format!("{}: {}", p.name, type_to_ts(&p.type_)))
+        .collect::<Vec<_>>();
+    // 슬롯 콘텐츠는 이름 -> 콘텐츠로 한 prop에 모은다. `$`는 quble 이름에 못 오므로 prop과 안 겹친다.
+    if has_slot(&comp.template) {
+        fields.push("$slots?: $q.TSlots".to_string());
+    }
+    let props_ty = if fields.is_empty() {
+        "{}".to_string()
+    } else {
+        format!("{{ {} }}", fields.join("; "))
+    };
     out.push_str(&format!(
-        "export const {} = (p: {}) => {{\n",
-        comp.name,
-        type_to_ts(&props_ty)
+        "export const {} = (p: {props_ty}) => {{\n",
+        comp.name
     ));
     out.push_str("  const q = $q.useQ();\n");
     out.push_str("  return (\n");
@@ -36,6 +43,17 @@ fn emit_comp(comp: &Component, out: &mut String) {
     }
     line(out, 2, "</>");
     out.push_str("  );\n};\n");
+}
+
+/// 이 템플릿에 `@slot` 자리가 있는가. 합성의 슬롯 콘텐츠는 쓰는 쪽 것이라 세지 않는다.
+fn has_slot(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::SlotPlaceholderDef { .. } => true,
+        Node::Element { children, .. } | Node::With { children, .. } => has_slot(children),
+        Node::If { then, else_, .. } => has_slot(then) || has_slot(else_),
+        Node::For { body, .. } => has_slot(body),
+        Node::Text(_) | Node::Interpolation(_) | Node::Component { .. } => false,
+    })
 }
 
 fn line(out: &mut String, depth: usize, text: &str) {
@@ -95,9 +113,6 @@ fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: 
             args,
             contents,
         } => {
-            if !contents.is_empty() {
-                todo!("슬롯 콘텐츠")
-            }
             // 자식이 받는 props 주소. 핸들러가 `set(props.text, v)`로 쓰면 이 주소가 가리키는
             // store 자리가 바뀐다. 리터럴 인자는 값을 그대로 주소로 싣는다.
             let addrs = js_object(args.iter().map(|(arg, value)| {
@@ -120,10 +135,26 @@ fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: 
             for (arg, value) in args {
                 elem.push_str(&format!(" {}={{{}}}", arg.name, js_expr(value)));
             }
-            line(out, depth + 1, &format!("<{elem} />"));
+            if contents.is_empty() {
+                line(out, depth + 1, &format!("<{elem} />"));
+            } else {
+                // 슬롯 콘텐츠는 쓰는 쪽 경로, 컨텍스트, 회차로 해석한다. q.slot이 지금 q의 것을
+                // 다시 깔아 자식 안에 붙어도 그것을 보게 한다. 무기명 슬롯의 키는 "".
+                line(out, depth + 1, &format!("<{elem} $slots={{{{"));
+                for content in contents {
+                    let key = content.name.as_ref().map_or("", |n| n.name.as_str());
+                    line(out, depth + 2, &format!("{}: q.slot(", js_str(key)));
+                    emit_fragment(&content.nodes, comp, vars, depth + 3, out);
+                    line(out, depth + 2, "),");
+                }
+                line(out, depth + 1, "}} />");
+            }
             line(out, depth, "</$q.Segment>");
         }
-        Node::SlotPlaceholderDef { .. } => todo!("슬롯 자리"),
+        Node::SlotPlaceholderDef { name, .. } => {
+            let key = name.as_ref().map_or("", |n| n.name.as_str());
+            line(out, depth, &format!("{{p.$slots?.[{}]}}", js_str(key)));
+        }
         Node::If { cond, then, else_ } => {
             line(out, depth, &format!("{{{} ? (", js_expr(cond)));
             emit_fragment(then, comp, vars, depth + 1, out);
@@ -449,6 +480,86 @@ export const Label = (p: { text: string }) => {
 };
 "#
         );
+    }
+
+    #[test]
+    fn slots() {
+        let out = tsx(r#"
+            component Page {
+              props { title: string }
+              template {
+                Card() {
+                  Header << h1() { ${title} }
+                  Body << {
+                    p() { "b" }
+                    Label(text={title} /)
+                  }
+                }
+                Plain() { span() { "x" } }
+              }
+            }
+            component Card { template { div() { @slot(Header) @slot(Body) } } }
+            component Plain { template { @slot() } }
+            component Label { props { text: string } template { span() { ${text} } } }
+        "#);
+        let expected = [
+            r#"      <$q.Segment name="Card" props={{}}>
+        <Card $slots={{
+          "Header": q.slot(
+            <>
+              <h1>
+                {$q.str(p.title)}
+              </h1>
+            </>
+          ),
+          "Body": q.slot(
+            <>
+              <p>
+                {"b"}
+              </p>
+              <$q.Segment name="Label" props={{ text: q.at("title") }}>
+                <Label text={p.title} />
+              </$q.Segment>
+            </>
+          ),
+        }} />
+      </$q.Segment>
+      <$q.Segment name="Plain" props={{}}>
+        <Plain $slots={{
+          "": q.slot(
+            <>
+              <span>
+                {"x"}
+              </span>
+            </>
+          ),
+        }} />
+      </$q.Segment>
+"#,
+            r#"export const Card = (p: { $slots?: $q.TSlots }) => {
+  const q = $q.useQ();
+  return (
+    <>
+      <div>
+        {p.$slots?.["Header"]}
+        {p.$slots?.["Body"]}
+      </div>
+    </>
+  );
+};"#,
+            r#"export const Plain = (p: { $slots?: $q.TSlots }) => {
+  const q = $q.useQ();
+  return (
+    <>
+      {p.$slots?.[""]}
+    </>
+  );
+};"#,
+            "export const Label = (p: { text: string }) => {",
+        ];
+        for piece in expected {
+            assert!(out.contains(piece), "{piece}\n--- 산출 ---\n{out}");
+        }
     }
 
     #[test]
