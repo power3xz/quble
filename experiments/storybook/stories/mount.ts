@@ -17,7 +17,8 @@ export const mount = (component: TComponent, data: unknown, handlers: THandlers 
       }
       return (data: Record<string, unknown>, ctx: Record<string, unknown>) => {
         const loops = Object.fromEntries(Object.entries(ctx).filter(([name]) => name.startsWith("$")));
-        action(key)(data, { context: ctx.context, ...loops });
+        // 패널이 인자를 배열 번호로 보여 주므로, 이름이 보이게 객체 하나로 넘긴다.
+        action(key)({ data, context: ctx.context, ...loops });
         target[key]?.(data, ctx);
       };
     },
