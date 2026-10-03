@@ -11,6 +11,7 @@
 | `qubc-plugin.ts` | vite 플러그인. `x.qubc?qubb`는 컴파일된 컴포넌트로, `x.qubc`는 story 모듈로 바꾼다 |
 | `stories/mount.ts` | story의 render. 컴포넌트를 마운트하고, 모든 fullname을 Actions 패널에 남긴 뒤 짝 핸들러를 부른다 |
 | `.storybook/main.ts` | 지정 디렉터리의 `.qubc`를 story로 싣는 indexer, 플러그인 등록, 레포 루트 파일 서빙 허용 |
+| `.storybook/preview.ts` | 전역 스타일(`core/web/styles`의 reset, global)을 싣고, Storybook 기본 여백(padded)을 뺀다 |
 
 의존 방향은 이 디렉터리에서 기존 코드 쪽으로만 난다. 생성물은 모두 `dist/`(gitignore)에 둔다. 걷어 낼 때는 이
 디렉터리를 지우고 WORKSPACES.md experiments 목록에서 `storybook`을 빼면 된다.
