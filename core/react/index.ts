@@ -14,6 +14,9 @@ export type TAddr = { readonly path: readonly string[] } | { readonly lit: unkno
 
 type TContexts = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 
+// 자식이 받는 슬롯 콘텐츠. 슬롯 이름 -> 콘텐츠. 무기명 슬롯의 키는 "".
+export type TSlots = Readonly<Record<string, ReactNode>>;
+
 // 핸들러가 get/set에 넘기는 주소. 필드와 인덱스로 내려간다. props.rows[0].title
 export type TAddrNode = { readonly [key: string]: TAddrNode };
 
@@ -87,6 +90,8 @@ export type TQ = {
   ) => void;
   at: (name: string, ...fields: string[]) => TAddr;
   lit: (value: unknown) => TAddr;
+  // 슬롯 콘텐츠. 자식 안에 붙어도 이 q의 경로, 컨텍스트, 회차로 해석되게 그 프레임을 다시 깐다.
+  slot: (content: ReactNode) => ReactNode;
   // @for. source가 수면 0..source-1을, 배열이면 요소를 돈다. 회차마다 그 회차를 보는 q를 넘긴다.
   // addr는 배열의 주소다 - 요소를 자식에 넘기면 그 주소 아래 회차 번호가 요소의 주소가 된다.
   each: {
@@ -119,6 +124,7 @@ const qOf = (frame: TFrame): TQ => {
     // @for 변수와 prop은 이름이 겹치지 않는다(codegen이 거른다).
     at: (name, ...fields) => descend(frame.vars[name] ?? frame.props[name], fields),
     lit: (value) => ({ lit: value }),
+    slot: (content) => createElement(Frame.Provider, { value: frame }, content),
     each: (
       source: number | readonly unknown[],
       addr: TAddr | null,

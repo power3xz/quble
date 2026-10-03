@@ -358,8 +358,42 @@ for (const [name, c] of forCases) {
   test(`${name} (${c.fixture})`, () => checkParity(c));
 }
 
+// 슬롯 콘텐츠는 쓰는 쪽의 경로, 컨텍스트, 회차로 해석된다.
+const slotCases: [string, TCase][] = [
+  [
+    "기명과 무기명 슬롯",
+    {
+      fixture: "slot_placeholder",
+      values: { title: "T", note: "N" },
+      clicks: [
+        ["h1", 0],
+        [".own", 0],
+      ],
+    },
+  ],
+  [
+    "@for와 @if 안 슬롯 콘텐츠",
+    {
+      fixture: "slot_placeholder_control",
+      values: { tags: ["a", "b"], open: true, label: "L" },
+      clicks: [
+        [".cell", 1],
+        [".deferred", 0],
+      ],
+    },
+  ],
+  [
+    "슬롯 콘텐츠 안 합성은 쓰는 쪽 경로와 컨텍스트",
+    { fixture: "slot_content_compose", values: { label: "L" }, clicks: [["button", 0]] },
+  ],
+];
+
+for (const [name, c] of slotCases) {
+  test(`${name} (${c.fixture})`, () => checkParity(c));
+}
+
 test("산출 TSX가 strict 타입 검사를 통과한다", () => {
-  const fixtures = [...new Set([...cases, ...forCases].map(([, c]) => c.fixture))];
+  const fixtures = [...new Set([...cases, ...forCases, ...slotCases].map(([, c]) => c.fixture))];
   assert.deepEqual(typeErrors(fixtures), []);
 });
 
