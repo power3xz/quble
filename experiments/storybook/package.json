@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
+    "@storybook/addon-docs": "^10.6.1",
     "@storybook/html-vite": "^10.6.1",
     "@types/node": "^26.6.4",
     "storybook": "^10.6.1",

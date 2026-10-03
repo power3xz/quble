@@ -36,17 +36,23 @@ export const pairsOf = (id: string): { data: string; handlers: string } | null =
 };
 
 // x.qubc의 story 모듈. indexer가 짝 파일이 둘 다 있는 것만 싣는다.
-const storyModule = (id: string) => {
-  const pairs = pairsOf(id);
-  if (!pairs) {
-    throw new Error(`${id}: 짝 data(.data.json)와 핸들러(.qubc.handlers.ts)가 둘 다 있어야 story가 된다`);
-  }
+// Code 패널에는 .qubc, 핸들러, data 원본을 파일 이름 머리 줄로 나눠 이어 붙여 보인다.
+const storyModule = (id: string, pairs: { data: string; handlers: string }) => {
+  const code = [id, pairs.handlers, pairs.data]
+    .map((path) => `// ${basename(path)}\n${readFileSync(path, "utf8").trimEnd()}`)
+    .join("\n\n");
+  // .qubc용 구문 강조가 없어 tsx 강조를 빌린다.
+  const source = { code, language: "tsx" };
   return [
     `import component from ${JSON.stringify(`${id}?qubb`)};`,
     `import { mount } from ${JSON.stringify(MOUNT)};`,
     `import data from ${JSON.stringify(pairs.data)};`,
     `import { handlers } from ${JSON.stringify(pairs.handlers)};`,
-    "export default { render: (args) => mount(component, args, handlers), args: data };",
+    "export default {",
+    "  render: (args) => mount(component, args, handlers),",
+    "  args: data,",
+    `  parameters: { docs: { source: ${JSON.stringify(source)} } },`,
+    "};",
     "export const Default = {};",
   ].join("\n");
 };
@@ -63,7 +69,14 @@ export const qubc = (): Plugin => ({
       return null;
     }
     if (query === undefined) {
-      return storyModule(id);
+      const pairs = pairsOf(id);
+      if (!pairs) {
+        throw new Error(`${id}: 짝 data(.data.json)와 핸들러(.qubc.handlers.ts)가 둘 다 있어야 story가 된다`);
+      }
+      // Code 패널의 원본이 짝 파일을 고쳐도 따라오게 한다.
+      this.addWatchFile(pairs.data);
+      this.addWatchFile(pairs.handlers);
+      return storyModule(id, pairs);
     }
     if (query !== "qubb") {
       return null;

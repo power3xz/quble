@@ -36,6 +36,8 @@ story 파일을 쓰지 않는다.
 - 짝 `x.data.json`을 args로 쓴다. Controls에서 고치면 이전 인스턴스를 `destroy`로 해체하고 다시 마운트한다.
 - 짝 `x.qubc.handlers.ts`(또는 `.js`)를 싣는다. 생성된 story 모듈은 이 실험의 타입 검사 대상이 아니라, ts-plugin이
   타입을 주입하는 핸들러 파일도 실린다.
+- Code 탭에 `.qubc`, 핸들러, data 원본을 파일 이름 머리 줄로 나눠 보인다. `.qubc` 구문 강조가 없어 `tsx` 강조를
+  빌린다.
 - 짝이 하나라도 없으면 싣지 않는다. data 없이 마운트하면 `@for`가 0회로 돌거나 빈 배열 인덱스 접근이 RangeError를
   내, 동작을 보여 주는 story가 되지 못한다.
 
