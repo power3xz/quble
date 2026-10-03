@@ -23,7 +23,13 @@ const data = {
   })),
   editing: 0,
   source: sources[0].source,
-  lines: tokenize(sources[0].source, sources[0].name),
+  // 셸의 줄 모양은 밑줄을 hasUnderline/underlineStyle로 받는다(핸들러의 forScreen). 첫 화면은 컴파일 전이라
+  // 밑줄이 없다.
+  lines: tokenize(sources[0].source, sources[0].name).map(({ underline: _, ...line }) => ({
+    ...line,
+    hasUnderline: false,
+    underlineStyle: "",
+  })),
   lineCount: lineCountOf(sources[0].source),
   caretLine: "transform: translateY(1rem)",
   preview: 0,
@@ -39,7 +45,8 @@ if (!editor) {
   throw new Error("#editor가 없다");
 }
 createRoot(editor).render(
-  createElement(QubleRoot, {
+  // props 타입을 산출 컴포넌트에서 받는다 - 안 주면 T가 Record<string, unknown>으로 추론돼 Playground와 안 맞는다.
+  createElement(QubleRoot<Parameters<typeof Playground>[0]>, {
     component: Playground,
     initial: data,
     // 핸들러 표의 타입은 qubb 기준(leafIndex)이다. 쓰는 법은 같아 그대로 넘긴다.
