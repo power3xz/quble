@@ -15,7 +15,11 @@ export default defineConfig({
         react: "react.html",
         "react-memo": "react-memo.html",
         svelte: "svelte.html",
+        // canvas 렌더 실험(core/web/canvas). 비교 표의 대상이 아니라 따로 여는 데모다.
+        canvas: "canvas.html",
       },
     },
   },
+  // canvas 실험의 Worker가 모듈을 import한다.
+  worker: { format: "es" },
 });
