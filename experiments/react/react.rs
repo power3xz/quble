@@ -7,6 +7,8 @@ use crate::expr_type::{expr_type, path_type};
 use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::scope::ForVar;
 use crate::{codegen, fs_loader, CompileError};
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 #[path = "rn_style.rs"]
@@ -24,7 +26,114 @@ pub fn react_tsx(
 ) -> Result<String, CompileError> {
     let comps = flatten(entry_path, src, loader).map_err(CompileError::Flatten)?;
     codegen::generate(&comps).map_err(CompileError::Codegen)?;
-    Ok(generate(&comps, out_dir))
+    Ok(generate(&comps, out_dir, Target::Web))
+}
+
+/// React Native 산출이 내는 에러. 검증은 qubb codegen이 하고(`Compile`), 나머지는 RN이 못 받는 입력이다.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NativeError {
+    Compile(CompileError),
+    /// RN에 대응하는 컴포넌트가 없는 태그(table 계열, br, hr, select, option, video, audio, canvas)
+    UnsupportedTag(String),
+    /// click, input, change, focus, blur, submit 밖의 DOM 이벤트
+    UnsupportedEvent(String),
+    /// 허용 목록 밖 속성
+    UnsupportedAttr { tag: String, attr: String },
+}
+
+/// 엔트리 소스를 React Native 컴포넌트 모듈(TSX)로 낸다. `react_tsx`와 같은 검증을 거친 뒤, RN이
+/// 못 받는 태그/이벤트/속성은 에러로 낸다.
+pub fn react_native_tsx(
+    entry_path: &str,
+    src: &str,
+    loader: &impl SourceLoader,
+    out_dir: &str,
+) -> Result<String, NativeError> {
+    let comps = flatten(entry_path, src, loader)
+        .map_err(|e| NativeError::Compile(CompileError::Flatten(e)))?;
+    codegen::generate(&comps).map_err(|e| NativeError::Compile(CompileError::Codegen(e)))?;
+    for fc in &comps {
+        check_native(&fc.comp.template)?;
+    }
+    Ok(generate(&comps, out_dir, Target::Native))
+}
+
+/// 파일 경로로 React Native 모듈을 낸다. 엔트리를 읽고 fs loader로 use를 해소한다.
+pub fn react_native_tsx_from_path(path: &str, out_dir: &str) -> Result<String, NativeError> {
+    let not_found = || NativeError::Compile(CompileError::EntryNotFound(path.to_string()));
+    let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
+    let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
+    react_native_tsx(&entry.to_string_lossy(), &src, &fs_loader, out_dir)
+}
+
+/// RN이 받는 템플릿인지 본다. 산출 단계는 이 검사를 통과한 입력만 받아 에러를 안 낸다.
+fn check_native(nodes: &[Node]) -> Result<(), NativeError> {
+    for node in nodes {
+        match node {
+            Node::Element {
+                tag,
+                attrs,
+                event_bindings,
+                children,
+            } => {
+                let has_click = event_bindings.iter().any(|(dom, _)| dom == "click");
+                native_tag(&tag.name, has_click)?;
+                for (dom_event, _) in event_bindings {
+                    native_event_prop(dom_event)?;
+                }
+                if let Some((attr, _)) = attrs.first() {
+                    return Err(NativeError::UnsupportedAttr {
+                        tag: tag.name.clone(),
+                        attr: attr.clone(),
+                    });
+                }
+                check_native(children)?;
+            }
+            Node::Component { contents, .. } => {
+                for content in contents {
+                    check_native(&content.nodes)?;
+                }
+            }
+            Node::If { then, else_, .. } => {
+                check_native(then)?;
+                check_native(else_)?;
+            }
+            Node::For { body, .. } => check_native(body)?,
+            Node::With { children, .. } => check_native(children)?,
+            Node::Text(_) | Node::Interpolation(_) | Node::SlotPlaceholderDef { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+/// HTML 태그 -> RN 컴포넌트. `@click`이 달린 View 계열은 onPress를 받는 Pressable이 된다.
+fn native_tag(tag: &str, has_click: bool) -> Result<&'static str, NativeError> {
+    match tag {
+        "div" | "section" | "article" | "header" | "footer" | "nav" | "main" | "aside" | "ul"
+        | "ol" | "li" | "form" | "figure" | "dl" | "dt" | "dd" => {
+            Ok(if has_click { "Pressable" } else { "View" })
+        }
+        "span" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "label" | "a" | "em" | "b"
+        | "strong" | "i" | "small" | "code" | "pre" | "time" | "figcaption" | "blockquote" => {
+            Ok("Text")
+        }
+        "button" => Ok("Pressable"),
+        "input" | "textarea" => Ok("TextInput"),
+        "img" => Ok("Image"),
+        _ => Err(NativeError::UnsupportedTag(tag.to_string())),
+    }
+}
+
+/// DOM 이벤트 이름 -> RN 이벤트 prop. input과 change는 둘 다 onChangeText다(RN에 둘의 구분이 없다).
+fn native_event_prop(dom_event: &str) -> Result<&'static str, NativeError> {
+    match dom_event {
+        "click" => Ok("onPress"),
+        "input" | "change" => Ok("onChangeText"),
+        "focus" => Ok("onFocus"),
+        "blur" => Ok("onBlur"),
+        "submit" => Ok("onSubmitEditing"),
+        _ => Err(NativeError::UnsupportedEvent(dom_event.to_string())),
+    }
 }
 
 /// 파일 경로로 React 모듈을 낸다. 엔트리를 읽고 fs loader로 use를 해소한다.
@@ -39,21 +148,56 @@ pub fn react_tsx_from_path(path: &str, out_dir: &str) -> Result<String, CompileE
 /// 컴포넌트 안에서 props는 `p`, 런타임 손잡이는 `q`다. 컴포넌트 이름은 대문자로 시작해 둘과 안 겹친다.
 ///
 /// `use "./x.css"` 리소스는 산출 파일(out_dir)에서 본 상대 경로로 import한다. 같은 파일은 한 번만 싣는다.
-fn generate(comps: &[FlatComp], out_dir: &str) -> String {
-    let mut out = String::from("import * as $q from \"quble-react\";\n");
-    let mut seen: Vec<&str> = Vec::new();
-    for res in comps.iter().flat_map(|fc| &fc.resources) {
-        if seen.contains(&res.as_str()) {
-            continue;
-        }
-        seen.push(res);
-        out.push_str(&format!("import {};\n", js_str(&relative_path(out_dir, res))));
-    }
+fn generate(comps: &[FlatComp], out_dir: &str, target: Target) -> String {
+    // RN 산출은 본문을 먼저 내야 어떤 RN 컴포넌트를 import할지 안다.
+    let used = RefCell::new(BTreeSet::new());
+    let cx = Cx {
+        target,
+        in_text: false,
+        used: &used,
+    };
+    let mut body = String::new();
     for fc in comps {
-        out.push('\n');
-        emit_comp(&fc.comp, &mut out);
+        body.push('\n');
+        emit_comp(&fc.comp, cx, &mut body);
     }
+    let mut out = String::from("import * as $q from \"quble-react\";\n");
+    match target {
+        Target::Web => {
+            let mut seen: Vec<&str> = Vec::new();
+            for res in comps.iter().flat_map(|fc| &fc.resources) {
+                if seen.contains(&res.as_str()) {
+                    continue;
+                }
+                seen.push(res);
+                out.push_str(&format!("import {};\n", js_str(&relative_path(out_dir, res))));
+            }
+        }
+        Target::Native => {
+            let used = used.borrow();
+            if !used.is_empty() {
+                let names = used.iter().copied().collect::<Vec<_>>().join(", ");
+                out.push_str(&format!("import {{ {names} }} from \"react-native\";\n"));
+            }
+        }
+    }
+    out.push_str(&body);
     out
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Target {
+    Web,
+    Native,
+}
+
+/// 산출을 내려가며 들고 가는 값. in_text는 가장 가까운 감싸는 요소가 RN Text인지(맨 텍스트를 감쌀지),
+/// used는 지금까지 쓴 RN 컴포넌트 이름이다.
+#[derive(Clone, Copy)]
+struct Cx<'a> {
+    target: Target,
+    in_text: bool,
+    used: &'a RefCell<BTreeSet<&'static str>>,
 }
 
 /// from 디렉터리에서 to 파일로 가는 상대 경로. 둘 다 정규화된 절대 경로다.
@@ -76,7 +220,7 @@ fn relative_path(from: &str, to: &str) -> String {
     }
 }
 
-fn emit_comp(comp: &Component, out: &mut String) {
+fn emit_comp(comp: &Component, cx: Cx, out: &mut String) {
     let mut fields = comp
         .props
         .iter()
@@ -99,7 +243,7 @@ fn emit_comp(comp: &Component, out: &mut String) {
     out.push_str("  return (\n");
     line(out, 2, "<>");
     for node in &comp.template {
-        emit_node(node, comp, &[], 3, out);
+        emit_node(node, comp, cx, &[], 3, out);
     }
     line(out, 2, "</>");
     out.push_str("  );\n};\n");
@@ -123,12 +267,19 @@ fn line(out: &mut String, depth: usize, text: &str) {
 }
 
 /// vars는 감싼 @for들이 연 변수다. 식에서 이 이름은 prop(`p.이름`)이 아니라 콜백 인자(`이름$`)다.
-fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: &mut String) {
+fn emit_node(
+    node: &Node,
+    comp: &Component,
+    cx: Cx,
+    vars: &[ForVar],
+    depth: usize,
+    out: &mut String,
+) {
     let js_expr = |expr: &Expr| js_expr(expr, vars);
     match node {
-        Node::Text(s) => line(out, depth, &format!("{{{}}}", js_str(s))),
+        Node::Text(s) => emit_text(cx, depth, &format!("{{{}}}", js_str(s)), out),
         Node::Interpolation(expr) => {
-            line(out, depth, &format!("{{{}}}", js_text(expr, comp, vars)))
+            emit_text(cx, depth, &format!("{{{}}}", js_text(expr, comp, vars)), out)
         }
         Node::Element {
             tag,
@@ -136,7 +287,19 @@ fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: 
             event_bindings,
             children,
         } => {
-            let mut open = format!("<{}", tag.name);
+            let has_click = event_bindings.iter().any(|(dom, _)| dom == "click");
+            let tag_name: &str = match cx.target {
+                Target::Web => &tag.name,
+                Target::Native => {
+                    let name = native_tag(&tag.name, has_click).expect("check_native가 걸렀다");
+                    cx.used.borrow_mut().insert(name);
+                    name
+                }
+            };
+            let mut open = format!("<{tag_name}");
+            if cx.target == Target::Native && tag.name == "textarea" {
+                open.push_str(" multiline");
+            }
             for (name, value) in attrs {
                 let react_name = attr_name(name);
                 open.push_str(&format!(
@@ -156,9 +319,17 @@ fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: 
                         .iter()
                         .map(|(field, value)| (field.clone(), js_expr(value))),
                 );
+                // RN의 onChangeText는 이벤트가 아니라 문자열을 준다. 핸들러가 qubb처럼
+                // event.target.value를 읽게 그 모양으로 감싼다.
+                let (prop, arg) = match cx.target {
+                    Target::Web => (react_event_prop(dom_event), "e"),
+                    Target::Native => {
+                        let prop = native_event_prop(dom_event).expect("check_native가 걸렀다");
+                        (prop, if prop == "onChangeText" { "$q.textEvent(e)" } else { "e" })
+                    }
+                };
                 open.push_str(&format!(
-                    " {}={{(e) => q.emit({}, {data}, e)}}",
-                    react_event_prop(dom_event),
+                    " {prop}={{(e) => q.emit({}, {data}, {arg})}}",
                     js_str(&event.name)
                 ));
             }
@@ -185,10 +356,14 @@ fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: 
                 return;
             }
             line(out, depth, &format!("{open}>"));
+            let inner = Cx {
+                in_text: cx.target == Target::Native && tag_name == "Text",
+                ..cx
+            };
             for child in children {
-                emit_node(child, comp, vars, depth + 1, out);
+                emit_node(child, comp, inner, vars, depth + 1, out);
             }
-            line(out, depth, &format!("</{}>", tag.name));
+            line(out, depth, &format!("</{tag_name}>"));
         }
         Node::Component {
             alias,
@@ -227,7 +402,7 @@ fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: 
                 for content in contents {
                     let key = content.name.as_ref().map_or("", |n| n.name.as_str());
                     line(out, depth + 2, &format!("{}: q.slot(", js_str(key)));
-                    emit_fragment(&content.nodes, comp, vars, depth + 3, out);
+                    emit_fragment(&content.nodes, comp, cx, vars, depth + 3, out);
                     line(out, depth + 2, "),");
                 }
                 line(out, depth + 1, "}} />");
@@ -240,13 +415,13 @@ fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: 
         }
         Node::If { cond, then, else_ } => {
             line(out, depth, &format!("{{{} ? (", js_expr(cond)));
-            emit_fragment(then, comp, vars, depth + 1, out);
+            emit_fragment(then, comp, cx, vars, depth + 1, out);
             if else_.is_empty() {
                 line(out, depth, ") : null}");
                 return;
             }
             line(out, depth, ") : (");
-            emit_fragment(else_, comp, vars, depth + 1, out);
+            emit_fragment(else_, comp, cx, vars, depth + 1, out);
             line(out, depth, ")}");
         }
         Node::For {
@@ -291,7 +466,7 @@ fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: 
             if let Some(index) = index {
                 inner.push(for_var(&index.name, Type::Number));
             }
-            emit_fragment(body, comp, &inner, depth + 1, out);
+            emit_fragment(body, comp, cx, &inner, depth + 1, out);
             line(out, depth, "))}");
         }
         Node::With { context, children } => {
@@ -312,19 +487,39 @@ fn emit_node(node: &Node, comp: &Component, vars: &[ForVar], depth: usize, out: 
             );
             // 안쪽 요소가 이 컨텍스트를 보는 q를 쓰도록 With가 넘기는 q로 바깥 q를 가린다.
             line(out, depth + 1, "{(q) => (");
-            emit_fragment(children, comp, vars, depth + 2, out);
+            emit_fragment(children, comp, cx, vars, depth + 2, out);
             line(out, depth + 1, ")}");
             line(out, depth, "</$q.With>");
         }
     }
 }
 
-fn emit_fragment(nodes: &[Node], comp: &Component, vars: &[ForVar], depth: usize, out: &mut String) {
+fn emit_fragment(
+    nodes: &[Node],
+    comp: &Component,
+    cx: Cx,
+    vars: &[ForVar],
+    depth: usize,
+    out: &mut String,
+) {
     line(out, depth, "<>");
     for node in nodes {
-        emit_node(node, comp, vars, depth + 1, out);
+        emit_node(node, comp, cx, vars, depth + 1, out);
     }
     line(out, depth, "</>");
+}
+
+/// 텍스트 자리. RN은 맨 텍스트를 Text 안에서만 받으므로, 가장 가까운 감싸는 요소가 Text가 아니면
+/// 감싼다. 템플릿 최상위는 부모를 몰라 감싼다(Text 안의 Text는 RN에서 유효하다).
+fn emit_text(cx: Cx, depth: usize, expr: &str, out: &mut String) {
+    if cx.target == Target::Native && !cx.in_text {
+        cx.used.borrow_mut().insert("Text");
+        line(out, depth, "<Text>");
+        line(out, depth + 1, expr);
+        line(out, depth, "</Text>");
+    } else {
+        line(out, depth, expr);
+    }
 }
 
 /// 타입 조회용 @for 변수. offset은 qubb 슬롯 자리라 여기서는 안 쓴다.
@@ -544,10 +739,160 @@ fn js_str(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::react_tsx;
+    use super::{react_native_tsx, react_tsx, NativeError};
 
     fn tsx(src: &str) -> String {
         react_tsx("entry", src, &(|_: &str, _: &str| None), "/").unwrap()
+    }
+
+    fn native(src: &str) -> String {
+        react_native_tsx("entry", src, &(|_: &str, _: &str| None), "/").unwrap()
+    }
+
+    fn native_err(src: &str) -> NativeError {
+        react_native_tsx("entry", src, &(|_: &str, _: &str| None), "/").unwrap_err()
+    }
+
+    #[test]
+    fn native_maps_tags_and_wraps_bare_text() {
+        let out = native(
+            r#"
+            component Card {
+              props { title: string }
+              events { PICK({ }) }
+              template {
+                div() {
+                  span() { ${title} }
+                  button(@click:PICK) { "go" }
+                }
+              }
+            }
+        "#,
+        );
+        assert_eq!(
+            out,
+            r#"import * as $q from "quble-react";
+import { Pressable, Text, View } from "react-native";
+
+export const Card = (p: { title: string }) => {
+  const q = $q.useQ();
+  return (
+    <>
+      <View>
+        <Text>
+          {p.title}
+        </Text>
+        <Pressable onPress={(e) => q.emit("PICK", {}, e)}>
+          <Text>
+            {"go"}
+          </Text>
+        </Pressable>
+      </View>
+    </>
+  );
+};
+"#
+        );
+    }
+
+    #[test]
+    fn native_view_with_click_becomes_pressable() {
+        let out = native(
+            r#"
+            component Row {
+              events { PICK({ }) }
+              template { div(@click:PICK) { span() { "x" } } }
+            }
+        "#,
+        );
+        assert!(out.contains("<Pressable onPress="), "{out}");
+        assert!(!out.contains("<View"), "{out}");
+        assert!(out.contains("import { Pressable, Text } from \"react-native\";"), "{out}");
+    }
+
+    #[test]
+    fn native_text_input_events_use_text_event() {
+        let out = native(
+            r#"
+            component Field {
+              props { v: string }
+              events { EDIT({ v }) }
+              template { input(@input:EDIT /) }
+            }
+        "#,
+        );
+        assert!(
+            out.contains(
+                r#"<TextInput onChangeText={(e) => q.emit("EDIT", { v: p.v }, $q.textEvent(e))} />"#
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn native_textarea_is_multiline_with_default_value() {
+        let out = native(
+            r#"
+            component Editor {
+              props { text: string }
+              events { EDIT({ }) }
+              template { textarea(@change:EDIT) { "> " ${text} } }
+            }
+        "#,
+        );
+        assert!(
+            out.contains(
+                r#"<TextInput multiline onChangeText={(e) => q.emit("EDIT", {}, $q.textEvent(e))} defaultValue={"> " + $q.str(p.text)} />"#
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn native_wraps_text_through_if_but_not_inside_text() {
+        let out = native(
+            r#"
+            component Page {
+              props { on: bool }
+              template {
+                @if (on) { "top" }
+                span() { @if (on) { "inner" } }
+              }
+            }
+        "#,
+        );
+        // 최상위 if 안은 부모를 몰라 감싸고, Text 안은 감싸지 않는다.
+        assert_eq!(out.matches("<Text>").count(), 2, "{out}");
+        assert!(out.contains("{\"top\"}"), "{out}");
+    }
+
+    #[test]
+    fn native_rejects_tags_events_and_attrs_rn_cannot_take() {
+        assert_eq!(
+            native_err("component A { template { table() { tr() { td() { \"x\" } } } } }"),
+            NativeError::UnsupportedTag("table".to_string())
+        );
+        assert_eq!(
+            native_err(
+                "component A { events { S({ }) } template { div(@scroll:S) { span() { \"x\" } } } }"
+            ),
+            NativeError::UnsupportedEvent("scroll".to_string())
+        );
+        assert_eq!(
+            native_err("component A { template { div(class=\"a\" /) } }"),
+            NativeError::UnsupportedAttr {
+                tag: "div".to_string(),
+                attr: "class".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn native_still_rejects_what_qubb_codegen_rejects() {
+        assert!(matches!(
+            native_err("component A { template { nope( /) } }"),
+            NativeError::Compile(_)
+        ));
     }
 
     #[test]

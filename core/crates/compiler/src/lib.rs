@@ -19,7 +19,9 @@ mod src_range;
 #[path = "../../../../experiments/react/react.rs"]
 mod react;
 #[cfg(feature = "experimental-react")]
-pub use react::{react_tsx, react_tsx_from_path};
+pub use react::{
+    react_native_tsx, react_native_tsx_from_path, react_tsx, react_tsx_from_path, NativeError,
+};
 
 pub use diagnostic::{locate_utf16, Utf16Location};
 pub use dts::{handler_names, handlers_dts, handlers_dts_from_path};
