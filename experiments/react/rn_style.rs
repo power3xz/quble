@@ -102,11 +102,11 @@ fn convert_rule(class: &str, body: &str) -> Result<Vec<(String, String)>, CssErr
                 _ => return Err(unsupported()),
             },
             "font-size" => {
-                let size = px(value).ok_or_else(unsupported)?;
+                let size = to_px(value).ok_or_else(unsupported)?;
                 font_size = Some(size);
                 push("fontSize", number(size));
             }
-            "line-height" => match px(value) {
+            "line-height" => match to_px(value) {
                 Some(size) => push("lineHeight", number(size)),
                 None => {
                     unitless_line_height =
@@ -130,7 +130,7 @@ fn convert_rule(class: &str, body: &str) -> Result<Vec<(String, String)>, CssErr
                     continue;
                 }
                 for token in split_tokens(value) {
-                    if let Some(width) = px(&token) {
+                    if let Some(width) = to_px(&token) {
                         push("borderWidth", number(width));
                     } else if ["solid", "dashed", "dotted"].contains(&token.as_str()) {
                         push("borderStyle", quote(&token));
@@ -185,17 +185,25 @@ fn convert_rule(class: &str, body: &str) -> Result<Vec<(String, String)>, CssErr
     Ok(out)
 }
 
-/// "16px" -> 16. 단위 없는 0도 0이다. 다른 단위(rem, em, %)는 None.
-fn px(value: &str) -> Option<f64> {
+/// 1rem의 px. core/web/styles/global.css가 html font-size를 62.5%로 둬 웹에서 1rem이 10px이다.
+/// RN에는 루트 font-size가 없어, 같은 .qubc가 두 곳에서 같은 크기가 되도록 이 값에 맞춘다.
+const REM_PX: f64 = 10.0;
+
+/// "16px" -> 16, "1.6rem" -> 16. 단위 없는 0도 0이다. 다른 단위(em, %)는 None.
+fn to_px(value: &str) -> Option<f64> {
     if value == "0" {
         return Some(0.0);
+    }
+    if let Some(rem) = value.strip_suffix("rem") {
+        // 1.1 * 10 = 11.000000000000002 같은 부동소수 꼬리를 소수 둘째 자리에서 자른다.
+        return Some((rem.parse::<f64>().ok()? * REM_PX * 100.0).round() / 100.0);
     }
     value.strip_suffix("px")?.parse().ok()
 }
 
-/// 길이 리터럴. px는 수로, %는 문자열로 낸다.
+/// 길이 리터럴. px와 rem은 px 수로, %는 문자열로 낸다.
 fn length(value: &str) -> Option<String> {
-    if let Some(n) = px(value) {
+    if let Some(n) = to_px(value) {
         return Some(number(n));
     }
     let percent = value.strip_suffix('%')?;
@@ -361,6 +369,34 @@ mod tests {
     }
 
     #[test]
+    fn rem_converts_at_10px() {
+        // core/web/styles/global.css가 html font-size를 62.5%로 둬 1rem이 10px이다.
+        let css = ".a { font-size: 1.6rem; padding: 0.4rem 1.1rem; gap: 2rem; border-radius: 0.5rem; line-height: 2.4rem; }";
+        assert_eq!(
+            decls(css, "a"),
+            pairs(&[
+                ("fontSize", "16"),
+                ("paddingTop", "4"),
+                ("paddingRight", "11"),
+                ("paddingBottom", "4"),
+                ("paddingLeft", "11"),
+                ("gap", "20"),
+                ("borderRadius", "5"),
+                ("lineHeight", "24"),
+            ])
+        );
+    }
+
+    #[test]
+    fn unitless_line_height_uses_rem_font_size() {
+        let css = ".a { font-size: 1.4rem; line-height: 1.5; }";
+        assert_eq!(
+            decls(css, "a"),
+            pairs(&[("fontSize", "14"), ("lineHeight", "21")])
+        );
+    }
+
+    #[test]
     fn unitless_line_height_without_font_size_is_error() {
         assert_eq!(
             css_to_styles(".a { line-height: 1.6; }"),
@@ -384,7 +420,7 @@ mod tests {
     fn unsupported_declarations_are_errors() {
         for (prop, value) in [
             ("box-shadow", "0 1px 3px red"),
-            ("margin", "1rem"),
+            ("margin", "1em"),
             ("width", "calc(100% - 4px)"),
             ("color", "var(--x)"),
         ] {
