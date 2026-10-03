@@ -1,7 +1,7 @@
 // .qubc를 싣는 vite 플러그인. import 모양에 따라 두 가지를 낸다.
 //
 // `x.qubc?qubb` - quble 바이너리로 qubb를 내고, 그 바이트와 스타일 리소스 URL로 런타임 compile을 부른 결과를
-// default export한다. `?qubb`는 .qubc 옆에 생성된 .qubc.d.ts(핸들러 타입)가 이 import의 타입을 가리지 않게 붙인다.
+// default export한다. story 모듈이 이것을 싣는다.
 //
 //   import TodoList from "../../../components/todo_list.qubc?qubb";
 //   TodoList(0)(data, handlers)  // { nodes, destroy, ... }

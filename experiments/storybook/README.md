@@ -10,7 +10,6 @@
 |---|---|
 | `qubc-plugin.ts` | vite 플러그인. `x.qubc?qubb`는 컴파일된 컴포넌트로, `x.qubc`는 story 모듈로 바꾼다 |
 | `stories/mount.ts` | story의 render. 컴포넌트를 마운트하고, 모든 fullname을 Actions 패널에 남긴 뒤 짝 핸들러를 부른다 |
-| `stories/*.stories.ts` | 손으로 쓴 story. `FileRow`는 playground 셸 컴포넌트의 상태별 모습을 나눠 띄운다 |
 | `.storybook/main.ts` | 지정 디렉터리의 `.qubc`를 story로 싣는 indexer, 플러그인 등록, 레포 루트 파일 서빙 허용 |
 
 의존 방향은 이 디렉터리에서 기존 코드 쪽으로만 난다. 생성물은 모두 `dist/`(gitignore)에 둔다. 걷어 낼 때는 이
@@ -33,25 +32,11 @@
 story 파일을 쓰지 않는다.
 
 - 루트 컴포넌트는 그 파일의 첫 컴포넌트다(qubb ID 0).
-- 짝 `x.data.json`을 args로 쓴다. Controls에서 고치면 다시 마운트한다.
+- 짝 `x.data.json`을 args로 쓴다. Controls에서 고치면 이전 인스턴스를 `destroy`로 해체하고 다시 마운트한다.
 - 짝 `x.qubc.handlers.ts`(또는 `.js`)를 싣는다. 생성된 story 모듈은 이 실험의 타입 검사 대상이 아니라, ts-plugin이
   타입을 주입하는 핸들러 파일도 실린다.
 - 짝이 하나라도 없으면 싣지 않는다. data 없이 마운트하면 `@for`가 0회로 돌거나 빈 배열 인덱스 접근이 RangeError를
   내, 동작을 보여 주는 story가 되지 못한다.
-
-## 손으로 쓰는 story
-
-```ts
-import TodoList from "../../../components/todo_list.qubc?qubb";
-import { mount } from "./mount.ts";
-
-export const Todo = { render: () => mount(TodoList, data, handlers) };
-```
-
-- `?qubb`를 붙인다. `.qubc` 옆에 생성되는 `.qubc.d.ts`(핸들러 타입)가 import 타입을 가리지 않게 하려는 것이다.
-- args를 data로 넘기면 Controls로 props를 바꿀 때마다 다시 마운트한다. 이전 인스턴스는 `destroy`로 해체한다.
-- 손으로 쓴 story에서는 ctx 타입을 직접 적은 핸들러만 싣는다. ts-plugin이 타입을 주입해야 하는 핸들러 파일은
-  이 실험의 타입 검사를 통과하지 못한다.
 
 ## 제약
 
