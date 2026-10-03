@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>quble React Native (web)</title>
+  <style>
+    /* react-native-web 문서의 루트 배치 - 루트가 화면 높이를 채우는 flex 칸이어야 RN 레이아웃이 선다. */
+    html, body { height: 100%; margin: 0; }
+    #root { display: flex; height: 100%; max-width: 480px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

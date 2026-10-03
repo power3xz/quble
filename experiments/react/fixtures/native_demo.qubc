@@ -1,0 +1,32 @@
+use "./native_demo.css"
+
+component NativeDemo {
+  props { todos: { text: string, done: bool }[], tone: string }
+  events {
+    ADD({ })
+    EDIT({ })
+    TOGGLE({ })
+    DEL({ })
+  }
+  template {
+    div(class="demo") {
+      h2(class="demo__title") { "React Native 확인" }
+      input(class="demo__input" placeholder="새 할 일" @input:EDIT /)
+      button(class="demo__add" @click:ADD) { span(class="demo__addtext") { "+ 추가" } }
+      span(class={tone}) { "tone: " ${tone} }
+      @for (todo, i of todos) {
+        div(class="demo__row") {
+          span(class="demo__num") { ${i} }
+          span(class="demo__text") { ${todo.text} }
+          @if (todo.done) {
+            span(class="demo__done") { "완료" }
+          } @else {
+            span(class="demo__open") { "진행" }
+          }
+          button(class="demo__btn" @click:TOGGLE) { span(class="demo__btntext") { "전환" } }
+          button(class="demo__btn" @click:DEL) { span(class="demo__btntext") { "삭제" } }
+        }
+      }
+    }
+  }
+}
