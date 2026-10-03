@@ -5,7 +5,7 @@
 // 배치 방식(display)은 넷이다.
 //   block   자식을 세로로 쌓는다. 너비는 받은 너비를 다 쓴다.
 //   inline  자식을 가로로 잇는다. 너비는 내용만큼이다.
-//   row     자식을 가로로 잇고 gap을 둔다. 넘치면 다음 줄로 넘긴다(flex-wrap).
+//   row     자식을 가로로 잇고 gap을 둔다. wrap이면 넘칠 때 다음 줄로 넘긴다(flex, flex-wrap).
 //   grid    자식을 columns의 고정 폭 칸에 하나씩 놓는다. 폭 0인 칸은 남은 폭을 나눠 가진다(1fr).
 // 줄바꿈 없는 한 줄 텍스트만 다룬다.
 //
@@ -19,6 +19,8 @@ export type TStyle = {
   display?: "block" | "inline" | "row" | "grid";
   columns?: number[];
   gap?: number;
+  // row에서 넘치면 다음 줄로 넘긴다
+  wrap?: boolean;
   // 위, 오른쪽, 아래, 왼쪽
   padding?: [number, number, number, number];
   marginBottom?: number;
@@ -49,6 +51,9 @@ export type TBox = {
   // 글자 폭은 정렬 위치에만 쓰이고, 그것은 렌더러가 그릴 때 화면에 보이는 것만 잰다. 그동안 자식 텍스트
   // 상자의 w는 -1이다.
   lazyText: boolean;
+  // 요소 자신이 바뀌었다(속성, 자식 목록). 다음 계산 때 스타일을 다시 구한다. 자식 텍스트만 바뀌면 스타일은
+  // 그대로라 구하지 않는다. 조상의 속성에 따라 달라지는 스타일(.a[x] .b)은 다시 구하지 않는다(실험 한계).
+  styleStale: boolean;
 };
 
 export type TLayoutEnv = {
@@ -62,6 +67,16 @@ const NO_PADDING: [number, number, number, number] = [0, 0, 0, 0];
 
 // node와 조상의 상자에 다시 계산하라고 표시한다. 이미 표시된 노드에서 멈춘다 - 표시된 노드의 조상은
 // 늘 표시돼 있다.
+// 장면 트리에서 node가 바뀌었다. 요소면 스타일도 다시 구하게 하고, node와 조상을 다시 계산하게 한다.
+// SDocument.onChange에 건다.
+export const markChanged = (node: SNode): void => {
+  const box = node.layout as TBox | null;
+  if (box !== null && node.nodeType === ELEMENT_NODE) {
+    box.styleStale = true;
+  }
+  markDirty(node);
+};
+
 export const markDirty = (node: SNode): void => {
   for (let n: SNode | null = node; n !== null; n = n.parentNode) {
     const box = n.layout as TBox | null;
@@ -78,7 +93,7 @@ export const markDirty = (node: SNode): void => {
 const boxOf = (node: SNode): TBox => {
   let box = node.layout as TBox | null;
   if (box === null) {
-    box = { x: 0, y: 0, w: 0, h: 0, dirty: true, availW: Number.NaN, style: null, lazyText: false };
+    box = { x: 0, y: 0, w: 0, h: 0, dirty: true, availW: Number.NaN, style: null, lazyText: false, styleStale: true };
     node.layout = box;
   }
   return box;
@@ -138,8 +153,11 @@ export const layout = (env: TLayoutEnv, node: SNode, availW: number, bold: boole
     return box;
   }
   const el = node as SElement;
-  const style = env.styleOf(el);
-  box.style = style;
+  if (box.styleStale || box.style === null) {
+    box.style = env.styleOf(el);
+    box.styleStale = false;
+  }
+  const style = box.style;
   const childBold = style.bold ?? bold;
   const [pt, pr, pb, pl] = style.padding ?? NO_PADDING;
   const bw = style.border === undefined ? 0 : 1;
@@ -210,7 +228,7 @@ export const layout = (env: TLayoutEnv, node: SNode, availW: number, bold: boole
   } else {
     // inline과 row - 가로로 잇는다. row는 gap을 두고 넘치면 줄을 넘긴다.
     const gap = display === "row" ? (style.gap ?? 0) : 0;
-    const wrap = display === "row" && innerAvail >= 0;
+    const wrap = display === "row" && style.wrap === true && innerAvail >= 0;
     let x = 0;
     let y = 0;
     let lineH = 0;

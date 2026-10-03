@@ -2,14 +2,14 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { layout, markDirty, placeLazyText, type TBox, type TLayoutEnv, type TStyle } from "./layout.ts";
+import { layout, markChanged, placeLazyText, type TBox, type TLayoutEnv, type TStyle } from "./layout.ts";
 import { SDocument, type SElement, type SNode } from "./scene.ts";
 
 const STYLES: Record<string, TStyle> = {
   list: { display: "block" },
   row: { display: "grid", columns: [30, 0, 40], gap: 10, padding: [2, 5, 2, 5] },
   right: { align: "right" },
-  bar: { display: "row", gap: 4 },
+  bar: { display: "row", gap: 4, wrap: true },
   btn: { padding: [0, 3, 0, 3] },
 };
 
@@ -71,18 +71,21 @@ test("row는 넘치면 다음 줄로 넘긴다", () => {
   assert.equal(boxOf(bar).h, 44);
 });
 
-test("한 행의 텍스트가 바뀌면 그 칸과 조상만 다시 계산한다", () => {
+test("스타일은 요소 자신이 바뀔 때만 다시 구한다", () => {
   const rows = Array.from({ length: 100 }, (_, i) =>
     el("row", el("", text(`${i}`)), el("right", text("v")), el("", text("+"))),
   );
   const list = el("list", ...rows);
-  doc.onChange = markDirty;
+  doc.onChange = markChanged;
   layout(env, list, 300, false);
-  const t = rows[50].childNodes[1].firstChild as SNode;
+  const cell = rows[50].childNodes[1] as SElement;
   styled = 0;
-  t.textContent = "longer";
+  (cell.firstChild as SNode).textContent = "longer";
   layout(env, list, 300, false);
-  assert.equal(styled, 3, "칸, 행, 목록");
+  assert.equal(styled, 0, "텍스트만 바뀌면 스타일은 그대로");
+  cell.setAttribute("class", "");
+  layout(env, list, 300, false);
+  assert.equal(styled, 1, "속성이 바뀐 칸 하나");
   assert.equal(boxOf(rows[51]).y, boxOf(rows[50]).y + boxOf(rows[50]).h);
   doc.onChange = null;
 });
