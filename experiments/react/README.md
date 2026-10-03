@@ -14,6 +14,7 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
 | `fixtures/` | 이 실험만 쓰는 fixture. 나머지는 레포의 `components/`를 쓴다 |
 | `playground/` | playground 셸(`core/playground/playground.qubc`)의 React 판. 핸들러는 qubb 셸과 같은 파일이다 |
 | `bench/` | bench-expr의 주문 목록 React 판. 하네스, 핸들러, 스타일, 데이터는 bench-expr의 것을 쓴다 |
+| `next/` | playground 셸의 Next.js(Pages Router) 판. 첫 화면을 서버에서 그리고 브라우저가 hydrate한다 |
 
 의존 방향은 이 디렉터리에서 기존 코드 쪽으로만 난다. 생성물은 모두 `dist/`(gitignore)에 둔다. 자기
 `package.json`과 `node_modules`(React, vite)를 갖고, 패키지 이름이 `quble-react`라 이 디렉터리 안 파일은
@@ -30,6 +31,17 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
 - 타입 검사: `npm run typecheck --prefix experiments/react`
 - playground: `experiments/react/playground.sh` -> http://localhost:8147
 - bench: `experiments/react/bench.sh` -> http://localhost:8148/?n=10000
+- Next.js: `experiments/react/next.sh` -> http://localhost:8150
+
+## Next.js 판
+
+- `getServerSideProps`가 데모 소스를 파일에서 읽어 첫 화면 data를 만들고, 산출 셸을 서버에서 그린다.
+- 셸 핸들러 모듈은 브라우저에서만 싣는다. 실리자마자 wasm 컴파일러를 받으러 가고 console을 가로채기 때문이다.
+  `QubleRoot`는 발화할 때 핸들러 표를 읽으므로, 실린 뒤 채워 넣으면 된다.
+- Pages Router는 `_app` 밖의 전역 CSS import를 막는다. 산출 셸의 CSS import는 turbopack 규칙으로 빈 모듈로
+  바꾸고, `_app`이 `next.sh`가 복사한 사본을 싣는다.
+- 셸 핸들러가 사용자 핸들러를 blob URL에서 `import()`한다. Turbopack이 이를 빌드 때 실패 코드로 바꾸지 않게
+  그 import에 `webpackIgnore` 주석을 달았다.
 
 ## 걷어 내기
 
@@ -38,6 +50,7 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
 - `core/crates/compiler/Cargo.toml`의 `experimental-react` feature
 - `core/crates/compiler/src/lib.rs`의 `experimental-react` cfg 넷
 - `core/crates/compiler/src/dts.rs`의 `type_to_ts`를 `pub(crate)`에서 비공개로
+- `core/playground/playground.qubc.handlers.ts`의 `webpackIgnore` 주석(남겨 둬도 동작은 같다)
 - `WORKSPACES.md` experiments 목록의 `react`
 
 ## 대응
@@ -107,6 +120,8 @@ typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 
   누락, 슬롯 경로, 배열 `length` 같은 어긋남을 바로 잡았다.
 - **어긋난 곳은 React 관례였다.** `style` 객체, textarea `defaultValue`, 속성마다 다른 타입 - 셋 다 의미가
   아니라 표기 문제였다.
+- **서버 렌더가 런타임 한 줄로 된다.** 상태가 루트 store 객체 하나라 `useSyncExternalStore`에 서버 스냅샷만
+  주면 된다. 비교 테스트를 서버 HTML에 hydrate해 다시 돌려도 qubb와 같다.
 - **React 산출은 도입 수단이지 성능 수단이 아니다.** 핸들러가 값을 바꾸면 루트부터 다시 그려 memo 없는
   React와 같은 갱신 비용이 들고, 회차마다 `q`와 프레임을 만들어 할당은 그보다 많다. 세밀한 갱신은 qubb에서만
   난다.

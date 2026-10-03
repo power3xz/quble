@@ -1,0 +1,39 @@
+/* vite 판 index.html의 배치와 같다 - 셸과 #preview를 같은 칸에 겹친다.
+ * 칸 크기는 셸 CSS(playground.css의 .pg)와 같아야 하고, 이유는 그 파일의 주석에 있다. */
+html,
+body {
+  height: 100%;
+  background: #0d1117;
+  color: #e6e9ef;
+}
+body {
+  overflow: hidden;
+}
+.stack {
+  display: grid;
+  height: 100%;
+}
+.stack > * {
+  grid-area: 1 / 1;
+  min-height: 0;
+}
+.stack__preview {
+  display: grid;
+  grid-template-columns: 24rem 1fr 1fr;
+  grid-template-rows: 4.8rem 1fr 20rem;
+  pointer-events: none;
+}
+.preview-cell {
+  grid-area: 2 / 3;
+  height: 100%;
+  overflow: auto;
+  background: #fff;
+  color: #111;
+  pointer-events: auto;
+}
+#preview {
+  height: 100%;
+}
+.preview-cell:has(#preview:empty) {
+  background: none;
+}
