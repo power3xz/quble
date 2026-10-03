@@ -83,6 +83,10 @@ const cases: [string, TCase][] = [
     },
   ],
   ["@if 안 @with", { fixture: "if_with_context", values: { cond: true, a: "A", b: "B" } }],
+  [
+    "textarea 자식 텍스트와 수 속성",
+    { fixture: "if_sibling_update", values: { text: "t", lines: "1", count: 3, note: "n", shown: true } },
+  ],
   ["리터럴 인자", { fixture: "lit_arg", values: {} }],
   ["숫자와 불리언 리터럴 인자", { fixture: "typed_lit_arg", values: {} }],
   ["객체 경로 보간", { fixture: "object_path", values: { title: "T", user: { name: "N", contact: { email: "E" } } } }],
