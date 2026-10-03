@@ -1,7 +1,7 @@
 //! React 산출기. 평탄화한 컴포넌트를 React 컴포넌트(TSX) 한 모듈로 낸다(docs/react-target.draft.md).
 //! 입력은 qubb codegen의 검증을 통과한 것이라 여기서는 에러를 내지 않는다.
 
-use crate::ast::{BinaryOp, Component, Expr, Lit, Node, Type, UnaryOp};
+use crate::ast::{BinaryOp, Component, Expr, ForCount, Lit, Node, Type, UnaryOp};
 use crate::dts::type_to_ts;
 use crate::flatten::FlatComp;
 
@@ -32,7 +32,7 @@ fn emit_comp(comp: &Component, out: &mut String) {
     out.push_str("  return (\n");
     line(out, 2, "<>");
     for node in &comp.template {
-        emit_node(node, comp, 3, out);
+        emit_node(node, comp, &[], 3, out);
     }
     line(out, 2, "</>");
     out.push_str("  );\n};\n");
@@ -44,7 +44,9 @@ fn line(out: &mut String, depth: usize, text: &str) {
     out.push('\n');
 }
 
-fn emit_node(node: &Node, comp: &Component, depth: usize, out: &mut String) {
+/// vars는 감싼 @for들이 연 변수 이름이다. 식에서 이 이름은 prop(`p.이름`)이 아니라 콜백 인자(`이름$`)다.
+fn emit_node(node: &Node, comp: &Component, vars: &[String], depth: usize, out: &mut String) {
+    let js_expr = |expr: &Expr| js_expr(expr, vars);
     match node {
         Node::Text(s) => line(out, depth, &format!("{{{}}}", js_str(s))),
         // React는 boolean을 안 찍는다. qubb처럼 "true"/"false"로 찍으려고 문자열로 바꾼다.
@@ -57,7 +59,7 @@ fn emit_node(node: &Node, comp: &Component, depth: usize, out: &mut String) {
         } => {
             let mut open = format!("<{}", tag.name);
             for (name, value) in attrs {
-                open.push_str(&format!(" {}={{{}}}", attr_name(name), attr_value(value)));
+                open.push_str(&format!(" {}={{{}}}", attr_name(name), attr_value(value, vars)));
             }
             for (dom_event, event_name) in event_bindings {
                 let event = comp
@@ -83,7 +85,7 @@ fn emit_node(node: &Node, comp: &Component, depth: usize, out: &mut String) {
             }
             line(out, depth, &format!("{open}>"));
             for child in children {
-                emit_node(child, comp, depth + 1, out);
+                emit_node(child, comp, vars, depth + 1, out);
             }
             line(out, depth, &format!("</{}>", tag.name));
         }
@@ -101,14 +103,7 @@ fn emit_node(node: &Node, comp: &Component, depth: usize, out: &mut String) {
             let addrs = js_object(args.iter().map(|(arg, value)| {
                 let addr = match value {
                     Expr::Lit(..) => format!("q.lit({})", js_expr(value)),
-                    _ => {
-                        let segments = ref_segments(value)
-                            .iter()
-                            .map(|s| js_str(s))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("q.at({segments})")
-                    }
+                    _ => js_at(value),
                 };
                 (arg.name.clone(), addr)
             }));
@@ -131,16 +126,50 @@ fn emit_node(node: &Node, comp: &Component, depth: usize, out: &mut String) {
         Node::SlotPlaceholderDef { .. } => todo!("슬롯 자리"),
         Node::If { cond, then, else_ } => {
             line(out, depth, &format!("{{{} ? (", js_expr(cond)));
-            emit_fragment(then, comp, depth + 1, out);
+            emit_fragment(then, comp, vars, depth + 1, out);
             if else_.is_empty() {
                 line(out, depth, ") : null}");
                 return;
             }
             line(out, depth, ") : (");
-            emit_fragment(else_, comp, depth + 1, out);
+            emit_fragment(else_, comp, vars, depth + 1, out);
             line(out, depth, ")}");
         }
-        Node::For { .. } => todo!("@for"),
+        Node::For {
+            item,
+            index,
+            count,
+            body,
+        } => {
+            // 순회 대상의 주소를 함께 넘긴다 - 요소를 자식에 넘기면 그 주소 아래가 요소의 주소다.
+            let (source, addr) = match count {
+                ForCount::Literal(n) => (n.to_string(), "null".to_string()),
+                ForCount::Var(expr) => (js_expr(expr), js_at(expr)),
+            };
+            let index_name = match index {
+                Some(index) => js_str(&index.name),
+                None => "null".to_string(),
+            };
+            let mut params = format!("q, {}$", item.name);
+            if let Some(index) = index {
+                params.push_str(&format!(", {}$", index.name));
+            }
+            line(
+                out,
+                depth,
+                &format!(
+                    "{{q.each({source}, {addr}, {}, {index_name}, ({params}) => (",
+                    js_str(&item.name)
+                ),
+            );
+            let mut inner = vars.to_vec();
+            inner.push(item.name.clone());
+            if let Some(index) = index {
+                inner.push(index.name.clone());
+            }
+            emit_fragment(body, comp, &inner, depth + 1, out);
+            line(out, depth, "))}");
+        }
         Node::With { context, children } => {
             let def = comp
                 .contexts
@@ -159,22 +188,32 @@ fn emit_node(node: &Node, comp: &Component, depth: usize, out: &mut String) {
             );
             // 안쪽 요소가 이 컨텍스트를 보는 q를 쓰도록 With가 넘기는 q로 바깥 q를 가린다.
             line(out, depth + 1, "{(q) => (");
-            emit_fragment(children, comp, depth + 2, out);
+            emit_fragment(children, comp, vars, depth + 2, out);
             line(out, depth + 1, ")}");
             line(out, depth, "</$q.With>");
         }
     }
 }
 
-fn emit_fragment(nodes: &[Node], comp: &Component, depth: usize, out: &mut String) {
+fn emit_fragment(nodes: &[Node], comp: &Component, vars: &[String], depth: usize, out: &mut String) {
     line(out, depth, "<>");
     for node in nodes {
-        emit_node(node, comp, depth + 1, out);
+        emit_node(node, comp, vars, depth + 1, out);
     }
     line(out, depth, "</>");
 }
 
-/// 합성 인자의 참조를 마디로 편다. 합성 인자는 참조와 경로 접근뿐이다(codegen이 거른다).
+/// 참조의 주소. user.name -> q.at("user", "name")
+fn js_at(expr: &Expr) -> String {
+    let segments = ref_segments(expr)
+        .iter()
+        .map(|s| js_str(s))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("q.at({segments})")
+}
+
+/// 참조를 마디로 편다. 합성 인자와 @for 대상은 참조와 경로 접근뿐이다(codegen이 거른다).
 /// user.name -> ["user", "name"]
 fn ref_segments(expr: &Expr) -> Vec<String> {
     match expr {
@@ -199,9 +238,9 @@ fn attr_name(name: &str) -> &str {
 
 /// 속성값. 배열은 class에서만 오고 qubb처럼 컴파일타임에 공백으로 잇는다.
 /// ["card", "lg"] -> "card lg"
-fn attr_value(value: &Expr) -> String {
+fn attr_value(value: &Expr, vars: &[String]) -> String {
     match value {
-        Expr::Lit(..) => js_expr(value),
+        Expr::Lit(..) => js_expr(value, vars),
         Expr::List(items, _) => {
             let joined = items
                 .iter()
@@ -216,7 +255,7 @@ fn attr_value(value: &Expr) -> String {
                 .join(" ");
             js_str(&joined)
         }
-        _ => format!("$q.str({})", js_expr(value)),
+        _ => format!("$q.str({})", js_expr(value, vars)),
     }
 }
 
@@ -255,8 +294,11 @@ fn js_object(fields: impl Iterator<Item = (String, String)>) -> String {
 
 /// 식 -> JS 식. 연산자 가지는 괄호로 감싸 우선순위를 원본 트리 그대로 둔다.
 /// count * (a + 1) -> (p.count * (p.a + 1))
-fn js_expr(expr: &Expr) -> String {
+/// @for 변수는 콜백 인자로 읽는다. @for (row of rows)의 row.title -> row$.title
+fn js_expr(expr: &Expr, vars: &[String]) -> String {
+    let js_expr = |expr: &Expr| js_expr(expr, vars);
     match expr {
+        Expr::Var(name, _) if vars.contains(name) => format!("{name}$"),
         Expr::Var(name, _) => format!("p.{name}"),
         Expr::Lit(lit, _) => match &lit.value {
             Lit::Str(s) => js_str(s),
@@ -405,6 +447,61 @@ export const Label = (p: { text: string }) => {
     </>
   );
 };
+"#
+        );
+    }
+
+    #[test]
+    fn for_loops() {
+        let out = tsx(r#"
+            component List {
+              props { rows: { title: string }[] }
+              events { PICK({ }) }
+              template {
+                @for (row, i of rows) {
+                  button(@click:PICK) { ${i} ${row.title} }
+                  Item: Cell(text={row.title} /)
+                }
+                @for (n of 2) { span() { ${n * 2} } }
+              }
+            }
+            component Cell {
+              props { text: string }
+              template { span() { ${text} } }
+            }
+        "#);
+        let list = out
+            .split("export const Cell")
+            .next()
+            .unwrap()
+            .split("return (\n")
+            .nth(1)
+            .unwrap();
+        assert_eq!(
+            list,
+            r#"    <>
+      {q.each(p.rows, q.at("rows"), "row", "i", (q, row$, i$) => (
+        <>
+          <button onClick={(e) => q.emit("PICK", {}, e)}>
+            {$q.str(i$)}
+            {$q.str(row$.title)}
+          </button>
+          <$q.Segment name="Item" props={{ text: q.at("row", "title") }}>
+            <Cell text={row$.title} />
+          </$q.Segment>
+        </>
+      ))}
+      {q.each(2, null, "n", null, (q, n$) => (
+        <>
+          <span>
+            {$q.str((n$ * 2))}
+          </span>
+        </>
+      ))}
+    </>
+  );
+};
+
 "#
         );
     }
