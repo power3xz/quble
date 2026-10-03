@@ -8,6 +8,7 @@
 //
 // `x.qubc` - story 모듈(CSF). Storybook indexer(.storybook/main.ts)가 디렉터리의 .qubc를 story로 실을 때 쓴다.
 // 루트는 그 파일의 첫 컴포넌트이고, 짝 `x.data.json`을 args로, 짝 `x.qubc.handlers.ts`를 핸들러로 싣는다.
+// 짝이 둘 다 있는 .qubc만 story가 된다.
 //
 // 산출물은 dist/qubc/<경로 해시>/에 둔다. 스타일은 `?url`로 실어 vite가 서빙한다.
 
@@ -25,17 +26,26 @@ const RUNTIME = join(REPO, "core", "web", "runtime.ts");
 const OUT = join(HERE, "dist", "qubc");
 const MOUNT = join(HERE, "stories", "mount.ts");
 
-// x.qubc의 story 모듈. 짝 파일이 없으면 빈 data, 빈 핸들러 표로 띄운다.
-const storyModule = (id: string) => {
+// x.qubc의 짝 파일. data는 x.data.json, 핸들러는 x.qubc.handlers.ts 또는 .js. 둘 다 있어야 story가 된다.
+export const pairsOf = (id: string): { data: string; handlers: string } | null => {
   const data = id.replace(/\.qubc$/, ".data.json");
   const handlers = [".qubc.handlers.ts", ".qubc.handlers.js"]
     .map((suffix) => id.replace(/\.qubc$/, suffix))
     .find((path) => existsSync(path));
+  return existsSync(data) && handlers ? { data, handlers } : null;
+};
+
+// x.qubc의 story 모듈. indexer가 짝 파일이 둘 다 있는 것만 싣는다.
+const storyModule = (id: string) => {
+  const pairs = pairsOf(id);
+  if (!pairs) {
+    throw new Error(`${id}: 짝 data(.data.json)와 핸들러(.qubc.handlers.ts)가 둘 다 있어야 story가 된다`);
+  }
   return [
     `import component from ${JSON.stringify(`${id}?qubb`)};`,
     `import { mount } from ${JSON.stringify(MOUNT)};`,
-    existsSync(data) ? `import data from ${JSON.stringify(data)};` : "const data = {};",
-    handlers ? `import { handlers } from ${JSON.stringify(handlers)};` : "const handlers = {};",
+    `import data from ${JSON.stringify(pairs.data)};`,
+    `import { handlers } from ${JSON.stringify(pairs.handlers)};`,
     "export default { render: (args) => mount(component, args, handlers), args: data };",
     "export const Default = {};",
   ].join("\n");

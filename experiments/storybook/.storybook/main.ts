@@ -1,7 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { StorybookConfig } from "@storybook/html-vite";
-import { qubc } from "../qubc-plugin.ts";
+import { pairsOf, qubc } from "../qubc-plugin.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
@@ -15,14 +15,13 @@ const config: StorybookConfig = {
     "../stories/*.stories.ts",
     ...STORY_DIRS.map((dir) => ({ directory: join(REPO, dir), files: "*.qubc", titlePrefix: dir })),
   ],
-  // .qubc 하나가 story 하나다. 내용은 qubc-plugin.ts가 story 모듈(CSF)로 만든다.
+  // 짝 data와 핸들러가 둘 다 있는 .qubc 하나가 story 하나다. 내용은 qubc-plugin.ts가 story 모듈(CSF)로 만든다.
   experimental_indexers: async (indexers) => [
     ...(indexers ?? []),
     {
       test: /\.qubc$/,
-      createIndex: async (fileName, { makeTitle }) => [
-        { type: "story", importPath: fileName, exportName: "Default", title: makeTitle() },
-      ],
+      createIndex: async (fileName, { makeTitle }) =>
+        pairsOf(fileName) ? [{ type: "story", importPath: fileName, exportName: "Default", title: makeTitle() }] : [],
     },
   ],
   viteFinal: (vite) => ({

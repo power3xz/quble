@@ -29,15 +29,15 @@
 
 ## 디렉터리의 .qubc를 story로
 
-`QUBLE_STORY_DIRS`의 디렉터리마다 `*.qubc` 하나가 story 하나(`Default`)가 된다. story 파일을 쓰지 않는다.
+`QUBLE_STORY_DIRS`의 디렉터리에서 짝 data와 핸들러가 둘 다 있는 `*.qubc` 하나가 story 하나(`Default`)가 된다.
+story 파일을 쓰지 않는다.
 
 - 루트 컴포넌트는 그 파일의 첫 컴포넌트다(qubb ID 0).
-- 짝 `x.data.json`이 있으면 args로 쓴다. Controls에서 고치면 다시 마운트한다. 없으면 빈 data로 마운트한다.
-- 짝 `x.qubc.handlers.ts`(또는 `.js`)가 있으면 싣는다. 생성된 story 모듈은 이 실험의 타입 검사 대상이 아니라,
-  ts-plugin이 타입을 주입하는 핸들러 파일도 실린다.
-- 짝 data가 없는 컴포넌트는 빈 data로 마운트된다. 이때 `@for`가 0회로 돌거나 `@if`가 거짓이 되어 화면이 비거나,
-  빈 배열에 인덱스로 접근해 RangeError가 날 수 있다. qubb에는 props의 구조만 남고 string/number/bool 구분이 없어
-  기본값을 자동으로 채우지 않는다.
+- 짝 `x.data.json`을 args로 쓴다. Controls에서 고치면 다시 마운트한다.
+- 짝 `x.qubc.handlers.ts`(또는 `.js`)를 싣는다. 생성된 story 모듈은 이 실험의 타입 검사 대상이 아니라, ts-plugin이
+  타입을 주입하는 핸들러 파일도 실린다.
+- 짝이 하나라도 없으면 싣지 않는다. data 없이 마운트하면 `@for`가 0회로 돌거나 빈 배열 인덱스 접근이 RangeError를
+  내, 동작을 보여 주는 story가 되지 못한다.
 
 ## 손으로 쓰는 story
 
