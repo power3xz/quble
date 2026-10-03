@@ -1,7 +1,6 @@
 # bench-expr
 
-template 식의 갱신 비용을 quble, quble -> React, React, React + memo, Svelte 5에서 같은 앱으로 잰다.
-quble -> React는 같은 `orders.qubc`를 `quble-react`로 컴파일한 React 컴포넌트다(docs/react-target.draft.md). 식 평가 방식(부분
+template 식의 갱신 비용을 quble, React, React + memo, Svelte 5에서 같은 앱으로 잰다. 식 평가 방식(부분
 재평가, 인덱스 접근의 구독 다시 걸기)은 core/web/EXPR-EVAL.md에 있고, 측정 방법의 원칙은 그 문서 7절
 "잴 때"에 있다. 측정 수치는 런타임이 바뀌면 낡으므로 여기 적지 않는다.
 
@@ -9,7 +8,6 @@ quble -> React는 같은 `orders.qubc`를 `quble-react`로 컴파일한 React �
 
 레포 루트에서 `./bench-expr.sh`. 의존 설치, `orders.qubc` 컴파일, 데이터 생성, vite 빌드를 하고
 http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런타임과 quble 바이너리를 그대로 쓴다.
-quble -> React는 `quble-react` 바이너리가 낸 `gen/orders.tsx`와 레포의 `core/react` 런타임을 쓴다.
 
 1. 첫 화면(비교 표)에서 행 수(1k, 5k, 10k)와 압축(없음, gzip, brotli)을 고른다.
 2. 대상 이름을 누르면 새 탭에 그 대상만 뜬다. 그 탭에서 **측정**을 누른다.
@@ -25,7 +23,7 @@ quble -> React는 `quble-react` 바이너리가 낸 `gen/orders.tsx`와 레포�
 뜨지 않는다.
 
 - 커밋을 임시 worktree로 꺼내 그 `core/web`으로 빌드해 서버(8144)에 띄운다. 작업 트리의 커밋 안 한 변경은
-  재지 않는다. `orders.qubb`, `gen/orders.tsx`, 데이터는 지금 컴파일러로 만든다.
+  재지 않는다. `orders.qubb`와 데이터는 지금 컴파일러로 만든다.
 - `bench-expr/quick.mjs`가 `quble.html?n=10000`을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 다섯의
   DOM 반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
 - 기록은 `bench-results/<커밋>.expr.json`에 남는다. 커밋끼리는 `node bench-compare.mjs expr <ref> <ref>`로
@@ -37,8 +35,7 @@ quble -> React는 `quble-react` 바이너리가 낸 `gen/orders.tsx`와 레포�
 
 ## 재는 앱
 
-주문 목록 N행(`quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte`). quble -> React는
-`orders.qubc`를 컴파일해 쓰고 핸들러는 quble 대상과 같은 `src/quble-handlers.ts`다. 행마다 단순 값
+주문 목록 N행(`quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte`). 행마다 단순 값
 셋(id, 가격, 수량)과 식 넷을 둔다.
 
 ```

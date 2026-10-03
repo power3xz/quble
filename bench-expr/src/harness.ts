@@ -49,7 +49,6 @@ export const SCENARIOS = [
 
 export const TARGETS = [
   { id: "quble", label: "quble" },
-  { id: "quble-react", label: "quble -> React" },
   { id: "react-memo", label: "React + memo" },
   { id: "react", label: "React" },
   { id: "svelte", label: "Svelte 5" },

@@ -1,5 +1,0 @@
-# quble-playground-react.sh가 만든다: playground.tsx(quble-react 컴파일)
-gen/
-# quble-playground-react.sh가 복사한다: wasm 컴파일러, 데모 소스, 전역 스타일
-public/
-dist/

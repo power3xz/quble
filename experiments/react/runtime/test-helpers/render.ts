@@ -2,22 +2,38 @@
 import "./dom.ts";
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { QubleRoot, type THandlerCtx, type THandlers } from "quble-react";
 import { act, createElement, type FC } from "react";
 import { createRoot } from "react-dom/client";
 import ts from "typescript";
-import { compile, type THandlers as TQubbHandlers } from "../../web/runtime.ts";
-import { buildFixture } from "../../web/test-helpers/build.ts";
+import { compile, type THandlers as TQubbHandlers } from "../../../../core/web/runtime.ts";
 
-const HERE = dirname(fileURLToPath(import.meta.url)); // core/react/test-helpers
-const CORE = join(HERE, "..", "..");
-const QUBLE_REACT_BIN = join(CORE, "target", "debug", "quble-react");
-const COMPONENTS = join(CORE, "..", "components");
-// 변환한 모듈은 core/ 아래에 둔다 - 거기서 위로 올라가며 react와 quble-react를 찾는다.
-const OUT_DIR = join(CORE, "dist", "react-fixtures");
+const HERE = dirname(fileURLToPath(import.meta.url)); // experiments/react/runtime/test-helpers
+const EXPERIMENT = join(HERE, "..", "..");
+const REPO = join(EXPERIMENT, "..", "..");
+const QUBLE_BIN = join(REPO, "core", "target", "debug", "quble");
+const QUBLE_REACT_BIN = join(EXPERIMENT, "cli", "target", "debug", "quble-react");
+// 생성물은 이 실험의 dist/ 아래에 둔다. 거기서 위로 올라가며 react와 quble-react(이 패키지 자신)를 찾는다.
+const OUT_DIR = join(EXPERIMENT, "dist", "fixtures");
+
+// 이 실험의 fixture가 먼저, 없으면 레포의 components/<이름>.fixture.qubc.
+const fixturePath = (fixture: string): string => {
+  const own = join(EXPERIMENT, "fixtures", `${fixture}.qubc`);
+  return existsSync(own) ? own : join(REPO, "components", `${fixture}.fixture.qubc`);
+};
+
+const buildQubb = (fixture: string): Uint8Array => {
+  const out = join(OUT_DIR, "qubb");
+  execFileSync(QUBLE_BIN, [fixturePath(fixture), "--out-dir", out], { stdio: ["ignore", "ignore", "inherit"] });
+  const stem = fixturePath(fixture)
+    .split("/")
+    .at(-1)
+    ?.replace(/\.qubc$/, "");
+  return new Uint8Array(readFileSync(join(out, `${stem}.qubb`)));
+};
 
 // 핸들러 표. 두 런타임에 같은 표를 넘긴다 - ctx의 이름(get/set/props/context)이 같다.
 export type TAnyHandlers = THandlers;
@@ -31,23 +47,24 @@ const appendHost = (): HTMLElement => {
 };
 
 export const renderQubb = (fixture: string, values: unknown, handlers: TAnyHandlers): HTMLElement => {
-  const inst = compile(buildFixture(fixture))(0)(values, handlers as unknown as TQubbHandlers);
+  const inst = compile(buildQubb(fixture))(0)(values, handlers as unknown as TQubbHandlers);
   const host = appendHost();
   host.append(...inst.nodes);
   return host;
 };
 
-export const reactTsx = (fixture: string): string =>
-  execFileSync(QUBLE_REACT_BIN, [join(COMPONENTS, `${fixture}.fixture.qubc`)], { encoding: "utf8" });
+// quble-react로 OUT_DIR/<fixture>.tsx를 내고 그 내용을 돌려준다. 리소스 import가 그 위치 기준이다.
+const reactTsx = (fixture: string): string => {
+  const file = join(OUT_DIR, `${fixture}.tsx`);
+  execFileSync(QUBLE_REACT_BIN, [fixturePath(fixture), "--out", file], { stdio: ["ignore", "ignore", "inherit"] });
+  return readFileSync(file, "utf8");
+};
 
-// 산출 TSX를 strict로 타입 검사해 오류 메시지를 돌려준다. 파일은 OUT_DIR에 둔다 - 거기서
-// quble-react와 react의 타입을 찾는다.
+// 산출 TSX를 strict로 타입 검사해 오류 메시지를 돌려준다.
 export const typeErrors = (fixtures: readonly string[]): string[] => {
-  mkdirSync(OUT_DIR, { recursive: true });
   const files = fixtures.map((fixture) => {
-    const file = join(OUT_DIR, `${fixture}.tsx`);
-    writeFileSync(file, reactTsx(fixture));
-    return file;
+    reactTsx(fixture);
+    return join(OUT_DIR, `${fixture}.tsx`);
   });
   const program = ts.createProgram(files, {
     strict: true,

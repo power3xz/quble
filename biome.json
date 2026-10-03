@@ -9,7 +9,6 @@
     "ignoreUnknown": false,
     "includes": [
       "core/web/**",
-      "core/react/**",
       "core/playground/**",
       "core/wasm-compiler/**",
       "core/build/**",

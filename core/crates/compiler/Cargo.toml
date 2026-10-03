@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 bytecode = { path = "../bytecode" }
+
+[features]
+# React 산출 실험(experiments/react). 기본으로 꺼져 있어 qubb 빌드, wasm, 테스트에 들지 않는다.
+experimental-react = []

@@ -1,18 +1,42 @@
-//! React 산출기. 평탄화한 컴포넌트를 React 컴포넌트(TSX) 한 모듈로 낸다(docs/react-target.draft.md).
-//! 입력은 qubb codegen의 검증을 통과한 것이라 여기서는 에러를 내지 않는다.
+//! React 산출기(experiments/react/README.md). 평탄화한 컴포넌트를 React 컴포넌트(TSX) 한 모듈로 낸다.
+//! 컴파일러 크레이트가 `experimental-react` feature로 이 파일을 모듈로 끼워 넣는다.
 
 use crate::ast::{BinaryOp, Component, Expr, ForCount, Lit, Node, Type, UnaryOp};
 use crate::dts::type_to_ts;
 use crate::expr_type::{expr_type, path_type};
-use crate::flatten::FlatComp;
+use crate::flatten::{flatten, FlatComp, SourceLoader};
 use crate::scope::ForVar;
+use crate::{codegen, fs_loader, CompileError};
 use std::path::Path;
 
-/// 런타임(`core/react`)은 `$q`로 싣는다 - 사용자 컴포넌트 이름(`Segment`, `String`)과 부딪히지 않게.
+/// 엔트리 소스를 React 컴포넌트 모듈(TSX)로 낸다. 검증은 qubb codegen이 하고 바이트코드는 버린다 -
+/// 같은 소스가 qubb에서 에러면 여기서도 같은 에러다.
+///
+/// out_dir는 산출 TSX가 놓일 디렉터리다. `use "./x.css"` 리소스를 거기서 본 상대 경로로 import한다.
+pub fn react_tsx(
+    entry_path: &str,
+    src: &str,
+    loader: &impl SourceLoader,
+    out_dir: &str,
+) -> Result<String, CompileError> {
+    let comps = flatten(entry_path, src, loader).map_err(CompileError::Flatten)?;
+    codegen::generate(&comps).map_err(CompileError::Codegen)?;
+    Ok(generate(&comps, out_dir))
+}
+
+/// 파일 경로로 React 모듈을 낸다. 엔트리를 읽고 fs loader로 use를 해소한다.
+pub fn react_tsx_from_path(path: &str, out_dir: &str) -> Result<String, CompileError> {
+    let not_found = || CompileError::EntryNotFound(path.to_string());
+    let entry = std::fs::canonicalize(path).map_err(|_| not_found())?;
+    let src = std::fs::read_to_string(&entry).map_err(|_| not_found())?;
+    react_tsx(&entry.to_string_lossy(), &src, &fs_loader, out_dir)
+}
+
+/// 런타임(`runtime/index.ts`)은 `$q`로 싣는다 - 사용자 컴포넌트 이름(`Segment`, `String`)과 부딪히지 않게.
 /// 컴포넌트 안에서 props는 `p`, 런타임 손잡이는 `q`다. 컴포넌트 이름은 대문자로 시작해 둘과 안 겹친다.
 ///
 /// `use "./x.css"` 리소스는 산출 파일(out_dir)에서 본 상대 경로로 import한다. 같은 파일은 한 번만 싣는다.
-pub fn generate(comps: &[FlatComp], out_dir: &str) -> String {
+fn generate(comps: &[FlatComp], out_dir: &str) -> String {
     let mut out = String::from("import * as $q from \"quble-react\";\n");
     let mut seen: Vec<&str> = Vec::new();
     for res in comps.iter().flat_map(|fc| &fc.resources) {
@@ -517,7 +541,7 @@ fn js_str(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::react_tsx;
+    use super::react_tsx;
 
     fn tsx(src: &str) -> String {
         react_tsx("entry", src, &(|_: &str, _: &str| None), "/").unwrap()

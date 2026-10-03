@@ -1,0 +1,11 @@
+[package]
+name = "quble-react"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+compiler = { path = "../../../core/crates/compiler", features = ["experimental-react"] }
+quble = { path = "../../../core" }
+
+# core 워크스페이스에 들지 않는 독립 크레이트다 - 실험을 걷어 낼 때 core를 안 건드린다.
+[workspace]

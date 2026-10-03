@@ -3,8 +3,8 @@
 import { QubleRoot, type THandlers } from "quble-react";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { handlers, lineCountOf, tokenize } from "../../core/playground/playground.qubc.handlers.ts";
-import { Playground } from "../gen/playground.tsx";
+import { handlers, lineCountOf, tokenize } from "../../../../core/playground/playground.qubc.handlers.ts";
+import { Playground } from "../../dist/playground/playground.tsx";
 
 // sources.json은 이름만 담고 내용은 demo/에 있다. 목록 순서가 곧 파일 트리 순서다.
 const names: string[] = await fetch("./sources.json").then((r) => r.json());
