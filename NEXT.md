@@ -8,7 +8,7 @@
 
 ## 하는 중
 
-없음
+React 컴파일 타겟 (ROADMAP 컴파일 타겟) - 브랜치 `react-target`. 설계 draft는 docs/react-target.draft.md.
 
 ## 할 것
 
