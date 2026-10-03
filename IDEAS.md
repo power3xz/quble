@@ -244,6 +244,28 @@ opcode를 재해석해 노드를 새로 조립하는 대신, 뼈대를 한 번 �
 
 미설계: 한 번에 하나씩 받을지 여러 개를 묶을지, 클라가 가진 걸 어떻게 알릴지.
 
+### 렌더 호스트 인터페이스 (canvas 등)
+
+런타임이 DOM 대신 다른 대상에 그리게 하는 경계. 실험과 얻은 것은 `experiments/canvas/README.md`.
+
+### 가상 document로 서버 렌더
+
+런타임이 쓰는 document 인터페이스를 구현한 가상 document(`experiments/canvas/scene.ts`)를 서버의 전역
+document 자리에 넣고, 브라우저용 런타임을 그대로 돌려 HTML로 직렬화한다.
+
+```
+globalThis.document = new SDocument()
+const inst = compile(qubb)(0)(초기 props)
+const html = toHTML(document.body)
+```
+
+- 구현이 하나라 서버와 클라이언트 결과가 어긋나지 않는다. 바이트코드 의미를 Rust로 한 번 더 구현하던 SSR
+  renderer(ISSUES.md "renderer(SSR) 보류")는 형식이 바뀔 때 따로 깨졌다.
+- 출력이 DOM과 같다는 것은 `experiments/canvas/scene.test.ts`가 jsdom과 견줘 확인한다.
+- 남는 일은 hydration이다. 지금 런타임은 노드를 자기가 만들며 구독을 건다. 받은 HTML을 따라가며 구독과
+  이벤트 바인딩만 거는 길이 없으면 클라이언트가 같은 화면을 다시 지어야 한다.
+- 서버가 JS를 돌려야 한다(Node 등). Rust renderer는 JS 없이 돌았다.
+
 ## 구현됨 (기록 보존)
 
 적용 완료해 확정 설계로 승격된 아이디어. 본문은 거부한 대안/근거를 남기기 위한 기록이다.
