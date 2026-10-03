@@ -658,7 +658,7 @@ const runPreview = async (at: number, ctx: TCtx) => {
   let handlers: THandlers = {};
   let initialData: unknown = {};
   try {
-    handlers = (await import(/* @vite-ignore */ handlersUrl)).handlers ?? {};
+    handlers = (await import(/* @vite-ignore */ /* webpackIgnore: true */ handlersUrl)).handlers ?? {};
     initialData = JSON.parse(sourceOf(`${stem}.data.json`, ctx) || "{}");
   } catch (e) {
     URL.revokeObjectURL(handlersUrl);
