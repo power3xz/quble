@@ -8,7 +8,7 @@
 
 ## 하는 중
 
-React 컴파일 타겟 (ROADMAP 컴파일 타겟) - 브랜치 `react-target`. 설계 draft는 docs/react-target.draft.md.
+React 컴파일 타겟 실험 (ROADMAP 컴파일 타겟) - 브랜치 `react-target`. 내용은 experiments/react/README.md.
 
 ## 할 것
 
