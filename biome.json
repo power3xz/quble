@@ -15,6 +15,7 @@
       "editors/vscode/src/**",
       "editors/vscode/build.mjs",
       "editors/ts-plugin/src/**",
+      "experiments/**",
       "!**/node_modules",
       "!**/dist",
       "!**/*.qubc.d.ts"

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>quble canvas</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #f6f7f9;
+        font: 13px/1.5 ui-sans-serif, system-ui, sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+      #info {
+        padding: 6px 16px;
+        border-bottom: 1px solid #e3e6eb;
+        color: #6b7380;
+      }
+      #stage {
+        flex: 1;
+        width: 100%;
+        min-height: 0;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="info">로드 중</div>
+    <canvas id="stage"></canvas>
+    <script type="module" src="/src/canvas.ts"></script>
+  </body>
+</html>
