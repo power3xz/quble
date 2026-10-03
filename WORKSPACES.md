@@ -37,7 +37,8 @@ workspaces: `core/web`, `core/react`, `core/playground`, `core/wasm-compiler`, `
 
 `bench-expr`(식 갱신 벤치)도 워크스페이스 밖이다. 자기 `package.json`과 `node_modules`(vite, React,
 Svelte)를 갖는다. quble 런타임은 vite alias로 `core/web`을 직접 싣는다. canvas 데모는 같은 방식으로
-`experiments`도 싣는다.
+`experiments`도 싣는다. quble -> React 페이지는 `core/react`를 싣고, react는 `resolve.dedupe`로 bench-expr의
+것 하나만 쓴다.
 
 `experiments`(실험 코드)도 워크스페이스 밖이다. 자기 `package.json`이 없고 루트의 `node_modules`(jsdom)를 쓴다.
 루트 tsconfig와 biome은 보지만 `npm test`는 돌지 않는다 - 실행 명령은 실험마다 README에 있다.
