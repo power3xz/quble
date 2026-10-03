@@ -6,7 +6,16 @@
 //
 //   Page의 First: Toggle(...) 안 button에서 TOGGLE이 나면 fullname은 "First.TOGGLE"
 
-import { createContext, createElement, type FC, type ReactNode, useContext, useRef, useSyncExternalStore } from "react";
+import {
+  type CSSProperties,
+  createContext,
+  createElement,
+  type FC,
+  type ReactNode,
+  useContext,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 
 // 주소. 핸들러가 get/set에 넘기는 키다. qubb의 leafIndex 자리에 루트 state 안 경로가 온다.
 // 리터럴 인자(`Label(text="x")`)는 store에 자리가 없어 값을 그대로 든다.
@@ -313,6 +322,24 @@ export const QubleRoot = <T extends Record<string, unknown>>({
 
 // 텍스트와 속성값. React는 boolean을 안 찍으므로 qubb처럼 "true"/"false"로 바꾼다.
 export const str = (value: unknown): string => String(value);
+
+// style 속성. qubb는 CSS 선언 문자열을 그대로 쓰지만 React는 객체만 받는다.
+//   "background-color: red; --gap: 1rem" -> { backgroundColor: "red", "--gap": "1rem" }
+// 이름은 camelCase로 바꾸고, 사용자 정의 속성(--)은 그대로 둔다. -webkit-x는 WebkitX다.
+export const style = (text: string): CSSProperties => {
+  const out: Record<string, string> = {};
+  for (const decl of text.split(";")) {
+    const colon = decl.indexOf(":");
+    if (colon === -1) {
+      continue;
+    }
+    const name = decl.slice(0, colon).trim();
+    const value = decl.slice(colon + 1).trim();
+    const key = name.startsWith("--") ? name : name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+    out[key] = value;
+  }
+  return out;
+};
 
 // 배열 인덱스 접근. 요소가 없는 인덱스는 qubb처럼 RangeError를 낸다.
 export const idx = <T>(array: readonly T[], index: number): T => {

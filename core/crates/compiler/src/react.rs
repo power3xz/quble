@@ -366,6 +366,10 @@ const NUMBER_ATTRS: &[&str] = &[
 /// 식은 React 속성 타입에 맞춘다. number만 받는 속성에는 수를 그대로, 나머지에는 문자열로 낸다.
 /// 어느 쪽이든 DOM에 찍히는 글자는 qubb와 같다.
 fn attr_value(react_name: &str, value: &Expr, comp: &Component, vars: &[ForVar]) -> String {
+    // React는 style에 객체만 받는다. qubb의 CSS 선언 문자열을 런타임이 객체로 바꾼다.
+    if react_name == "style" {
+        return format!("$q.style({})", js_expr(value, vars));
+    }
     match value {
         Expr::Lit(..) => js_expr(value, vars),
         Expr::List(items, _) => {
@@ -584,6 +588,18 @@ export const Label = (p: { text: string }) => {
 };
 "#
         );
+    }
+
+    #[test]
+    fn style_text_to_object() {
+        let out = tsx(r#"
+            component Box {
+              props { pos: string }
+              template { div(style="color: red" /) div(style={pos} /) }
+            }
+        "#);
+        assert!(out.contains(r#"<div style={$q.style("color: red")} />"#), "{out}");
+        assert!(out.contains(r#"<div style={$q.style(p.pos)} />"#), "{out}");
     }
 
     #[test]
