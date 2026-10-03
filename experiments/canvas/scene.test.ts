@@ -4,8 +4,8 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
 import { JSDOM } from "jsdom";
-import { compile, type THandlers } from "../runtime.ts";
-import { buildFixture } from "../test-helpers/build.ts";
+import { compile, type THandlers } from "../../core/web/runtime.ts";
+import { buildFixture } from "../../core/web/test-helpers/build.ts";
 import { SDocument, type SElement, type SNode, toHTML } from "./scene.ts";
 
 // 런타임이 보는 전역 document를 단계마다 바꿔 끼운다.

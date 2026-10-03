@@ -5,7 +5,13 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react(), svelte()],
   // quble 페이지는 레포의 런타임을 그대로 싣는다.
-  resolve: { alias: { "@quble-web": new URL("../core/web", import.meta.url).pathname } },
+  // canvas 데모는 레포의 실험 코드(experiments/)도 싣는다.
+  resolve: {
+    alias: {
+      "@quble-web": new URL("../core/web", import.meta.url).pathname,
+      "@experiments": new URL("../experiments", import.meta.url).pathname,
+    },
+  },
   build: {
     // 대상마다 번들이 따로 나오게 페이지를 각각 진입점으로 둔다. 공유 청크(harness)는 모든 대상이 같이 받는다.
     rollupOptions: {
@@ -15,7 +21,7 @@ export default defineConfig({
         react: "react.html",
         "react-memo": "react-memo.html",
         svelte: "svelte.html",
-        // canvas 렌더 실험(core/web/canvas). 비교 표의 대상이 아니라 따로 여는 데모다.
+        // canvas 렌더 실험(experiments/canvas). 비교 표의 대상이 아니라 따로 여는 데모다.
         canvas: "canvas.html",
       },
     },

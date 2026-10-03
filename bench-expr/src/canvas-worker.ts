@@ -1,7 +1,7 @@
 // canvas 실험 - quble 런타임을 Worker에서 돌려 Orders를 OffscreenCanvas에 그린다. Worker에는 document가
 // 없어서 장면 트리(SDocument)를 전역 document 자리에 넣을 수 있다. 런타임은 고치지 않는다.
 //
-// 스타일은 DOM 페이지와 같은 style.css를 받아 해석한다(core/web/canvas/css.ts). 마크업도 DOM 페이지처럼
+// 스타일은 DOM 페이지와 같은 style.css를 받아 해석한다(experiments/canvas/css.ts). 마크업도 DOM 페이지처럼
 // body > main#app 안에 둔다.
 //
 // 메인 스레드(canvas.ts)와 주고받는 메시지
@@ -10,9 +10,9 @@
 //   보냄  mounted { mountMs }, frame { layoutMs, drawMs, sinceClickMs }
 
 import { compile } from "@quble-web/runtime.ts";
-import { createStyleOf, parseCss } from "@quble-web/canvas/css.ts";
-import { createRenderer, type TRenderer } from "@quble-web/canvas/render.ts";
-import { SDocument, type SElement } from "@quble-web/canvas/scene.ts";
+import { createStyleOf, parseCss } from "@experiments/canvas/css.ts";
+import { createRenderer, type TRenderer } from "@experiments/canvas/render.ts";
+import { SDocument, type SElement } from "@experiments/canvas/scene.ts";
 import { handlers } from "./quble-handlers.ts";
 
 const doc = new SDocument();
