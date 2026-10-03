@@ -2,7 +2,7 @@
 
 같은 `.qubc`를 qubb 대신 React 컴포넌트(TSX)로 낼 수 있는지 본 실험이다(ROADMAP "컴파일 타겟"). 작성은
 quble로 하고 산출은 React로 내보내 기존 앱에 넣는 점진 도입이 목적이다. 실험 코드라 `npm test`, 루트
-typecheck, 머지 훅에 들지 않는다.
+typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 biome이 본다).
 
 ## 구조
 
@@ -38,7 +38,6 @@ typecheck, 머지 훅에 들지 않는다.
 - `core/crates/compiler/Cargo.toml`의 `experimental-react` feature
 - `core/crates/compiler/src/lib.rs`의 `experimental-react` cfg 넷
 - `core/crates/compiler/src/dts.rs`의 `type_to_ts`를 `pub(crate)`에서 비공개로
-- 루트 `tsconfig.json` exclude의 `experiments/react`
 - `WORKSPACES.md` experiments 목록의 `react`
 
 ## 대응

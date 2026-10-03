@@ -33,8 +33,7 @@
     "core/web/**/*.ts",
     "core/playground/**/*.ts",
     "core/wasm-compiler/**/*.ts",
-    "editors/vscode/src/**/*.ts",
-    "experiments/**/*.ts"
+    "editors/vscode/src/**/*.ts"
   ],
   // include 패턴에 멤버 밑 node_modules가 걸리므로 명시로 끊는다. exclude를 두면 tsc의
   // 기본 제외가 덮이니 여기에 적힌 것이 전부다 - 항목을 더할 때 node_modules를 지우지 않는다.
@@ -42,7 +41,5 @@
   // *.qubc.handlers.ts는 tsc가 볼 수 없다 - 핸들러 표의 타입을 ts-plugin이 편집기 스냅샷에만
   // 주입하므로 주입 없이 열면 ctx가 unknown이 된다. 대신 editors/ts-plugin/typecheck-handlers.ts가
   // LanguageService에 plugin을 올려 검사한다(typecheck 스크립트가 함께 돌린다).
-  //
-  // experiments/react는 자기 node_modules(react)와 tsconfig를 갖는다 - 루트 npm ci로는 그 의존이 안 깔린다.
-  "exclude": ["**/node_modules", "**/*.qubc.handlers.ts", "experiments/react"]
+  "exclude": ["**/node_modules", "**/*.qubc.handlers.ts"]
 }

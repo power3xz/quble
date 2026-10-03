@@ -1,5 +1,5 @@
 {
-  // 이 실험은 자기 node_modules(react)를 갖는다. 루트 tsconfig는 이 디렉터리를 빼고, 여기서 따로 본다.
+  // 이 실험은 자기 node_modules(react)를 갖는다. 루트 tsconfig는 experiments를 보지 않고, 여기서 따로 본다.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ES2022",

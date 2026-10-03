@@ -1,7 +1,9 @@
 # canvas 렌더 실험
 
 quble 런타임을 고치지 않고 DOM 대신 canvas에 그릴 수 있는지 본 실험이다. 결론과 얻은 것을 남긴다. 실험
-코드라 `npm test`와 머지 훅에 들지 않는다. 자기 `package.json`이 없고 루트의 `node_modules`(jsdom)를 쓴다.
+코드라 `npm test`, 루트 typecheck, 머지 훅의 테스트에 들지 않는다(lint와 포맷은 루트 biome이 본다). 자기
+`package.json`과 `node_modules`(jsdom, vite)를 갖는다. 의존 방향은 이 디렉터리에서 기존 코드 쪽으로만 나므로,
+걷어 낼 때는 이 디렉터리를 지우고 WORKSPACES.md experiments 목록에서 `canvas`를 빼면 된다.
 
 ## 구조
 
@@ -15,14 +17,18 @@ quble 런타임을 고치지 않고 DOM 대신 canvas에 그릴 수 있는지 �
 | `layout.ts` | block, inline, flex(row), grid 배치. 바뀐 상자만 다시 잰다 |
 | `render.ts` | 바뀐 프레임에 레이아웃하고 보이는 상자만 그린다. 클릭은 hit test 뒤 document로 보낸다 |
 
-데모는 `bench-expr/canvas.html`이다. 런타임을 Worker에서 돌려 OffscreenCanvas에 그리고, DOM 페이지와 같은
-`.qubb`, 핸들러, `style.css`를 쓴다. 브라우저의 `document`는 바꿔 끼울 수 없어 Worker에서 돌린다.
+데모는 `demo/`다. bench-expr의 주문 목록을 런타임을 Worker에서 돌려 OffscreenCanvas에 그린다. bench-expr DOM
+페이지와 같은 `.qubb`, 핸들러, `style.css`를 쓴다. 브라우저의 `document`는 바꿔 끼울 수 없어 Worker에서 돌린다.
 
 ## 실행
 
-- 테스트: `node --experimental-strip-types --test "experiments/canvas/*.test.ts"`. `scene.test.ts`는 같은
-  컴포넌트를 jsdom과 장면 트리에서 지어 결과를 견준다(quble 바이너리가 필요하다).
-- 데모: `./bench-expr.sh` 뒤 `http://localhost:8143/canvas.html?n=10000`.
+모두 레포 루트에서.
+
+- 의존: `npm install --prefix experiments/canvas`
+- 테스트: `npm test --prefix experiments/canvas`. `scene.test.ts`는 같은 컴포넌트를 jsdom과 장면 트리에서 지어
+  결과를 견준다(`core/target/debug/quble`이 필요하다).
+- 타입 검사: `npm run typecheck --prefix experiments/canvas`
+- 데모: `experiments/canvas/demo.sh` -> http://localhost:8149/?n=10000
 
 ## 얻은 것
 

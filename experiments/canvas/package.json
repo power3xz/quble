@@ -1,0 +1,17 @@
+{
+  "name": "quble-canvas-experiment",
+  "private": true,
+  "type": "module",
+  "description": "canvas 렌더 실험(README.md). 테스트와 데모가 이 의존을 쓴다.",
+  "scripts": {
+    "test": "node --experimental-strip-types --test \"*.test.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^22.20.1",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vite": "^6.3.5"
+  }
+}
