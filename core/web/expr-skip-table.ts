@@ -1,4 +1,17 @@
-import { EXPR, instrSize } from "./expr-opcode.ts";
+import {
+  EXPR_FIELD_AT,
+  EXPR_LOAD_ARRAY_LENGTH,
+  EXPR_LOAD_CONST,
+  EXPR_LOAD_FALSE,
+  EXPR_LOAD_SMALL_INT,
+  EXPR_LOAD_STRING_LENGTH,
+  EXPR_LOAD_TRUE,
+  EXPR_LOAD_VAR,
+  EXPR_NEG,
+  EXPR_NOT,
+  EXPR_READ_LEAF,
+  instrSize,
+} from "./expr-opcode.ts";
 
 // 식을 다시 셀 때, 바뀐 칸과 무관한 부분식을 계산하지 않고 지난번 값을 쓰려고 만드는 표.
 //
@@ -73,25 +86,25 @@ export type TExprSkipTable = {
 
 // 잎 명령인가. 스택에서 아무것도 꺼내지 않고 값 하나를 올린다.
 const isLeaf = (opcode: number) =>
-  opcode === EXPR.LOAD_VAR ||
-  opcode === EXPR.LOAD_CONST ||
-  opcode === EXPR.LOAD_ARRAY_LENGTH ||
-  opcode === EXPR.LOAD_STRING_LENGTH ||
-  opcode === EXPR.LOAD_SMALL_INT ||
-  opcode === EXPR.LOAD_TRUE ||
-  opcode === EXPR.LOAD_FALSE;
+  opcode === EXPR_LOAD_VAR ||
+  opcode === EXPR_LOAD_CONST ||
+  opcode === EXPR_LOAD_ARRAY_LENGTH ||
+  opcode === EXPR_LOAD_STRING_LENGTH ||
+  opcode === EXPR_LOAD_SMALL_INT ||
+  opcode === EXPR_LOAD_TRUE ||
+  opcode === EXPR_LOAD_FALSE;
 
 // 단항 연산인가. 값 하나를 꺼내 하나를 올린다. 나머지 연산(ADD, ELEM_AT 등)은 둘을 꺼내 하나를 올린다.
 const isUnary = (opcode: number) =>
-  opcode === EXPR.NOT || opcode === EXPR.NEG || opcode === EXPR.FIELD_AT || opcode === EXPR.READ_LEAF;
+  opcode === EXPR_NOT || opcode === EXPR_NEG || opcode === EXPR_FIELD_AT || opcode === EXPR_READ_LEAF;
 
 // store 칸을 읽는 명령인가. 이 명령들만 변수로 묶는다. LOAD_CONST, LOAD_SMALL_INT, LOAD_TRUE,
 // LOAD_FALSE는 값이 바이트에 박혀 있어 바뀌지 않는다.
 const readsCell = (opcode: number) =>
-  opcode === EXPR.LOAD_VAR ||
-  opcode === EXPR.LOAD_STRING_LENGTH ||
-  opcode === EXPR.LOAD_ARRAY_LENGTH ||
-  opcode === EXPR.READ_LEAF;
+  opcode === EXPR_LOAD_VAR ||
+  opcode === EXPR_LOAD_STRING_LENGTH ||
+  opcode === EXPR_LOAD_ARRAY_LENGTH ||
+  opcode === EXPR_READ_LEAF;
 
 // varKey가 같으면 같은 변수다. 슬롯을 읽는 명령(LOAD_VAR, LOAD_STRING_LENGTH, LOAD_ARRAY_LENGTH)에만
 // 쓴다. 같은 슬롯이라도 값 칸과 길이 칸은 다른 변수라 칸 종류까지 넣는다.
@@ -104,7 +117,7 @@ const readsCell = (opcode: number) =>
 const VALUE_CELL = 0;
 const LENGTH_CELL = 1;
 const varKey = (expr: Uint8Array, pc: number) => {
-  const cell = expr[pc] === EXPR.LOAD_ARRAY_LENGTH ? LENGTH_CELL : VALUE_CELL;
+  const cell = expr[pc] === EXPR_LOAD_ARRAY_LENGTH ? LENGTH_CELL : VALUE_CELL;
   return (cell << 16) | (expr[pc + 1] << 8) | expr[pc + 2];
 };
 
@@ -132,7 +145,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     return positions.length - 1;
   };
   const varNumberOf = (pc: number) => {
-    if (expr[pc] === EXPR.READ_LEAF) {
+    if (expr[pc] === EXPR_READ_LEAF) {
       return newVar();
     }
     const key = varKey(expr, pc);
@@ -191,7 +204,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
       startStack.pop();
     }
     // 단항이라 스택 맨 위가 피연산자(leafIndex를 내는 부분식)의 시작이다.
-    if (opcode === EXPR.READ_LEAF) {
+    if (opcode === EXPR_READ_LEAF) {
       addLeafIndexOp(startStack[startStack.length - 1], prevPc);
     }
     addToChain(startStack[startStack.length - 1], pc);
