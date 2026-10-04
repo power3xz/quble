@@ -10,7 +10,10 @@ const preview: Preview = {
     layout: "fullscreen",
     // 패널에 Code 탭을 띄운다. 내용은 story 모듈이 넣는 원본(qubc-plugin.ts)이다.
     docs: { codePanel: true },
+    // 흰 배경 컴포넌트(팝업 등)의 경계가 보이도록 회색 배경과 격자를 기본으로 켠다.
+    backgrounds: { options: { gray: { name: "Gray", value: "#d9d9d9" } } },
   },
+  initialGlobals: { backgrounds: { value: "gray", grid: true } },
 };
 
 export default preview;
