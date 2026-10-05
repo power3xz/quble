@@ -14,6 +14,10 @@ export const nextRate = (rate: number) => (rate === 1300 ? 1350 : 1300);
 export const nextThreshold = (threshold: number) => (threshold === 30000 ? 30001 : 30000);// 기준 행은 매번 다음 행으로 옮겨, 모든 행의 비교 식(row.price - rows[pivot].price)이 다른 행을 읽게 한다.
 export const nextPivot = (pivot: number, length: number) => (pivot + 1) % length;
 
+// 전체 행 일괄 갱신이 번갈아 넘기는 두 배열 - 처음 데이터와 모든 행의 네 값이 1씩 큰 데이터.
+// runTarget이 로드와 네트워크 집계를 마친 뒤 채우므로 로드 지표에 들어가지 않는다.
+export const bulk: { base: TRow[]; bumped: TRow[] } = { base: [], bumped: [] };
+
 type TTarget<P> = {
   id: string;
   label: string;
@@ -46,6 +50,7 @@ export const SCENARIOS = [
   { key: "pivotPrice", label: "기준 행 가격 변경", desc: "모든 행의 비교 식이 읽는 기준 행 가격 하나가 바뀐다" },
   { key: "rateAndTax", label: "환율+세율 동시 변경", desc: "한 핸들러가 모든 행의 금액 식이 읽는 두 값을 함께 바꾼다" },
   { key: "rateBurst", label: "환율 연속 3회 변경", desc: "한 핸들러가 같은 값을 세 번 바꾼다" },
+  { key: "bulk", label: "전체 행 일괄 갱신", desc: "한 핸들러가 모든 행의 가격, 수량, 할인, 재고를 한꺼번에 바꾼다" },
 ] as const;
 
 export const TARGETS = [
@@ -173,6 +178,7 @@ const BUTTON_OF: Record<string, string> = {
   pivotPrice: "#btn-pivot-price",
   rateAndTax: "#btn-rate-tax",
   rateBurst: "#btn-rate-burst",
+  bulk: "#btn-bulk",
 };
 const buttonFor = (root: HTMLElement, key: string, k: number): HTMLElement => {
   if (key === "inc") {
@@ -314,6 +320,8 @@ export const runTarget = async <P>(target: TTarget<P>) => {
     await new Promise((r) => addEventListener("load", r, { once: true }));
   }
   const files = collectFiles();
+  bulk.base = data.rows;
+  bulk.bumped = await fetch(`./bulk-${n}.json`).then((r) => r.json() as Promise<TRow[]>);
   const result: TResult = {
     id: target.id,
     label: target.label,

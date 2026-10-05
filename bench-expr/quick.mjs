@@ -12,7 +12,7 @@ import { chromium } from "playwright";
 const ROUNDS = 5;
 const N = 10000;
 // 하네스 SCENARIOS와 같은 키와 순서. 표의 열을 padEnd로 맞추므로 라벨도 키 그대로 둔다(한글은 폭이 2칸).
-const SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst"];
+const SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk"];
 const RESULT_KEY = `quble|${N}|none`;
 
 const [url, outPath] = process.argv.slice(2);

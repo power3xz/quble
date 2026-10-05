@@ -1,4 +1,4 @@
-// public/data-<N>.json을 만든다. 네 대상이 모두 같은 파일을 fetch한다.
+// public/data-<N>.json과 bulk-<N>.json을 만든다. 네 대상이 모두 같은 파일을 fetch한다.
 // 난수는 시드 고정이라 매번 같은 데이터가 나온다.
 import { mkdirSync, writeFileSync } from "node:fs";
 
@@ -18,4 +18,7 @@ for (const n of [1000, 5000, 10000]) {
   }
   const data = { rows, rate: 1300, tax: 10, threshold: 30000, pivot: 0 };
   writeFileSync(new URL(`./public/data-${n}.json`, import.meta.url), JSON.stringify(data));
+  // 전체 행 일괄 갱신 시나리오가 처음 데이터와 번갈아 넘기는 배열 - 모든 행의 네 값이 1씩 크다.
+  const bumped = rows.map((r) => ({ ...r, price: r.price + 1, qty: r.qty + 1, discount: r.discount + 1, stock: r.stock + 1 }));
+  writeFileSync(new URL(`./public/bulk-${n}.json`, import.meta.url), JSON.stringify(bumped));
 }

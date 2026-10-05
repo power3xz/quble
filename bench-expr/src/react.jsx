@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
+import { bulk, nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
 
 const Row = ({ row, rows, pivot, rate, tax, threshold, onInc }) => (
   <div className="row">
@@ -63,6 +63,12 @@ const App = ({ data }) => {
           }}
         >
           환율 연속 3회 변경
+        </button>
+        <button
+          id="btn-bulk"
+          onClick={() => setRows((rs) => (rs[0].price === bulk.base[0].price ? bulk.bumped : bulk.base))}
+        >
+          전체 행 일괄 갱신
         </button>
         <span className="orders__info">
           환율 <span className="orders__rate">{rate}</span> / 기준 <span className="orders__threshold">{threshold}</span> / 기준 행{" "}
