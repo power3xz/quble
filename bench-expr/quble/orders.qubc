@@ -8,10 +8,12 @@ component Orders {
   }
   events {
     INC({})
-    RATE({})
-    THRESHOLD({})
-    PIVOT({})
-    PIVOT_PRICE({})
+    RATE({ nextRate: 2650 - rate })
+    THRESHOLD({ nextThreshold: 60001 - threshold })
+    PIVOT({ nextPivot: (pivot + 1) % rows.length })
+    PIVOT_PRICE({ nextPrice: rows[pivot].price + 1 })
+    RATE_AND_TAX({ nextRate: rate + 1, nextTax: tax + 1 })
+    RATE_BURST({ first: rate + 1, second: rate + 2, third: rate + 3 })
   }
   template {
     div(class="orders") {
@@ -20,6 +22,8 @@ component Orders {
         button(id="btn-threshold" @click:THRESHOLD) { "기준 변경" }
         button(id="btn-pivot" @click:PIVOT) { "기준 행 이동" }
         button(id="btn-pivot-price" @click:PIVOT_PRICE) { "기준 행 가격 변경" }
+        button(id="btn-rate-tax" @click:RATE_AND_TAX) { "환율+세율 동시 변경" }
+        button(id="btn-rate-burst" @click:RATE_BURST) { "환율 연속 3회 변경" }
         span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } " / 기준 " span(class="orders__threshold") { ${threshold} } " / 기준 행 " span(class="orders__pivot") { ${pivot} } }
       }
       div(class="orders__list") {

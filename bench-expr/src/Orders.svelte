@@ -8,7 +8,7 @@
   let rate = $state(data.rate);
   let threshold = $state(data.threshold);
   let pivot = $state(data.pivot);
-  const tax = data.tax;
+  let tax = $state(data.tax);
 </script>
 
 <div class="orders">
@@ -17,6 +17,8 @@
     <button id="btn-threshold" onclick={() => (threshold = nextThreshold(threshold))}>기준 변경</button>
     <button id="btn-pivot" onclick={() => (pivot = nextPivot(pivot, rows.length))}>기준 행 이동</button>
     <button id="btn-pivot-price" onclick={() => rows[pivot].price++}>기준 행 가격 변경</button>
+    <button id="btn-rate-tax" onclick={() => { rate++; tax++; }}>환율+세율 동시 변경</button>
+    <button id="btn-rate-burst" onclick={() => { rate++; rate++; rate++; }}>환율 연속 3회 변경</button>
     <span class="orders__info">
       환율 <span class="orders__rate">{rate}</span> / 기준 <span class="orders__threshold">{threshold}</span> / 기준 행 <span class="orders__pivot">{pivot}</span>
     </span>

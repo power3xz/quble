@@ -11,8 +11,7 @@ export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number
 
 // 버튼이 오가는 값. 환율은 매번 바꿔 모든 행 금액이 바뀌고, 기준은 1만 움직여 경고가 거의 안 바뀐다.
 export const nextRate = (rate: number) => (rate === 1300 ? 1350 : 1300);
-export const nextThreshold = (threshold: number) => (threshold === 30000 ? 30001 : 30000);
-// 기준 행은 매번 다음 행으로 옮겨, 모든 행의 비교 식(row.price - rows[pivot].price)이 다른 행을 읽게 한다.
+export const nextThreshold = (threshold: number) => (threshold === 30000 ? 30001 : 30000);// 기준 행은 매번 다음 행으로 옮겨, 모든 행의 비교 식(row.price - rows[pivot].price)이 다른 행을 읽게 한다.
 export const nextPivot = (pivot: number, length: number) => (pivot + 1) % length;
 
 type TTarget<P> = {
@@ -45,6 +44,8 @@ export const SCENARIOS = [
   { key: "threshold", label: "기준 변경", desc: "모든 행의 경고 식을 다시 세지만 값은 거의 그대로" },
   { key: "pivot", label: "기준 행 이동", desc: "모든 행의 비교 식이 인덱스가 바뀌어 다른 행을 읽는다" },
   { key: "pivotPrice", label: "기준 행 가격 변경", desc: "모든 행의 비교 식이 읽는 기준 행 가격 하나가 바뀐다" },
+  { key: "rateAndTax", label: "환율+세율 동시 변경", desc: "한 핸들러가 모든 행의 금액 식이 읽는 두 값을 함께 바꾼다" },
+  { key: "rateBurst", label: "환율 연속 3회 변경", desc: "한 핸들러가 같은 값을 세 번 바꾼다" },
 ] as const;
 
 export const TARGETS = [
@@ -170,6 +171,8 @@ const BUTTON_OF: Record<string, string> = {
   threshold: "#btn-threshold",
   pivot: "#btn-pivot",
   pivotPrice: "#btn-pivot-price",
+  rateAndTax: "#btn-rate-tax",
+  rateBurst: "#btn-rate-burst",
 };
 const buttonFor = (root: HTMLElement, key: string, k: number): HTMLElement => {
   if (key === "inc") {
