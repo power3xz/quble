@@ -99,14 +99,37 @@ clear.addEventListener("click", () => {
   render();
 });
 
-// 지금 보이는 표를 캡션과 함께 탭으로 나눈 텍스트로 복사한다. 셀 안의 줄바꿈(대상 이름 아래 측정 시각)은 공백으로 잇는다.
+// 지금 그려진 표를 캡션과 함께 탭으로 나눈 텍스트로 만든다. 셀 안의 줄바꿈(대상 이름 아래 측정 시각)은 공백으로 잇는다.
+const tableText = (): string => {
+  const table = document.getElementById("compare") as HTMLTableElement;
+  const lines = [...table.rows].map((tr) => [...tr.cells].map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("\t"));
+  return [document.getElementById("caption")!.textContent, ...lines].join("\n");
+};
+
+// 세 지표(DOM 반영, 레이아웃, 힙) 표를 모두 이어 복사한다. 보이는 표를 바꿔 가며 그린 뒤 원래 지표로 돌려놓는다.
+// 복사가 끝나면 버튼 글자가 잠깐 바뀐다.
+const METRICS: TMetric[] = ["dom", "layout", "heap"];
 const copy = document.createElement("button");
 copy.className = "btn";
 copy.textContent = "표 복사";
-copy.addEventListener("click", () => {
-  const table = document.getElementById("compare") as HTMLTableElement;
-  const lines = [...table.rows].map((tr) => [...tr.cells].map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("\t"));
-  void navigator.clipboard.writeText([document.getElementById("caption")!.textContent, ...lines].join("\n"));
+copy.addEventListener("click", async () => {
+  const shown = metric;
+  const texts = METRICS.map((m) => {
+    metric = m;
+    render();
+    return tableText();
+  });
+  metric = shown;
+  render();
+  try {
+    await navigator.clipboard.writeText(texts.join("\n\n"));
+    copy.textContent = "복사됨 (표 3개)";
+  } catch {
+    copy.textContent = "복사 실패";
+  }
+  setTimeout(() => {
+    copy.textContent = "표 복사";
+  }, 1500);
 });
 
 document.getElementById("controls")!.append(...controls(render), metricSelect, copy, clear);
