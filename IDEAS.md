@@ -118,6 +118,35 @@ interpret(chunk.code, paths, ...) }` (3) 활성화 트리거를 건다. activate
 바이트코드 포맷 변경이라 크다 - 런타임 트리셰이킹(기능 청크 분할)과 같은 "필요할 때만 로드"
 계열이니 함께 검토.
 
+### 라우트 전환 시 singleton 컴포넌트 보존 (outlet 대체)
+
+페이지를 라우트마다 통째로 쓰면 Header/Footer처럼 공통인 부분도 라우트가 바뀔 때 다시 만들어진다.
+React는 이를 피하려고 outlet(상위 레이아웃이 `<Outlet />` 자리에 자식 라우트를 끼움)을 쓰는데,
+페이지 구성이 한 파일에 안 보인다. 페이지는 전부 풀어 쓰고, **`singleton`으로 표시한 컴포넌트만**
+라우트가 바뀌어도 인스턴스를 유지한다.
+
+    // React - Page1 -> Page2에서 Header/Footer가 새로 만들어진다. 유지하려면 outlet이 필요
+    Page1 = <App><Header /><ListContent /><Footer /></App>
+    Page2 = <App><Header /><DetailContent /><Footer /></App>
+
+    // quble - 두 페이지가 각자 전체 구성을 쓰고, singleton 표시만으로 Header/Footer 유지
+    Page1: App { Header(singleton) ListContent Footer(singleton) }
+    Page2: App { Header(singleton) DetailContent Footer(singleton) }
+    // 표기는 예시. 이동하면 ListContent -> DetailContent만 교체되고 Header/Footer는 그대로
+
+- 같은 자리가 아니어도 된다 - `Page1`의 `App.Header`와 `Page2`의 `Layout.Top.Header`가 같은
+  singleton이면 인스턴스를 옮긴다.
+- singleton이 없는 라우트로 이동해도 인스턴스를 보존하고, 돌아오면 그대로 쓴다. singleton 수는
+  컴파일타임에 정해져 보존 크기가 유한하다.
+- 컴파일러 검증: 한 라우트에 두 번 나오거나 `@for` 몸체 안에 있으면 오류.
+- 선행 사례: Turbo `data-turbo-permanent`, htmx `hx-preserve`(런타임에 DOM `id`로 맞춤 -
+  우리는 컴파일타임 검증).
+
+**미결:** `singleton` 표시를 사용처에 달지 컴포넌트 선언에 달지. singleton의 fullname을 자기
+자신을 루트로 둘지(위치 독립 id). 컴파일 오류 규칙(한 라우트 중복, `@for` 안)의 확정. 슬롯 내용이
+라우트마다 다른 singleton. 화면에서 떨어진 인스턴스의 구독 유지 여부(유지 쪽으로 기울었으나 사용
+사례 없이 한 추정). 핸들러 `goTo`(DESIGN.md)와의 연결.
+
 ### qubb 리소스 테이블 (`LOAD_EX`의 resId -> 경로)
 
 외부 리소스 로드(`LOAD_EX resId`, 컴포넌트가 `use './x.css'` 한 CSS를 로드)에서, resId가 어느
