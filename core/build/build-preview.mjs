@@ -118,11 +118,17 @@ const preloads = [
 if (finalManifest.handlers) {
   preloads.push(`  <link rel="modulepreload" href="./${finalManifest.handlers}">`);
 }
+// 전역 스타일(reset.css, global.css)을 dist로 복사해 싣는다 - playground/Storybook과 같은 두 파일이다.
+const globalStyles = ["reset.css", "global.css"];
+for (const file of globalStyles) {
+  writeFileSync(join(distDir, file), readFileSync(join(buildDir, "..", "web", "styles", file)));
+}
 const indexHtml = `<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <title>${stem}</title>
+${globalStyles.map((file) => `  <link rel="stylesheet" href="./${file}">`).join("\n")}
 ${preloads.join("\n")}
 </head>
 <body>
