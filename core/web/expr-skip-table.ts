@@ -81,7 +81,7 @@ export type TExprSkipTable = {
   // 비어 있다.
   //   a[i].b + x   FIELD_AT(7)이 넘긴 leafIndex를 READ_LEAF(9)가 읽는다
   //     a, i -> [7]    READ_LEAF 자신, x -> []
-  leafIndexOpsByVar: Int32Array[];
+  readLeafIndexOpsByVar: Int32Array[];
 };
 
 // 잎 명령인가. 스택에서 아무것도 꺼내지 않고 값 하나를 올린다.
@@ -218,7 +218,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     positionsByVar: positions.map((p) => Int32Array.from(p)),
     varAt,
     skipPastOpByVar: [],
-    leafIndexOpsByVar: leafIndexOps.map((ops) => Int32Array.from(ops)),
+    readLeafIndexOpsByVar: leafIndexOps.map((ops) => Int32Array.from(ops)),
   };
   table.skipPastOpByVar = table.positionsByVar.map((p) => buildSkipPastOp(table, expr, p));
   if (table.skipPastOpByVar.every((skipPastOp) => Object.keys(skipPastOp).length === 0)) {

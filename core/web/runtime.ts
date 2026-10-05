@@ -1956,9 +1956,9 @@ class Interpreter {
   ): unknown => {
     const cache: unknown[] = new Array(table.opCount);
     const { value, leafOfVar } = this.evalExpr(expr, pairs, table, cache);
-    // 인덱스 접근이 있으면 배열 변수가 READ_LEAF가 읽을 leafIndex를 정하므로 leafIndexOpsByVar 어딘가가
+    // 인덱스 접근이 있으면 배열 변수가 READ_LEAF가 읽을 leafIndex를 정하므로 readLeafIndexOpsByVar 어딘가가
     // 비어 있지 않다.
-    const hasIndexAccess = table.leafIndexOpsByVar.some((ops) => ops.length > 0);
+    const hasIndexAccess = table.readLeafIndexOpsByVar.some((ops) => ops.length > 0);
     let lastValue = value;
     const reevalOnChange: TSubscriber = (_, leafIndex) => {
       const skipPastOp = this.skipPastOpOfLeaf(expr, table, leafOfVar, leafIndex);
@@ -2042,7 +2042,7 @@ class Interpreter {
     subscriber: TSubscriber,
     varNumber: number,
   ): void => {
-    for (const op of table.leafIndexOpsByVar[varNumber]) {
+    for (const op of table.readLeafIndexOpsByVar[varNumber]) {
       const readLeafVar = table.varAt[op + instrSize(expr[op])];
       const newLeafIndex = cache[table.cacheIndex[op]] as number;
       this.resubscribeReadLeaf(leafOfVar, branch, subscriber, readLeafVar, newLeafIndex);

@@ -109,7 +109,7 @@ test("READ_LEAF가 읽을 leafIndex를 정하는 데 쓰인 변수에 그 leafIn
   const table = tableOf(bytes(v(0), v(1), EXPR_ELEM_AT, EXPR_FIELD_AT, 0, EXPR_READ_LEAF, v(2), EXPR_ADD));
   // 변수는 a(0), i(1), READ_LEAF(2), x(3). READ_LEAF 자신과 x는 읽을 leafIndex를 바꾸지 않는다.
   assert.deepEqual(
-    table.leafIndexOpsByVar,
+    table.readLeafIndexOpsByVar,
     [[7], [7], [], []].map((p) => Int32Array.from(p)),
   );
 });
@@ -125,14 +125,14 @@ test("중첩된 인덱스 접근은 안쪽이 바뀌면 바깥 READ_LEAF가 읽�
   // 변수는 a(0), b(1), k(2), 안쪽 READ_LEAF(3), 바깥 READ_LEAF(4). 안쪽 READ_LEAF가 읽은 값은 바깥의
   // 인덱스라, 그 leaf가 바뀌면 바깥이 읽을 leafIndex가 바뀐다.
   assert.deepEqual(
-    table.leafIndexOpsByVar,
+    table.readLeafIndexOpsByVar,
     [[12], [9, 12], [9, 12], [12], []].map((p) => Int32Array.from(p)),
   );
 });
 
 test("배열 인덱스 접근이 없는 식은 READ_LEAF가 읽을 leafIndex를 바꾸는 변수가 없다", () => {
   assert.deepEqual(
-    tableOf(MIXED).leafIndexOpsByVar,
+    tableOf(MIXED).readLeafIndexOpsByVar,
     [[], [], [], [], []].map((p) => Int32Array.from(p)),
   );
 });

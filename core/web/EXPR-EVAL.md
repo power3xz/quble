@@ -195,7 +195,7 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 | `skipPastOpByVar` | 변수마다 건너뛸 표 |
 | `cacheIndex`, `opCount` | 연산 위치 -> cache 칸 번호, 연산 수 |
 | `positionsByVar`, `varAt` | 변수 -> 읽는 위치, 위치 -> 변수. 처음 셀 때 어느 leaf를 어느 변수가 읽었는지 모은다 |
-| `leafIndexOpsByVar` | 인덱스 접근의 구독을 다시 건다(5절) |
+| `readLeafIndexOpsByVar` | 인덱스 접근의 구독을 다시 건다(5절) |
 | `sameStartOpChain` | 위의 표를 만들 때만 사용한다 |
 
 **인스턴스마다**
@@ -272,14 +272,14 @@ branch.updateFns     [fn, fn, fn]
 
 **어느 변수가 이 leafIndex를 정하는지는 표를 만들 때 정해진다.** `READ_LEAF`를 만나면, 그 바로 앞
 연산(leafIndex를 넘기는 연산)의 부분식 구간 안에서 읽히는 변수마다 그 연산 위치를 단다
-(`leafIndexOpsByVar`).
+(`readLeafIndexOpsByVar`).
 
 | 위치 | 0 | 3 | 6 | 7 | 9 | 10 | 12 |
 |---|---|---|---|---|---|---|---|
 | 명령 | LOAD_VAR rows | LOAD_VAR cursor | ELEM_AT | FIELD_AT 1 | READ_LEAF | LOAD_SMALL_INT 2 | MUL |
 | FIELD_AT(7)의 구간 | = | = | = | = | | | |
 
-| 변수 | `leafIndexOpsByVar` | |
+| 변수 | `readLeafIndexOpsByVar` | |
 |---|---|---|
 | rows | [7] | 구간 안 - 인덱스 쪽만이 아니라 배열 쪽도 든다 |
 | cursor | [7] | 구간 안 |
@@ -288,7 +288,7 @@ branch.updateFns     [fn, fn, fn]
 **다시 센 뒤 구독을 다시 건다.** cursor가 0에서 1로 바뀌면
 
 1. cursor 변수의 건너뛸 표로 다시 센다. `cache[FIELD_AT]`이 5가 된다.
-2. `leafIndexOpsByVar[cursor]`가 `[7]`이다.
+2. `readLeafIndexOpsByVar[cursor]`가 `[7]`이다.
 3. `cache[FIELD_AT(7)]`의 5가 `READ_LEAF`가 방금 읽은 leafIndex다.
 4. `resubscribeReadLeaf`가 `leafOfVar[READ_LEAF]`의 3과 5를 비교한다. 다르므로 5로 바꾸고
    - 3을 읽는 변수가 더 없으니 3의 구독을 푼다.
@@ -314,7 +314,7 @@ ${columns[lane].cards[seat].title}
 | 안쪽 FIELD_AT의 구간 | = | = | = | = | | | | | |
 | 바깥 FIELD_AT의 구간 | = | = | = | = | = | = | = | = | |
 
-| 변수 | `leafIndexOpsByVar` |
+| 변수 | `readLeafIndexOpsByVar` |
 |---|---|
 | columns, lane | 안쪽 FIELD_AT, 바깥 FIELD_AT |
 | 안쪽 READ_LEAF, seat | 바깥 FIELD_AT |
@@ -337,7 +337,7 @@ cursor 0이 가리키는 요소는 A에서 B로 바뀌었지만, 식이 읽는 l
 ```
 notify(leaf 0)
   -> reeval with skip table of rows    ELEM_AT 4, FIELD_AT 5
-  -> leafIndexOpsByVar[rows] = [7]
+  -> readLeafIndexOpsByVar[rows] = [7]
   -> resubscribe 3 -> 5
 ```
 
