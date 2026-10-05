@@ -1,0 +1,27 @@
+component NotifyBatch {
+  props { a: number, b: number, rows: { label: string }[] }
+  events {
+    BUMP_A_THREE({})
+    BUMP_AB({})
+    REMOVE_THEN_PUSH({})
+    SHRINK_THEN_GROW({})
+  }
+  template {
+    div(class="root") {
+      span(class="a") { ${a} }
+      span(class="sum") { ${a + b} }
+      button(class="bump-a" @click:BUMP_A_THREE) { "a" }
+      button(class="bump-ab" @click:BUMP_AB) { "ab" }
+      button(class="remove-push" @click:REMOVE_THEN_PUSH) { "rp" }
+      button(class="shrink-grow" @click:SHRINK_THEN_GROW) { "sg" }
+      ul() {
+        @for (row, i of rows) {
+          li(class="row") {
+            span(class="idx") { ${i} }
+            span(class="label") { ${row.label} }
+          }
+        }
+      }
+    }
+  }
+}

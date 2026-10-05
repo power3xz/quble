@@ -1283,19 +1283,28 @@ class Interpreter {
       }
     }
     binding.props ??= this.buildProps(this.module.defs[binding.compId].propsTypeRef, binding.scope);
-    this.handlers[binding.fullName]?.(data, {
-      event: domEventObject,
-      set: this.store.set,
-      get: this.store.get,
-      setObject: this.setObject,
-      setArray: this.setArrayElements,
-      push: this.pushArrayElement,
-      removeAt: this.removeArrayElementAt,
-      swapAt: this.swapArrayElementsAt,
-      props: binding.props,
-      store: this.rootStore(),
-      context,
-      ...currentIndices,
+    const handler = this.handlers[binding.fullName];
+    if (handler === undefined) {
+      return;
+    }
+    // 핸들러가 끝날 때까지 구독자 통지를 모은다 - 값은 set이 바로 기록하니 핸들러 안의 get은 새 값을 읽는다.
+    // 같은 칸을 여러 번 써도 한 번, 배열 조작이 쓰는 여러 칸도 칸마다 한 번씩만 나간다. 핸들러가 반환하는
+    // Promise를 기다린 뒤의 쓰기는 이미 배치 밖이라 지금처럼 바로 통지한다.
+    this.store.batch(() => {
+      handler(data, {
+        event: domEventObject,
+        set: this.store.set,
+        get: this.store.get,
+        setObject: this.setObject,
+        setArray: this.setArrayElements,
+        push: this.pushArrayElement,
+        removeAt: this.removeArrayElementAt,
+        swapAt: this.swapArrayElementsAt,
+        props: binding.props,
+        store: this.rootStore(),
+        context,
+        ...currentIndices,
+      });
     });
   };
 

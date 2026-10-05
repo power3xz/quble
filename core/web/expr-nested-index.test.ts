@@ -34,6 +34,13 @@ const seed = () => ({
 // 핸들러 안에서 난 에러. 클릭으로 부른 핸들러의 에러는 click()까지 올라오지 않아 여기 담아 본다.
 let handlerError: unknown = null;
 
+// 핸들러가 끝날 때 모은 통지에서 난 에러는 핸들러 밖(dispatch)에서 올라오므로 핸들러 안 try로 못 받는다.
+// click()은 listener의 에러를 jsdom이 window의 error 이벤트로 보고하게 하니 여기서 받아 담는다.
+document.defaultView?.addEventListener("error", (e) => {
+  handlerError = e.error;
+  e.preventDefault();
+});
+
 const handlers: THandlers = {
   REMOVE_FIRST_COLUMN: (_d, ctx) => {
     const removeAt = ctx.removeAt as (a: unknown, i: number) => void;
