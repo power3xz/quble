@@ -238,6 +238,22 @@ React는 이를 피하려고 outlet(상위 레이아웃이 `<Outlet />` 자리�
   변환의 경계. 응답 배열 원소를 `@for` 몸체로 보내는 방법(배열 원소 데이터 전달 공백)이 먼저
   풀려야 한다.
 
+### payload의 `items[]` - 현재 회차 요소 전달
+
+`@for` 안에서 발화하는 이벤트가 payload로 도는 배열의 현재 요소를 넘기는 표기. 지금은 payload에
+루프 변수나 `$0`을 못 써서 요소를 넘길 방법이 없다(`rows[cursor]`처럼 인덱스가 prop인 경우만 됨).
+
+    @for (item of items) {
+      button(@click:PICK) { ... }       // events { PICK({ row: items[] }) }
+    }
+
+- `items[]`는 발화할 때 현재 회차 칸의 값을 읽어 `items[그 값]`을 넘긴다. `items[$0]`와 같은
+  뜻이다. 항목을 빼서 순서가 바뀌어도 회차 칸이 갱신돼 맞게 나온다.
+- `items`를 도는 `@for` 밖에서 쓰면 컴파일 오류.
+
+**미결:** 중첩 루프에서 `rows[].cells[]`의 각 `[]`가 어느 `@for`에 묶이는지(도는 배열 식과 맞는
+것끼리, 같은 배열이 두 깊이에 있으면 가까운 쪽?).
+
 ### qubb 리소스 테이블 (`LOAD_EX`의 resId -> 경로)
 
 외부 리소스 로드(`LOAD_EX resId`, 컴포넌트가 `use './x.css'` 한 CSS를 로드)에서, resId가 어느
