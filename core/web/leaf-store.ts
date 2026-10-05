@@ -123,7 +123,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   };
 
   // fn 안의 set/notify가 보낼 통지를 모았다가 가장 바깥 batch가 끝날 때 칸마다 한 번 보낸다. 값은 set이
-  // 바로 기록하므로 fn 안의 get은 새 값을 읽는다. fn이 예외를 던져도 모은 통지는 나가고 예외는 올라간다.
+  // 바로 기록하므로 fn 안의 get은 새 값을 읽는다. fn이 예외를 throw해도 모은 통지는 나가고 예외는 올라간다.
   const batch = (fn: () => void): void => {
     batchDepth += 1;
     try {
@@ -137,12 +137,25 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   };
 
   // 모은 칸을 처음 모은 순서대로 비운다. 구독자가 통지 중에 쓰는 값이 같은 집합을 건드리지 않게 먼저
-  // 옮겨 담고 비운 뒤 부른다.
+  // 옮겨 담고 비운 뒤 부른다. 구독자가 예외를 throw해도 나머지 칸은 모두 통지한다 - 값은 이미 다 기록됐는데
+  // 통지만 건너뛰면 화면이 값을 따라오지 못한다. 첫 예외는 모두 통지한 뒤 다시 throw한다.
   const flushPending = (): void => {
     const leaves = [...pendingLeaves];
     pendingLeaves.clear();
+    let failed = false;
+    let firstError: unknown;
     for (const leafIndex of leaves) {
-      fire(leafIndex);
+      try {
+        fire(leafIndex);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstError = error;
+        }
+      }
+    }
+    if (failed) {
+      throw firstError;
     }
   };
 

@@ -2,7 +2,7 @@
 // 끝날 때 칸마다 한 번씩 보낸다. 배치 밖은 지금처럼 set마다 바로 통지한다.
 //
 // 규칙: 값은 즉시 기록(get이 새 값을 읽음). 같은 칸을 여러 번 써도 통지는 한 번, 마지막 값으로.
-// 서로 다른 칸은 처음 모은 순서대로. 중첩 batch는 가장 바깥이 끝날 때만 비운다. fn이 예외를 던져도
+// 서로 다른 칸은 처음 모은 순서대로. 중첩 batch는 가장 바깥이 끝날 때만 비운다. fn이 예외를 throw해도
 // 모은 통지는 나가고 예외는 그대로 올라간다.
 
 import assert from "node:assert/strict";
@@ -102,7 +102,7 @@ test("배치가 끝나면 이후 set은 다시 바로 통지한다", () => {
   assert.deepEqual(calls, [[1, "y"]]);
 });
 
-test("fn이 예외를 던져도 모은 통지는 나가고 예외는 그대로 올라간다", () => {
+test("fn이 예외를 throw해도 모은 통지는 나가고 예외는 그대로 올라간다", () => {
   const { store, calls } = setup();
   assert.throws(
     () =>
@@ -116,6 +116,28 @@ test("fn이 예외를 던져도 모은 통지는 나가고 예외는 그대로 �
   calls.length = 0;
   store.set(1, "y");
   assert.deepEqual(calls, [[1, "y"]], "예외 뒤에도 깊이가 돌아와 바로 통지한다");
+});
+
+test("통지 중 구독자가 예외를 throw해도 나머지 칸은 모두 통지하고 첫 예외를 올린다", () => {
+  const store = createLeafStoreSubject(["a", "b", "c"]);
+  const calls: number[] = [];
+  store.subscribe(0, () => {
+    calls.push(0);
+    throw new Error("첫 칸 구독자 오류");
+  });
+  store.subscribe(1, () => calls.push(1));
+  store.subscribe(2, () => calls.push(2));
+
+  assert.throws(
+    () =>
+      store.batch(() => {
+        store.set(0, "x");
+        store.set(1, "y");
+        store.set(2, "z");
+      }),
+    /첫 칸 구독자 오류/,
+  );
+  assert.deepEqual(calls, [0, 1, 2], "앞 칸에서 예외가 발생해도 뒤 칸의 통지는 건너뛰지 않는다");
 });
 
 test("통지를 보내는 중 구독자가 쓴 값은 바로 통지된다", () => {
