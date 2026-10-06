@@ -294,3 +294,33 @@ test("변수가 32개를 넘는 식에서도 같은 표가 나온다", () => {
   // v0과 v32가 바뀌면 곱 전체를 다시 세고 건너뛸 부분식이 없다.
   assert.deepEqual(buildSkipPastOpsOfVars(table, expr, [0, 32]), {});
 });
+
+// 같은 식을 쓰는 인스턴스(@for 행마다 하나씩)가 바뀐 변수 조합이 같으면 같은 표를 쓰도록 table에 담아 둔다.
+
+test("같은 변수 조합은 순서와 상관없이 담아 둔 같은 표를 돌려준다", () => {
+  const table = tableOf(MIXED);
+  const first = buildSkipPastOpsOfVars(table, MIXED, [0, 2]);
+  assert.equal(buildSkipPastOpsOfVars(table, MIXED, [0, 2]), first);
+  assert.equal(buildSkipPastOpsOfVars(table, MIXED, [2, 0]), first);
+  assert.notEqual(buildSkipPastOpsOfVars(table, MIXED, [0, 3]), first, "다른 조합은 다른 표");
+  assert.equal(table.skipPastOpsByVarSet.size, 2);
+});
+
+test("변수가 하나면 담아 두지 않고 변수별 표를 쓴다", () => {
+  const table = tableOf(MIXED);
+  buildSkipPastOpsOfVars(table, MIXED, [2]);
+  assert.equal(table.skipPastOpsByVarSet.size, 0);
+});
+
+test("변수가 32개를 넘는 식은 비트마스크 키를 못 만들어 담아 두지 않는다", () => {
+  const parts: (number | number[])[] = [v(0)];
+  for (let offset = 1; offset < 32; offset++) {
+    parts.push(v(offset), EXPR_ADD);
+  }
+  parts.push(v(32), EXPR_MUL);
+  const expr = bytes(...parts);
+  const table = tableOf(expr);
+  const first = buildSkipPastOpsOfVars(table, expr, [0, 32]);
+  assert.notEqual(buildSkipPastOpsOfVars(table, expr, [0, 32]), first);
+  assert.equal(table.skipPastOpsByVarSet.size, 0);
+});

@@ -75,6 +75,10 @@ export type TExprSkipTable = {
   // 변수 번호 -> 그 변수가 바뀌었을 때의 skipPastOps. 변수가 식에 여러 번 나오면 그 위치들이 함께
   // 바뀐 것으로 본다. c(2)는 { 0: 6, 11: 17 }.
   skipPastOpsByVar: TSkipPastOps[];
+  // 둘 이상의 변수가 함께 바뀌었을 때의 skipPastOps. 키는 바뀐 변수 번호를 비트로 모은 정수(변수 a=0, c=2가
+  // 바뀌면 0b101). 같은 식을 쓰는 인스턴스(@for 행마다 하나씩)가 같은 조합이면 같은 표를 쓰도록, 조합이
+  // 처음 나올 때 buildSkipPastOpsOfVars가 담는다. 변수가 32개를 넘는 식은 키를 만들 수 없어 담지 않는다.
+  skipPastOpsByVarSet: Map<number, TSkipPastOps>;
   // 변수 번호 -> 그 변수가 바뀌면 READ_LEAF가 읽을 leafIndex가 바뀌는가. leafIndex가 바뀌는 READ_LEAF마다,
   // 그 READ_LEAF에 leafIndex를 넘기는 연산(바로 앞 명령)의 위치를 담는다. 런타임은 다시 센 뒤 그 연산의
   // cache 값으로 READ_LEAF가 새로 읽은 leafIndex를 알고 구독을 다시 건다. 인덱스 접근이 없는 식은 모두
@@ -218,6 +222,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     positionsByVar: positions.map((p) => Uint8Array.from(p)),
     varAt,
     skipPastOpsByVar: [],
+    skipPastOpsByVarSet: new Map(),
     readLeafIndexOpsByVar: leafIndexOps.map((ops) => Uint8Array.from(ops)),
   };
   table.skipPastOpsByVar = table.positionsByVar.map((p) => buildSkipPastOps(table, expr, p));
@@ -227,28 +232,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
   return table;
 };
 
-// 부분식 안에 바뀐 위치가 있는지를 뺄셈 한 번으로 알려고 두는 배열이다. 식은 최대 255바이트라 크기가
-// 정해져 있어 호출마다 새로 만들지 않고 다시 쓴다.
-//   changedMark    바뀐 위치마다 1이다. accumulateChanged가 읽고 0으로 되돌린다.
-//   changedPrefix  changedPrefix[i]는 위치 0~i-1에 바뀐 위치가 몇 개인지다.
-//
-// 위 식에서 a(위치 0)와 c(위치 7)가 바뀌었다면
-//   i              0  1  2 ... 7  8  9 ... 19
-//   changedPrefix  0  1  1 ... 1  2  2 ...  2
-//   a + b(위치 0~6)에는 changedPrefix[7] - changedPrefix[0] = 1이라 바뀐 위치가 있다.
-//   d + e(위치 11~17)에는 changedPrefix[18] - changedPrefix[11] = 0이라 없다.
-const MAX_EXPR_LEN = 255;
-const changedMark = new Uint8Array(MAX_EXPR_LEN);
-const changedPrefix = new Uint8Array(MAX_EXPR_LEN + 1);
-
-const accumulateChanged = (len: number) => {
-  for (let i = 0; i < len; i++) {
-    changedPrefix[i + 1] = changedPrefix[i] + changedMark[i];
-    changedMark[i] = 0;
-  }
-};
-
-// 바뀐 위치들(changedPositions, 오름차순)을 품지 않은 부분식을 골라 skipPastOps를 만든다.
+// 바뀐 위치들(changedPositions)을 품지 않은 부분식을 골라 skipPastOps를 만든다.
 // buildSkipTable이 변수마다 부른다. 변수 여럿이 함께 바뀌는 경우는 buildSkipPastOpsOfVars가 맡는다.
 //
 // 위 식에서 d와 e를 읽는 위치가 함께 바뀌면 changedPositions = [11, 14]
@@ -259,19 +243,10 @@ export const buildSkipPastOps = (
   expr: Uint8Array,
   changedPositions: Uint8Array,
 ): TSkipPastOps => {
-  for (const position of changedPositions) {
-    changedMark[position] = 1;
-  }
-  return walkSkipPastOps(table, expr);
-};
-
-// changedMark에 표시된 바뀐 위치를 품지 않은 부분식을 골라 skipPastOps를 만든다.
-const walkSkipPastOps = (table: TExprSkipTable, expr: Uint8Array): TSkipPastOps => {
-  accumulateChanged(expr.length);
   const chain = table.sameStartOpChain;
 
-  // 위치 start~end 구간에 바뀐 위치가 하나라도 있나.
-  const hasChangeIn = (start: number, end: number) => changedPrefix[end + 1] - changedPrefix[start] > 0;
+  // 위치 start~end 구간에 바뀐 위치가 하나라도 있나. 표를 만들 때만 도는 코드라 그냥 다 본다.
+  const hasChangeIn = (start: number, end: number) => changedPositions.some((p) => start <= p && p <= end);
 
   // pc에서 시작하는 부분식을 바깥부터 보며, 바뀐 위치가 없는 첫 부분식의 끝 연산을 찾는다. 모두 바뀐
   // 위치를 품으면 CHAIN_END다.
@@ -316,10 +291,24 @@ export const buildSkipPastOpsOfVars = (table: TExprSkipTable, expr: Uint8Array, 
   if (varNumbers.length === 1) {
     return table.skipPastOpsByVar[varNumbers[0]];
   }
-  for (const varNumber of varNumbers) {
-    for (const position of table.positionsByVar[varNumber]) {
-      changedMark[position] = 1;
+  const cacheable = table.positionsByVar.length <= 32;
+  let key = 0;
+  if (cacheable) {
+    for (const varNumber of varNumbers) {
+      key |= 1 << varNumber;
+    }
+    const found = table.skipPastOpsByVarSet.get(key);
+    if (found !== undefined) {
+      return found;
     }
   }
-  return walkSkipPastOps(table, expr);
+  const positions: number[] = [];
+  for (const varNumber of varNumbers) {
+    positions.push(...table.positionsByVar[varNumber]);
+  }
+  const skipPastOps = buildSkipPastOps(table, expr, Uint8Array.from(positions));
+  if (cacheable) {
+    table.skipPastOpsByVarSet.set(key, skipPastOps);
+  }
+  return skipPastOps;
 };
