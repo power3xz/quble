@@ -4088,6 +4088,30 @@ component B { props { a: A } template { div( /) } }"#;
         assert_eq!(error_message("component C ]"), "expected `{`, found `]`");
     }
 
+    /// `__proto__`는 이름으로 못 쓴다 - 런타임이 이름을 키로 객체에 값을 기록하면 own 속성 대신
+    /// 프로토타입이 바뀐다. 이름이 객체 키가 되는 자리마다 본다.
+    #[test]
+    fn proto_name_rejected() {
+        let rejected = "`__proto__` is reserved and cannot be used as a name";
+        let cases = [
+            // prop
+            "component C { props { __proto__: string } template { p( /) } }",
+            // 객체 타입 필드
+            "component C { props { a: { __proto__: string } } template { p( /) } }",
+            // 이벤트
+            "component C { events { __proto__({}) } template { p( /) } }",
+            // payload 필드
+            "component C { props { a: string } events { GO({ __proto__: a }) } template { p( /) } }",
+            // 컨텍스트
+            "component C { props { a: string } contexts { __proto__ { a } } template { p( /) } }",
+            // 컨텍스트 필드
+            "component C { props { a: string } contexts { Area { __proto__: a } } template { p( /) } }",
+        ];
+        for src in cases {
+            assert_eq!(error_message(src), rejected, "{src}");
+        }
+    }
+
     /// base_dir 아래 경로는 상대경로로 줄여 낸다. 아래가 아니면 원본 그대로.
     #[test]
     fn diagnostic_shortens_path_under_base_dir() {
