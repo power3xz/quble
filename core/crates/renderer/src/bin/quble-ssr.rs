@@ -1,12 +1,15 @@
 //! `quble-ssr <qubb> <data.json> [resource-url...]` - qubb를 data로 렌더한 HTML을 stdout에 낸다.
-//! LOAD_RES가 만난 리소스 URL은 stderr에 `link: <url>`로 한 줄씩 낸다.
+//! data 자리가 `-`면 표준 입력에서 읽는다. LOAD_RES가 만난 리소스 URL은 stderr에 `link: <url>`로
+//! 한 줄씩 낸다.
 
+use std::io::Read;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
         eprintln!("usage: quble-ssr <qubb> <data.json> [resource-url...]");
+        eprintln!("       quble-ssr <qubb> - [resource-url...]    (data를 표준 입력에서 읽는다)");
         return ExitCode::FAILURE;
     }
     let bytes = match std::fs::read(&args[0]) {
@@ -16,7 +19,14 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let data = match std::fs::read_to_string(&args[1]) {
+    let data = match args[1].as_str() {
+        "-" => {
+            let mut s = String::new();
+            std::io::stdin().read_to_string(&mut s).map(|_| s)
+        }
+        path => std::fs::read_to_string(path),
+    };
+    let data = match data {
         Ok(s) => s,
         Err(e) => {
             eprintln!("cannot read `{}`: {e}", args[1]);
