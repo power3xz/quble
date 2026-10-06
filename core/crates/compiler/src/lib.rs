@@ -2965,6 +2965,52 @@ component B { props { a: A } template { div( /) } }"#;
         ));
     }
 
+    /// 합성 인자로 넘기는 없는 필드 경로도 UnknownField 에러(패닉이 아니라).
+    #[test]
+    fn unknown_object_field_in_comp_arg_rejected() {
+        let src = r#"
+            component Card { props { s: string } template { p() { ${s} } } }
+            component C {
+              props { a: { name: string } }
+              template { Card(s={a.nope} /) }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::ExprType(expr_type::ExprTypeErrorKind::Scope(
+                        scope::ScopeErrorKind::UnknownField { .. }
+                    )),
+                    ..
+                },
+                ..
+            }))
+        ));
+    }
+
+    /// `.length`는 읽는 쪽이 계산하는 값이라 넘길 leaf 주소가 없다 - 합성 인자로는 패닉이 아니라 에러.
+    #[test]
+    fn length_in_comp_arg_rejected() {
+        let src = r#"
+            component Card { props { n: number } template { p() { ${n} } } }
+            component C {
+              props { items: string[] }
+              template { Card(n={items.length} /) }
+            }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::UnsupportedValueExpr,
+                    ..
+                },
+                ..
+            }))
+        ));
+    }
+
     /// def 하나의 코드 구간(테스트용). 슬롯은 사용쪽(부모)/정의쪽(자식) 코드가 갈려 둘 다 봐야 한다.
     fn def_code(module: &bytecode::Module, id: u16) -> &[u8] {
         let def = module.def(id).unwrap();

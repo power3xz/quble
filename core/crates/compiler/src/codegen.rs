@@ -8,9 +8,7 @@ use crate::expr_type::{
     expr_type, path_type, require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind,
 };
 use crate::flatten::{FlatComp, Sourced};
-use crate::scope::{
-    expr_display, fixed_ref_of, lookup_field, ForVar, ScopeError, ScopeErrorKind,
-};
+use crate::scope::{expr_display, fixed_ref_of, lookup_field, ForVar, ScopeError, ScopeErrorKind};
 use crate::src_range::SrcRange;
 use bytecode::{
     encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, ExprOp, Field, FieldValue,
@@ -570,9 +568,10 @@ fn arg_to_field(
             return Err(CodegenErrorKind::ListNotAllowed.at(range.0));
         }
         _ => match fixed_ref_of(value, props, &[])? {
-            Some((scope_index, offset, ty)) => {
-                (types.intern(ty, pool), FieldValue::Scope(scope_index, offset))
-            }
+            Some((scope_index, offset, ty)) => (
+                types.intern(ty, pool),
+                FieldValue::Scope(scope_index, offset),
+            ),
             None => expr_field_value(value, props, pool, types, exprs)?,
         },
     };
@@ -1115,11 +1114,18 @@ fn emit_node(
                     })?;
                 match arg_value {
                     Expr::Var(..) | Expr::Field(..) => {
+                        // 없는 필드는 fixed_ref_of가 안 탓하고 None을 내므로 경로부터 검사한다.
+                        path_type(arg_value, props, for_scope.for_vars)?;
                         // 도달 타입이 자식 prop 타입과 구조가 같아야 한다.
                         let found = fixed_ref_of(arg_value, props, for_scope.for_vars)?;
+                        // 경로는 맞는데 슬롯으로 안 접히는 것(`.length`)은 식이라 아직 못 넘긴다.
                         let (scope_index, offset, reached_ty) = match found {
                             Some(found) => found,
-                            None => unreachable!("참조 체인은 늘 슬롯으로 접힌다"),
+                            None => {
+                                return Err(
+                                    CodegenErrorKind::UnsupportedValueExpr.at(arg_value.range().0)
+                                );
+                            }
                         };
                         if !types_match(reached_ty, &child_prop.type_) {
                             // 타입이 안 맞는 건 넘긴 그 참조다 - 그 자리를 가리킨다.
