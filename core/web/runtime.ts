@@ -170,6 +170,25 @@ const DOM_EVENTS = [
   "scroll",
 ] as const;
 
+// URL을 받는 속성. 값이 javascript: 스킴이면 이동/제출 때 그 스크립트가 실행된다.
+const URL_ATTRS = new Set(["href", "src", "action", "formaction"]);
+// 브라우저는 스킴 앞의 공백/제어 문자(U+0000~U+0020)와 스킴 안의 탭/개행을 무시하고 읽는다.
+const SCHEME_LEADING = /^[\u0000- ]+/;
+const SCHEME_INNER = /[\t\n\r]/g;
+
+// 동적 속성 값을 단다. URL 속성에 javascript: 값이 오면 달지 않고 있던 속성도 지운다(XSS 차단).
+const setAttributeSafely = (el: HTMLElement, name: string, value: unknown): void => {
+  if (
+    URL_ATTRS.has(name) &&
+    typeof value === "string" &&
+    value.replace(SCHEME_LEADING, "").replace(SCHEME_INNER, "").toLowerCase().startsWith("javascript:")
+  ) {
+    el.removeAttribute(name);
+    return;
+  }
+  el.setAttribute(name, value as string);
+};
+
 const OP_HALT = 0x00;
 const OP_ELEM_OPEN = 0x01;
 const OP_ATTR_G = 0x02;
@@ -2194,14 +2213,14 @@ class Interpreter {
     const nameIndex = u16(pc);
     const name =
       op === OP_ATTR_G_VAR || op === OP_ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
-    const update = (v: unknown) => el.setAttribute(name, v as string);
+    const update = (v: unknown) => setAttributeSafely(el, name, v);
     const v =
       op === OP_ATTR_G_VAR || op === OP_ATTR_L_VAR
         ? // 이어서 scope_index, offset
           this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
         : // 이어서 expr_index
           this.bindExpr(this.module.defs[compId].exprs[code[pc + 2]], update, argumentSourcePairs, branch);
-    el.setAttribute(name, v as string);
+    setAttributeSafely(el, name, v);
   };
 
   // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
