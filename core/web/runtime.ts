@@ -50,7 +50,7 @@ import {
   EXPR_SUB,
   instrSize,
 } from "./expr-opcode.ts";
-import { buildSkipPastOp, buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
+import { buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
@@ -1948,7 +1948,7 @@ class Interpreter {
   };
 
   // 건너뛸 부분식이 있는 식. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 함수는 불릴 때
-  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다(skipPastOpOfLeaf).
+  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다(skipPastOpsOfLeaf).
   //
   // 인스턴스가 드는 것은 cache와 leafOfVar(변수마다 읽는 leafIndex) 둘이다. 건너뛰기 표는 식 정의가
   // 공유하고, 행마다 다른 것은 읽는 leafIndex뿐이다.
@@ -2001,13 +2001,13 @@ class Interpreter {
         }
         return;
       }
-      const skipPastOp = this.skipPastOpOfLeaf(expr, table, leafOfVar, leafIndex);
+      const skipPastOps = this.skipPastOpsOfLeaf(table, leafOfVar, leafIndex);
       // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
       // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
-      if (skipPastOp === null) {
+      if (skipPastOps === null) {
         return;
       }
-      const v = this.reevalExpr(expr, pairs, table, cache, [skipPastOp]);
+      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOps);
       // 다시 걸기가 leafOfVar를 고쳐, 바뀐 leaf를 읽는 변수가 여럿이면 먼저 모아 둔다.
       //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
       //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, leafOfVar로는 바깥이 안 보인다.
@@ -2044,31 +2044,26 @@ class Interpreter {
     return value;
   };
 
-  // leafIndex를 읽는 변수들의 건너뛰기 표. 읽는 변수가
+  // leafIndex를 읽는 변수마다의 건너뛰기 표(table.skipPastOpByVar). 읽는 변수가
   //   없으면   null이다. 구독을 다시 걸며 이미 뺀 leafIndex다.
-  //   하나면   식 정의가 공유하는 표(table.skipPastOpByVar)다.
+  //   하나면   그 변수의 표 하나다.
   //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
-  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로 위치를 합쳐 새로 만든다. 드물어 담아 두지 않는다.
-  skipPastOpOfLeaf = (
-    expr: Uint8Array,
-    table: TExprSkipTable,
-    leafOfVar: number[],
-    leafIndex: number,
-  ): TSkipPastOp | null => {
+  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로 변수마다의 표를 모두 낸다.
+  skipPastOpsOfLeaf = (table: TExprSkipTable, leafOfVar: number[], leafIndex: number): TSkipPastOp[] | null => {
     const first = leafOfVar.indexOf(leafIndex);
     if (first < 0) {
       return null;
     }
     if (leafOfVar.indexOf(leafIndex, first + 1) < 0) {
-      return table.skipPastOpByVar[first];
+      return [table.skipPastOpByVar[first]];
     }
-    const positions: number[] = [];
+    const skipPastOps: TSkipPastOp[] = [];
     for (let n = first; n < leafOfVar.length; n++) {
       if (leafOfVar[n] === leafIndex) {
-        positions.push(...table.positionsByVar[n]);
+        skipPastOps.push(table.skipPastOpByVar[n]);
       }
     }
-    return buildSkipPastOp(table, expr, Int32Array.from(positions).sort());
+    return skipPastOps;
   };
 
   // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.
