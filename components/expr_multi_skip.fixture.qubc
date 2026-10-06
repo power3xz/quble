@@ -1,0 +1,14 @@
+component ExprMultiSkip {
+  props {
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number
+  }
+  template {
+    div() {
+      p(class="sum") { ${((a + b) * c) - (d + e)} }
+    }
+  }
+}

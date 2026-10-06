@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
+import { bulk, nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
 
 const Row = ({ row, rows, pivot, rate, tax, threshold, onInc }) => (
   <div className="row">
@@ -26,7 +26,7 @@ const App = ({ data }) => {
   const [rate, setRate] = useState(data.rate);
   const [threshold, setThreshold] = useState(data.threshold);
   const [pivot, setPivot] = useState(data.pivot);
-  const tax = data.tax;
+  const [tax, setTax] = useState(data.tax);
   return (
     <div className="orders">
       <div className="orders__bar">
@@ -44,6 +44,31 @@ const App = ({ data }) => {
           onClick={() => setRows((rs) => rs.map((r, j) => (j === pivot ? { ...r, price: r.price + 1 } : r)))}
         >
           기준 행 가격 변경
+        </button>
+        <button
+          id="btn-rate-tax"
+          onClick={() => {
+            setRate((r) => r + 1);
+            setTax((t) => t + 1);
+          }}
+        >
+          환율+세율 동시 변경
+        </button>
+        <button
+          id="btn-rate-burst"
+          onClick={() => {
+            setRate((r) => r + 1);
+            setRate((r) => r + 1);
+            setRate((r) => r + 1);
+          }}
+        >
+          환율 연속 3회 변경
+        </button>
+        <button
+          id="btn-bulk"
+          onClick={() => setRows((rs) => (rs[0].price === bulk.base[0].price ? bulk.bumped : bulk.base))}
+        >
+          전체 행 일괄 갱신
         </button>
         <span className="orders__info">
           환율 <span className="orders__rate">{rate}</span> / 기준 <span className="orders__threshold">{threshold}</span> / 기준 행{" "}

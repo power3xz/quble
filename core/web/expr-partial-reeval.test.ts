@@ -182,3 +182,54 @@ test("식이 든 가지가 꺼진 동안 칸 둘이 바뀌어도 다시 켜면 �
   set(SHOW, true);
   assert.equal(textOf("shown"), "24", "(4 + 2) * (7 - 3)");
 });
+
+// 한 batch에서 서로 다른 부분식의 칸이 함께 바뀌면 flush의 첫 통지가 바뀐 칸 전체로 한 번에 다시 센다.
+// 칸마다 따로 세면 첫 통지에서 새 a와 cache의 옛 c가 섞인 중간 값이 DOM에 쓰인다.
+
+// cls 요소 아래에 DOM 쓰기가 몇 번 일어났는지 센다. takeRecords는 동기라 batch 직후 바로 읽는다.
+const observeWrites = (host: HTMLElement, cls: string) => {
+  const target = host.querySelector(`.${cls}`) as HTMLElement;
+  const observer = new (host.ownerDocument.defaultView as unknown as typeof globalThis).MutationObserver(() => {});
+  observer.observe(target, { subtree: true, childList: true, characterData: true });
+  return { writeCount: () => observer.takeRecords().length };
+};
+
+test("batch에서 a와 c가 함께 바뀌면 최종 값 하나만 DOM에 쓴다", () => {
+  const { inst, host, textOf } = instantiate();
+  const arith = observeWrites(host, "arith");
+  inst.store.batch(() => {
+    inst.store.set(A, 2);
+    inst.store.set(C, 10);
+  });
+  assert.equal(textOf("arith"), "28", "(2 + 2) * (10 - 3)");
+  assert.equal(arith.writeCount(), 1, "섞인 중간 값 (2 + 2) * (5 - 3) = 8을 쓰지 않는다");
+});
+
+test("batch에서 cursor와 x가 함께 바뀌면 최종 값 하나만 쓰고 구독도 옮겨 간다", () => {
+  const { inst, host, textOf, set } = instantiate();
+  assert.equal(textOf("index"), "110", "rows[0].score + x");
+  const index = observeWrites(host, "index");
+  inst.store.batch(() => {
+    inst.store.set(CURSOR, 1);
+    inst.store.set(X, 200);
+  });
+  assert.equal(textOf("index"), "220", "rows[1].score + x");
+  assert.equal(index.writeCount(), 1, "중간 값 20 + 100 = 120을 쓰지 않는다");
+  set(scoreLeaf(1), 50);
+  assert.equal(textOf("index"), "250", "새 요소의 score 구독이 걸려 있다");
+  set(scoreLeaf(0), 999);
+  assert.equal(textOf("index"), "250", "옛 요소의 score는 더는 읽지 않는다");
+});
+
+test("batch에서 읽는 칸 둘이 함께 바뀌어도 건너뛴 부분식 없이 한 번 센다", () => {
+  const { inst, host, readsDuring } = instantiate();
+  const arith = observeWrites(host, "arith");
+  const reads = readsDuring(() =>
+    inst.store.batch(() => {
+      inst.store.set(A, 2);
+      inst.store.set(C, 10);
+    }),
+  );
+  assert.deepEqual(reads, [A, B, C, D], "식을 한 번 처음부터 센다");
+  assert.equal(arith.writeCount(), 1);
+});

@@ -147,7 +147,7 @@ leaf 2, 3을 조립해 `{ title: "A", score: 10 }`을 넘긴다.
 | 명령 | `a` | `b` | ADD | `c` | `d` | SUB | MUL |
 | c가 바뀌면 | 건너뜀 | 건너뜀 | cache 값을 올림 | 읽음 | 읽음 | 계산 | 계산 |
 
-건너뛸 곳은 변수마다 미리 정해 둔다(`skipPastOpByVar`). 키는 부분식이 시작하는 잎 위치, 값은 그
+건너뛸 곳은 변수마다 미리 정해 둔다(`skipPastOpsByVar`). 키는 부분식이 시작하는 잎 위치, 값은 그
 부분식의 끝 연산 위치다.
 
 | 바뀐 변수 | 건너뛸 표 | 건너뛰는 부분식 |
@@ -192,10 +192,11 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 
 | 무엇 | 사용처 |
 |---|---|
-| `skipPastOpByVar` | 변수마다 건너뛸 표 |
+| `skipPastOpsByVar` | 변수마다 건너뛸 표 |
+| `skipPastOpsByVarSet` | 둘 이상의 변수가 함께 바뀔 때의 표. 바뀐 변수 조합이 처음 나올 때 만들어 담는다(4절) |
 | `cacheIndex`, `opCount` | 연산 위치 -> cache 칸 번호, 연산 수 |
 | `positionsByVar`, `varAt` | 변수 -> 읽는 위치, 위치 -> 변수. 처음 셀 때 어느 leaf를 어느 변수가 읽었는지 모은다 |
-| `leafIndexOpsByVar` | 인덱스 접근의 구독을 다시 건다(5절) |
+| `readLeafIndexOpsByVar` | 인덱스 접근의 구독을 다시 건다(5절) |
 | `sameStartOpChain` | 위의 표를 만들 때만 사용한다 |
 
 **인스턴스마다**
@@ -224,7 +225,7 @@ leafIndex로 그 leaf의 건너뛸 표를 고른다.
 leaf 0 (rows)    --\
 leaf 1 (cursor)  ---+--> reevalOnChange(value, leafIndex)
 leaf 3 (score)   --/       v = leafOfVar.indexOf(leafIndex)
-                           reeval with skipPastOpByVar[v]
+                           reeval with skipPastOpsByVar[v]
 ```
 
 다시 센 값이 지난번과 같으면 DOM에 반영하지 않는다.
@@ -244,8 +245,25 @@ leaf마다 함수를 따로 두면 많은 행에서 함수가 수만 개 늘어,
 leafOfVar   [23, 23]    x, y
 ```
 
-leaf 23은 한 번만 구독한다. leaf 23이 바뀌면 x, y가 함께 바뀌므로, 두 변수의 위치를 합쳐 표를 새로
-만든다. 드문 경우라 인스턴스에 담아 두지 않고 그때마다 만든다.
+leaf 23은 한 번만 구독한다. leaf 23이 바뀌면 x, y가 함께 바뀌므로, 두 변수를 하나도 품지 않은 부분식의
+표를 쓴다(아래 "한 flush에서 읽는 leaf 여럿이 바뀔 때"와 같은 표다).
+
+**한 flush에서 읽는 leaf 여럿이 바뀔 때** - 구독 함수는 셋째 인자로 이번 flush에서 바뀐 leaf 전체(`flushLeaves`,
+LEAF-STORE-LAYOUT.md 4절)를 받는다. `flushLeaves`가 둘 이상이면 처음 불릴 때 `leafOfVar`에서 그중 식이
+읽는 변수를 모아, 그 변수들을 하나도 품지 않은 부분식만 건너뛰며 한꺼번에 센다. 같은 flush의 나머지
+호출은 `flushLeaves`가 이미 처리한 것과 같은 Set이라 바로 끝난다.
+
+```
+((a + b) * c) - (d + e)       변수 a=0, b=1, c=2, d=3, e=4
+a와 c가 함께 바뀌면            { 11: 17 }   d + e(위치 11~17)만 건너뛴다
+a와 d가 함께 바뀌면            {}           건너뛸 부분식이 없어 처음부터 센다
+```
+
+변수마다의 표(`skipPastOpsByVar`)를 합친 것이다. 바뀐 변수는 변수 번호를 비트로 모은 정수(a=0, c=2가
+바뀌면 `0b101`)로 다루고, 같은 식을 쓰는 모든 인스턴스가 조합이 같으면 같은 표를 쓰므로
+`skipPastOpsByVarSet`에 그 정수를 키로 담아 둔다. 조합이 처음 나올 때 한 번만 계산한다. 행마다 하는
+일은 `leafOfVar`를 훑어 정수를 만드는 것과 표를 찾는 것뿐이라 배열을 만들지 않는다. 변수가 32개를
+넘는 식은 정수에 담을 수 없어 표를 만들지 않고(`buildSkipTable`이 `null`), 처음부터 센다.
 
 **가지를 떼고 붙일 때** - 구독은 식이 놓인 가지(`TBranch`)의 목록에 함께 담긴다.
 
@@ -272,14 +290,14 @@ branch.updateFns     [fn, fn, fn]
 
 **어느 변수가 이 leafIndex를 정하는지는 표를 만들 때 정해진다.** `READ_LEAF`를 만나면, 그 바로 앞
 연산(leafIndex를 넘기는 연산)의 부분식 구간 안에서 읽히는 변수마다 그 연산 위치를 단다
-(`leafIndexOpsByVar`).
+(`readLeafIndexOpsByVar`).
 
 | 위치 | 0 | 3 | 6 | 7 | 9 | 10 | 12 |
 |---|---|---|---|---|---|---|---|
 | 명령 | LOAD_VAR rows | LOAD_VAR cursor | ELEM_AT | FIELD_AT 1 | READ_LEAF | LOAD_SMALL_INT 2 | MUL |
 | FIELD_AT(7)의 구간 | = | = | = | = | | | |
 
-| 변수 | `leafIndexOpsByVar` | |
+| 변수 | `readLeafIndexOpsByVar` | |
 |---|---|---|
 | rows | [7] | 구간 안 - 인덱스 쪽만이 아니라 배열 쪽도 든다 |
 | cursor | [7] | 구간 안 |
@@ -288,7 +306,7 @@ branch.updateFns     [fn, fn, fn]
 **다시 센 뒤 구독을 다시 건다.** cursor가 0에서 1로 바뀌면
 
 1. cursor 변수의 건너뛸 표로 다시 센다. `cache[FIELD_AT]`이 5가 된다.
-2. `leafIndexOpsByVar[cursor]`가 `[7]`이다.
+2. `readLeafIndexOpsByVar[cursor]`가 `[7]`이다.
 3. `cache[FIELD_AT(7)]`의 5가 `READ_LEAF`가 방금 읽은 leafIndex다.
 4. `resubscribeReadLeaf`가 `leafOfVar[READ_LEAF]`의 3과 5를 비교한다. 다르므로 5로 바꾸고
    - 3을 읽는 변수가 더 없으니 3의 구독을 푼다.
@@ -314,7 +332,7 @@ ${columns[lane].cards[seat].title}
 | 안쪽 FIELD_AT의 구간 | = | = | = | = | | | | | |
 | 바깥 FIELD_AT의 구간 | = | = | = | = | = | = | = | = | |
 
-| 변수 | `leafIndexOpsByVar` |
+| 변수 | `readLeafIndexOpsByVar` |
 |---|---|
 | columns, lane | 안쪽 FIELD_AT, 바깥 FIELD_AT |
 | 안쪽 READ_LEAF, seat | 바깥 FIELD_AT |
@@ -337,7 +355,7 @@ cursor 0이 가리키는 요소는 A에서 B로 바뀌었지만, 식이 읽는 l
 ```
 notify(leaf 0)
   -> reeval with skip table of rows    ELEM_AT 4, FIELD_AT 5
-  -> leafIndexOpsByVar[rows] = [7]
+  -> readLeafIndexOpsByVar[rows] = [7]
   -> resubscribe 3 -> 5
 ```
 
@@ -358,8 +376,12 @@ notify(leaf 0)
 | 범위 밖이 되는 때 | 에러가 올라오는 곳 |
 |---|---|
 | 처음 그릴 때 | `compile` 호출 |
-| 핸들러가 인덱스를 `set` | 그 `set` 호출 |
-| 핸들러가 `removeAt`, `setArray`로 배열을 줄임 | 그 호출 |
+| 핸들러가 인덱스를 `set`하거나 `removeAt`, `setArray`로 배열을 줄임 | 핸들러가 끝날 때(`dispatch`). 핸들러 안의 `try`로는 받지 못한다 |
+| 핸들러 밖에서 `store.set` | 그 `set` 호출 |
+
+핸들러 안의 통지는 핸들러가 끝날 때 칸마다 모아 보내므로(LEAF-STORE-LAYOUT.md 4절), 식이 다시 세어
+`RangeError`를 throw하는 시점도 핸들러가 끝날 때다. 통지 중 구독자가 예외를 throw해도 나머지 칸은 모두
+통지하고, 첫 예외를 그 뒤에 다시 throw한다.
 
 ## 6. 버린 안
 
@@ -395,8 +417,6 @@ notify(leaf 0)
 
 ## 8. 남은 것
 
-- **여러 leaf가 한 번에 바뀌는 경우** - 핸들러 하나가 leaf 여럿을 바꾸면 leaf마다 한 번씩 다시 센다.
-  값은 맞지만 중간 값이 한 번씩 DOM에 반영된다. 갱신을 모아 한 번에 처리하는 배치와 함께 본다.
 - **모든 행의 값이 바뀌는 갱신이 처음부터 세기보다 약간 느리다**(환율 변경). 식 계산 자체는 더
   빠른데, 프로파일에서 차이가 텍스트 반영과 `reevalExpr` 호출 쪽에서 난다. 원인은 모른다.
   `runExpr`의 호출마다 할당은 원인이 아니었다(4절 - 없앴지만 클릭 시간이 그대로).
