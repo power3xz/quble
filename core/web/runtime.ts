@@ -69,6 +69,7 @@ import {
   type TRegion,
   truncateFor,
 } from "./region.ts";
+import { ResumeCursor } from "./resume-cursor.ts";
 
 const TAGS = [
   "div",
@@ -1086,6 +1087,10 @@ class Interpreter {
   // 정해진다(@for 본문은 FOR_END, @if 가지는 ELSE/IF_END, 합성은 def 끝).
   templatePlanCache = new Map<number, TTemplatePlan | null>();
 
+  // SSR DOM을 이어받는(resume) 동안만 있다. 노드를 만들던 자리가 새로 만드는 대신 여기서 기존 노드를
+  // 꺼낸다. 처음 그리기가 끝나면 비운다 - 그 뒤의 lazy build와 @for grow는 노드를 새로 만든다.
+  resumeCursor: ResumeCursor | null = null;
+
   constructor(
     module: TModule,
     handlers: THandlers,
@@ -1710,7 +1715,7 @@ class Interpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex);
+    const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex, this.resumeCursor?.anchor());
     const region = this.regionPool.entries[forRegionIndex];
     branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
     parent.appendChild(region.anchor);
@@ -1799,7 +1804,7 @@ class Interpreter {
       }
     }
 
-    const forRegionIndex = appendForRegion(this.regionPool, sizeLeafIndex);
+    const forRegionIndex = appendForRegion(this.regionPool, sizeLeafIndex, this.resumeCursor?.anchor());
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
     const region = this.regionPool.entries[forRegionIndex];
     branch.childRegionIndices.push(forRegionIndex);
@@ -2427,7 +2432,8 @@ class Interpreter {
     slotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [],
   ): DocumentFragment => {
     // 요소/텍스트/값 자리/이벤트만으로 된 범위(@for 회차 본문 등)는 해석하지 않고 뼈대를 복제한다.
-    const plan = this.templatePlanOf(startPc, endPc);
+    // resume 중에는 복제하지 않는다 - 노드는 SSR DOM에 이미 있고, 해석하며 하나씩 꺼낸다.
+    const plan = this.resumeCursor === null ? this.templatePlanOf(startPc, endPc) : null;
     if (plan !== null) {
       return this.cloneTemplate(
         plan,
@@ -2476,6 +2482,13 @@ class Interpreter {
           const url = this.resources[u16at()];
           if (url && !this.loadedHrefs.has(url)) {
             this.loadedHrefs.add(url);
+            // resume이면 SSR 페이지가 head에 이미 넣었을 수 있다.
+            const inHead =
+              this.resumeCursor !== null &&
+              [...document.head.querySelectorAll("link")].some((l) => l.getAttribute("href") === url);
+            if (inHead) {
+              break;
+            }
             const link = document.createElement("link");
             link.rel = "stylesheet";
             link.href = url;
@@ -2484,7 +2497,8 @@ class Interpreter {
           break;
         }
         case OP_ELEM_OPEN: {
-          pending = document.createElement(TAGS[u16at()]);
+          const tag = TAGS[u16at()];
+          pending = this.resumeCursor !== null ? this.resumeCursor.element(tag) : document.createElement(tag);
           break;
         }
         case OP_ATTR_G: {
@@ -2537,12 +2551,13 @@ class Interpreter {
           break;
         }
         case OP_TEXT: {
-          nodeTop().appendChild(document.createTextNode(this.module.constpool[u16at()] as string));
+          const text = this.module.constpool[u16at()] as string;
+          nodeTop().appendChild(this.resumeCursor !== null ? this.resumeCursor.text() : document.createTextNode(text));
           break;
         }
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR: {
-          const node = document.createTextNode("");
+          const node = this.resumeCursor !== null ? this.resumeCursor.text() : document.createTextNode("");
           this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
           pc += operandLen(op);
           nodeTop().appendChild(node);
@@ -3058,7 +3073,13 @@ class Interpreter {
     branch: TBranch,
     parent: Node,
   ): number => {
-    const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, ownsCondLeaf);
+    const regionIndex = appendIfRegion(
+      this.regionPool,
+      this.branchPool,
+      condLeafIndex,
+      ownsCondLeaf,
+      this.resumeCursor?.anchor(),
+    );
     const region = this.regionPool.entries[regionIndex];
     branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
     const thenBranchIndex = region.branchIndices[THEN_INDEX];
@@ -3154,9 +3175,12 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
   const loadedHrefs = new Set();
   // code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def/자식 구간마다
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
+  // options.resumeFrom - SSR이 그린 노드들의 부모. 주면 노드를 새로 만들지 않고 그 노드들을 이어받는다
+  // (rootValue는 SSR에 넘긴 data와 같아야 한다). 반환한 nodes가 바로 그 노드들이다.
   return (compId: number) =>
-    (rootValue: unknown, handlers: THandlers = {}) => {
+    (rootValue: unknown, handlers: THandlers = {}, options: { resumeFrom?: Node } = {}) => {
       const def = module.defs[compId];
+      const resumeCursor = options.resumeFrom ? new ResumeCursor(options.resumeFrom) : null;
       // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
       // @for가 순회하는 배열마다 요소 leaf 위치(entries). 요소 추가/제거 시 참조. free는 빈 칸 인덱스(freelist).
       const arrayPool: Pool<TArrayInfo> = new Pool();
@@ -3172,7 +3196,7 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
       // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
       // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
       const createdContexts: TCreatedContext[] = [];
-      const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1)]; // 루트도 region(인덱스 0)
+      const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, resumeCursor?.anchor())]; // 루트도 region(인덱스 0)
       branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
       rootRegion.shownIndex = THEN_INDEX;
 
@@ -3192,6 +3216,7 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
         createdContexts,
         rootFlat,
       );
+      interpreter.resumeCursor = resumeCursor;
       const fragment = interpreter.interpret(
         rootFlat,
         compId, // 루트 def
@@ -3202,6 +3227,9 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
         0, // 세그먼트 인덱스 base 0
         { loopIndexStack: [], activeContexts: [] }, // 루트는 @for/@with 밖 - 빈 스택
       );
+      // 처음 그리기가 끝났다 - SSR 노드를 다 짚었는지 보고, 이후의 build는 노드를 새로 만들게 한다.
+      resumeCursor?.finish();
+      interpreter.resumeCursor = null;
       branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
       fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
       rootRegion.attach(store, regionPool, branchPool, rootRegion);
