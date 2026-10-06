@@ -33,7 +33,11 @@ const createLeafStore = (leaves: unknown[]) => {
 
 // 칸이 바뀌면 불리는 함수. 새 값과 함께 어느 칸이 바뀌었는지 받는다 - 식 하나가 칸 a, b를 함께
 // 구독하면 두 칸에 같은 함수 하나를 걸고, 불릴 때 leafIndex로 a인지 b인지 가린다.
-export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
+//
+// 셋째 인자 flushLeaves는 batch가 끝날 때의 통지에서만 온다. 이번 flush에서 바뀐 leaf 전체(구독하지 않은
+// leaf 포함)이고, 한 flush 안에서는 같은 Set이다 - 식이 첫 호출에서 한꺼번에 다시 세고 나머지 호출은
+// 같은 Set인지로 건너뛴다. 배치 밖의 통지에서는 오지 않는다.
+export type TSubscriber = (value: unknown, leafIndex: LeafIndex, flushLeaves?: ReadonlySet<LeafIndex>) => void;
 
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
@@ -53,7 +57,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const freeBySize = new Map<number, LeafIndex[]>();
   // 열려 있는 batch의 수와, 그동안 통지를 미룬 칸(Set이라 같은 칸은 한 번만 든다).
   let batchDepth = 0;
-  const pendingLeaves = new Set<LeafIndex>();
+  let pendingLeaves = new Set<LeafIndex>();
 
   const set = (leafIndex: LeafIndex, value: unknown): void => {
     if (leafStore.get(leafIndex) === value) {
@@ -75,13 +79,14 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   };
 
   // 구독 함수들을 지금 호출한다. 모아 둔 칸을 비울 때는 그 칸의 현재 값(마지막으로 쓴 값)을 넘긴다.
-  const fire = (leafIndex: LeafIndex): void => {
+  // flushLeaves는 모아 둔 칸을 비울 때만 넘어온다.
+  const fire = (leafIndex: LeafIndex, flushLeaves?: ReadonlySet<LeafIndex>): void => {
     const subs = subscribers[leafIndex];
     if (subs) {
       const value = leafStore.get(leafIndex);
       // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
       for (const fn of [...subs]) {
-        fn(value, leafIndex);
+        fn(value, leafIndex, flushLeaves);
       }
     }
   };
@@ -136,17 +141,18 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     }
   };
 
-  // 모은 칸을 처음 모은 순서대로 비운다. 구독자가 통지 중에 쓰는 값이 같은 집합을 건드리지 않게 먼저
-  // 옮겨 담고 비운 뒤 부른다. 구독자가 예외를 throw해도 나머지 칸은 모두 통지한다 - 값은 이미 다 기록됐는데
-  // 통지만 건너뛰면 화면이 값을 따라오지 못한다. 첫 예외는 모두 통지한 뒤 다시 throw한다.
+  // 모은 칸을 처음 모은 순서대로 비운다. 구독자가 통지 중에 쓰는 값이 같은 집합을 건드리지 않게 모은
+  // 집합을 이번 flush의 것으로 넘기고 새 집합으로 바꾼 뒤 부른다. 구독자가 예외를 throw해도 나머지 칸은
+  // 모두 통지한다 - 값은 이미 다 기록됐는데 통지만 건너뛰면 화면이 값을 따라오지 못한다. 첫 예외는 모두
+  // 통지한 뒤 다시 throw한다.
   const flushPending = (): void => {
-    const leaves = [...pendingLeaves];
-    pendingLeaves.clear();
+    const flushLeaves = pendingLeaves;
+    pendingLeaves = new Set();
     let failed = false;
     let firstError: unknown;
-    for (const leafIndex of leaves) {
+    for (const leafIndex of flushLeaves) {
       try {
-        fire(leafIndex);
+        fire(leafIndex, flushLeaves);
       } catch (error) {
         if (!failed) {
           failed = true;

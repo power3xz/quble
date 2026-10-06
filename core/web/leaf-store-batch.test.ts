@@ -151,3 +151,44 @@ test("통지를 보내는 중 구독자가 쓴 값은 바로 통지된다", () =
     [2, "from-subscriber"],
   ]);
 });
+
+// flush가 구독 함수에 이번에 바뀐 leaf 전체를 셋째 인자로 넘긴다. 식이 여러 leaf를 읽을 때 첫 호출에서
+// 한꺼번에 다시 세게 하려는 것이다.
+
+test("batch가 끝날 때 구독 함수는 바뀐 leaf 전체를 처음 쓴 순서로 받는다", () => {
+  const store = createLeafStoreSubject(["a", "b", "c"]);
+  const received: Array<number[] | undefined> = [];
+  store.subscribe(0, (_value, _leafIndex, flushLeaves) => received.push(flushLeaves && [...flushLeaves]));
+  store.batch(() => {
+    store.set(2, "z");
+    store.set(0, "x");
+  });
+  assert.deepEqual(received, [[2, 0]], "구독하지 않은 leaf 2도 들어 있다");
+});
+
+test("한 flush 안에서는 같은 Set이고 flush마다 다른 Set이다", () => {
+  const store = createLeafStoreSubject(["a", "b"]);
+  const sets: Array<ReadonlySet<number> | undefined> = [];
+  const subscriber = (_value: unknown, _leafIndex: number, flushLeaves?: ReadonlySet<number>) => sets.push(flushLeaves);
+  store.subscribe(0, subscriber);
+  store.subscribe(1, subscriber);
+  store.batch(() => {
+    store.set(0, "x");
+    store.set(1, "y");
+  });
+  store.batch(() => {
+    store.set(0, "x2");
+  });
+  assert.equal(sets.length, 3);
+  assert.equal(sets[0], sets[1], "같은 flush");
+  assert.notEqual(sets[1], sets[2], "다른 flush");
+});
+
+test("batch 밖의 통지는 flushLeaves를 넘기지 않는다", () => {
+  const store = createLeafStoreSubject(["a"]);
+  const received: unknown[] = [];
+  store.subscribe(0, (_value, _leafIndex, flushLeaves) => received.push(flushLeaves));
+  store.set(0, "x");
+  store.notify(0);
+  assert.deepEqual(received, [undefined, undefined]);
+});

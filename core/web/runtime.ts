@@ -1925,7 +1925,15 @@ class Interpreter {
     }
     // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 DOM에 쓰지 않는다.
     let lastValue = value;
-    const reevalOnChange: TSubscriber = () => {
+    // 같은 flush에서 바뀐 leaf를 읽는 곳마다 불리지만 처음부터 세므로 한 번이면 된다.
+    let handledFlush: ReadonlySet<number> | undefined;
+    const reevalOnChange: TSubscriber = (_, __, flushLeaves) => {
+      if (flushLeaves !== undefined) {
+        if (flushLeaves === handledFlush) {
+          return;
+        }
+        handledFlush = flushLeaves;
+      }
       const v = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, null);
       if (v !== lastValue) {
         lastValue = v;
@@ -1960,7 +1968,44 @@ class Interpreter {
     // 비어 있지 않다.
     const hasIndexAccess = table.readLeafIndexOpsByVar.some((ops) => ops.length > 0);
     let lastValue = value;
-    const reevalOnChange: TSubscriber = (_, leafIndex) => {
+    // 같은 flush에서 읽는 leaf 둘 이상이 바뀌면 처음 불릴 때 한꺼번에 센다. 읽는 leaf마다 따로 세면
+    // 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다. 같은 flush의 나머지 호출은 건너뛴다.
+    let handledFlush: ReadonlySet<number> | undefined;
+    const reevalOnChange: TSubscriber = (_, leafIndex, flushLeaves) => {
+      if (flushLeaves !== undefined && flushLeaves.size > 1) {
+        if (flushLeaves === handledFlush) {
+          return;
+        }
+        handledFlush = flushLeaves;
+        // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 모은다.
+        const changedVars: number[] = [];
+        for (let n = 0; n < leafOfVar.length; n++) {
+          if (flushLeaves.has(leafOfVar[n])) {
+            changedVars.push(n);
+          }
+        }
+        if (changedVars.length === 0) {
+          return;
+        }
+        // 바뀐 변수가 모두 같은 leaf를 읽으면 그 leaf의 건너뛰기 표를 쓰고, 다르면 처음부터 센다.
+        const firstLeaf = leafOfVar[changedVars[0]];
+        const sameLeaf = changedVars.every((n) => leafOfVar[n] === firstLeaf);
+        const skipPastOp = sameLeaf ? this.skipPastOpOfLeaf(expr, table, leafOfVar, firstLeaf) : SKIP_NOTHING;
+        if (skipPastOp === null) {
+          return;
+        }
+        const v = this.reevalExpr(expr, pairs, table, cache, skipPastOp);
+        if (hasIndexAccess) {
+          for (const varNumber of changedVars) {
+            this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, reevalOnChange, varNumber);
+          }
+        }
+        if (v !== lastValue) {
+          lastValue = v;
+          onValue(v);
+        }
+        return;
+      }
       const skipPastOp = this.skipPastOpOfLeaf(expr, table, leafOfVar, leafIndex);
       // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
       // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
