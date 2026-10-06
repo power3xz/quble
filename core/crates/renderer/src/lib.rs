@@ -121,7 +121,7 @@ impl Val {
     }
 }
 
-/// JS `String(n)`. 정수는 소수점 없이, 지수 표기는 1e21 이상과 1e-7 미만에서만.
+/// JS `String(n)`. 정수는 소수점 없이, 지수 표기는 절댓값이 1e21 이상이거나 1e-6 미만일 때만.
 fn js_number(n: f64) -> String {
     if n.is_nan() {
         return "NaN".into();
@@ -137,7 +137,7 @@ fn js_number(n: f64) -> String {
         return "0".into();
     }
     let abs = n.abs();
-    if (1e-7..1e21).contains(&abs) {
+    if (1e-6..1e21).contains(&abs) {
         return format!("{n}");
     }
     // Rust `{:e}`는 `1e21`, JS는 `1e+21` - 양의 지수에 `+`를 붙인다.
@@ -764,6 +764,37 @@ fn escape_text(s: &str, out: &mut String) {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             _ => out.push(c),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// JS `String(n)`과 같은 표기. 기댓값은 node에서 `String(n)`으로 확인한 것이다.
+    #[test]
+    fn js_number_matches_js_string() {
+        let cases = [
+            (0.0, "0"),
+            (-0.0, "0"),
+            (42.0, "42"),
+            (-7.0, "-7"),
+            (1.5, "1.5"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1e20, "100000000000000000000"),
+            (1e21, "1e+21"),
+            (1.5e21, "1.5e+21"),
+            (1e-6, "0.000001"),
+            (9.99e-7, "9.99e-7"),
+            (1e-7, "1e-7"),
+            (-2.5e-8, "-2.5e-8"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ];
+        for (n, want) in cases {
+            assert_eq!(js_number(n), want, "{n:?}");
         }
     }
 }

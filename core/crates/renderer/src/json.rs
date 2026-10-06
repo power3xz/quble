@@ -210,3 +210,38 @@ impl Parser<'_> {
             .map_err(|_| format!("bad number `{text}` at {start}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_nested_values_in_key_order() {
+        let v = parse(r#" { "a": [1, -2.5e3, true, null], "b": { "c": "x" }, "d": false } "#).unwrap();
+        assert_eq!(
+            v,
+            Json::Obj(vec![
+                (
+                    "a".into(),
+                    Json::Arr(vec![Json::Num(1.0), Json::Num(-2500.0), Json::Bool(true), Json::Null])
+                ),
+                ("b".into(), Json::Obj(vec![("c".into(), Json::Str("x".into()))])),
+                ("d".into(), Json::Bool(false)),
+            ])
+        );
+    }
+
+    #[test]
+    fn decodes_string_escapes() {
+        let v = parse(r#""a\"b\\c\ndé😀""#).unwrap();
+        assert_eq!(v, Json::Str("a\"b\\c\nd\u{e9}\u{1f600}".into()));
+    }
+
+    #[test]
+    fn rejects_broken_input() {
+        assert!(parse("{").is_err());
+        assert!(parse(r#"{"a" 1}"#).is_err());
+        assert!(parse("[1,]").is_err());
+        assert!(parse("1 2").is_err());
+    }
+}
