@@ -53,6 +53,7 @@ pub fn render(bytes: &[u8], data: &str, resources: &[String]) -> Result<Rendered
         links: Vec::new(),
         loaded_res: Vec::new(),
         next_region: 0,
+        last_was_text: false,
     };
     // 루트도 region 하나다(런타임 compile의 rootRegion) - 앵커가 루트 노드들 맨 앞에 선다.
     r.region_anchor();
@@ -276,7 +277,16 @@ struct Renderer<'m> {
     loaded_res: Vec<u16>,
     /// 다음 region 번호. 런타임 regionPool이 처음 그릴 때 매기는 순서(앞순회)와 같다.
     next_region: usize,
+    /// 바로 앞에 낸 노드가 텍스트인가 - 이어서 텍스트를 내면 경계 표시를 끼운다.
+    last_was_text: bool,
 }
+
+/// 이웃한 두 텍스트 노드 사이의 경계. HTML 파서는 붙은 텍스트를 하나로 합치므로, resume이 노드를
+/// 하나씩 되찾을 수 있게 사이에 둔다. resume은 이 주석을 지운다.
+const TEXT_BOUNDARY_MARK: &str = "<!---->";
+/// 값이 빈 텍스트 노드 자리. 빈 텍스트는 HTML에 흔적이 없어 자리를 표시한다. resume은 이 주석을
+/// 빈 텍스트 노드로 바꾼다.
+const EMPTY_TEXT_MARK: &str = "<!--qb:empty-->";
 
 /// 내용을 가질 수 없는 요소 - 닫는 태그를 내지 않는다.
 const VOID_TAGS: [&str; 13] = [
@@ -289,6 +299,21 @@ impl Renderer<'_> {
         self.out
             .push_str(&format!("<!--qb:region#{}-->", self.next_region));
         self.next_region += 1;
+        self.last_was_text = false;
+    }
+
+    /// 텍스트 노드 하나를 낸다. 노드 경계가 HTML에서 사라지는 두 경우에 표시를 남긴다.
+    fn text_node(&mut self, s: &str) {
+        if s.is_empty() {
+            self.out.push_str(EMPTY_TEXT_MARK);
+            self.last_was_text = false;
+            return;
+        }
+        if self.last_was_text {
+            self.out.push_str(TEXT_BOUNDARY_MARK);
+        }
+        escape_text(s, &mut self.out);
+        self.last_was_text = true;
     }
 
     fn slot_value(&self, slot: Slot, offset: usize) -> Val {
@@ -340,6 +365,7 @@ impl Renderer<'_> {
                     tags.push(name);
                     self.out.push('<');
                     self.out.push_str(name);
+                    self.last_was_text = false;
                 }
                 Op::AttrG | Op::AttrL => {
                     let name = u16at(&mut pc);
@@ -379,17 +405,17 @@ impl Renderer<'_> {
                 Op::ElemCloseOpen => self.out.push('>'),
                 Op::Text => {
                     let text = Val::from_const(module.pool.get(u16at(&mut pc)).expect("상수풀"));
-                    escape_text(&text.dom_string(), &mut self.out);
+                    self.text_node(&text.dom_string());
                 }
                 Op::TextVar => {
                     let v = self.slot_value(pairs[code[pc] as usize], code[pc + 1] as usize);
                     pc += 2;
-                    escape_text(&v.dom_string(), &mut self.out);
+                    self.text_node(&v.dom_string());
                 }
                 Op::TextExpr => {
                     let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
                     pc += 1;
-                    escape_text(&v.dom_string(), &mut self.out);
+                    self.text_node(&v.dom_string());
                 }
                 Op::ElemEnd => {
                     let name = tags.pop().ok_or(RenderError::Unbalanced("ELEM_END"))?;
@@ -398,6 +424,7 @@ impl Renderer<'_> {
                         self.out.push_str(name);
                         self.out.push('>');
                     }
+                    self.last_was_text = false;
                 }
                 Op::PushThrough => {
                     args.push(pairs[code[pc] as usize]);

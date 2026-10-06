@@ -7,18 +7,17 @@
 // 노드는 사라져, 노드 경계까지는 같을 수 없다.
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { compile } from "./runtime.ts";
-import { buildFixtureWithResmap, fixtureQubbPath } from "./test-helpers/build.ts";
+import { buildFixtureWithResmap } from "./test-helpers/build.ts";
 import "./test-helpers/dom.ts";
+import { removeTextMarks, renderSsr } from "./test-helpers/ssr.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // core/web
 const COMPONENTS = join(HERE, "..", "..", "components");
-const SSR_BIN = join(HERE, "..", "target", "debug", "quble-ssr");
 
 const seeds: Record<string, unknown[]> = JSON.parse(readFileSync(join(HERE, "ssr-match.seeds.json"), "utf8"));
 
@@ -58,22 +57,14 @@ const renderClient = (qubb: Uint8Array, resmap: string[], data: unknown) => {
   return { html, links };
 };
 
-// quble-ssr는 HTML을 stdout에, 링크를 stderr에 `link: <url>` 줄로 낸다.
-const renderSsr = (name: string, resmap: string[], data: unknown) => {
-  const run = spawnSync(SSR_BIN, [fixtureQubbPath(name), "-", ...resmap], {
-    input: JSON.stringify(data),
-    encoding: "utf8",
-    // 기본 1MB를 넘는 픽스처가 있다(perfbig 약 3MB). 넘치면 status가 null로 끝난다.
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  assert.equal(run.status, 0, run.stderr);
+// SSR 결과 - 텍스트 경계 표시를 지우고 normalize()한 트리의 HTML과 링크 목록.
+const renderServer = (name: string, resmap: string[], data: unknown) => {
+  const { html, links } = renderSsr(name, resmap, data);
   const host = document.createElement("div");
-  host.innerHTML = run.stdout;
+  host.innerHTML = html;
+  // resume용 텍스트 경계 표시는 클라이언트 DOM에 없다 - 지우고 비교한다.
+  removeTextMarks(host);
   host.normalize();
-  const links = run.stderr
-    .split("\n")
-    .filter((l) => l.startsWith("link: "))
-    .map((l) => l.slice("link: ".length));
   return { html: host.innerHTML, links };
 };
 
@@ -82,9 +73,9 @@ for (const [name, list] of Object.entries(seeds)) {
     test(`${name} 시드 ${i}`, () => {
       const { qubb, resmap } = buildFixtureWithResmap(name);
       const client = renderClient(qubb, resmap, data);
-      const ssr = renderSsr(name, resmap, data);
-      assert.equal(ssr.html, client.html);
-      assert.deepEqual(ssr.links, client.links);
+      const server = renderServer(name, resmap, data);
+      assert.equal(server.html, client.html);
+      assert.deepEqual(server.links, client.links);
     });
   });
 }
