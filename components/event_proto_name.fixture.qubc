@@ -1,0 +1,10 @@
+component ProtoName {
+  events {
+    constructor({})
+    toString({})
+  }
+  template {
+    button(id="ctor" @click:constructor) { "a" }
+    button(id="str" @click:toString) { "b" }
+  }
+}

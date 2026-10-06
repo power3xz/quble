@@ -1266,7 +1266,7 @@ class Interpreter {
     }
     const context: Record<string, Record<string, unknown>> = {};
     if (binding.contextLeaves !== null) {
-      for (const ctxName in binding.contextLeaves) {
+      for (const ctxName of Object.keys(binding.contextLeaves)) {
         const values: Record<string, unknown> = {};
         for (const p of binding.contextLeaves[ctxName]) {
           values[p.name] = this.assembledValue(p);
@@ -1277,14 +1277,15 @@ class Interpreter {
     // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
     // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
     const currentIndices: Record<string, number> = {};
-    for (const key in binding.loopIndices) {
+    for (const key of Object.keys(binding.loopIndices)) {
       const src = binding.loopIndices[key as TIndexSymbol];
       if (src) {
         currentIndices[key] = src.kind === STORE ? (this.store.get(src.ref) as number) : src.ref;
       }
     }
     binding.props ??= this.buildProps(this.module.defs[binding.compId].propsTypeRef, binding.scope);
-    const handler = this.handlers[binding.fullName];
+    // own 키만 본다 - 상속된 키(Object.prototype의 constructor나 오염된 키)를 핸들러로 호출하지 않는다.
+    const handler = Object.hasOwn(this.handlers, binding.fullName) ? this.handlers[binding.fullName] : undefined;
     if (handler === undefined) {
       return;
     }
