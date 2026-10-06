@@ -4,10 +4,10 @@
 //! 순서로 opcode를 해석하되 노드 대신 문자열을, 구독 대신 아무것도 만들지 않는다. region 앵커 주석
 //! (`<!--qb:region#N-->`)도 런타임과 같은 번호로 낸다.
 
-mod json;
+pub mod json;
 
 use bytecode::{Const, DecodeError, ExprOp, Module, Op, TypeEntry};
-pub use json::Json;
+use json::Json;
 
 #[derive(Debug, PartialEq)]
 pub enum RenderError {
@@ -38,12 +38,17 @@ pub struct Rendered {
     pub links: Vec<String>,
 }
 
-/// qubb를 디코드해 진입점(def 0)을 data(루트 props JSON)로 렌더한다.
+/// qubb를 디코드해 진입점(def 0)을 data(루트 props JSON 문자열)로 렌더한다.
 pub fn render(bytes: &[u8], data: &str, resources: &[String]) -> Result<Rendered, RenderError> {
-    let module = bytecode::decode(bytes)?;
     let data = json::parse(data).map_err(RenderError::Json)?;
+    render_value(bytes, &data, resources)
+}
+
+/// render와 같되 data를 이미 만든 값으로 받는다 - 같은 data로 여러 번 렌더하는 쪽이 파싱을 한 번만 한다.
+pub fn render_value(bytes: &[u8], data: &Json, resources: &[String]) -> Result<Rendered, RenderError> {
+    let module = bytecode::decode(bytes)?;
     let mut store = Store::default();
-    let root_pairs = plant_root(&module, &data, &mut store);
+    let root_pairs = plant_root(&module, data, &mut store);
     let def = module.def(0).expect("진입점 def 0");
     let mut r = Renderer {
         module: &module,
