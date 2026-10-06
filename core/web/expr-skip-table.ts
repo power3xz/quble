@@ -77,7 +77,7 @@ export type TExprSkipTable = {
   skipPastOpsByVar: TSkipPastOps[];
   // 둘 이상의 변수가 함께 바뀌었을 때의 skipPastOps. 키는 바뀐 변수 번호를 비트로 모은 정수(변수 a=0, c=2가
   // 바뀌면 0b101). 같은 식을 쓰는 인스턴스(@for 행마다 하나씩)가 같은 조합이면 같은 표를 쓰도록, 조합이
-  // 처음 나올 때 buildSkipPastOpsOfVars가 담는다. 변수가 32개를 넘는 식은 키를 만들 수 없어 담지 않는다.
+  // 처음 나올 때 buildSkipPastOpsOfVars가 담는다.
   skipPastOpsByVarSet: Map<number, TSkipPastOps>;
   // 변수 번호 -> 그 변수가 바뀌면 READ_LEAF가 읽을 leafIndex가 바뀌는가. leafIndex가 바뀌는 READ_LEAF마다,
   // 그 READ_LEAF에 leafIndex를 넘기는 연산(바로 앞 명령)의 위치를 담는다. 런타임은 다시 센 뒤 그 연산의
@@ -125,11 +125,15 @@ const varKey = (expr: Uint8Array, pc: number) => {
   return (cell << 16) | (expr[pc + 1] << 8) | expr[pc + 2];
 };
 
+// 바뀐 변수 조합을 비트마스크로 다루므로 표를 만들 수 있는 변수 수의 상한이다.
+const MAX_VARS = 32;
+
 // 어느 변수가 바뀌어도 건너뛸 부분식이 없으면 null이다. 런타임은 그런 식을 cache 없이 처음부터
 // 다시 센다.
 //   a - b     어느 쪽이 바뀌어도 a - b 전체를 다시 센다
 //   big > 50  변수가 big 하나라 모든 연산이 big을 품는다
 // 서로 다른 변수가 같은 칸을 가리켜 함께 바뀌어도 바뀐 위치가 늘 뿐이라 여전히 건너뛸 것이 없다.
+// 변수가 32개를 넘는 식도 null이다. 바뀐 변수를 번호를 비트로 모은 32비트 정수로 다루기 때문이다.
 export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
   const len = expr.length;
   const sameStartOpChain = new Uint8Array(len).fill(CHAIN_END);
@@ -215,6 +219,10 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     cacheIndex[pc] = opCount++;
   }
 
+  if (positions.length > MAX_VARS) {
+    return null;
+  }
+
   const table: TExprSkipTable = {
     sameStartOpChain,
     cacheIndex,
@@ -278,37 +286,36 @@ export const buildSkipPastOps = (
   return skipPastOps;
 };
 
-// 바뀐 변수들(varNumbers)을 하나도 품지 않은 부분식의 skipPastOps를 만든다. 변수가 하나면 미리 만들어 둔
-// table.skipPastOpsByVar의 것을 그대로 돌려준다.
+// 바뀐 변수들(changedVarMask)을 하나도 품지 않은 부분식의 skipPastOps를 만든다. 바뀐 변수는 변수 번호를
+// 비트로 모은 정수다(변수 a=0, c=2가 바뀌면 0b101). 변수가 하나면 미리 만들어 둔 table.skipPastOpsByVar의
+// 것을 그대로 돌려주고, 둘 이상이면 조합마다 한 번만 만들어 table.skipPastOpsByVarSet에 담는다.
 //
 // 위 식에서 변수 번호는 a=0, b=1, c=2, d=3, e=4다.
-//   varNumbers  skipPastOps
-//   [2]         { 0: 6, 11: 17 }   c만 바뀌면 a + b(0~6)와 d + e(11~17)를 건너뛴다
-//   [0]         { 11: 17 }         a만 바뀌면 d + e를 건너뛴다. a + b는 a를 품어 다시 센다
-//   [0, 2]      { 11: 17 }         a와 c가 함께 바뀌면 위 둘 모두에 있는 d + e만 건너뛴다
-//   [0, 3]      {}                 a와 d가 함께 바뀌면 (a + b) * c는 a를, d + e는 d를 품어 건너뛸 것이 없다
-export const buildSkipPastOpsOfVars = (table: TExprSkipTable, expr: Uint8Array, varNumbers: number[]): TSkipPastOps => {
-  if (varNumbers.length === 1) {
-    return table.skipPastOpsByVar[varNumbers[0]];
+//   바뀐 변수  changedVarMask  skipPastOps
+//   c          0b00100         { 0: 6, 11: 17 }   c만 바뀌면 a + b(0~6)와 d + e(11~17)를 건너뛴다
+//   a          0b00001         { 11: 17 }         a만 바뀌면 d + e를 건너뛴다. a + b는 a를 품어 다시 센다
+//   a, c       0b00101         { 11: 17 }         a와 c가 함께 바뀌면 위 둘 모두에 있는 d + e만 건너뛴다
+//   a, d       0b01001         {}                 (a + b) * c는 a를, d + e는 d를 품어 건너뛸 것이 없다
+export const buildSkipPastOpsOfVars = (
+  table: TExprSkipTable,
+  expr: Uint8Array,
+  changedVarMask: number,
+): TSkipPastOps => {
+  // 비트가 하나뿐인가. 최상위 비트(31)만 켜진 음수에서도 changedVarMask - 1이 32비트로 감겨 맞다.
+  if ((changedVarMask & (changedVarMask - 1)) === 0) {
+    return table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)];
   }
-  const cacheable = table.positionsByVar.length <= 32;
-  let key = 0;
-  if (cacheable) {
-    for (const varNumber of varNumbers) {
-      key |= 1 << varNumber;
-    }
-    const found = table.skipPastOpsByVarSet.get(key);
-    if (found !== undefined) {
-      return found;
-    }
+  const found = table.skipPastOpsByVarSet.get(changedVarMask);
+  if (found !== undefined) {
+    return found;
   }
   const positions: number[] = [];
-  for (const varNumber of varNumbers) {
-    positions.push(...table.positionsByVar[varNumber]);
+  for (let varNumber = 0; varNumber < table.positionsByVar.length; varNumber++) {
+    if (changedVarMask & (1 << varNumber)) {
+      positions.push(...table.positionsByVar[varNumber]);
+    }
   }
   const skipPastOps = buildSkipPastOps(table, expr, Uint8Array.from(positions));
-  if (cacheable) {
-    table.skipPastOpsByVarSet.set(key, skipPastOps);
-  }
+  table.skipPastOpsByVarSet.set(changedVarMask, skipPastOps);
   return skipPastOps;
 };

@@ -1979,20 +1979,22 @@ class Interpreter {
           return;
         }
         handledFlush = flushLeaves;
-        // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 모은다.
-        const changedVars: number[] = [];
+        // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 번호의 비트로 모은다.
+        let changedVarMask = 0;
         for (let n = 0; n < leafOfVar.length; n++) {
           if (flushLeaves.has(leafOfVar[n])) {
-            changedVars.push(n);
+            changedVarMask |= 1 << n;
           }
         }
-        if (changedVars.length === 0) {
+        if (changedVarMask === 0) {
           return;
         }
-        const v = this.reevalExpr(expr, pairs, table, cache, buildSkipPastOpsOfVars(table, expr, changedVars));
+        const v = this.reevalExpr(expr, pairs, table, cache, buildSkipPastOpsOfVars(table, expr, changedVarMask));
         if (hasIndexAccess) {
-          for (const varNumber of changedVars) {
-            this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, reevalOnChange, varNumber);
+          for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
+            if (changedVarMask & (1 << varNumber)) {
+              this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, reevalOnChange, varNumber);
+            }
           }
         }
         if (v !== lastValue) {
@@ -2062,13 +2064,13 @@ class Interpreter {
     if (leafOfVar.indexOf(leafIndex, first + 1) < 0) {
       return table.skipPastOpsByVar[first];
     }
-    const varNumbers: number[] = [];
+    let changedVarMask = 0;
     for (let n = first; n < leafOfVar.length; n++) {
       if (leafOfVar[n] === leafIndex) {
-        varNumbers.push(n);
+        changedVarMask |= 1 << n;
       }
     }
-    return buildSkipPastOpsOfVars(table, expr, varNumbers);
+    return buildSkipPastOpsOfVars(table, expr, changedVarMask);
   };
 
   // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.

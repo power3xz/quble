@@ -227,24 +227,20 @@ test("식에 없는 칸이면 식 전체를 건너뛴다", () => {
   assert.deepEqual(buildSkipPastOps(table, MIXED, new Uint8Array(0)), { 0: 18 });
 });
 
-// 변수 a=0, b=1, c=2, d=3, e=4.
+// 변수 a=0, b=1, c=2, d=3, e=4. 바뀐 변수는 번호를 비트로 모은 정수로 넘긴다. a와 c가 바뀌면 0b101.
+const maskOf = (...varNumbers: number[]) => varNumbers.reduce((mask, n) => mask | (1 << n), 0);
 
 test("바뀐 변수가 여럿이면 그 변수들을 하나도 품지 않은 부분식만 건너뛴다", () => {
   const table = tableOf(MIXED);
   // a(0)와 c(7)는 (a + b) * c에 들어 있고 d + e(11~17)만 건너뛴다.
-  assert.deepEqual(buildSkipPastOpsOfVars(table, MIXED, [0, 2]), { 11: 17 });
+  assert.deepEqual(buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 2)), { 11: 17 });
   // a(0)와 d(11)면 (a + b) * c와 d + e를 모두 다시 센다.
-  assert.deepEqual(buildSkipPastOpsOfVars(table, MIXED, [0, 3]), {});
+  assert.deepEqual(buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 3)), {});
 });
 
 test("바뀐 변수가 하나면 미리 만든 그 변수의 표를 그대로 돌려준다", () => {
   const table = tableOf(MIXED);
-  assert.equal(buildSkipPastOpsOfVars(table, MIXED, [2]), table.skipPastOpsByVar[2]);
-});
-
-test("변수 번호의 순서와 상관없이 같은 표가 나온다", () => {
-  const table = tableOf(MIXED);
-  assert.deepEqual(buildSkipPastOpsOfVars(table, MIXED, [2, 0]), buildSkipPastOpsOfVars(table, MIXED, [0, 2]));
+  assert.equal(buildSkipPastOpsOfVars(table, MIXED, maskOf(2)), table.skipPastOpsByVar[2]);
 });
 
 test("같은 위치에서 끝 연산이 다르면 안쪽(작은) 끝 연산을 쓴다", () => {
@@ -256,7 +252,7 @@ test("같은 위치에서 끝 연산이 다르면 안쪽(작은) 끝 연산을 �
   const table = tableOf(expr);
   assert.deepEqual(table.skipPastOpsByVar[2], { 0: 6 });
   assert.deepEqual(table.skipPastOpsByVar[3], { 0: 10 });
-  assert.deepEqual(buildSkipPastOpsOfVars(table, expr, [2, 3]), { 0: 6 });
+  assert.deepEqual(buildSkipPastOpsOfVars(table, expr, maskOf(2, 3)), { 0: 6 });
 });
 
 test("변수 둘 이상의 모든 조합이 변수별 표를 모두 건너뛰는 부분식만 남긴 것과 같다", () => {
@@ -277,50 +273,46 @@ test("변수 둘 이상의 모든 조합이 변수별 표를 모두 건너뛰는
     if (varNumbers.length < 2) {
       continue;
     }
-    assert.deepEqual(buildSkipPastOpsOfVars(table, MIXED, varNumbers), intersect(varNumbers), `변수 ${varNumbers}`);
+    assert.deepEqual(buildSkipPastOpsOfVars(table, MIXED, mask), intersect(varNumbers), `변수 ${varNumbers}`);
   }
 });
 
-test("변수가 32개를 넘는 식에서도 같은 표가 나온다", () => {
-  // (v0 + v1 + ... + v31) * v32 - 변수 33개. v32가 바뀌면 합 전체를 건너뛴다.
+// (v0 + v1 + ... + v(n-2)) * v(n-1) - 변수 n개. 마지막 변수가 바뀌면 합 전체를 건너뛴다.
+const sumTimesLast = (varCount: number) => {
   const parts: (number | number[])[] = [v(0)];
-  for (let offset = 1; offset < 32; offset++) {
+  for (let offset = 1; offset < varCount - 1; offset++) {
     parts.push(v(offset), EXPR_ADD);
   }
-  parts.push(v(32), EXPR_MUL);
-  const expr = bytes(...parts);
+  parts.push(v(varCount - 1), EXPR_MUL);
+  return bytes(...parts);
+};
+
+test("변수가 32개까지는 마지막 비트(31)까지 써서 표를 만든다", () => {
+  const expr = sumTimesLast(32);
   const table = tableOf(expr);
-  assert.equal(table.positionsByVar.length, 33);
-  // v0과 v32가 바뀌면 곱 전체를 다시 세고 건너뛸 부분식이 없다.
-  assert.deepEqual(buildSkipPastOpsOfVars(table, expr, [0, 32]), {});
+  assert.equal(table.positionsByVar.length, 32);
+  // v0과 v31이 바뀌면 곱 전체를 다시 세고 건너뛸 부분식이 없다.
+  assert.deepEqual(buildSkipPastOpsOfVars(table, expr, maskOf(0, 31)), {});
+  // v31 하나만 바뀌면 합 전체(위치 0부터)를 건너뛴다.
+  assert.deepEqual(Object.keys(buildSkipPastOpsOfVars(table, expr, maskOf(31))), ["0"]);
+});
+
+test("변수가 32개를 넘는 식은 비트마스크로 바뀐 변수를 담지 못해 표를 만들지 않는다", () => {
+  assert.equal(buildSkipTable(sumTimesLast(33)), null);
 });
 
 // 같은 식을 쓰는 인스턴스(@for 행마다 하나씩)가 바뀐 변수 조합이 같으면 같은 표를 쓰도록 table에 담아 둔다.
 
-test("같은 변수 조합은 순서와 상관없이 담아 둔 같은 표를 돌려준다", () => {
+test("같은 변수 조합은 담아 둔 같은 표를 돌려준다", () => {
   const table = tableOf(MIXED);
-  const first = buildSkipPastOpsOfVars(table, MIXED, [0, 2]);
-  assert.equal(buildSkipPastOpsOfVars(table, MIXED, [0, 2]), first);
-  assert.equal(buildSkipPastOpsOfVars(table, MIXED, [2, 0]), first);
-  assert.notEqual(buildSkipPastOpsOfVars(table, MIXED, [0, 3]), first, "다른 조합은 다른 표");
+  const first = buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 2));
+  assert.equal(buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 2)), first);
+  assert.notEqual(buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 3)), first, "다른 조합은 다른 표");
   assert.equal(table.skipPastOpsByVarSet.size, 2);
 });
 
 test("변수가 하나면 담아 두지 않고 변수별 표를 쓴다", () => {
   const table = tableOf(MIXED);
-  buildSkipPastOpsOfVars(table, MIXED, [2]);
-  assert.equal(table.skipPastOpsByVarSet.size, 0);
-});
-
-test("변수가 32개를 넘는 식은 비트마스크 키를 못 만들어 담아 두지 않는다", () => {
-  const parts: (number | number[])[] = [v(0)];
-  for (let offset = 1; offset < 32; offset++) {
-    parts.push(v(offset), EXPR_ADD);
-  }
-  parts.push(v(32), EXPR_MUL);
-  const expr = bytes(...parts);
-  const table = tableOf(expr);
-  const first = buildSkipPastOpsOfVars(table, expr, [0, 32]);
-  assert.notEqual(buildSkipPastOpsOfVars(table, expr, [0, 32]), first);
+  buildSkipPastOpsOfVars(table, MIXED, maskOf(2));
   assert.equal(table.skipPastOpsByVarSet.size, 0);
 });
