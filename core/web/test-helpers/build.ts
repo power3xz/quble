@@ -38,6 +38,9 @@ export const buildFixture = (name: string): Uint8Array => {
   return new Uint8Array(readFileSync(join(OUT_DIR, `${name}.fixture.qubb`)));
 };
 
+// buildFixture가 낸 .qubb 파일 경로. 바이트가 아니라 파일을 받는 도구(quble-ssr)에 넘긴다.
+export const fixtureQubbPath = (name: string): string => join(OUT_DIR, `${name}.fixture.qubb`);
+
 // 위와 같이 빌드하되 { qubb, resmap }를 돌려준다. resmap은 manifest의 resources 배열
 // (<OUT_DIR>/<name>.fixture.manifest.json). manifest는 항상 생성되고, 리소스 없으면 빈 배열.
 export const buildFixtureWithResmap = (name: string) => {
