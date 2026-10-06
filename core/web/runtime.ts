@@ -2841,7 +2841,6 @@ class Interpreter {
     skipPastOps: TSkipPastOp[],
     reads: number[] | null,
   ): unknown => {
-    const stack = this.exprStack;
     // 스택 높이. 0부터 센다 - 앞선 평가가 ELEM_AT의 RangeError로 중간에 멈췄으면 배열에 그때 값이
     // 남아 있다. 배열 길이를 0으로 비우지 않는 것은 V8이 저장 공간을 놓아 다음에 다시 할당하기 때문이다.
     let sp = 0;
@@ -2853,7 +2852,7 @@ class Interpreter {
         skipPastOpAt = other === undefined ? undefined : Math.min(skipPastOpAt, other);
       }
       if (skipPastOpAt !== undefined && table !== null && cache !== null) {
-        stack[sp++] = cache[table.cacheIndex[skipPastOpAt]];
+        this.exprStack[sp++] = cache[table.cacheIndex[skipPastOpAt]];
         pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
         continue;
       }
@@ -2862,7 +2861,7 @@ class Interpreter {
       let result: unknown;
       switch (op) {
         case EXPR_LOAD_VAR: {
-          stack[sp++] = this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads);
+          this.exprStack[sp++] = this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads);
           pc += 2;
           continue;
         }
@@ -2878,42 +2877,42 @@ class Interpreter {
             info.sizeLeafIndex ??= this.store.alloc([info.elemStartLeafIndices.length]);
             reads?.push(info.sizeLeafIndex, at);
           }
-          stack[sp++] = info.elemStartLeafIndices.length;
+          this.exprStack[sp++] = info.elemStartLeafIndices.length;
           pc += 2;
           continue;
         }
         case EXPR_LOAD_STRING_LENGTH: {
           // 길이는 값 칸 자체를 구독해 바뀔 때 다시 잰다 - slotValue가 그 칸을 담는다.
-          stack[sp++] = String(this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads)).length;
+          this.exprStack[sp++] = String(this.slotValue(pairs, expr[pc], expr[pc + 1], at, reads)).length;
           pc += 2;
           continue;
         }
         case EXPR_LOAD_CONST: {
-          stack[sp++] = this.module.constpool[expr[pc] | (expr[pc + 1] << 8)];
+          this.exprStack[sp++] = this.module.constpool[expr[pc] | (expr[pc + 1] << 8)];
           pc += 2;
           continue;
         }
         case EXPR_LOAD_SMALL_INT:
-          stack[sp++] = expr[pc++];
+          this.exprStack[sp++] = expr[pc++];
           continue;
         case EXPR_LOAD_TRUE:
-          stack[sp++] = true;
+          this.exprStack[sp++] = true;
           continue;
         case EXPR_LOAD_FALSE:
-          stack[sp++] = false;
+          this.exprStack[sp++] = false;
           continue;
         // 단항 - 하나 꺼내 하나 넣는다.
         case EXPR_NOT:
-          result = !stack[--sp];
+          result = !this.exprStack[--sp];
           break;
         case EXPR_NEG:
-          result = -(stack[--sp] as number);
+          result = -(this.exprStack[--sp] as number);
           break;
         // 인덱스 접근 - 값 대신 leafIndex를 올린다. 요소 위치는 인덱스를 세어 봐야 정해진다.
         // 요소가 없는 인덱스(범위 밖, 음수, 정수 아님)는 에러다 - 범위는 핸들러 로직이 지킨다.
         case EXPR_ELEM_AT: {
-          const i = stack[--sp] as number;
-          const info = this.arrayPool.entries[stack[--sp] as number];
+          const i = this.exprStack[--sp] as number;
+          const info = this.arrayPool.entries[this.exprStack[--sp] as number];
           const start = info.elemStartLeafIndices[i];
           if (start === undefined) {
             throw new RangeError(`index ${i} out of range (length ${info.elemStartLeafIndices.length})`);
@@ -2922,29 +2921,29 @@ class Interpreter {
           break;
         }
         case EXPR_FIELD_AT:
-          result = (stack[--sp] as number) + expr[pc++];
+          result = (this.exprStack[--sp] as number) + expr[pc++];
           break;
         case EXPR_READ_LEAF: {
-          const leafIndex = stack[--sp] as number;
+          const leafIndex = this.exprStack[--sp] as number;
           reads?.push(leafIndex, at);
           result = this.store.get(leafIndex);
           break;
         }
         // 이항 - 둘 꺼내 하나 넣는다. 나중에 밀린 것이 오른쪽이라 먼저 꺼내진다.
         default: {
-          const right = stack[--sp];
-          const left = stack[--sp];
+          const right = this.exprStack[--sp];
+          const left = this.exprStack[--sp];
           result = applyBinary(op, left, right);
           break;
         }
       }
       // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
-      stack[sp++] = result;
+      this.exprStack[sp++] = result;
       if (table !== null && cache !== null) {
         cache[table.cacheIndex[at]] = result;
       }
     }
-    return stack[0];
+    return this.exprStack[0];
   };
 
   // 슬롯 하나가 가리키는 값. CONST면 상수풀, RAW면 ref 자체(개수 반복의 회차 번호), STORE면 store 칸.
