@@ -8,7 +8,7 @@
 // cargo가 관여하지 않아 잠금이 생기지 않는다.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,8 +23,12 @@ const COMPONENTS = join(CORE, "..", "components");
 
 // 산출물은 용도별 하위 디렉토리에 낸다 - playground/preview 빌드와 섞이지 않게(그쪽은 시작할 때
 // 자기 디렉토리를 비운다). cwd가 CORE라 quble에는 상대 경로로 넘긴다.
-const OUT_NAME = join("dist", "fixtures");
+//
+// 그 아래를 프로세스마다 나눈다. node --test는 테스트 파일마다 프로세스를 띄워 병렬로 돌리는데, 같은
+// 픽스처를 여러 파일이 빌드하면 한쪽이 다시 쓰는 중인 qubb를 다른 쪽이 읽을 수 있다. 끝날 때 지운다.
+const OUT_NAME = join("dist", "fixtures", String(process.pid));
 const OUT_DIR = join(CORE, OUT_NAME);
+process.on("exit", () => rmSync(OUT_DIR, { recursive: true, force: true }));
 
 // components/<name>.fixture.qubc를 컴파일하고 <OUT_DIR>/<name>.fixture.qubb 바이트를 돌려준다.
 export const buildFixture = (name: string): Uint8Array => {
