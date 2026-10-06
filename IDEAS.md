@@ -8,8 +8,8 @@
 
 ### 런타임 트리셰이킹 (필요한 opcode 핸들러만 구성)
 
-지금 runtime.ts는 작지만(~5KB), `@for`/`@if`/이벤트/반응성이 들어오면 계속 커져 React 런타임
-(46KB gzip)을 향해 간다. "런타임이 작다"는 강점이 희석된다. 해결: **페이지가 실제로 쓰는
+runtime.ts는 처음에 작았지만(~5KB) `@for`/`@if`/이벤트/반응성이 들어와 지금 3000줄이 넘고 계속
+커져 React 런타임(46KB gzip)을 향해 간다. "런타임이 작다"는 강점이 희석된다. 해결: **페이지가 실제로 쓰는
 기능(opcode)만 든 런타임을 구성**한다.
 
 **우리만의 무기:** qubb는 컴파일타임에 다 알 수 있어, **어떤 opcode를 쓰는지 정적 분석**이 된다.
@@ -254,12 +254,12 @@ React는 이를 피하려고 outlet(상위 레이아웃이 `<Outlet />` 자리�
 **미결:** 중첩 루프에서 `rows[].cells[]`의 각 `[]`가 어느 `@for`에 묶이는지(도는 배열 식과 맞는
 것끼리, 같은 배열이 두 깊이에 있으면 가까운 쪽?).
 
-### qubb 리소스 테이블 (`LOAD_EX`의 resId -> 경로)
+### qubb 리소스 테이블 (`LOAD_RES`의 resId -> 경로)
 
-외부 리소스 로드(`LOAD_EX resId`, 컴포넌트가 `use './x.css'` 한 CSS를 로드)에서, resId가 어느
+외부 리소스 로드(`LOAD_RES resId`, 컴포넌트가 `use './x.css'` 한 CSS를 로드)에서, resId가 어느
 파일인지 알려주는 `resId -> 원본경로` 테이블을 **qubb 안에** 둘지에 대한 검토.
 
-**현재 결정 - 테이블 없이 resId(정수)만.** qubb엔 `LOAD_EX resId`만 두고, `resId -> 경로`는
+**현재 결정 - 테이블 없이 resId(정수)만.** qubb엔 `LOAD_RES resId`만 두고, `resId -> 경로`는
 컴파일러 부산물(qubb 밖)로, `resId -> url`은 런타임 주입 맵으로 처리한다(url은 빌드마다 바뀌어
 qubb에 못 박는다). 런타임은 `resourceMap[resId]`로 url 찾아 로드, 중복 url은 스킵. resId는
 **모듈(qubb) 로컬 인덱스** - scope offset/컴포넌트 id와 같은 스코프.
@@ -359,14 +359,6 @@ control 경계에서만 - RENDER는 같은 subs를 이어 쓴다(현행과 동�
 `@for`가 요소를 제거/추가할 때 지금은 노드를 새로 생성/파괴한다. 성능이 필요해지면
 제거한 노드를 재사용 풀에 두고 값만 갈아끼우는 여지가 있다. 1단계는 단순 생성/제거.
 
-### `@for`/`@if` 회차 뼈대 cloneNode (성능 필요 시)
-
-경계(if/for) 사이 구간은 요소 구조가 회차 불변이고 값(TextVar)만 바뀐다. 회차마다
-opcode를 재해석해 노드를 새로 조립하는 대신, 뼈대를 한 번 만들어 cloneNode로 복제하고
-가변 지점만 채우는 여지. 대량 반복에서 DOM 생성(create+append)이 지배적이라 그 부분을
-겨냥. 가변 지점 추적/중첩 경계 분리/구독 배선 유지가 얽혀 기본 기능 완성 후 검토.
-[[정적-서브트리-innerHTML]]과 겨루는 대안.
-
 ### 조작 함수를 모듈 import로 (`quble/array`)
 
 지금 핸들러 ctx에 실어 넘기는 조작 함수를 `import { push } from 'quble/array'`처럼 모듈에서
@@ -454,3 +446,14 @@ interpret(startPc, endPc, regionIndex, branchIndex)
 검증 순서: (1) 스킵 없는 버전(양쪽 다 build, IF_END에서 비활성 구독 해제)으로 뼈대 확인 ->
 (2) cond 변경 swap 동작 확인 -> (3) skip + lazy build 도입. **(1)/(2)/(3) 모두 완료**
 (`core/web/runtime.ts` 해석, `region.ts`, 테스트는 `if-integration.test.ts`로 이관).
+
+### `@for`/`@if` 회차 뼈대 cloneNode
+
+-> **구현 완료.** 구현은 `core/web/runtime.ts`의 `templatePlanOf`/`cloneTemplate`(뼈대와 값 자리 목록)이고
+별도 확정 설계 문서는 없다. 아래는 도입 당시 설계 메모(기록 보존).
+
+경계(if/for) 사이 구간은 요소 구조가 회차 불변이고 값(TextVar)만 바뀐다. 회차마다
+opcode를 재해석해 노드를 새로 조립하는 대신, 뼈대를 한 번 만들어 cloneNode로 복제하고
+가변 지점만 채우는 여지. 대량 반복에서 DOM 생성(create+append)이 지배적이라 그 부분을
+겨냥. 가변 지점 추적/중첩 경계 분리/구독 배선 유지가 얽혀 기본 기능 완성 후 검토.
+[[정적-서브트리-innerHTML]]과 겨루는 대안.
