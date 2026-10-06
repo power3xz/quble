@@ -50,7 +50,7 @@ import {
   EXPR_SUB,
   instrSize,
 } from "./expr-opcode.ts";
-import { buildSkipTable, type TExprSkipTable, type TSkipPastOp } from "./expr-skip-table.ts";
+import { buildSkipPastOpsOfVars, buildSkipTable, type TExprSkipTable, type TSkipPastOps } from "./expr-skip-table.ts";
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
@@ -501,7 +501,7 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
 const skipTables = new WeakMap<Uint8Array, TExprSkipTable | null>();
 
 // 식을 처음 셀 때 runExpr에 넘기는 값 - 아무것도 건너뛰지 않는다.
-const SKIP_NOTHING: TSkipPastOp[] = [{}];
+const SKIP_NOTHING: TSkipPastOps = {};
 
 // 식 평가 스택. runExpr마다 새로 만들지 않고 이것을 다시 쓴다. 식 평가는 동기이고 runExpr가 다시 부르지
 // 않아 런타임 인스턴스가 여럿이어도 하나를 함께 쓴다.
@@ -1969,7 +1969,7 @@ class Interpreter {
     // 비어 있지 않다.
     const hasIndexAccess = table.readLeafIndexOpsByVar.some((ops) => ops.length > 0);
     let lastValue = value;
-    // 같은 flush에서 읽는 leaf 둘 이상이 바뀌면 처음 불릴 때 바뀐 변수 전체의 건너뛰기 표를 함께 써서
+    // 같은 flush에서 읽는 leaf 둘 이상이 바뀌면 처음 불릴 때 바뀐 변수 전체로 만든 건너뛰기 표로
     // 한꺼번에 센다. 읽는 leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
     // 같은 flush의 나머지 호출은 건너뛴다.
     let handledFlush: ReadonlySet<number> | undefined;
@@ -1989,8 +1989,7 @@ class Interpreter {
         if (changedVars.length === 0) {
           return;
         }
-        const skipPastOps = changedVars.map((varNumber) => table.skipPastOpByVar[varNumber]);
-        const v = this.reevalExpr(expr, pairs, table, cache, skipPastOps);
+        const v = this.reevalExpr(expr, pairs, table, cache, buildSkipPastOpsOfVars(table, expr, changedVars));
         if (hasIndexAccess) {
           for (const varNumber of changedVars) {
             this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, reevalOnChange, varNumber);
@@ -2002,7 +2001,7 @@ class Interpreter {
         }
         return;
       }
-      const skipPastOps = this.skipPastOpsOfLeaf(table, leafOfVar, leafIndex);
+      const skipPastOps = this.skipPastOpsOfLeaf(expr, table, leafOfVar, leafIndex);
       // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
       // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
       if (skipPastOps === null) {
@@ -2045,26 +2044,31 @@ class Interpreter {
     return value;
   };
 
-  // leafIndex를 읽는 변수마다의 건너뛰기 표(table.skipPastOpByVar). 읽는 변수가
+  // leafIndex를 읽는 변수들의 건너뛰기 표. 읽는 변수가
   //   없으면   null이다. 구독을 다시 걸며 이미 뺀 leafIndex다.
-  //   하나면   그 변수의 표 하나다.
+  //   하나면   식 정의가 공유하는 표(table.skipPastOpsByVar)다.
   //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
-  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로 변수마다의 표를 모두 낸다.
-  skipPastOpsOfLeaf = (table: TExprSkipTable, leafOfVar: number[], leafIndex: number): TSkipPastOp[] | null => {
+  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로 두 변수를 모두 품지 않은 부분식의 표를 만든다.
+  skipPastOpsOfLeaf = (
+    expr: Uint8Array,
+    table: TExprSkipTable,
+    leafOfVar: number[],
+    leafIndex: number,
+  ): TSkipPastOps | null => {
     const first = leafOfVar.indexOf(leafIndex);
     if (first < 0) {
       return null;
     }
     if (leafOfVar.indexOf(leafIndex, first + 1) < 0) {
-      return [table.skipPastOpByVar[first]];
+      return table.skipPastOpsByVar[first];
     }
-    const skipPastOps: TSkipPastOp[] = [];
+    const varNumbers: number[] = [];
     for (let n = first; n < leafOfVar.length; n++) {
       if (leafOfVar[n] === leafIndex) {
-        skipPastOps.push(table.skipPastOpByVar[n]);
+        varNumbers.push(n);
       }
     }
-    return skipPastOps;
+    return buildSkipPastOpsOfVars(table, expr, varNumbers);
   };
 
   // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.
@@ -2813,23 +2817,21 @@ class Interpreter {
     return { value, leafOfVar };
   };
 
-  // 식을 다시 센다. skipPastOps는 바뀐 변수마다의 건너뛰기 표다. 모든 표에 적힌 부분식만 계산하지 않고
-  // cache의 지난번 값을 쓴다.
+  // 식을 다시 센다. skipPastOps에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다.
   reevalExpr = (
     expr: Uint8Array,
     pairs: TScope,
     table: TExprSkipTable,
     cache: unknown[],
-    skipPastOps: TSkipPastOp[],
+    skipPastOps: TSkipPastOps,
   ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOps, null);
 
   // 식을 후위 표기로 센다(BYTECODE.md #4 <EXPR>). evalExpr와 reevalExpr가 함께 쓰는 본체다.
   //
   // 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
   //
-  //   - 잎 명령 위치 at에 skipPastOps의 모든 표가 항목을 가지면, 그 연산까지를 계산하지 않고 cache에 든
-  //     그 연산의 지난번 값을 올린 뒤 그 연산 다음 명령으로 간다. 표마다 끝 연산이 다르면 안쪽(위치가
-  //     작은) 것을 쓴다 - 바깥 부분식은 어느 한 변수를 품고 있다. 표가 하나라도 항목이 없으면 읽는다.
+  //   - 잎 명령 위치 at에 skipPastOps[at]이 있으면, 그 연산까지를 계산하지 않고 cache에 든 그 연산의
+  //     지난번 값을 올린 뒤 그 연산 다음 명령으로 간다.
   //   - 연산 결과는 cache[table.cacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
   //     건너뛸 부분식이 없는 식은 표도 cache도 없어(null) 쓰지 않는다.
   //   - reads가 있으면 store 칸을 읽을 때마다 leafIndex와 읽은 명령의 위치를 이어 붙인다. a + b에서
@@ -2839,7 +2841,7 @@ class Interpreter {
     pairs: TScope,
     table: TExprSkipTable | null,
     cache: unknown[] | null,
-    skipPastOps: TSkipPastOp[],
+    skipPastOps: TSkipPastOps,
     reads: number[] | null,
   ): unknown => {
     // 스택 높이. 0부터 센다 - 앞선 평가가 ELEM_AT의 RangeError로 중간에 멈췄으면 배열에 그때 값이
@@ -2847,14 +2849,10 @@ class Interpreter {
     let sp = 0;
     for (let pc = 0; pc < expr.length; ) {
       const at = pc;
-      let skipPastOpAt: number | undefined = skipPastOps[0][at];
-      for (let k = 1; skipPastOpAt !== undefined && k < skipPastOps.length; k++) {
-        const other = skipPastOps[k][at];
-        skipPastOpAt = other === undefined ? undefined : Math.min(skipPastOpAt, other);
-      }
-      if (skipPastOpAt !== undefined && table !== null && cache !== null) {
-        exprStack[sp++] = cache[table.cacheIndex[skipPastOpAt]];
-        pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
+      const skipPastOpsAt = skipPastOps[at];
+      if (skipPastOpsAt !== undefined && table !== null && cache !== null) {
+        exprStack[sp++] = cache[table.cacheIndex[skipPastOpsAt]];
+        pc = skipPastOpsAt + instrSize(expr[skipPastOpsAt]);
         continue;
       }
       const op = expr[pc++];

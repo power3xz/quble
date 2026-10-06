@@ -33,19 +33,19 @@ import {
 export const CHAIN_END = 0;
 
 // 바뀐 칸이 있을 때 건너뛸 부분식. 키는 부분식이 시작하는 잎 위치, 값은 그 부분식의 끝 연산
-// 위치다. 평가하다 잎 위치 p에 왔을 때 skipPastOp[p]가 있으면, 연산 skipPastOp[p]까지를 계산하지
+// 위치다. 평가하다 잎 위치 p에 왔을 때 skipPastOps[p]가 있으면, 연산 skipPastOps[p]까지를 계산하지
 // 않고 cache에 든 그 연산의 지난번 값을 쓴 뒤 그 연산 다음 명령으로 간다. 키가 없으면 잎을 읽는다.
 // 다음 명령은 끝 연산 위치 + 그 명령의 바이트 수다 - FIELD_AT처럼 operand가 붙은 연산이 끝일 수
 // 있어 + 1이 아니다.
 //
 // 위 식에서 c(위치 7)가 바뀌면 c에서 루트로 가는 길(MUL 10, SUB 18) 옆의 부분식을 건너뛴다.
 //   { 0: 6, 11: 17 }   위치 0에서 a + b(끝 ADD 6)를, 위치 11에서 d + e(끝 ADD 17)를 건너뛴다
-export type TSkipPastOp = Record<number, number>;
+export type TSkipPastOps = Record<number, number>;
 
 // 식 바이트만으로 정해지는 표. 같은 식을 쓰는 인스턴스(@for 회차마다 생기는 것)끼리 하나를
 // 공유한다.
 export type TExprSkipTable = {
-  // skipPastOp를 만들 때 쓴다. 잎 위치에서는 그 위치에서 시작하는 부분식 가운데 가장 바깥 것의 끝
+  // skipPastOps를 만들 때 쓴다. 잎 위치에서는 그 위치에서 시작하는 부분식 가운데 가장 바깥 것의 끝
   // 연산을, 연산 위치에서는 같은 위치에서 시작하는 한 겹 안쪽 부분식의 끝 연산을 가리킨다.
   //
   // 위치 0에서는 식 전체, (a + b) * c, a + b 세 부분식이 시작한다. 바깥부터 이으면
@@ -68,20 +68,20 @@ export type TExprSkipTable = {
   //
   // 위 식에서 a=0, b=1, c=2, d=3, e=4.
   // 변수 번호 -> 그 변수를 읽는 위치들(오름차순). [[0], [3], [7], [11], [14]]
-  positionsByVar: Int32Array[];
+  positionsByVar: Uint8Array[];
   // 읽는 명령의 위치 -> 변수 번호. 0 -> 0, 3 -> 1, 7 -> 2, 11 -> 3, 14 -> 4. 런타임이 식을 세며
   // 어느 칸을 어느 변수가 읽었는지 모을 때 쓴다.
   varAt: Uint8Array;
-  // 변수 번호 -> 그 변수가 바뀌었을 때의 skipPastOp. 변수가 식에 여러 번 나오면 그 위치들이 함께
+  // 변수 번호 -> 그 변수가 바뀌었을 때의 skipPastOps. 변수가 식에 여러 번 나오면 그 위치들이 함께
   // 바뀐 것으로 본다. c(2)는 { 0: 6, 11: 17 }.
-  skipPastOpByVar: TSkipPastOp[];
+  skipPastOpsByVar: TSkipPastOps[];
   // 변수 번호 -> 그 변수가 바뀌면 READ_LEAF가 읽을 leafIndex가 바뀌는가. leafIndex가 바뀌는 READ_LEAF마다,
   // 그 READ_LEAF에 leafIndex를 넘기는 연산(바로 앞 명령)의 위치를 담는다. 런타임은 다시 센 뒤 그 연산의
   // cache 값으로 READ_LEAF가 새로 읽은 leafIndex를 알고 구독을 다시 건다. 인덱스 접근이 없는 식은 모두
   // 비어 있다.
   //   a[i].b + x   FIELD_AT(7)이 넘긴 leafIndex를 READ_LEAF(9)가 읽는다
   //     a, i -> [7]    READ_LEAF 자신, x -> []
-  readLeafIndexOpsByVar: Int32Array[];
+  readLeafIndexOpsByVar: Uint8Array[];
 };
 
 // 잎 명령인가. 스택에서 아무것도 꺼내지 않고 값 하나를 올린다.
@@ -215,30 +215,63 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     sameStartOpChain,
     cacheIndex,
     opCount,
-    positionsByVar: positions.map((p) => Int32Array.from(p)),
+    positionsByVar: positions.map((p) => Uint8Array.from(p)),
     varAt,
-    skipPastOpByVar: [],
-    readLeafIndexOpsByVar: leafIndexOps.map((ops) => Int32Array.from(ops)),
+    skipPastOpsByVar: [],
+    readLeafIndexOpsByVar: leafIndexOps.map((ops) => Uint8Array.from(ops)),
   };
-  table.skipPastOpByVar = table.positionsByVar.map((p) => buildSkipPastOp(table, expr, p));
-  if (table.skipPastOpByVar.every((skipPastOp) => Object.keys(skipPastOp).length === 0)) {
+  table.skipPastOpsByVar = table.positionsByVar.map((p) => buildSkipPastOps(table, expr, p));
+  if (table.skipPastOpsByVar.every((skipPastOp) => Object.keys(skipPastOp).length === 0)) {
     return null;
   }
   return table;
 };
 
-// 바뀐 위치들(changedPositions, 오름차순)을 품지 않은 부분식을 골라 skipPastOp를 만든다.
-// buildSkipTable이 변수마다 부른다. 한 인스턴스에서 서로 다른 변수가 같은 칸을 가리키면, 그 칸이
-// 바뀔 때 두 변수가 함께 바뀌므로 런타임이 두 변수의 위치를 합쳐 정렬해 부른다.
+// 부분식 안에 바뀐 위치가 있는지를 뺄셈 한 번으로 알려고 두는 배열이다. 식은 최대 255바이트라 크기가
+// 정해져 있어 호출마다 새로 만들지 않고 다시 쓴다.
+//   changedMark    바뀐 위치마다 1이다. accumulateChanged가 읽고 0으로 되돌린다.
+//   changedPrefix  changedPrefix[i]는 위치 0~i-1에 바뀐 위치가 몇 개인지다.
 //
-// 위 식에서 d와 e가 같은 칸을 가리키면 changedPositions = [11, 14]
+// 위 식에서 a(위치 0)와 c(위치 7)가 바뀌었다면
+//   i              0  1  2 ... 7  8  9 ... 19
+//   changedPrefix  0  1  1 ... 1  2  2 ...  2
+//   a + b(위치 0~6)에는 changedPrefix[7] - changedPrefix[0] = 1이라 바뀐 위치가 있다.
+//   d + e(위치 11~17)에는 changedPrefix[18] - changedPrefix[11] = 0이라 없다.
+const MAX_EXPR_LEN = 255;
+const changedMark = new Uint8Array(MAX_EXPR_LEN);
+const changedPrefix = new Uint8Array(MAX_EXPR_LEN + 1);
+
+const accumulateChanged = (len: number) => {
+  for (let i = 0; i < len; i++) {
+    changedPrefix[i + 1] = changedPrefix[i] + changedMark[i];
+    changedMark[i] = 0;
+  }
+};
+
+// 바뀐 위치들(changedPositions, 오름차순)을 품지 않은 부분식을 골라 skipPastOps를 만든다.
+// buildSkipTable이 변수마다 부른다. 변수 여럿이 함께 바뀌는 경우는 buildSkipPastOpsOfVars가 맡는다.
+//
+// 위 식에서 d와 e를 읽는 위치가 함께 바뀌면 changedPositions = [11, 14]
 //   { 0: 10 }   (a + b) * c(0~10)는 건너뛰고, d + e는 d, e를 품어 다시 센다
 // 식에 없는 칸이면 changedPositions = []이고 식 전체를 건너뛴다. { 0: 18 }
-export const buildSkipPastOp = (table: TExprSkipTable, expr: Uint8Array, changedPositions: Int32Array): TSkipPastOp => {
+export const buildSkipPastOps = (
+  table: TExprSkipTable,
+  expr: Uint8Array,
+  changedPositions: Uint8Array,
+): TSkipPastOps => {
+  for (const position of changedPositions) {
+    changedMark[position] = 1;
+  }
+  return walkSkipPastOps(table, expr);
+};
+
+// changedMark에 표시된 바뀐 위치를 품지 않은 부분식을 골라 skipPastOps를 만든다.
+const walkSkipPastOps = (table: TExprSkipTable, expr: Uint8Array): TSkipPastOps => {
+  accumulateChanged(expr.length);
   const chain = table.sameStartOpChain;
 
-  // 위치 start~end 구간에 바뀐 위치가 하나라도 있나. 표를 만들 때만 도는 코드라 그냥 다 본다.
-  const hasChangeIn = (start: number, end: number) => changedPositions.some((p) => start <= p && p <= end);
+  // 위치 start~end 구간에 바뀐 위치가 하나라도 있나.
+  const hasChangeIn = (start: number, end: number) => changedPrefix[end + 1] - changedPrefix[start] > 0;
 
   // pc에서 시작하는 부분식을 바깥부터 보며, 바뀐 위치가 없는 첫 부분식의 끝 연산을 찾는다. 모두 바뀐
   // 위치를 품으면 CHAIN_END다.
@@ -254,18 +287,39 @@ export const buildSkipPastOp = (table: TExprSkipTable, expr: Uint8Array, changed
 
   // 식을 셀 때와 같은 순서로 앞에서부터 간다. 건너뛴 부분식의 안쪽은 들르지 않는다 - 평가할 때도
   // 들르지 않기 때문이다.
-  const skipPastOp: TSkipPastOp = {};
+  const skipPastOps: TSkipPastOps = {};
   let pc = 0;
   while (pc < expr.length) {
     if (isLeaf(expr[pc])) {
       const op = outermostUnchangedFrom(pc);
       if (op !== CHAIN_END) {
-        skipPastOp[pc] = op;
+        skipPastOps[pc] = op;
         pc = op + instrSize(expr[op]);
         continue;
       }
     }
     pc += instrSize(expr[pc]);
   }
-  return skipPastOp;
+  return skipPastOps;
+};
+
+// 바뀐 변수들(varNumbers)을 하나도 품지 않은 부분식의 skipPastOps를 만든다. 변수가 하나면 미리 만들어 둔
+// table.skipPastOpsByVar의 것을 그대로 돌려준다.
+//
+// 위 식에서 변수 번호는 a=0, b=1, c=2, d=3, e=4다.
+//   varNumbers  skipPastOps
+//   [2]         { 0: 6, 11: 17 }   c만 바뀌면 a + b(0~6)와 d + e(11~17)를 건너뛴다
+//   [0]         { 11: 17 }         a만 바뀌면 d + e를 건너뛴다. a + b는 a를 품어 다시 센다
+//   [0, 2]      { 11: 17 }         a와 c가 함께 바뀌면 위 둘 모두에 있는 d + e만 건너뛴다
+//   [0, 3]      {}                 a와 d가 함께 바뀌면 (a + b) * c는 a를, d + e는 d를 품어 건너뛸 것이 없다
+export const buildSkipPastOpsOfVars = (table: TExprSkipTable, expr: Uint8Array, varNumbers: number[]): TSkipPastOps => {
+  if (varNumbers.length === 1) {
+    return table.skipPastOpsByVar[varNumbers[0]];
+  }
+  for (const varNumber of varNumbers) {
+    for (const position of table.positionsByVar[varNumber]) {
+      changedMark[position] = 1;
+    }
+  }
+  return walkSkipPastOps(table, expr);
 };
