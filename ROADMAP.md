@@ -67,6 +67,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
     (`props.ghost.style`), 배열은 인덱스로(`props.items[2].title`) 내려간다. 통째 교체는
     `setObject`/`setArray`.
   - [x] leafIndex 할당기 / free list - 배열 항목 제거 시 회수하고 다음 할당이 재사용.
+  - [x] 통지 배치 - 핸들러 안의 쓰기를 모아 끝날 때 leaf마다 한 번 통지(core/web/LEAF-STORE-LAYOUT.md).
+    한 flush에서 바뀐 leaf 전체를 구독 함수가 받아, 식이 읽는 leaf 여럿이 바뀌어도 한 번에 다시 센다(core/web/EXPR-EVAL.md).
 
 ## 합성 / 이벤트
 
