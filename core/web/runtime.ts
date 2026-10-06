@@ -501,7 +501,7 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
 const skipTables = new WeakMap<Uint8Array, TExprSkipTable | null>();
 
 // 식을 처음 셀 때 runExpr에 넘기는 값 - 아무것도 건너뛰지 않는다.
-const SKIP_NOTHING: TSkipPastOp = {};
+const SKIP_NOTHING: TSkipPastOp[] = [{}];
 
 // 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
 // @for 회차/RENDER 재진입은 같은 walkStacks를 이어 쓰고(push/pop 공유), 지연 실행(@if lazyBuild/@for grow)만
@@ -1968,8 +1968,9 @@ class Interpreter {
     // 비어 있지 않다.
     const hasIndexAccess = table.readLeafIndexOpsByVar.some((ops) => ops.length > 0);
     let lastValue = value;
-    // 같은 flush에서 읽는 leaf 둘 이상이 바뀌면 처음 불릴 때 한꺼번에 센다. 읽는 leaf마다 따로 세면
-    // 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다. 같은 flush의 나머지 호출은 건너뛴다.
+    // 같은 flush에서 읽는 leaf 둘 이상이 바뀌면 처음 불릴 때 바뀐 변수 전체의 건너뛰기 표를 함께 써서
+    // 한꺼번에 센다. 읽는 leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
+    // 같은 flush의 나머지 호출은 건너뛴다.
     let handledFlush: ReadonlySet<number> | undefined;
     const reevalOnChange: TSubscriber = (_, leafIndex, flushLeaves) => {
       if (flushLeaves !== undefined && flushLeaves.size > 1) {
@@ -1987,14 +1988,8 @@ class Interpreter {
         if (changedVars.length === 0) {
           return;
         }
-        // 바뀐 변수가 모두 같은 leaf를 읽으면 그 leaf의 건너뛰기 표를 쓰고, 다르면 처음부터 센다.
-        const firstLeaf = leafOfVar[changedVars[0]];
-        const sameLeaf = changedVars.every((n) => leafOfVar[n] === firstLeaf);
-        const skipPastOp = sameLeaf ? this.skipPastOpOfLeaf(expr, table, leafOfVar, firstLeaf) : SKIP_NOTHING;
-        if (skipPastOp === null) {
-          return;
-        }
-        const v = this.reevalExpr(expr, pairs, table, cache, skipPastOp);
+        const skipPastOps = changedVars.map((varNumber) => table.skipPastOpByVar[varNumber]);
+        const v = this.reevalExpr(expr, pairs, table, cache, skipPastOps);
         if (hasIndexAccess) {
           for (const varNumber of changedVars) {
             this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, reevalOnChange, varNumber);
@@ -2012,7 +2007,7 @@ class Interpreter {
       if (skipPastOp === null) {
         return;
       }
-      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOp);
+      const v = this.reevalExpr(expr, pairs, table, cache, [skipPastOp]);
       // 다시 걸기가 leafOfVar를 고쳐, 바뀐 leaf를 읽는 변수가 여럿이면 먼저 모아 둔다.
       //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
       //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, leafOfVar로는 바깥이 안 보인다.
@@ -2822,21 +2817,23 @@ class Interpreter {
     return { value, leafOfVar };
   };
 
-  // 식을 다시 센다. skipPastOp에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다.
+  // 식을 다시 센다. skipPastOps는 바뀐 변수마다의 건너뛰기 표다. 모든 표에 적힌 부분식만 계산하지 않고
+  // cache의 지난번 값을 쓴다.
   reevalExpr = (
     expr: Uint8Array,
     pairs: TScope,
     table: TExprSkipTable,
     cache: unknown[],
-    skipPastOp: TSkipPastOp,
-  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOp, null);
+    skipPastOps: TSkipPastOp[],
+  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOps, null);
 
   // 식을 후위 표기로 센다(BYTECODE.md #4 <EXPR>). evalExpr와 reevalExpr가 함께 쓰는 본체다.
   //
   // 타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 여기서 안 본다.
   //
-  //   - 잎 명령 위치 at에 skipPastOp[at]이 있으면, 그 연산까지를 계산하지 않고 cache에 든 그 연산의
-  //     지난번 값을 올린 뒤 그 연산 다음 명령으로 간다.
+  //   - 잎 명령 위치 at에 skipPastOps의 모든 표가 항목을 가지면, 그 연산까지를 계산하지 않고 cache에 든
+  //     그 연산의 지난번 값을 올린 뒤 그 연산 다음 명령으로 간다. 표마다 끝 연산이 다르면 안쪽(위치가
+  //     작은) 것을 쓴다 - 바깥 부분식은 어느 한 변수를 품고 있다. 표가 하나라도 항목이 없으면 읽는다.
   //   - 연산 결과는 cache[table.cacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
   //     건너뛸 부분식이 없는 식은 표도 cache도 없어(null) 쓰지 않는다.
   //   - reads가 있으면 store 칸을 읽을 때마다 leafIndex와 읽은 명령의 위치를 이어 붙인다. a + b에서
@@ -2846,7 +2843,7 @@ class Interpreter {
     pairs: TScope,
     table: TExprSkipTable | null,
     cache: unknown[] | null,
-    skipPastOp: TSkipPastOp,
+    skipPastOps: TSkipPastOp[],
     reads: number[] | null,
   ): unknown => {
     const stack = this.exprStack;
@@ -2855,7 +2852,11 @@ class Interpreter {
     let sp = 0;
     for (let pc = 0; pc < expr.length; ) {
       const at = pc;
-      const skipPastOpAt = skipPastOp[at];
+      let skipPastOpAt: number | undefined = skipPastOps[0][at];
+      for (let k = 1; skipPastOpAt !== undefined && k < skipPastOps.length; k++) {
+        const other = skipPastOps[k][at];
+        skipPastOpAt = other === undefined ? undefined : Math.min(skipPastOpAt, other);
+      }
       if (skipPastOpAt !== undefined && table !== null && cache !== null) {
         stack[sp++] = cache[table.cacheIndex[skipPastOpAt]];
         pc = skipPastOpAt + instrSize(expr[skipPastOpAt]);
