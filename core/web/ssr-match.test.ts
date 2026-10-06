@@ -36,8 +36,12 @@ const usedByOthers = new Set(
   ),
 );
 
+// 일부러 비교하지 않는 픽스처.
+//   perfbig - 큰 데이터 성능용(노드 수만 개). 비교할 구조는 다른 픽스처가 이미 덮는다.
+const SKIPPED = new Set(["perfbig"]);
+
 test("모든 픽스처가 시드를 갖거나 다른 픽스처가 쓰는 자식이다", () => {
-  const uncovered = fixtures.filter((name) => !seeds[name] && !usedByOthers.has(name));
+  const uncovered = fixtures.filter((name) => !seeds[name] && !usedByOthers.has(name) && !SKIPPED.has(name));
   assert.deepEqual(uncovered, [], "ssr-match.seeds.json에 시드를 더한다");
 });
 
