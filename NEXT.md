@@ -8,9 +8,7 @@
 
 ## 하는 중
 
-보안 이슈 수정(브랜치 `security-hardening`). 첫 항목은 동적 `href`/`src`/`action`/`formaction`
-값의 `javascript:` 스킴 차단(`core/web/runtime.ts`). 추가로 찾는 보안 이슈는 같은 브랜치에서
-하나씩 고친다.
+없음
 
 ## 할 것
 
