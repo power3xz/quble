@@ -81,6 +81,9 @@ pub enum CodegenErrorKind {
     ListNotAllowed,
     /// class 배열 요소가 문자열 리터럴이 아니다(`class={["a", x]}`). 변수 섞기는 아직 안 된다.
     ClassArrayItemType,
+    /// `on`으로 시작하는 이벤트 핸들러 속성(`onclick`, `onerror`)이 왔다. 값이 JS로 실행되는
+    /// 속성이라 값이 런타임 문자열이면 XSS가 된다. 이벤트는 `@click:EVENT`로 받는다.
+    EventHandlerAttr(String),
 }
 
 impl std::fmt::Display for CodegenErrorKind {
@@ -173,6 +176,12 @@ impl std::fmt::Display for CodegenErrorKind {
             }
             CodegenErrorKind::ClassArrayItemType => {
                 write!(f, "class array takes string literals")
+            }
+            CodegenErrorKind::EventHandlerAttr(name) => {
+                write!(
+                    f,
+                    "`{name}` is an event handler attribute; use `@click:EVENT`"
+                )
             }
         }
     }
@@ -609,6 +618,11 @@ fn expr_field_value(
     Ok((types.intern(&ty, pool), FieldValue::Expr(index)))
 }
 
+/// 속성 이름이 이벤트 핸들러 속성(`on`으로 시작, ASCII 대소문자 무시)인지.
+fn is_event_handler_attr(name: &str) -> bool {
+    name.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("on"))
+}
+
 /// class 배열 요소를 공백으로 이어 하나의 값으로. ["card", "lg"] -> "card lg".
 /// 요소는 문자열 리터럴만 - 변수가 섞이면 런타임이 합쳐야 하는데 아직 그 길이 없다.
 fn join_class_items(items: &[Expr]) -> Result<String, CodegenError> {
@@ -985,6 +999,11 @@ fn emit_node(
             }
 
             for (name, value) in attrs {
+                if is_event_handler_attr(name) {
+                    return Err(
+                        CodegenErrorKind::EventHandlerAttr(name.clone()).at(value.range().0)
+                    );
+                }
                 // DOM 속성값은 문자열이라 리터럴은 Str만 온다 - 숫자/불리언은 갈 곳이 없다.
                 // 배열은 class에서만 오고, 컴파일타임에 공백으로 이어 같은 정적 값이 된다.
                 let static_str = match value {

@@ -1049,6 +1049,27 @@ mod tests {
         );
     }
 
+    /// `on`으로 시작하는 속성은 값이 JS로 실행되어 막는다 - 리터럴/동적 값, 대소문자 모두.
+    #[test]
+    fn event_handler_attr_errors() {
+        let msg = |name: &str| format!("`{name}` is an event handler attribute; use `@click:EVENT`");
+        let lit = r#"component C { template { div(onclick="a()" /) } }"#;
+        assert_eq!(error_message(lit), msg("onclick"));
+        let dynamic = r#"component C { props { x: string } template { div(onclick={x} /) } }"#;
+        assert_eq!(error_message(dynamic), msg("onclick"));
+        let upper = r#"component C { template { div(ONCLICK="a()" /) } }"#;
+        assert_eq!(error_message(upper), msg("ONCLICK"));
+        let error = r#"component C { template { img(onerror="a()" /) } }"#;
+        assert_eq!(error_message(error), msg("onerror"));
+    }
+
+    /// `on`이 이름 중간에 있거나 짧은 접두사가 아닌 속성은 막지 않는다.
+    #[test]
+    fn non_event_attrs_compile() {
+        let src = r#"component C { template { div(class="a" data-on="1" id="x" title="t" /) } }"#;
+        assert!(compile(src).is_ok());
+    }
+
     /// 요소에 변수를 섞는 건 아직 안 된다 - 런타임 합치기가 없다.
     #[test]
     fn class_array_with_var_item_errors() {
