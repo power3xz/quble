@@ -6,7 +6,7 @@
 //   - 클릭: 컴포넌트 안의 실제 버튼을 .click()으로 누르고, DOM 반영과 페인트까지의 시간을 잰다.
 //   - 결과를 localStorage에 넣어 index 페이지의 비교 표가 읽게 한다.
 
-export type TRow = { id: number; price: number; qty: number; discount: number; stock: number };
+export type TRow = { id: number; price: number; qty: number; discount: number; stock: number; url: string };
 export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number };
 
 // 버튼이 오가는 값. 환율은 매번 바꿔 모든 행 금액이 바뀌고, 기준은 1만 움직여 경고가 거의 안 바뀐다.
@@ -14,7 +14,7 @@ export const nextRate = (rate: number) => (rate === 1300 ? 1350 : 1300);
 export const nextThreshold = (threshold: number) => (threshold === 30000 ? 30001 : 30000);// 기준 행은 매번 다음 행으로 옮겨, 모든 행의 비교 식(row.price - rows[pivot].price)이 다른 행을 읽게 한다.
 export const nextPivot = (pivot: number, length: number) => (pivot + 1) % length;
 
-// 전체 행 일괄 갱신이 번갈아 넘기는 두 배열 - 처음 데이터와 모든 행의 네 값이 1씩 큰 데이터.
+// 전체 행 일괄 갱신이 번갈아 넘기는 두 배열 - 처음 데이터와 모든 행의 네 값이 1씩 크고 url이 다른 데이터.
 // runTarget이 로드와 네트워크 집계를 마친 뒤 채우므로 로드 지표에 들어가지 않는다.
 export const bulk: { base: TRow[]; bumped: TRow[] } = { base: [], bumped: [] };
 
@@ -50,7 +50,7 @@ export const SCENARIOS = [
   { key: "pivotPrice", label: "기준 행 가격 변경", desc: "모든 행의 비교 식이 읽는 기준 행 가격 하나가 바뀐다" },
   { key: "rateAndTax", label: "환율+세율 동시 변경", desc: "한 핸들러가 모든 행의 금액 식이 읽는 두 값을 함께 바꾼다" },
   { key: "rateBurst", label: "환율 연속 3회 변경", desc: "한 핸들러가 같은 값을 세 번 바꾼다" },
-  { key: "bulk", label: "전체 행 일괄 갱신", desc: "한 핸들러가 모든 행의 가격, 수량, 할인, 재고를 한꺼번에 바꾼다" },
+  { key: "bulk", label: "전체 행 일괄 갱신", desc: "한 핸들러가 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 한꺼번에 바꾼다" },
 ] as const;
 
 export const TARGETS = [

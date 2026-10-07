@@ -1049,6 +1049,65 @@ mod tests {
         );
     }
 
+    /// `on`으로 시작하는 속성은 값이 JS로 실행되어 막는다 - 리터럴/동적 값, 대소문자 모두.
+    #[test]
+    fn event_handler_attr_errors() {
+        let msg = |name: &str| format!("`{name}` is an event handler attribute; use `@click:EVENT`");
+        let lit = r#"component C { template { div(onclick="a()" /) } }"#;
+        assert_eq!(error_message(lit), msg("onclick"));
+        let dynamic = r#"component C { props { x: string } template { div(onclick={x} /) } }"#;
+        assert_eq!(error_message(dynamic), msg("onclick"));
+        let upper = r#"component C { template { div(ONCLICK="a()" /) } }"#;
+        assert_eq!(error_message(upper), msg("ONCLICK"));
+        let error = r#"component C { template { img(onerror="a()" /) } }"#;
+        assert_eq!(error_message(error), msg("onerror"));
+    }
+
+    /// `on*` 속성이 다른 속성 뒤에 오거나 @for/@if 안에 있어도 막는다 - 속성 순회가 한 곳이라 위치와 무관하다.
+    #[test]
+    fn event_handler_attr_errors_when_not_first_or_nested() {
+        let msg = "`onclick` is an event handler attribute; use `@click:EVENT`";
+        let second = r#"component C { template { div(class="a" onclick="a()" /) } }"#;
+        assert_eq!(error_message(second), msg);
+        let nested = r#"component C { props { xs: string[] } template { div() { @for (x of xs) { @if (true) { b(onclick="a()" /) } } } } }"#;
+        assert_eq!(error_message(nested), msg);
+    }
+
+    /// 에러는 `on*` 속성의 값을 가리킨다.
+    #[test]
+    fn codegen_error_points_at_event_handler_attr_value() {
+        let src = r#"component C { template { div(onclick="a()" /) } }"#;
+        assert_eq!(codegen_error_snippet(src), r#""a()""#);
+    }
+
+    /// 이름이 정확히 `on`이면 접두사 규칙에 걸리고, `o`는 두 글자가 안 돼 걸리지 않는다.
+    #[test]
+    fn event_handler_attr_prefix_boundary() {
+        let on = r#"component C { template { div(on="a" /) } }"#;
+        assert_eq!(
+            error_message(on),
+            "`on` is an event handler attribute; use `@click:EVENT`"
+        );
+        assert!(compile(r#"component C { template { div(o="a" /) } }"#).is_ok());
+    }
+
+    /// 컴포넌트 호출의 인자 이름은 DOM 속성이 아니라 prop이다 - `onSelect` 같은 prop 이름은 막지 않는다.
+    #[test]
+    fn component_prop_named_like_event_handler_compiles() {
+        let src = r#"
+            component Child { props { onSelect: string } template { span() { ${onSelect} } } }
+            component P { template { Child(onSelect="x" /) } }
+        "#;
+        assert!(compile(src).is_ok());
+    }
+
+    /// `on`이 이름 중간에 있거나 짧은 접두사가 아닌 속성은 막지 않는다.
+    #[test]
+    fn non_event_attrs_compile() {
+        let src = r#"component C { template { div(class="a" data-on="1" id="x" title="t" /) } }"#;
+        assert!(compile(src).is_ok());
+    }
+
     /// 요소에 변수를 섞는 건 아직 안 된다 - 런타임 합치기가 없다.
     #[test]
     fn class_array_with_var_item_errors() {

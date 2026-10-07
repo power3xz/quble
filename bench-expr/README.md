@@ -36,7 +36,7 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 ## 재는 앱
 
 주문 목록 N행(`quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte`). 행마다 단순 값
-셋(id, 가격, 수량)과 식 넷을 둔다.
+셋(id, 가격, 수량)과 식 넷, 링크(`a`의 `href`가 행의 `url`) 하나를 둔다.
 
 ```
 금액  (row.price * row.qty - row.discount) * (100 + tax) / 100 * rate
@@ -67,7 +67,7 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 | 기준 행 가격 변경 | 기준 행의 가격 하나. 모든 행의 비교 식이 다시 센다 |
 | 환율+세율 동시 변경 | 한 핸들러가 환율과 세율을 함께 바꾼다. 금액 식에서 두 값이 서로 다른 하위 식이라, 읽는 leaf 둘이 한꺼번에 바뀌는 경우를 본다 |
 | 환율 연속 3회 변경 | 한 핸들러가 환율을 세 번 바꾼다. 같은 leaf를 여러 번 쓸 때 통지가 한 번인지 본다 |
-| 전체 행 일괄 갱신 | 한 핸들러가 `setArray`로 모든 행의 가격, 수량, 할인, 재고를 바꾼다. 데이터는 정적 파일(`bulk-<N>.json`)에서 받는다 |
+| 전체 행 일괄 갱신 | 한 핸들러가 `setArray`로 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 바꾼다. 데이터는 정적 파일(`bulk-<N>.json`)에서 받는다 |
 
 클릭마다 세 값을 잰다.
 - **DOM 반영**: 클릭부터 MutationObserver가 불릴 때까지. React와 Svelte가 microtask로 미루는 갱신까지

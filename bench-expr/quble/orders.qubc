@@ -1,6 +1,6 @@
 component Orders {
   props {
-    rows: { id: number, price: number, qty: number, discount: number, stock: number }[],
+    rows: { id: number, price: number, qty: number, discount: number, stock: number, url: string }[],
     rate: number,
     tax: number,
     threshold: number,
@@ -38,6 +38,7 @@ component Orders {
             span(class="row__left") { ${row.stock - row.qty} }
             span(class="row__diff") { ${row.price - rows[pivot].price} }
             span(class="row__warn" data-warn={row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold}) { "!" }
+            a(class="row__link" href={row.url}) { "link" }
             button(class="row__inc" @click:INC) { "+1" }
           }
         }

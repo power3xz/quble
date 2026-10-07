@@ -1,0 +1,12 @@
+component Links {
+  props { url: string }
+  template {
+    div() {
+      a(class="link" href={url}) { "go" }
+      img(class="img" src={url} /)
+      form(class="form" action={url}) {
+        button(class="btn" formaction={url}) { "send" }
+      }
+    }
+  }
+}

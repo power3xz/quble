@@ -15,6 +15,9 @@ const Row = ({ row, rows, pivot, rate, tax, threshold, onInc }) => (
     <span className="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold)}>
       !
     </span>
+    <a className="row__link" href={row.url}>
+      link
+    </a>
     <button className="row__inc" onClick={onInc}>
       +1
     </button>
