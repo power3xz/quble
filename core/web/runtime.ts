@@ -173,6 +173,7 @@ const DOM_EVENTS = [
 // URL을 받는 속성. 값이 javascript: 스킴이면 이동/제출 때 그 스크립트가 실행된다.
 const URL_ATTRS = new Set(["href", "src", "action", "formaction"]);
 // 브라우저는 스킴 앞의 공백/제어 문자(U+0000~U+0020)와 스킴 안의 탭/개행을 무시하고 읽는다.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: 브라우저가 무시하는 제어 문자를 그대로 걷어내야 한다
 const SCHEME_LEADING = /^[\u0000- ]+/;
 const SCHEME_INNER = /[\t\n\r]/g;
 
