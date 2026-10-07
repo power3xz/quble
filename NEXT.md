@@ -8,7 +8,9 @@
 
 ## 하는 중
 
-없음
+runtime.ts 분리 - `opcodes.ts`(OP_* 상수와 코드 경계 탐색)와 `decode.ts`(Reader, decode, 모듈
+타입)를 먼저 뺀다. 브랜치 `split-runtime`. 이후 `Interpreter` 클래스를 책임별로 가를지는
+이 둘을 끝낸 뒤 정한다.
 
 ## 할 것
 
