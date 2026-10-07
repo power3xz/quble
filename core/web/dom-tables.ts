@@ -108,10 +108,12 @@ const SCHEME_LEADING = /^[\u0000- ]+/;
 const SCHEME_INNER = /[\t\n\r]/g;
 
 // 동적 속성 값을 단다. URL 속성에 javascript: 값이 오면 달지 않고 있던 속성도 지운다(XSS 차단).
+// 스킴은 ':'로 끝나므로 ':'가 없는 값은 문자열을 만들어 보지 않고 통과시킨다.
 export const setAttributeSafely = (el: HTMLElement, name: string, value: unknown): void => {
   if (
     URL_ATTRS.has(name) &&
     typeof value === "string" &&
+    value.includes(":") &&
     value.replace(SCHEME_LEADING, "").replace(SCHEME_INNER, "").toLowerCase().startsWith("javascript:")
   ) {
     el.removeAttribute(name);
