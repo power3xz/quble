@@ -1752,13 +1752,31 @@ class Interpreter {
     setAttributeSafely(el, name, v);
   };
 
+  // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
+  // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
+  // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
+  // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
+  loadResource = (resId: number) => {
+    const url = this.resources[resId];
+    if (url && !this.loadedHrefs.has(url)) {
+      this.loadedHrefs.add(url);
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = url;
+      document.head.appendChild(link);
+    }
+  };
+
   // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
   //
   // 범위가 아래 명령만으로 되어 있으면 뼈대를 DOM으로 만들고 값 자리를 적는다. 하나라도 다른 명령
-  // (@if, @for, 합성, 슬롯, @with, LOAD_RES)이 섞이면 null - interpret가 지금처럼 해석한다.
+  // (@if, @for, 합성, 슬롯, @with)이 섞이면 null - interpret가 지금처럼 해석한다.
   //   뼈대      ELEM_OPEN, ATTR_G, ATTR_L, ELEM_CLOSE_OPEN, ELEM_END, TEXT
   //   값 자리   TEXT_VAR, TEXT_EXPR, ATTR_G_VAR, ATTR_L_VAR, ATTR_G_EXPR, ATTR_L_EXPR, BIND_EVENT
   //   경로 상태  PUSH_PATH_INDEX_SEGMENT(뒤따르는 BIND_EVENT의 [$n])
+  //   리소스    LOAD_RES - 노드가 없다. 계획을 만들 때 한 번 로드하고 복제본마다 하지 않는다
+  //             (범위가 처음 그려질 때가 계획을 만드는 때고, 중복은 loadedHrefs가 막는다).
+  //   끝        HALT - def 범위의 마지막 명령. 노드가 없다.
   //
   // 노드 번호는 노드를 만든 순서다. 요소는 자식보다 먼저, 형제는 앞에서부터 만들므로 이 순서가
   // 곧 뼈대의 앞순회 순서다 - 값 자리의 노드 번호를 앞 값 자리에서의 걸음으로 바꿔 두면(template-steps.ts)
@@ -1826,6 +1844,12 @@ class Interpreter {
         case OP_PUSH_PATH_INDEX_SEGMENT:
           holePcs.push(at);
           holeNodeNumbers.push(-1);
+          break;
+        case OP_LOAD_RES:
+          this.loadResource(u16(pc));
+          break;
+        case OP_HALT:
+          // def의 마지막 명령이다. 읽은 시점에 pc가 endPc라 반복문이 끝난다.
           break;
         default:
           plannable = false;
@@ -2034,18 +2058,7 @@ class Interpreter {
           break;
         }
         case OP_LOAD_RES: {
-          // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
-          // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
-          // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
-          // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
-          const url = this.resources[u16at()];
-          if (url && !this.loadedHrefs.has(url)) {
-            this.loadedHrefs.add(url);
-            const link = document.createElement("link");
-            link.rel = "stylesheet";
-            link.href = url;
-            document.head.appendChild(link);
-          }
+          this.loadResource(u16at());
           break;
         }
         case OP_ELEM_OPEN: {
