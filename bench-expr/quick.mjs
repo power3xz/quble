@@ -10,9 +10,9 @@ import { writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 
 const ROUNDS = 5;
-// 행 수. 환경 변수 BENCH_N(1000, 5000, 10000)으로 줄여 빠르게 돌려 볼 수 있다. 기록 파일은 행 수가 달라도 같은
-// 이름이니, 줄여 돌린 기록을 커밋 비교에 쓰지 않는다.
-const N = Number(process.env.BENCH_N ?? 10000);
+// 행 수. 환경 변수 BENCH_N(1000, 5000, 10000, 기본 1000)으로 고른다. 기록 파일 이름에 행 수를 붙이는 것은
+// bench-expr-quick.sh다.
+const N = Number(process.env.BENCH_N ?? 1000);
 // 하네스 SCENARIOS와 같은 키와 순서. 표의 열을 padEnd로 맞추므로 라벨도 키 그대로 둔다(한글은 폭이 2칸).
 const SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk"];
 // 테스트마다 페이지와 하네스가 결과를 담는 id가 다르다 - 결과가 서로 섞이지 않는다.

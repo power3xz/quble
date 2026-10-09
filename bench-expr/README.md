@@ -28,7 +28,7 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
   앱으로 재므로 서로 견줄 수 있다. `.qubb`와 데이터도 지금 컴파일러로 만든다.
 - `bench-expr/quick.mjs`가 `quble.html`(orders-deep이면 `quble-deep.html`)을 5회 연다. 페이지마다 하네스가
   잰 mount 시간과 클릭 여덟의 DOM 반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
-- 행 수는 환경 변수 `BENCH_N`(1000, 5000, 10000, 기본 10000)으로 고른다.
+- 행 수는 환경 변수 `BENCH_N`(1000, 5000, 10000, 기본 1000)으로 고른다.
 - 기록은 `bench-results/<커밋>.expr.json`(orders), `<커밋>.expr-deep.json`(orders-deep)에 남는다. 10000이
   아닌 행 수는 `.1k`, `.5k`가 붙는다(`<커밋>.expr.1k.json`). 커밋끼리는
   `BENCH_N=... node bench-compare.mjs <expr|expr-deep> <ref> <ref>`로 견준다.
