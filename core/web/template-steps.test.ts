@@ -32,14 +32,14 @@ const preorder = (root: Node): Node[] => {
 };
 
 const follow = (from: Node, steps: number[]): Node => {
-  let cursor: Node | null = from;
+  let cursor: Node = from;
   for (const step of steps) {
     cursor =
       step === STEP_FIRST_CHILD
-        ? cursor.firstChild
+        ? (cursor.firstChild as Node)
         : step === STEP_NEXT_SIBLING
-          ? cursor.nextSibling
-          : cursor.parentNode;
+          ? (cursor.nextSibling as Node)
+          : (cursor.parentNode as Node);
   }
   return cursor;
 };
