@@ -99,6 +99,18 @@ const runtimeBundle = await build({
 });
 writeFileSync(join(distDir, "quble-runtime.js"), runtimeBundle.outputFiles[0].text);
 
+// SSR 프리뷰용 - resume을 더한 번들. 일반 프리뷰 페이지는 위 번들만 쓴다.
+const resumeBundle = await build({
+  entryPoints: [join(buildDir, "..", "web", "resume-entry.ts")],
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2020",
+  minify: false,
+  write: false,
+});
+writeFileSync(join(distDir, "quble-resume.js"), resumeBundle.outputFiles[0].text);
+
 // 4. 진입 페이지 - quble-runtime.js를 로드해 <stem>.qubb를 #quble-app에 마운트한다.
 //    초기 data는 --data 파일 내용을 인라인(없으면 {}). store/provided 구조가 정해지면 교체(DESIGN #5.1).
 //    구동 크리티컬 체인(runtime -> manifest -> qubb -> handlers)은 순차 발견이라 폭포수가 된다.

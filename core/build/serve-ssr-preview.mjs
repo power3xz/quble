@@ -90,7 +90,7 @@ const page = (origin, mode) => {
       ? ""
       : `
   <script type="module">
-    import { compile, loadHandlers } from "./quble-runtime.js";
+    import { compile, loadHandlers, resume } from "./quble-resume.js";
     const status = document.getElementById("ssr-status");
     const app = document.getElementById("quble-app");
     const csr = ${mode === "csr"};
@@ -108,8 +108,9 @@ const page = (origin, mode) => {
     const resources = manifest.resources.map((p) => new URL(p, base).href);
     const t0 = performance.now();
     try {
-      const options = csr ? {} : snapshot ? { resumeFrom: app, snapshot } : { resumeFrom: app };
-      const inst = compile(bytes, resources)(0)(data, handlers, options);
+      const inst = csr
+        ? compile(bytes, resources)(0)(data, handlers)
+        : resume(bytes, resources)(0)(data, handlers, snapshot ? { resumeFrom: app, snapshot } : { resumeFrom: app });
       app.replaceChildren(...inst.nodes);
       const ms = (performance.now() - t0).toFixed(1);
       window.__quble = inst;

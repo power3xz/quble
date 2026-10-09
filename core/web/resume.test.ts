@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { resume as resumeFrom } from "./resume.ts";
 import { compile, type THandlers } from "./runtime.ts";
 import { buildFixtureWithResmap } from "./test-helpers/build.ts";
 import "./test-helpers/dom.ts";
@@ -33,7 +34,7 @@ const ssrHost = (name: string, resmap: string[], data: unknown): HTMLElement => 
 const allNodes = (root: Node): Node[] => [...root.childNodes].flatMap((n) => [n, ...allNodes(n)]);
 
 const resume = (qubb: Uint8Array, resmap: string[], host: HTMLElement, data: unknown, handlers: THandlers = {}) => {
-  const inst = compile(qubb, resmap)(0)(data, handlers, { resumeFrom: host });
+  const inst = resumeFrom(qubb, resmap)(0)(data, handlers, { resumeFrom: host });
   host.replaceChildren(...inst.nodes);
   return inst;
 };

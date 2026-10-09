@@ -12,10 +12,11 @@ import { fileURLToPath } from "node:url";
 import { decode } from "./decode.ts";
 import { Pool } from "./pool-allocator.ts";
 import type { TArrayInfo } from "./region.ts";
-import { adoptSnapshot, compile, plantRoot, type THandlers, type TLeafSnapshot } from "./runtime.ts";
+import { adoptSnapshot, resume, type TLeafSnapshot } from "./resume.ts";
+import { compile, plantRoot, type THandlers } from "./runtime.ts";
 import { buildFixtureWithResmap } from "./test-helpers/build.ts";
 import "./test-helpers/dom.ts";
-import { snapshotSsr } from "./test-helpers/ssr.ts";
+import { renderSsr, snapshotSsr } from "./test-helpers/ssr.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // core/web
 const seeds: Record<string, unknown[]> = JSON.parse(readFileSync(join(HERE, "ssr-match.seeds.json"), "utf8"));
@@ -28,11 +29,22 @@ const planted = (pool: Pool<TArrayInfo>) =>
     elemStartLeafIndices: info.elemStartLeafIndices,
   }));
 
-// 처음 그린 DOM의 HTML. data를 주면 plantRoot로, snapshot을 주면 plantRoot 없이 시작한다.
-const html = (qubb: Uint8Array, resmap: string[], data: unknown, snapshot?: TLeafSnapshot): string => {
-  const inst = compile(qubb, resmap)(0)(data, {}, snapshot ? { snapshot } : {});
+// data로 처음부터 그린(CSR) DOM의 HTML.
+const csrHtml = (qubb: Uint8Array, resmap: string[], data: unknown): string => {
+  const inst = compile(qubb, resmap)(0)(data, {});
   const host = document.createElement("div");
   host.append(...inst.nodes);
+  const out = host.innerHTML;
+  inst.destroy();
+  return out;
+};
+
+// SSR HTML을 스냅샷으로 이어받은 DOM의 HTML(plantRoot 없이 시작한다).
+const resumedHtml = (name: string, resmap: string[], qubb: Uint8Array, data: unknown): string => {
+  const host = document.createElement("div");
+  host.innerHTML = renderSsr(name, resmap, data).html;
+  const inst = resume(qubb, resmap)(0)(undefined, {}, { resumeFrom: host, snapshot: snapshotSsr(name, data) });
+  host.replaceChildren(...inst.nodes);
   const out = host.innerHTML;
   inst.destroy();
   return out;
@@ -42,7 +54,7 @@ for (const [name, list] of Object.entries(seeds)) {
   list.forEach((data, i) => {
     test(`${name} 시드 ${i} - 스냅샷으로 시작해도 같은 DOM이 나온다`, () => {
       const { qubb, resmap } = buildFixtureWithResmap(name);
-      assert.equal(html(qubb, resmap, undefined, snapshotSsr(name, data)), html(qubb, resmap, data));
+      assert.equal(resumedHtml(name, resmap, qubb, data), csrHtml(qubb, resmap, data));
     });
   });
 }
@@ -75,10 +87,14 @@ test("스냅샷으로 시작한 인스턴스에서 push가 동작한다", () => 
       push((ctx.props as Record<string, number>).tags, "b");
     },
   };
-  const inst = compile(qubb, resmap)(0)(undefined, handlers, { snapshot: snapshotSsr("for_array_push", data) });
   const host = document.createElement("div");
-  host.append(...inst.nodes);
+  host.innerHTML = renderSsr("for_array_push", resmap, data).html;
   document.body.replaceChildren(host);
+  const inst = resume(qubb, resmap)(0)(undefined, handlers, {
+    resumeFrom: host,
+    snapshot: snapshotSsr("for_array_push", data),
+  });
+  host.replaceChildren(...inst.nodes);
   (host.querySelector(".add") as HTMLButtonElement).click();
   assert.deepEqual(
     [...host.querySelectorAll(".tag")].map((t) => t.textContent),
