@@ -77,6 +77,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 | `npm run typecheck` | `npm ci`, `build:wasm` |
 | `npm run lint` | `npm ci` |
 | `node core/build/build-playground.mjs` | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |
+| `./quble-ssr-preview.sh` | 포트 8152가 비어 있을 것. 나머지는 스크립트가 `cargo build --bin quble`과 `-p renderer --bin quble-ssr`을 먼저 돌린다 |
 | `./bench-expr.sh` | 없음 - 스크립트가 의존 설치와 `cargo build --bin quble`을 먼저 돌린다 |
 | `./bench-expr-quick.sh` | 포트 8144가 비어 있을 것. 나머지는 스크립트가 의존과 playwright Chromium 설치, `cargo build --bin quble`을 먼저 돌린다 |
 | `./bench-krausest.sh` | 포트 8080이 비어 있을 것. 나머지는 스크립트가 krausest clone, 의존 설치, `cargo build --bin quble`을 먼저 돌린다 |
