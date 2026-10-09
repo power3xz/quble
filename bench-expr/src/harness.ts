@@ -53,13 +53,28 @@ export const SCENARIOS = [
   { key: "bulk", label: "전체 행 일괄 갱신", desc: "한 핸들러가 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 한꺼번에 바꾼다" },
 ] as const;
 
+// 테스트마다 대상 페이지와 결과가 따로다. 테스트가 다르면 같은 표에서 비교하지 않는다.
+export const TESTS = [
+  { key: "orders", label: "orders", desc: "기본 행" },
+  { key: "orders-deep", label: "orders-deep", desc: "값 자리 사이에 정적 하위 트리, 깊은 값 자리, 정적 형제 줄이 낀 행" },
+] as const;
+
 export const TARGETS = [
-  { id: "quble", label: "quble" },
-  { id: "quble-deep", label: "quble (deep)" },
-  { id: "react-memo", label: "React + memo" },
-  { id: "react", label: "React" },
-  { id: "svelte", label: "Svelte 5" },
+  { id: "quble", label: "quble", test: "orders" },
+  { id: "react-memo", label: "React + memo", test: "orders" },
+  { id: "react", label: "React", test: "orders" },
+  { id: "svelte", label: "Svelte 5", test: "orders" },
+  { id: "quble-deep", label: "quble (deep)", test: "orders-deep" },
+  { id: "react-memo-deep", label: "React + memo (deep)", test: "orders-deep" },
+  { id: "react-deep", label: "React (deep)", test: "orders-deep" },
+  { id: "svelte-deep", label: "Svelte 5 (deep)", test: "orders-deep" },
 ];
+
+// 비교 표가 보여 줄 테스트. compare 페이지 URL의 test 값(?test=orders-deep), 없거나 모르는 값이면 첫 테스트.
+export const currentTest = (): string => {
+  const test = new URLSearchParams(location.search).get("test");
+  return TESTS.some((t) => t.key === test) ? (test as string) : TESTS[0].key;
+};
 
 export const SIZES = [1000, 5000, 10000];
 export const ENCODINGS = [
