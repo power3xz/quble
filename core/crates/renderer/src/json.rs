@@ -217,15 +217,24 @@ mod tests {
 
     #[test]
     fn parses_nested_values_in_key_order() {
-        let v = parse(r#" { "a": [1, -2.5e3, true, null], "b": { "c": "x" }, "d": false } "#).unwrap();
+        let v =
+            parse(r#" { "a": [1, -2.5e3, true, null], "b": { "c": "x" }, "d": false } "#).unwrap();
         assert_eq!(
             v,
             Json::Obj(vec![
                 (
                     "a".into(),
-                    Json::Arr(vec![Json::Num(1.0), Json::Num(-2500.0), Json::Bool(true), Json::Null])
+                    Json::Arr(vec![
+                        Json::Num(1.0),
+                        Json::Num(-2500.0),
+                        Json::Bool(true),
+                        Json::Null
+                    ])
                 ),
-                ("b".into(), Json::Obj(vec![("c".into(), Json::Str("x".into()))])),
+                (
+                    "b".into(),
+                    Json::Obj(vec![("c".into(), Json::Str("x".into()))])
+                ),
                 ("d".into(), Json::Bool(false)),
             ])
         );

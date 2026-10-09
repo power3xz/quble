@@ -39,9 +39,15 @@ pub enum NativeError {
     /// click, input, change, focus, blur, submit 밖의 DOM 이벤트
     UnsupportedEvent(String),
     /// 허용 목록 밖 속성, 또는 리터럴이 아닌 `style`
-    UnsupportedAttr { tag: String, attr: String },
+    UnsupportedAttr {
+        tag: String,
+        attr: String,
+    },
     /// RN 스타일로 못 바꾸는 CSS. path는 CSS 파일 경로, `style` 속성이면 "style 속성"이다.
-    Css { path: String, error: CssError },
+    Css {
+        path: String,
+        error: CssError,
+    },
     /// 이 컴포넌트가 `use`한 CSS 어디에도 없는 클래스
     UnknownClass(String),
 }
@@ -310,7 +316,10 @@ fn generate(comps: &[FlatComp], out_dir: &str, target: Target, sheets: &[Sheet])
                     continue;
                 }
                 seen.push(res);
-                out.push_str(&format!("import {};\n", js_str(&relative_path(out_dir, res))));
+                out.push_str(&format!(
+                    "import {};\n",
+                    js_str(&relative_path(out_dir, res))
+                ));
             }
         }
         Target::Native => {
@@ -432,9 +441,12 @@ fn emit_node(
     let js_expr = |expr: &Expr| js_expr(expr, vars);
     match node {
         Node::Text(s) => emit_text(cx, depth, &format!("{{{}}}", js_str(s)), out),
-        Node::Interpolation(expr) => {
-            emit_text(cx, depth, &format!("{{{}}}", js_text(expr, comp, vars)), out)
-        }
+        Node::Interpolation(expr) => emit_text(
+            cx,
+            depth,
+            &format!("{{{}}}", js_text(expr, comp, vars)),
+            out,
+        ),
         Node::Element {
             tag,
             attrs,
@@ -474,8 +486,7 @@ fn emit_node(
                             style_parts.push(js_object(decls.into_iter()));
                         }
                         _ => {
-                            let rn_name =
-                                native_attr_name(name).expect("check_native가 걸렀다");
+                            let rn_name = native_attr_name(name).expect("check_native가 걸렀다");
                             let text = attr_value(rn_name, value, comp, vars);
                             if rn_name == "source" {
                                 open.push_str(&format!(" source={{{{ uri: {text} }}}}"));
@@ -509,7 +520,14 @@ fn emit_node(
                     Target::Web => (react_event_prop(dom_event), "e"),
                     Target::Native => {
                         let prop = native_event_prop(dom_event).expect("check_native가 걸렀다");
-                        (prop, if prop == "onChangeText" { "$q.textEvent(e)" } else { "e" })
+                        (
+                            prop,
+                            if prop == "onChangeText" {
+                                "$q.textEvent(e)"
+                            } else {
+                                "e"
+                            },
+                        )
                     }
                 };
                 open.push_str(&format!(
@@ -568,10 +586,7 @@ fn emit_node(
             line(
                 out,
                 depth,
-                &format!(
-                    "<$q.Segment name={} props={{{addrs}}}>",
-                    js_str(segment)
-                ),
+                &format!("<$q.Segment name={} props={{{addrs}}}>", js_str(segment)),
             );
             let mut elem = name.name.clone();
             for (arg, value) in args {
@@ -714,7 +729,8 @@ fn native_class_parts(value: &Expr, comp: &Component, cx: Cx, vars: &[ForVar]) -
                 .map(|sheet| sheet.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let text = match expr_type(value, &comp.props, vars).expect("codegen이 검사한 식") {
+            let text = match expr_type(value, &comp.props, vars).expect("codegen이 검사한 식")
+            {
                 Type::String => js_expr(value, vars),
                 _ => format!("$q.str({})", js_expr(value, vars)),
             };
@@ -1021,7 +1037,10 @@ export const Card = (p: { title: string }) => {
         );
         assert!(out.contains("<Pressable onPress="), "{out}");
         assert!(!out.contains("<View"), "{out}");
-        assert!(out.contains("import { Pressable, Text } from \"react-native\";"), "{out}");
+        assert!(
+            out.contains("import { Pressable, Text } from \"react-native\";"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -1175,7 +1194,10 @@ export const Card = (p: {}) => {
               template { div(class={tone} /) }
             }
         "#,
-            &[("a.css", ".x { color: red; }"), ("b.css", ".y { color: blue; }")],
+            &[
+                ("a.css", ".x { color: red; }"),
+                ("b.css", ".y { color: blue; }"),
+            ],
         )
         .unwrap();
         assert!(
@@ -1192,7 +1214,10 @@ export const Card = (p: {}) => {
             use "./b.css"
             component Tag { template { div(class="x" /) } }
         "#,
-            &[("a.css", ".x { color: red; }"), ("b.css", ".x { color: blue; }")],
+            &[
+                ("a.css", ".x { color: red; }"),
+                ("b.css", ".x { color: blue; }"),
+            ],
         )
         .unwrap();
         assert!(
@@ -1474,7 +1499,10 @@ export const Label = (p: { text: string }) => {
               template { div(style="color: red" /) div(style={pos} /) }
             }
         "#);
-        assert!(out.contains(r#"<div style={$q.style("color: red")} />"#), "{out}");
+        assert!(
+            out.contains(r#"<div style={$q.style("color: red")} />"#),
+            "{out}"
+        );
         assert!(out.contains(r#"<div style={$q.style(p.pos)} />"#), "{out}");
     }
 

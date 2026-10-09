@@ -96,10 +96,7 @@ pub fn lookup_name<'a>(
 
     // 회차변수에서 먼저 찾는다. props와 이름이 겹칠 수 없어(@for 진입에서 충돌을 에러로 건다)
     // 조회 순서는 무관. for_var는 자기 슬롯 번호를 이미 갖고 있고, prop은 선언 순번이 슬롯.
-    match for_vars
-        .iter()
-        .find(|fv| fv.name.as_deref() == Some(name))
-    {
+    match for_vars.iter().find(|fv| fv.name.as_deref() == Some(name)) {
         Some(fv) => Ok((u8::try_from(fv.offset).map_err(|_| overflow())?, &fv.type_)),
         None => {
             for (i, p) in props.iter().enumerate() {
@@ -171,17 +168,18 @@ pub fn fixed_ref_of<'a>(
             match found {
                 // 없는 필드는 여기서 안 탓한다 - `.length`가 그 경로로 오고(길이는 칸이 따로다),
                 // 진짜 오타는 expr_type이 먼저 돌아 UnknownField로 잡는다.
-                Some((scope_index, base, owner_ty)) => match lookup_field(
-                    owner_ty, field, owner, expr,
-                ) {
-                    Ok((ty, rel)) => {
-                        let overflow =
-                            || ScopeErrorKind::SlotOverflow(expr_display(expr)).at(expr.range().0);
-                        let offset = base.checked_add(rel).ok_or_else(overflow)?;
-                        Ok(Some((scope_index, offset, ty)))
+                Some((scope_index, base, owner_ty)) => {
+                    match lookup_field(owner_ty, field, owner, expr) {
+                        Ok((ty, rel)) => {
+                            let overflow = || {
+                                ScopeErrorKind::SlotOverflow(expr_display(expr)).at(expr.range().0)
+                            };
+                            let offset = base.checked_add(rel).ok_or_else(overflow)?;
+                            Ok(Some((scope_index, offset, ty)))
+                        }
+                        Err(_) => Ok(None),
                     }
-                    Err(_) => Ok(None),
-                },
+                }
                 None => Ok(None),
             }
         }

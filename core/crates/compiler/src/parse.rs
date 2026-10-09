@@ -759,10 +759,7 @@ impl<'a> Parser<'a> {
                     } else {
                         // 단축형은 필드명이 곧 prop 참조라 그 이름 토큰이 구간이다.
                         let range = NodeRange(self.just_read());
-                        Expr::Var(
-                            field.clone(),
-                            range,
-                        )
+                        Expr::Var(field.clone(), range)
                     };
                     payload.push((field, value));
                 }
@@ -819,10 +816,7 @@ impl<'a> Parser<'a> {
                     } else {
                         // 단축형은 키가 곧 prop 참조라 그 이름 토큰이 구간이다.
                         let range = NodeRange(self.just_read());
-                        Expr::Var(
-                            key.clone(),
-                            range,
-                        )
+                        Expr::Var(key.clone(), range)
                     };
                     fields.push((key, value));
                 }
