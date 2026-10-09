@@ -73,6 +73,22 @@ for (const [name, list] of Object.entries(seeds)) {
   });
 }
 
+test("SSR이 head에 <style data-qb-href>로 인라인한 리소스는 <link>로 다시 넣지 않는다", () => {
+  for (const link of [...document.head.querySelectorAll("link")]) {
+    link.remove();
+  }
+  const { qubb, resmap } = buildFixtureWithResmap("styled_res");
+  const host = ssrHost("styled_res", resmap, {});
+  const inlined = document.createElement("style");
+  inlined.setAttribute("data-qb-href", resmap[0]);
+  inlined.textContent = ".box { color: red }";
+  document.head.append(inlined);
+  const inst = resume(qubb, resmap, host, {});
+  assert.equal(document.head.querySelectorAll("link").length, 0, "인라인한 리소스를 <link>로 또 넣었다");
+  inst.destroy();
+  inlined.remove();
+});
+
 test("이어받은 뒤 클릭과 set이 CSR처럼 동작한다 - payload 식", () => {
   const data = { n: 1, open: true, cursor: 0, rows: [{ title: "A", tags: ["a1"] }] };
   const { qubb, resmap } = buildFixtureWithResmap("payload_expr");

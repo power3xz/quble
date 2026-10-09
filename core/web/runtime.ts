@@ -1765,10 +1765,12 @@ class Interpreter {
     const url = this.resources[resId];
     if (url && !this.loadedHrefs.has(url)) {
       this.loadedHrefs.add(url);
-      // resume이면 SSR 페이지가 head에 이미 넣었을 수 있다.
+      // resume이면 SSR 페이지가 head에 이미 넣었을 수 있다 - <link href>, 또는 인라인한 <style data-qb-href>.
       const inHead =
         this.resumeCursor !== null &&
-        [...document.head.querySelectorAll("link")].some((l) => l.getAttribute("href") === url);
+        [...document.head.querySelectorAll("link, style[data-qb-href]")].some(
+          (el) => (el.getAttribute("href") ?? el.getAttribute("data-qb-href")) === url,
+        );
       if (inHead) {
         return;
       }
