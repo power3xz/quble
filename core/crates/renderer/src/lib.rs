@@ -80,6 +80,79 @@ pub fn render_value(
     })
 }
 
+/// qubb를 data(루트 props JSON 문자열)로 심은 store를 JS 런타임이 그대로 받는 JSON으로 낸다.
+///
+/// {"leaves":[...],"undef":[i,...],"arrays":[[elemTypeRef,start,count],...]}
+///   leaves  store 배열(런타임 plantRoot의 leaves). JSON에 undefined가 없어 그 자리는 null로 두고 undef에 적는다.
+///   arrays  arrayInfoIndex 순서. 한 배열의 요소는 연속이라 첫 요소 시작 leafIndex와 개수면 충분하다.
+/// 루트 슬롯 base(rootFlat)는 타입에서 나오므로 싣지 않는다.
+pub fn snapshot(bytes: &[u8], data: &str) -> Result<String, RenderError> {
+    let data = json::parse(data).map_err(RenderError::Json)?;
+    let module = bytecode::decode(bytes)?;
+    let mut store = Store::default();
+    plant_root(&module, &data, &mut store);
+    Ok(snapshot_json(&store))
+}
+
+fn snapshot_json(store: &Store) -> String {
+    let mut out = String::from("{\"leaves\":[");
+    let mut undef = Vec::new();
+    for (i, leaf) in store.leaves.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        match leaf {
+            Val::Undef => {
+                undef.push(i);
+                out.push_str("null");
+            }
+            Val::Null => out.push_str("null"),
+            Val::Bool(b) => out.push_str(&b.to_string()),
+            Val::Num(n) => out.push_str(&js_number(*n)),
+            Val::Str(s) => write_json_string(s, &mut out),
+        }
+    }
+    out.push_str("],\"undef\":[");
+    out.push_str(
+        &undef
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    out.push_str("],\"arrays\":[");
+    for (i, starts) in store.arrays.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "[{},{},{}]",
+            store.array_elem_types[i],
+            starts.first().copied().unwrap_or(0),
+            starts.len()
+        ));
+    }
+    out.push_str("]}");
+    out
+}
+
+/// JSON 문자열 리터럴. 따옴표, 역슬래시, 제어 문자(U+0000~U+001F)를 이스케이프한다.
+fn write_json_string(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
 // ── 값과 store ─────────────────────────────────────────────────────────
 
 /// store leaf 값 하나. JS 런타임의 leaf가 담는 것과 같은 종류.
@@ -164,6 +237,8 @@ fn js_number(n: f64) -> String {
 struct Store {
     leaves: Vec<Val>,
     arrays: Vec<Vec<usize>>,
+    /// arrays[i]의 요소 타입(type_ref) - 스냅샷이 런타임 arrayInfo의 elemTypeRef로 싣는다.
+    array_elem_types: Vec<u16>,
 }
 
 /// 슬롯 하나의 출처(런타임 argumentSourcePairs의 (kind, ref) 한 쌍).
@@ -212,6 +287,7 @@ fn plant_fixed<'d>(
         TypeEntry::Array(elem_type) => {
             let array_index = store.arrays.len();
             store.arrays.push(Vec::new());
+            store.array_elem_types.push(*elem_type);
             store.leaves.push(Val::Num(array_index as f64));
             vec![Deferred {
                 array_index,
@@ -827,6 +903,14 @@ fn escape_text(s: &str, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 스냅샷의 문자열은 JSON.parse가 원래 값으로 읽어야 한다 - 따옴표, 역슬래시, 제어 문자를 이스케이프한다.
+    #[test]
+    fn json_string_escapes_for_json_parse() {
+        let mut out = String::new();
+        write_json_string("a\"b\\c\n\t\u{1}한", &mut out);
+        assert_eq!(out, "\"a\\\"b\\\\c\\n\\t\\u0001한\"");
+    }
 
     /// setAttributeSafely와 같은 판정 - URL 속성의 javascript: 값만 막고, 앞 공백/제어 문자와 스킴 안의
     /// 탭/개행으로 감춘 것도 막는다.
