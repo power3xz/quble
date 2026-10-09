@@ -8,9 +8,7 @@
 
 ## 하는 중
 
-runtime.ts cloneTemplate가 행마다 복제본 전체를 앞순회해 모으던 collect(프로파일에서 mount 중
-quble JS의 약 18%)를, plan이 미리 계산한 값 자리 사이 걸음(template-steps.ts)을 따라가는 방식으로
-바꾸고 expr 벤치로 main과 비교한다. 이득이 오차 안이면 머지하지 않고 브랜치를 버린다.
+없음
 
 ## 할 것
 
