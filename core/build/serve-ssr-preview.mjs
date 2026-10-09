@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+// SSR + resume 프리뷰 서버. build-preview.mjs가 만든 dist/preview를 정적으로 서빙하고, `/`만
+// quble-ssr로 렌더한 HTML을 내준다. 페이지의 스크립트가 그 HTML을 노드를 새로 만들지 않고 이어받는다
+// (compile(...)(0)(data, handlers, { resumeFrom })).
+//
+// 사용: node serve-ssr-preview.mjs <dist/preview> <stem> <port> <quble-ssr 바이너리>
+//   /          SSR HTML + resume 스크립트
+//   /?nojs     SSR HTML만(스크립트 없음) - 서버가 보낸 그대로 본다
+//   /?csr      SSR HTML 없이 클라이언트가 처음부터 그린다 - resume과 견주는 용도
+
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { createServer } from "node:http";
+import { extname, join, normalize } from "node:path";
+
+const [distDir, stem, portArg, ssrBin] = process.argv.slice(2);
+if (!distDir || !stem || !portArg || !ssrBin) {
+  console.error("usage: serve-ssr-preview.mjs <dist/preview> <stem> <port> <quble-ssr>");
+  process.exit(1);
+}
+const port = Number(portArg);
+
+const TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".qubb": "application/octet-stream",
+};
+
+const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// quble-ssr로 렌더한다. 리소스 URL은 클라이언트의 loadResource가 head에서 찾는 값(절대 URL)과 같아야 한다.
+const renderSsr = (origin) => {
+  const manifest = JSON.parse(readFileSync(join(distDir, `${stem}.manifest.json`), "utf8"));
+  const base = new URL(`${stem}.qubb`, `${origin}/`);
+  const urls = manifest.resources.map((path) => new URL(path, base).href);
+  const started = performance.now();
+  const run = spawnSync(ssrBin, [join(distDir, `${stem}.qubb`), join(distDir, "data.json"), ...urls], {
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  const ms = performance.now() - started;
+  if (run.status !== 0) {
+    throw new Error(run.stderr || "quble-ssr 실패");
+  }
+  const links = run.stderr
+    .split("\n")
+    .filter((line) => line.startsWith("link: "))
+    .map((line) => line.slice("link: ".length));
+  return { html: run.stdout, links, ms };
+};
+
+const page = (origin, mode) => {
+  const { html, links, ms } = mode === "csr" ? { html: "", links: [], ms: 0 } : renderSsr(origin);
+  const linkTags = links.map((href) => `  <link rel="stylesheet" href="${escapeHtml(href)}">`).join("\n");
+  const script =
+    mode === "nojs"
+      ? ""
+      : `
+  <script type="module">
+    import { compile, loadHandlers } from "./quble-runtime.js";
+    const status = document.getElementById("ssr-status");
+    const app = document.getElementById("quble-app");
+    const csr = ${mode === "csr"};
+    const ssrNodes = app.querySelectorAll("*").length;
+    const firstElement = app.firstElementChild;
+    const base = new URL("./${stem}.qubb", location.href);
+    const [manifest, bytes, data] = await Promise.all([
+      fetch("./${stem}.manifest.json").then((r) => r.json()),
+      fetch("./${stem}.qubb").then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b)),
+      fetch("./data.json").then((r) => r.json()),
+    ]);
+    const handlers = await loadHandlers(manifest, base);
+    const resources = manifest.resources.map((p) => new URL(p, base).href);
+    const t0 = performance.now();
+    try {
+      const inst = compile(bytes, resources)(0)(data, handlers, csr ? {} : { resumeFrom: app });
+      app.replaceChildren(...inst.nodes);
+      const ms = (performance.now() - t0).toFixed(1);
+      window.__quble = inst;
+      status.textContent = csr
+        ? "CSR: 처음부터 그림 " + ms + "ms"
+        : "resume: SSR 요소 " + ssrNodes + "개를 " + ms + "ms로 이어받음, 첫 요소 재사용 " + (app.firstElementChild === firstElement);
+    } catch (error) {
+      status.textContent = "resume 실패: " + error.message;
+      status.className = "error";
+      console.error(error);
+    }
+  </script>`;
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>${stem} (SSR)</title>
+  <link rel="stylesheet" href="./reset.css">
+  <link rel="stylesheet" href="./global.css">
+${linkTags}
+  <style>
+    #ssr-status { position: fixed; right: 8px; bottom: 8px; margin: 0; padding: 4px 8px; font: 12px monospace; background: #222; color: #9f9; }
+    #ssr-status.error { color: #f99; }
+  </style>
+</head>
+<body>
+  <div id="quble-app">${html}</div>
+  <p id="ssr-status">${mode === "nojs" ? `SSR만(스크립트 없음), 서버 렌더 ${ms.toFixed(1)}ms` : "..."}</p>${script}
+</body>
+</html>
+`;
+};
+
+createServer((req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  try {
+    if (url.pathname === "/") {
+      const mode = url.searchParams.has("nojs") ? "nojs" : url.searchParams.has("csr") ? "csr" : "resume";
+      const body = page(`http://${req.headers.host}`, mode);
+      res.writeHead(200, { "content-type": TYPES[".html"] });
+      res.end(body);
+      return;
+    }
+    const file = join(distDir, normalize(url.pathname).replace(/^(\.\.[/\\])+/, ""));
+    if (!file.startsWith(distDir) || !existsSync(file) || !statSync(file).isFile()) {
+      res.writeHead(404);
+      res.end("not found");
+      return;
+    }
+    res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
+    res.end(readFileSync(file));
+  } catch (error) {
+    res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+    res.end(String(error.message ?? error));
+  }
+}).listen(port, () => {
+  console.log(`[ssr-preview] http://localhost:${port}`);
+});
