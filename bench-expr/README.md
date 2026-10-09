@@ -6,10 +6,10 @@ template 식의 갱신 비용을 quble, React, React + memo, Svelte 5에서 같�
 
 ## 실행
 
-레포 루트에서 `./bench-expr.sh`. 의존 설치, `orders.qubc` 컴파일, 데이터 생성, vite 빌드를 하고
+레포 루트에서 `./bench-expr.sh`. 의존 설치, `orders.qubc`와 `orders-deep.qubc` 컴파일, 데이터 생성, vite 빌드를 하고
 http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런타임과 quble 바이너리를 그대로 쓴다.
 
-1. 첫 화면(비교 표)에서 행 수(1k, 5k, 10k)와 압축(없음, gzip, brotli)을 고른다.
+1. 첫 화면(비교 표)에서 테스트(orders, orders-deep), 행 수(1k, 5k, 10k), 압축(없음, gzip, brotli)을 고른다.
 2. 대상 이름을 누르면 새 탭에 그 대상만 뜬다. 그 탭에서 **측정**을 누른다.
 3. 측정을 마치면 로드와 클릭 결과가 함께 브라우저 localStorage에 저장되어 비교 표에 들어온다. 새로고침만
    해서는 저장된 결과가 바뀌지 않는다. 다른 브라우저나 기기에는 공유되지 않는다.
@@ -17,26 +17,47 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 같은 대상을 구현만 바꿔 잴 때는 URL에 `tag`를 붙여 결과를 나눠 담는다(`quble.html?n=10000&tag=before`).
 비교 표가 같은 대상의 tag별 결과를 나란히 보여 준다.
 
-### 빠른 측정 - `./bench-expr-quick.sh [git ref]`
+### 빠른 측정 - `./bench-expr-quick.sh [git ref] [orders|orders-deep]`
 
-커밋 하나(기본 HEAD)의 quble 런타임을 headless Chromium으로 재고 기록으로 남긴다. 1분 안쪽에 끝나고 창이
-뜨지 않는다.
+커밋 하나(기본 HEAD)의 quble 런타임을 headless Chromium으로 재고 기록으로 남긴다. 테스트를 생략하면 둘 다
+잰다. 1분 안쪽에 끝나고 창이 뜨지 않는다.
 
-- 커밋을 임시 worktree로 꺼내 그 `core/web`으로 빌드해 서버(8144)에 띄운다. 작업 트리의 커밋 안 한 변경은
-  재지 않는다. `orders.qubb`와 데이터는 지금 컴파일러로 만든다.
-- `bench-expr/quick.mjs`가 `quble.html?n=10000`을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 여덟의
-  DOM 반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
-- 기록은 `bench-results/<커밋>.expr.json`에 남는다. 커밋끼리는 `node bench-compare.mjs expr <ref> <ref>`로
-  견준다.
+- 런타임(`core/web`)만 커밋 것이다. 커밋을 임시 worktree로 꺼내 빌드해 서버(8144)에 띄운다. 작업 트리의
+  커밋 안 한 런타임 변경은 재지 않는다.
+- 벤치 앱(페이지, 행 템플릿, 시나리오, `tests.json`)은 지금 작업 트리 것으로 덮는다. 어떤 커밋이든 같은 벤치
+  앱으로 재므로 서로 견줄 수 있다. `.qubb`와 데이터도 지금 컴파일러로 만든다.
+- `bench-expr/quick.mjs`가 `quble.html`(orders-deep이면 `quble-deep.html`)을 5회 연다. 페이지마다 하네스가
+  잰 mount 시간과 클릭 여덟의 DOM 반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
+- 행 수는 환경 변수 `BENCH_N`(1000, 5000, 10000, 기본 10000)으로 고른다.
+- 기록은 `bench-results/<커밋>.expr.json`(orders), `<커밋>.expr-deep.json`(orders-deep)에 남는다. 10000이
+  아닌 행 수는 `.1k`, `.5k`가 붙는다(`<커밋>.expr.1k.json`). 커밋끼리는
+  `BENCH_N=... node bench-compare.mjs <expr|expr-deep> <ref> <ref>`로 견준다.
 
 클릭은 하네스 그대로 누르므로 클릭마다 다음 프레임을 기다린다. 측정 시간 대부분이 여기서 든다.
 
 따로 잰 기록끼리 견주므로 잰 시각 사이의 기계 상태 차이가 섞인다. 견줄 커밋은 이어서 잰다.
 
+## 테스트와 버전
+
+테스트는 둘이다. 각 대상은 테스트마다 자기 페이지가 있고, 같은 테스트의 대상끼리만 견준다.
+
+| 테스트 | 행 | 파일 |
+|---|---|---|
+| `orders` | 아래 "재는 앱"의 기본 행 | `quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte` |
+| `orders-deep` | 기본 행에 정적 하위 트리와 깊은 값 자리가 낀 행(노드 54개, 값 자리 13개). 값 자리 사이를 찾아가는 비용이 드러나게 만들었다 | `quble/orders-deep.qubc`, `src/react-deep.jsx`, `src/react-memo-deep.jsx`, `src/OrdersDeep.svelte` |
+
+두 테스트의 props, 이벤트, 툴바, 시나리오는 같다. 대상마다 DOM이 같은지(`orders-deep`은 네 구현 모두)를
+맞춰 둔다.
+
+`tests.json`이 테스트별 버전을 가진다. 하네스가 결과와 기록에 이 버전을 적는다. **같은 테스트의 측정 조건을
+바꾸면(행 템플릿, 데이터, 시나리오, 하네스의 재는 방식) 그 테스트의 버전을 올린다.** 버전이 다른 결과는
+같은 조건으로 잰 게 아니므로 비교 표에서 흐리게 보이고 막대와 최소 표시에서 빠지며, `bench-compare.mjs`는 퍼센트
+대신 `(버전 다름)`을 낸다. 버전 필드가 생기기 전 결과는 "버전 없음"이다.
+
 ## 재는 앱
 
-주문 목록 N행(`quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte`). 행마다 단순 값
-셋(id, 가격, 수량)과 식 넷, 링크(`a`의 `href`가 행의 `url`) 하나를 둔다.
+주문 목록 N행(`orders`). 행마다 단순 값 셋(id, 가격, 수량)과 식 넷, 링크(`a`의 `href`가 행의 `url`) 하나를
+둔다.
 
 ```
 금액  (row.price * row.qty - row.discount) * (100 + tax) / 100 * rate
@@ -89,8 +110,10 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 거칠게 끊긴다. Chrome이 아니면 `-`로 나온다. 측정 사이에 GC가 끼면 작아지거나 음수가 되므로 중앙값으로 본다.
 
 **대상마다 갱신 방식이 다르다.**
-- React(memo 없음)는 상태가 바뀌면 모든 행을 다시 렌더한다.
+- React(memo 없음)는 상태가 바뀌면 모든 행을 다시 렌더한다. 행은 `rows.map` 안에 인라인으로 쓴다(quble,
+  Svelte와 같은 조건을 맞추려 별도 Row 컴포넌트를 두지 않는다).
 - React + memo는 바뀐 행만 다시 렌더하지만, 환율과 기준처럼 모든 행의 props가 바뀌면 memo가 소용없다.
+  `memo`는 컴포넌트를 감싸므로 이 대상만 `Row` 컴포넌트를 둔다.
 - Svelte 5는 template 식마다 effect(읽은 값이 바뀌면 다시 도는 함수)를 하나씩 만든다. 식이 읽는 값 중
   하나라도 바뀌면 그 식을 처음부터 센다.
 - quble은 식이 읽는 leaf가 바뀌면 바뀐 부분만 다시 센다(부분 재평가).
