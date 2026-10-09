@@ -536,7 +536,7 @@ const plantFixed = (
 //
 // 요소 leaf가 고정 칸 사이에 끼면 뒤 필드 offset이 밀리므로, 고정부를 다 심은 뒤 요소를 끝에
 // 레벨별로 몰아 심는다(중간 삽입 금지).
-const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayInfo>) => {
+export const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayInfo>) => {
   const rootType = module.types[module.defs[0].propsTypeRef];
   const leaves: unknown[] = [];
   const rootFlat: number[] = [];
@@ -563,6 +563,40 @@ const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayIn
       }
     }
     pending = next;
+  }
+  return { leaves, rootFlat };
+};
+
+// quble-ssr --snapshot(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
+//   leaves  store 배열. JSON에 undefined가 없어 그 자리는 null이고 undef에 인덱스가 적혀 있다.
+//   arrays  arrayInfoIndex 순서의 [요소 타입, 첫 요소 시작 leafIndex, 요소 수]. 한 배열의 요소는 연속이다.
+export type TLeafSnapshot = {
+  leaves: unknown[];
+  undef: number[];
+  arrays: [elemTypeRef: number, start: number, count: number][];
+};
+
+// 스냅샷을 plantRoot 대신 store에 넣는다. 반환은 plantRoot와 같다 - leaves와 rootFlat([STORE, base, ...]).
+// 루트 prop의 base는 앞 prop들의 고정 칸 수의 합이라 타입에서 구한다. arrayPool은 빈 것이어야 한다
+// (appendArrayInfo가 0부터 매기는 arrayInfoIndex가 스냅샷의 배열 순서와 같다).
+export const adoptSnapshot = (module: TModule, snapshot: TLeafSnapshot, arrayPool: Pool<TArrayInfo>) => {
+  const { leaves, undef, arrays } = snapshot;
+  for (const i of undef) {
+    leaves[i] = undefined;
+  }
+  for (const [elemTypeRef, start, count] of arrays) {
+    const elemSize = leafCountOf(module, elemTypeRef);
+    const info = arrayPool.entries[appendArrayInfo(arrayPool, elemSize, elemTypeRef)];
+    for (let k = 0; k < count; k++) {
+      info.elemStartLeafIndices.push(start + k * elemSize);
+    }
+  }
+  const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
+  const rootFlat: number[] = [];
+  let base = 0;
+  for (const [, childTypeRef] of rootType.fields) {
+    rootFlat.push(STORE, base);
+    base += leafCountOf(module, childTypeRef);
   }
   return { leaves, rootFlat };
 };
@@ -2757,8 +2791,9 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
   // subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
   // options.resumeFrom - SSR이 그린 노드들의 부모. 주면 노드를 새로 만들지 않고 그 노드들을 이어받는다
   // (rootValue는 SSR에 넘긴 data와 같아야 한다). 반환한 nodes가 바로 그 노드들이다.
+  // options.snapshot - quble-ssr --snapshot이 낸 store. 주면 plantRoot 없이 그것으로 시작하고 rootValue는 안 본다.
   return (compId: number) =>
-    (rootValue: unknown, handlers: THandlers = {}, options: { resumeFrom?: Node } = {}) => {
+    (rootValue: unknown, handlers: THandlers = {}, options: { resumeFrom?: Node; snapshot?: TLeafSnapshot } = {}) => {
       const def = module.defs[compId];
       const resumeCursor = options.resumeFrom ? new ResumeCursor(options.resumeFrom) : null;
       // 인스턴스 불변 상태 - 모든 build(최초/lazy)가 공유한다.
@@ -2766,7 +2801,9 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
       const arrayPool: Pool<TArrayInfo> = new Pool();
       // rootValue를 루트 props 타입대로 store에 펴 심고(고정부 연속 + 배열 요소는 뒤로), 각 루트
       // 슬롯의 base leafIndex를 rootFlat([STORE, base, ...])으로 얻는다. 배열 요소는 arrayPool에 등록된다.
-      const { leaves, rootFlat } = plantRoot(module, rootValue, arrayPool);
+      const { leaves, rootFlat } = options.snapshot
+        ? adoptSnapshot(module, options.snapshot, arrayPool)
+        : plantRoot(module, rootValue, arrayPool);
       const store = createLeafStoreSubject(leaves);
       // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
       // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.

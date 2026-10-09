@@ -25,6 +25,17 @@ export const renderSsr = (name: string, resmap: string[], data: unknown) => {
   return { html: run.stdout, links };
 };
 
+// quble-ssr --snapshot이 낸 leaf store 스냅샷(JSON)을 객체로 돌려준다. 픽스처는 buildFixture로 먼저 빌드돼 있어야 한다.
+export const snapshotSsr = (name: string, data: unknown) => {
+  const run = spawnSync(SSR_BIN, ["--snapshot", fixtureQubbPath(name), "-"], {
+    input: JSON.stringify(data),
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+};
+
 // SSR이 resume용으로 남긴 텍스트 경계 표시 주석인가(`<!---->`, `<!--qb:empty-->`).
 export const isTextMark = (node: Node): boolean =>
   node.nodeType === node.COMMENT_NODE && ["", "qb:empty"].includes((node as Comment).data);
