@@ -51,9 +51,23 @@ const renderSsr = (origin) => {
   return { html: run.stdout, links, ms };
 };
 
+// CSS를 <style>로 인라인한다 - 렌더를 막는 stylesheet 요청이 없어진다. `</style`이 본문에 있으면 태그가
+// 일찍 닫히므로 `<\/`로 바꾼다.
+const inlineCss = (css) => css.replace(/<\/(style)/gi, "<\\/$1");
+
+// 컴포넌트 CSS의 절대 URL로 dist 안 파일을 읽는다. 런타임의 loadResource가 이 URL을 `data-qb-href`와 견줘
+// 이미 넣었는지 안다.
+const inlineResource = (href) => {
+  const file = join(distDir, normalize(new URL(href).pathname));
+  return `  <style data-qb-href="${escapeHtml(href)}">${inlineCss(readFileSync(file, "utf8"))}</style>`;
+};
+
 const page = (origin, mode) => {
   const { html, links, ms } = mode === "csr" ? { html: "", links: [], ms: 0 } : renderSsr(origin);
-  const linkTags = links.map((href) => `  <link rel="stylesheet" href="${escapeHtml(href)}">`).join("\n");
+  const globalStyles = ["reset.css", "global.css"]
+    .map((name) => `  <style>${inlineCss(readFileSync(join(distDir, name), "utf8"))}</style>`)
+    .join("\n");
+  const linkTags = links.map(inlineResource).join("\n");
   const script =
     mode === "nojs"
       ? ""
@@ -93,8 +107,7 @@ const page = (origin, mode) => {
 <head>
   <meta charset="utf-8">
   <title>${stem} (SSR)</title>
-  <link rel="stylesheet" href="./reset.css">
-  <link rel="stylesheet" href="./global.css">
+${globalStyles}
 ${linkTags}
   <style>
     #ssr-status { position: fixed; right: 8px; bottom: 8px; margin: 0; padding: 4px 8px; font: 12px monospace; background: #222; color: #9f9; }
