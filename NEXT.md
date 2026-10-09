@@ -11,6 +11,8 @@
 - SSR renderer 재작성 - qubb + 루트 props 데이터로 HTML을 낸다. 모든 픽스처에서 JS 런타임
   DOM과 같은 HTML이 나오는 것이 완료 기준(ROADMAP "SSR 렌더러", ISSUES "renderer(SSR) 보류").
   실행 재개(resume)는 다음 브랜치. 브랜치 `ssr-renderer`.
+- leaf store 스냅샷 - Rust renderer가 plant_root 결과(leaves, 배열 정보)를 직렬화하고
+  (`quble-ssr --snapshot`), 런타임이 plantRoot 없이 그 스냅샷을 store에 바로 넣는다. 브랜치 `leaf-snapshot`.
 
 ## 할 것
 
