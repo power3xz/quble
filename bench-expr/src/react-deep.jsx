@@ -1,5 +1,5 @@
-// React, memo 없이 흔히 쓰는 모양. 행은 컴포넌트 없이 map 안에 바로 쓴다(quble의 @for, Svelte의 each와 같은 조건).
-// 상태가 바뀌면 App이 모든 행을 다시 그린다.
+// React, memo 없는 모양에 deep 행(quble/orders-deep.qubc와 같은 DOM)을 그린다. 값 자리 사이에 정적 하위 트리,
+// 깊은 값 자리, 정적 형제 줄이 낀다. 행은 react.jsx처럼 컴포넌트 없이 map 안에 바로 쓴다. 결과는 react와 따로 쌓인다.
 import { useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -63,15 +63,46 @@ const App = ({ data }) => {
         {rows.map((row, i) => (
           <div key={row.id} className="row">
             <span className="row__id">{row.id}</span>
+            <div className="row__pad">
+              <div>
+                <div>
+                  <div>
+                    <span>.</span>
+                    <span>.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
             <span className="row__price">{row.price}</span>
-            <span className="row__qty">{row.qty}</span>
+            <div className="row__deep">
+              <div>
+                <div>
+                  <div>
+                    <span className="row__qty">{row.qty}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
             <span className="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax)) / 100) * rate}</span>
+            <ul className="row__meta">
+              <li>a</li>
+              <li>b</li>
+              <li>c</li>
+              <li>d</li>
+              <li>{row.stock}</li>
+              <li>e</li>
+              <li>f</li>
+              <li>g</li>
+              <li>h</li>
+              <li>i</li>
+              <li>{row.discount}</li>
+            </ul>
             <span className="row__left">{row.stock - row.qty}</span>
             <span className="row__diff">{row.price - rows[pivot].price}</span>
             <span className="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold)}>
               !
             </span>
-            <a className="row__link" href={row.url}>
+            <a className="row__link" href={row.url} data-p={row.price} data-q={row.qty}>
               link
             </a>
             <button
@@ -88,8 +119,8 @@ const App = ({ data }) => {
 };
 
 runTarget({
-  id: "react",
-  label: "React",
+  id: "react-deep",
+  label: "React (deep)",
   mount: (root, data) => {
     flushSync(() => createRoot(root).render(<App data={data} />));
   },

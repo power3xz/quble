@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# 커밋 하나의 quble 런타임을 bench-expr 앱으로 빠르게 재고 기록으로 남긴다: 의존 확인 -> orders.qubb 컴파일과
+# 커밋 하나의 quble 런타임을 bench-expr 앱으로 빠르게 재고 기록으로 남긴다: 의존 확인 -> .qubb 컴파일과
 # 데이터 생성 -> 그 커밋의 빌드 -> 서버 기동 -> bench-expr/quick.mjs -> 기록 출력.
 #
-# 커밋(기본 HEAD)을 임시 worktree로 꺼내 그 core/web으로 빌드한다 - 작업 트리의 커밋 안 한 변경은 재지
-# 않는다. orders.qubb와 데이터는 지금 컴파일러로 만든다(런타임만 비교한다).
+# 런타임(core/web)만 커밋(기본 HEAD)의 것이고, 벤치 앱(bench-expr/의 페이지, 행 템플릿, 시나리오)은 지금
+# 작업 트리 것이다 - 어떤 커밋이든 같은 벤치 앱으로 재서 서로 견줄 수 있다. 커밋은 임시 worktree로 꺼내
+# 빌드하므로 작업 트리의 커밋 안 한 런타임 변경은 재지 않는다. .qubb와 데이터는 지금 컴파일러로 만든다.
 #
-# 기록은 bench-results/<커밋>.expr.json에 남고, 같은 커밋을 다시 재면 덮어쓴다. 커밋끼리 비교는
-# node bench-compare.mjs expr <ref> <ref>로 본다.
+# 테스트는 둘이다. orders는 기본 행, orders-deep은 값 자리 사이에 정적 하위 트리와 깊은 값 자리가 낀 행이다.
+# 기록은 bench-results/<커밋>.expr.json(orders), <커밋>.expr-deep.json(orders-deep)에 남고, 같은 커밋을
+# 다시 재면 덮어쓴다. 커밋끼리 비교는 node bench-compare.mjs <expr|expr-deep> <ref> <ref>로 본다.
 #
 # headless로 돌아 창이 뜨지 않는다. 다른 대상(React, Svelte)과의 비교는 ./bench-expr.sh로 본다.
 #
-# 사용: ./bench-expr-quick.sh [git ref]   예: ./bench-expr-quick.sh main~3
+# 행 수는 환경 변수 BENCH_N(1000, 5000, 10000, 기본 10000)으로 줄여 빠르게 돌려 볼 수 있다. 10000이 아니면 기록
+# 이름에 .1k, .5k가 붙어 10000행 기록을 덮지 않는다(bench-compare.mjs도 같은 BENCH_N으로 그 기록을 읽는다).
+#
+# 사용: ./bench-expr-quick.sh [git ref] [orders|orders-deep]
+#   테스트를 생략하면 둘 다 잰다.   예: ./bench-expr-quick.sh main~3   BENCH_N=1000 ./bench-expr-quick.sh HEAD orders-deep
 set -euo pipefail
 
 PORT=8144
@@ -20,6 +26,25 @@ APP="$ROOT/bench-expr"
 OUT="dist-quick"
 REF="${1:-HEAD}"
 SHA="$(git -C "$ROOT" rev-parse --short=7 "$REF")"
+case "${2:-all}" in
+  all) TESTS="orders orders-deep" ;;
+  orders | orders-deep) TESTS="$2" ;;
+  *)
+    echo "사용: ./bench-expr-quick.sh [git ref] [orders|orders-deep]" >&2
+    exit 1
+    ;;
+esac
+BENCH_N="${BENCH_N:-10000}"
+case "$BENCH_N" in
+  10000) SUFFIX="" ;;
+  1000 | 5000) SUFFIX=".$((BENCH_N / 1000))k" ;;
+  *)
+    echo "BENCH_N은 1000, 5000, 10000 중 하나다: $BENCH_N" >&2
+    exit 1
+    ;;
+esac
+# quick.mjs와 bench-compare.mjs가 같은 값을 읽는다.
+export BENCH_N
 
 echo "[bench-expr-quick] 1/5 의존 확인"
 if [ ! -d "$APP/node_modules/playwright" ]; then
@@ -28,9 +53,10 @@ fi
 # 이미 받았으면 바로 끝난다.
 npx --prefix "$APP" playwright install chromium
 
-echo "[bench-expr-quick] 2/5 orders.qubc 컴파일, 데이터 생성"
+echo "[bench-expr-quick] 2/5 orders.qubc, orders-deep.qubc 컴파일, 데이터 생성"
 cargo build --manifest-path "$ROOT/core/Cargo.toml" --bin quble
 "$ROOT/core/target/debug/quble" "$APP/quble/orders.qubc" --out-dir "$APP/public"
+"$ROOT/core/target/debug/quble" "$APP/quble/orders-deep.qubc" --out-dir "$APP/public"
 node "$APP/gen-data.mjs"
 
 echo "[bench-expr-quick] 3/5 빌드: $REF($SHA)"
@@ -46,14 +72,16 @@ cleanup() {
 }
 trap cleanup EXIT
 git -C "$ROOT" worktree add --detach "$TREE" "$SHA" >/dev/null
-if [ ! -f "$TREE/bench-expr/src/quble.ts" ]; then
-  echo "[bench-expr-quick] $REF에는 bench-expr이 없다 - 더 나중 ref를 준다" >&2
+if [ ! -f "$TREE/core/web/runtime.ts" ]; then
+  echo "[bench-expr-quick] $REF에는 core/web/runtime.ts가 없다 - 더 나중 ref를 준다" >&2
   exit 1
 fi
-# worktree의 vite 설정이 그 worktree의 core/web을 싣는다. 의존은 작업 트리 것을 함께 쓴다.
+# 벤치 앱은 지금 작업 트리 것으로 덮는다(데이터 public/ 포함). worktree의 vite 설정이 그 worktree의
+# core/web을 싣고, 의존은 작업 트리 것을 함께 쓴다.
+rm -rf "$TREE/bench-expr"
+mkdir -p "$TREE/bench-expr"
+rsync -a --exclude node_modules --exclude dist --exclude dist-quick "$APP/" "$TREE/bench-expr/"
 ln -s "$APP/node_modules" "$TREE/bench-expr/node_modules"
-mkdir -p "$TREE/bench-expr/public"
-cp "$APP/public/"* "$TREE/bench-expr/public/"
 npm run --prefix "$TREE/bench-expr" build -- --outDir "$APP/$OUT/$SHA" --emptyOutDir --logLevel error
 
 echo "[bench-expr-quick] 4/5 서버 기동: $PORT"
@@ -64,5 +92,12 @@ done
 
 echo "[bench-expr-quick] 5/5 측정"
 mkdir -p "$ROOT/bench-results"
-node "$APP/quick.mjs" "http://localhost:$PORT" "$ROOT/bench-results/$SHA.expr.json"
-node "$ROOT/bench-compare.mjs" expr "$SHA"
+for TEST in $TESTS; do
+  case "$TEST" in
+    orders) KIND="expr" ;;
+    orders-deep) KIND="expr-deep" ;;
+  esac
+  echo "[bench-expr-quick] 테스트: $TEST"
+  node "$APP/quick.mjs" "http://localhost:$PORT" "$ROOT/bench-results/$SHA.$KIND$SUFFIX.json" "$TEST"
+  node "$ROOT/bench-compare.mjs" "$KIND" "$SHA"
+done

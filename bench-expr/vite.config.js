@@ -12,9 +12,13 @@ export default defineConfig({
       input: {
         index: "index.html",
         quble: "quble.html",
+        "quble-deep": "quble-deep.html",
         react: "react.html",
+        "react-deep": "react-deep.html",
         "react-memo": "react-memo.html",
+        "react-memo-deep": "react-memo-deep.html",
         svelte: "svelte.html",
+        "svelte-deep": "svelte-deep.html",
       },
     },
   },
