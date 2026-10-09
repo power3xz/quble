@@ -119,6 +119,7 @@ import {
   type TRegion,
   truncateFor,
 } from "./region.ts";
+import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 
 // 슬롯 해석방법. argumentSourcePairs는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
 // argumentSourcePairs[2*offset](해석방법) / argumentSourcePairs[2*offset+1](참조)로 읽는다. STORE는 참조가 store
@@ -227,14 +228,17 @@ type TWalkStacks = {
 
 // 템플릿 복제 계획 - 한 범위(startPc~endPc)의 정적 뼈대와 값 자리 목록(templatePlanOf).
 //   template  요소/정적 속성/정적 텍스트만 든 뼈대. 값 자리 텍스트는 빈 텍스트 노드로 자리만 잡는다.
-//   holes     [명령 위치, 노드 번호]를 이어 담은 목록. 노드 번호는 뼈대를 앞순회한 순서다. 노드가
-//             없는 명령(PUSH_PATH_INDEX_SEGMENT)은 -1.
+//   holes     [명령 위치, steps 시작, steps 끝]을 이어 담은 목록. 복제본 위의 커서가 앞 값 자리 노드에서
+//             이 값 자리 노드까지 가는 걸음이 steps[시작, 끝)이다. 첫 값 자리는 복제본 root에서 시작한다.
+//             노드가 없는 명령(PUSH_PATH_INDEX_SEGMENT)과 앞 값 자리와 같은 노드는 걸음이 비어 있다.
+//   steps     값 자리마다 이어 붙인 걸음(STEP_FIRST_CHILD, STEP_NEXT_SIBLING, STEP_PARENT).
 //
 // li(class="row") { span() { ${row.label} } button(@click:PICK) { "pick" } } 이면
 //   template  <li class="row"><span>""</span><button>"pick"</button></li>
 //   노드 번호  0=li 1=span 2=span 안 텍스트 3=button 4="pick"
-//   holes     [TEXT_VAR 위치, 2, BIND_EVENT 위치, 3]
-type TTemplatePlan = { template: DocumentFragment; holes: number[] };
+//   걸음      root에서 텍스트까지 [FIRST_CHILD, FIRST_CHILD, FIRST_CHILD], 텍스트에서 button까지 [PARENT, NEXT_SIBLING]
+//   holes     [TEXT_VAR 위치, 0, 3, BIND_EVENT 위치, 3, 5]
+type TTemplatePlan = { template: DocumentFragment; holes: number[]; steps: number[] };
 
 // 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
 // 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
@@ -1757,7 +1761,8 @@ class Interpreter {
   //   경로 상태  PUSH_PATH_INDEX_SEGMENT(뒤따르는 BIND_EVENT의 [$n])
   //
   // 노드 번호는 노드를 만든 순서다. 요소는 자식보다 먼저, 형제는 앞에서부터 만들므로 이 순서가
-  // 곧 뼈대의 앞순회 순서다 - 복제본을 앞순회로 모으면 같은 번호로 같은 노드를 찾는다.
+  // 곧 뼈대의 앞순회 순서다 - 값 자리의 노드 번호를 앞 값 자리에서의 걸음으로 바꿔 두면(template-steps.ts)
+  // 복제본 위에서 걸음을 따라가 같은 노드를 찾는다.
   templatePlanOf = (startPc: number, endPc: number): TTemplatePlan | null => {
     const cached = this.templatePlanCache.get(startPc);
     if (cached !== undefined) {
@@ -1767,11 +1772,12 @@ class Interpreter {
     const u16 = (at: number) => code[at] | (code[at + 1] << 8);
     const template = document.createDocumentFragment();
     const parents: Node[] = [template];
-    const holes: number[] = [];
+    const holePcs: number[] = [];
+    const holeNodeNumbers: number[] = [];
     let pending: HTMLElement | null = null;
     let nodeCount = 0;
-    let plan: TTemplatePlan | null = { template, holes };
-    for (let pc = startPc; pc < endPc && plan !== null; ) {
+    let plannable = true;
+    for (let pc = startPc; pc < endPc && plannable; ) {
       const at = pc;
       const op = code[pc++];
       switch (op) {
@@ -1793,7 +1799,8 @@ class Interpreter {
         case OP_ATTR_L_EXPR:
         case OP_BIND_EVENT:
           // 여는 중인 요소가 방금 만든 노드다.
-          holes.push(at, nodeCount - 1);
+          holePcs.push(at);
+          holeNodeNumbers.push(nodeCount - 1);
           break;
         case OP_ELEM_CLOSE_OPEN:
           // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
@@ -1812,16 +1819,28 @@ class Interpreter {
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR:
           parents[parents.length - 1].appendChild(document.createTextNode(""));
-          holes.push(at, nodeCount);
+          holePcs.push(at);
+          holeNodeNumbers.push(nodeCount);
           nodeCount++;
           break;
         case OP_PUSH_PATH_INDEX_SEGMENT:
-          holes.push(at, -1);
+          holePcs.push(at);
+          holeNodeNumbers.push(-1);
           break;
         default:
-          plan = null;
+          plannable = false;
       }
       pc += operandLen(op);
+    }
+    let plan: TTemplatePlan | null = null;
+    if (plannable) {
+      const holes: number[] = [];
+      const steps: number[] = [];
+      stepsToEachHole(template, holeNodeNumbers).forEach((stepsOfHole, i) => {
+        holes.push(holePcs[i], steps.length, steps.length + stepsOfHole.length);
+        steps.push(...stepsOfHole);
+      });
+      plan = { template, holes, steps };
     }
     this.templatePlanCache.set(startPc, plan);
     return plan;
@@ -1839,23 +1858,24 @@ class Interpreter {
     branch: TBranch,
   ): DocumentFragment => {
     const fragment = plan.template.cloneNode(true) as DocumentFragment;
-    // 복제본의 노드를 앞순회로 모은다 - 계획의 노드 번호와 같은 순서다.
-    const nodes: Node[] = [];
-    const collect = (parent: Node) => {
-      for (let child = parent.firstChild; child !== null; child = child.nextSibling) {
-        nodes.push(child);
-        collect(child);
-      }
-    };
-    collect(fragment);
 
     const code = this.code;
-    const { holes } = plan;
+    const { holes, steps } = plan;
+    // 커서는 fragment에서 출발해 값 자리마다 계획의 걸음만큼 움직여 그 자리의 노드에 닿는다.
+    let node: Node = fragment;
     // interpret의 segment와 같다 - PUSH_PATH_INDEX_SEGMENT가 깔고 다음 BIND_EVENT가 소비한다.
     let segment: string | null = null;
-    for (let h = 0; h < holes.length; h += 2) {
+    for (let h = 0; h < holes.length; h += 3) {
       const at = holes[h];
-      const node = nodes[holes[h + 1]];
+      for (let s = holes[h + 1]; s < holes[h + 2]; s++) {
+        const step = steps[s];
+        node =
+          step === STEP_FIRST_CHILD
+            ? (node.firstChild as Node)
+            : step === STEP_NEXT_SIBLING
+              ? (node.nextSibling as Node)
+              : (node.parentNode as Node);
+      }
       const op = code[at];
       const pc = at + 1;
       if (op === OP_PUSH_PATH_INDEX_SEGMENT) {
