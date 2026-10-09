@@ -12,6 +12,7 @@ import {
   TARGETS,
   TESTS,
   type TResult,
+  testVersion,
 } from "./harness.ts";
 
 type TColumn = { label: string; hint: string; value: (r: TResult) => number | undefined; format: (v: number) => string };
@@ -52,6 +53,9 @@ const render = () => {
   const n = currentN();
   const enc = currentEnc();
   const test = currentTest();
+  const version = testVersion(test);
+  // 지금 버전이 아닌 결과(버전 필드가 생기기 전 결과 포함)는 옛 버전이다 - 흐리게 보이고 막대와 최소 표시에서 뺀다.
+  const isStale = (r: TResult | undefined) => r !== undefined && r.version !== version;
   const all = Object.values(loadResults());
   // 선택한 테스트의 대상마다 tag 없는 결과 다음에 tag 붙은 결과를 잰 순서대로 한 행씩. tag 필드가 생기기 전 결과는 tag가 없다.
   const results = TARGETS.filter((t) => t.test === test).flatMap((t) => {
@@ -76,13 +80,21 @@ const render = () => {
       if (v === undefined) {
         return `<td class="dim">-</td>`;
       }
-      const values = results.map((x) => (x.result ? c.value(x.result) : undefined)).filter((x): x is number => x !== undefined);
+      if (isStale(result)) {
+        return `<td class="cell dim"><span>${c.format(v)}</span></td>`;
+      }
+      const values = results
+        .map((x) => (x.result && !isStale(x.result) ? c.value(x.result) : undefined))
+        .filter((x): x is number => x !== undefined);
       const max = Math.max(...values);
       const min = Math.min(...values);
       const best = v === min && values.length > 1 ? " best" : "";
       return `<td class="cell${best}"><div class="bar" style="width:${max > 0 ? (v / max) * 100 : 0}%"></div><span>${c.format(v)}</span></td>`;
     });
-    tr.innerHTML = `<td class="target">${link}${result ? `<div class="dim small">${new Date(result.at).toLocaleTimeString()}</div>` : `<div class="dim small">결과 없음</div>`}</td>${cells.join("")}`;
+    const meta = result
+      ? `${new Date(result.at).toLocaleTimeString()}, v${result.version ?? "없음"}${isStale(result) ? " (옛 버전, 지금 v" + version + ")" : ""}`
+      : "결과 없음";
+    tr.innerHTML = `<td class="target">${link}<div class="dim small">${meta}</div></td>${cells.join("")}`;
     return tr;
   });
 
@@ -91,7 +103,7 @@ const render = () => {
   table.tHead!.append(head);
   table.tBodies[0].append(...rows);
   document.getElementById("caption")!.textContent =
-    `${test}, ${n.toLocaleString()} 행, ${ENCODINGS.find((e) => e.key === enc)!.label}, 클릭은 ${METRIC_LABEL[metric]} 중앙값`;
+    `${test} v${version}, ${n.toLocaleString()} 행, ${ENCODINGS.find((e) => e.key === enc)!.label}, 클릭은 ${METRIC_LABEL[metric]} 중앙값`;
 };
 
 const testSelect = document.createElement("select");

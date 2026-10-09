@@ -10,7 +10,9 @@ import { writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 
 const ROUNDS = 5;
-const N = 10000;
+// 행 수. 환경 변수 BENCH_N(1000, 5000, 10000)으로 줄여 빠르게 돌려 볼 수 있다. 기록 파일은 행 수가 달라도 같은
+// 이름이니, 줄여 돌린 기록을 커밋 비교에 쓰지 않는다.
+const N = Number(process.env.BENCH_N ?? 10000);
 // 하네스 SCENARIOS와 같은 키와 순서. 표의 열을 padEnd로 맞추므로 라벨도 키 그대로 둔다(한글은 폭이 2칸).
 const SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk"];
 // 테스트마다 페이지와 하네스가 결과를 담는 id가 다르다 - 결과가 서로 섞이지 않는다.
@@ -29,6 +31,8 @@ const RESULT_KEY = `${TARGET_ID}|${N}|none`;
 const mount = [];
 const heap = [];
 const clicks = SCENARIOS.map(() => []);
+// 하네스가 결과에 적은 테스트 버전(bench-expr/tests.json). 회차마다 같다.
+let version;
 
 const readResult = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem("bench-expr-pivot"))[key], RESULT_KEY);
 
@@ -48,6 +52,7 @@ for (let round = 0; round < ROUNDS; round++) {
   });
   // 하네스는 측정을 마쳐야 로드와 클릭을 함께 저장한다.
   const result = await readResult(page);
+  version = result.version;
   mount.push(result.load.mounted);
   SCENARIOS.forEach((key, i) => {
     clicks[i].push(result.clicks[key].dom);
@@ -62,4 +67,4 @@ const rows = [
   { label: "heap after mount (MB)", digits: 2, values: heap },
   ...SCENARIOS.map((key, i) => ({ label: `click ${key} (ms)`, digits: 3, values: clicks[i] })),
 ];
-writeFileSync(outPath, JSON.stringify({ at: new Date().toISOString(), rounds: ROUNDS, rows }, null, 2));
+writeFileSync(outPath, JSON.stringify({ at: new Date().toISOString(), rounds: ROUNDS, test: testName, version, n: N, rows }, null, 2));

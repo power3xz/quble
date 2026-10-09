@@ -12,8 +12,11 @@
 #
 # headless로 돌아 창이 뜨지 않는다. 다른 대상(React, Svelte)과의 비교는 ./bench-expr.sh로 본다.
 #
+# 행 수는 환경 변수 BENCH_N(1000, 5000, 10000, 기본 10000)으로 줄여 빠르게 돌려 볼 수 있다. 10000이 아니면 기록
+# 이름에 .1k, .5k가 붙어 10000행 기록을 덮지 않는다(bench-compare.mjs도 같은 BENCH_N으로 그 기록을 읽는다).
+#
 # 사용: ./bench-expr-quick.sh [git ref] [orders|orders-deep]
-#   테스트를 생략하면 둘 다 잰다.   예: ./bench-expr-quick.sh main~3   ./bench-expr-quick.sh HEAD orders-deep
+#   테스트를 생략하면 둘 다 잰다.   예: ./bench-expr-quick.sh main~3   BENCH_N=1000 ./bench-expr-quick.sh HEAD orders-deep
 set -euo pipefail
 
 PORT=8144
@@ -31,6 +34,17 @@ case "${2:-all}" in
     exit 1
     ;;
 esac
+BENCH_N="${BENCH_N:-10000}"
+case "$BENCH_N" in
+  10000) SUFFIX="" ;;
+  1000 | 5000) SUFFIX=".$((BENCH_N / 1000))k" ;;
+  *)
+    echo "BENCH_N은 1000, 5000, 10000 중 하나다: $BENCH_N" >&2
+    exit 1
+    ;;
+esac
+# quick.mjs와 bench-compare.mjs가 같은 값을 읽는다.
+export BENCH_N
 
 echo "[bench-expr-quick] 1/5 의존 확인"
 if [ ! -d "$APP/node_modules/playwright" ]; then
@@ -84,6 +98,6 @@ for TEST in $TESTS; do
     orders-deep) KIND="expr-deep" ;;
   esac
   echo "[bench-expr-quick] 테스트: $TEST"
-  node "$APP/quick.mjs" "http://localhost:$PORT" "$ROOT/bench-results/$SHA.$KIND.json" "$TEST"
+  node "$APP/quick.mjs" "http://localhost:$PORT" "$ROOT/bench-results/$SHA.$KIND$SUFFIX.json" "$TEST"
   node "$ROOT/bench-compare.mjs" "$KIND" "$SHA"
 done

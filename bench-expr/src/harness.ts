@@ -6,6 +6,8 @@
 //   - 클릭: 컴포넌트 안의 실제 버튼을 .click()으로 누르고, DOM 반영과 페인트까지의 시간을 잰다.
 //   - 결과를 localStorage에 넣어 index 페이지의 비교 표가 읽게 한다.
 
+import testVersions from "../tests.json";
+
 export type TRow = { id: number; price: number; qty: number; discount: number; stock: number; url: string };
 export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number };
 
@@ -33,6 +35,9 @@ type TStat = { dom: number; layout: number; domP90: number; layoutP90: number; h
 export type TResult = {
   id: string;
   label: string;
+  // 어떤 테스트를 어느 버전으로 쟀는지. 이 필드가 생기기 전 결과에는 없다.
+  test?: string;
+  version?: number;
   n: number;
   enc: string;
   tag: string;
@@ -69,6 +74,10 @@ export const TARGETS = [
   { id: "react-deep", label: "React (deep)", test: "orders-deep" },
   { id: "svelte-deep", label: "Svelte 5 (deep)", test: "orders-deep" },
 ];
+
+// 테스트의 지금 버전(tests.json). 행 모양, 데이터, 시나리오, 측정 방식이 바뀌면 그 테스트의 버전을 올린다 -
+// 버전이 다른 결과끼리는 견주지 않는다.
+export const testVersion = (test: string): number => (testVersions as Record<string, { version: number }>)[test].version;
 
 // 비교 표가 보여 줄 테스트. compare 페이지 URL의 test 값(?test=orders-deep), 없거나 모르는 값이면 첫 테스트.
 export const currentTest = (): string => {
@@ -338,9 +347,12 @@ export const runTarget = async <P>(target: TTarget<P>) => {
   const files = collectFiles();
   bulk.base = data.rows;
   bulk.bumped = await fetch(`./bulk-${n}.json`).then((r) => r.json() as Promise<TRow[]>);
+  const test = TARGETS.find((t) => t.id === target.id)!.test;
   const result: TResult = {
     id: target.id,
     label: target.label,
+    test,
+    version: testVersion(test),
     n,
     enc,
     tag,
