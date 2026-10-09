@@ -55,6 +55,7 @@ export const SCENARIOS = [
 
 export const TARGETS = [
   { id: "quble", label: "quble" },
+  { id: "quble-deep", label: "quble (deep)" },
   { id: "react-memo", label: "React + memo" },
   { id: "react", label: "React" },
   { id: "svelte", label: "Svelte 5" },

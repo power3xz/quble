@@ -3,14 +3,14 @@
 // 기록은 ./bench-krausest-quick.sh, ./bench-expr-quick.sh가 커밋 하나를 잴 때마다 남긴다. 따로 잰 기록끼리
 // 견주므로, 잰 시각이 멀면 그 사이 기계 상태의 차이가 섞인다 - 이어서 잰 기록끼리 본다.
 //
-// 사용: node bench-compare.mjs <krausest|expr> <ref> [ref ...]   예: node bench-compare.mjs expr HEAD~1 HEAD
+// 사용: node bench-compare.mjs <krausest|expr|expr-deep> <ref> [ref ...]   예: node bench-compare.mjs expr HEAD~1 HEAD
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 const ROOT = new URL(".", import.meta.url).pathname;
 const [bench, ...refs] = process.argv.slice(2);
-if (!["krausest", "expr"].includes(bench) || refs.length === 0) {
-  console.error("사용: node bench-compare.mjs <krausest|expr> <ref> [ref ...]");
+if (!["krausest", "expr", "expr-deep"].includes(bench) || refs.length === 0) {
+  console.error("사용: node bench-compare.mjs <krausest|expr|expr-deep> <ref> [ref ...]");
   process.exit(1);
 }
 
@@ -19,7 +19,8 @@ const records = refs.map((ref) => {
   const sha = git("rev-parse", "--short=7", ref);
   const path = `${ROOT}bench-results/${sha}.${bench}.json`;
   if (!existsSync(path)) {
-    console.error(`${ref}(${sha})의 ${bench} 기록이 없다 - ./bench-${bench}-quick.sh ${ref}로 잰다`);
+    const quick = bench === "expr-deep" ? `./bench-expr-quick.sh ${ref} orders-deep` : `./bench-${bench}-quick.sh ${ref}`;
+    console.error(`${ref}(${sha})의 ${bench} 기록이 없다 - ${quick}로 잰다`);
     process.exit(1);
   }
   return { sha, subject: git("log", "-1", "--format=%s", sha), ...JSON.parse(readFileSync(path, "utf8")) };
