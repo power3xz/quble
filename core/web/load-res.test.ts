@@ -39,6 +39,24 @@ test("resmap 없으면 <link>를 안 만든다(리소스 로드 생략)", () => 
   assert.deepEqual(hrefs(), []);
 });
 
+// LOAD_RES가 든 def도 요소/텍스트뿐이면 템플릿 복제로 build된다 - <link>는 계획을 만들 때 한 번 넣는다.
+test("CSS를 쓰는 컴포넌트를 세 번 그려도 <link>는 하나고 뼈대는 한 번만 만든다", () => {
+  const { qubb: outerQubb, resmap } = buildFixtureWithResmap("res_clone");
+  const original = document.createElement.bind(document);
+  const created: string[] = [];
+  document.createElement = ((tag: string) => {
+    created.push(tag);
+    return original(tag);
+  }) as typeof document.createElement;
+  try {
+    compile(outerQubb, resmap)(0)({});
+  } finally {
+    document.createElement = original;
+  }
+  assert.deepEqual(hrefs(), resmap, "<link>는 한 번");
+  assert.equal(created.filter((tag) => tag === "span").length, 1, "자식 뼈대(span)는 한 번만 만든다");
+});
+
 // @if 가지 안에서만 RENDER되는 (다른 파일) 컴포넌트의 LOAD_RES는 그 가지가 켜질 때까지
 // 미뤄진다 - lazy build가 자식 def를 해석하지 않으면 자식 def 앞머리의 LOAD_RES도 실행되지
 // 않기 때문. 이게 "lazy 가지의 CSS가 늦게 로드된다"는 현 동작의 근거다.

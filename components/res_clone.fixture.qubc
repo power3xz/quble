@@ -1,0 +1,11 @@
+use Styled from "./lazy_res_child.fixture.qubc"
+
+component Outer {
+  template {
+    div() {
+      Styled( /)
+      Styled( /)
+      Styled( /)
+    }
+  }
+}

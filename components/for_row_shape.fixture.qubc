@@ -1,0 +1,17 @@
+component ForRowShape {
+  props { rows: { id: string, note: string, url: string }[] }
+  events { PICK({}) }
+  template {
+    div() {
+      @for (row of rows) {
+        li(class="row") {
+          b() { i() { "static" } }
+          span(class="id") { ${row.id} }
+          p() { em() { "x" } span(class="note") { ${row.note} } }
+          a(class="link" href={row.url} @click:PICK) { "go" }
+          small() { "end" }
+        }
+      }
+    }
+  }
+}

@@ -23,6 +23,20 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 type TIndexSymbol = `$${TDigitString}`;
 
 import {
+  decode,
+  FV_CONST,
+  FV_EXPR,
+  FV_RAW,
+  type TEventEntry,
+  type TField,
+  type TFieldEntry,
+  type TModule,
+  type TRef,
+  type TStep,
+  type TType,
+} from "./decode.ts";
+import { ATTRS, DOM_EVENTS, setAttributeSafely, TAGS } from "./dom-tables.ts";
+import {
   EXPR_ADD,
   EXPR_AND,
   EXPR_DIV,
@@ -52,6 +66,42 @@ import {
 } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, buildSkipTable, type TExprSkipTable, type TSkipPastOps } from "./expr-skip-table.ts";
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
+import {
+  forBodyEnd,
+  ifBranchRanges,
+  OP_ATTR_G,
+  OP_ATTR_G_EXPR,
+  OP_ATTR_G_VAR,
+  OP_ATTR_L,
+  OP_ATTR_L_EXPR,
+  OP_ATTR_L_VAR,
+  OP_BIND_EVENT,
+  OP_ELEM_CLOSE_OPEN,
+  OP_ELEM_END,
+  OP_ELEM_OPEN,
+  OP_ENTER_CONTEXT,
+  OP_EXIT_CONTEXT,
+  OP_FILL_SLOT_PLACEHOLDER,
+  OP_FOR_ARRAY_VAR,
+  OP_FOR_COUNT_VAR,
+  OP_FOR_RAW,
+  OP_HALT,
+  OP_IF,
+  OP_IF_EXPR,
+  OP_LOAD_RES,
+  OP_PUSH_ARG_LIT,
+  OP_PUSH_FIELD,
+  OP_PUSH_PATH_INDEX_SEGMENT,
+  OP_PUSH_PATH_SEGMENT,
+  OP_PUSH_SLOT_PLACEHOLDER_CONTENT,
+  OP_PUSH_THROUGH,
+  OP_RENDER,
+  OP_TEXT,
+  OP_TEXT_EXPR,
+  OP_TEXT_VAR,
+  operandLen,
+  slotPlaceholderContentEnd,
+} from "./opcodes.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
@@ -70,351 +120,7 @@ import {
   truncateFor,
 } from "./region.ts";
 import { ResumeCursor } from "./resume-cursor.ts";
-
-const TAGS = [
-  "div",
-  "span",
-  "p",
-  "h1",
-  "h2",
-  "h3",
-  "a",
-  "ul",
-  "li",
-  "button",
-  "article",
-  "img",
-  "section",
-  "header",
-  "footer",
-  "nav",
-  "main",
-  "aside",
-  "label",
-  "input",
-  "em",
-  "b",
-  "strong",
-  "i",
-  "small",
-  "code",
-  "pre",
-  "h4",
-  "h5",
-  "h6",
-  "br",
-  "hr",
-  "ol",
-  "dl",
-  "dt",
-  "dd",
-  "table",
-  "thead",
-  "tbody",
-  "tr",
-  "th",
-  "td",
-  "form",
-  "textarea",
-  "select",
-  "option",
-  "figure",
-  "figcaption",
-  "time",
-  "blockquote",
-  "video",
-  "audio",
-  "canvas",
-] as const;
-const ATTRS = [
-  "class",
-  "id",
-  "src",
-  "alt",
-  "href",
-  "type",
-  "name",
-  "value",
-  "title",
-  "style",
-  "placeholder",
-  "for",
-  "disabled",
-  "checked",
-  "readonly",
-  "required",
-  "rel",
-  "target",
-  "width",
-  "height",
-  "colspan",
-  "rowspan",
-  "role",
-  "tabindex",
-  "datetime",
-  "controls",
-] as const;
-// 전역 DOM 이벤트 테이블(BYTECODE.md #2). BIND_EVENT의 event_type. Rust dom_events.rs와 동일 순서.
-const DOM_EVENTS = [
-  "click",
-  "input",
-  "change",
-  "submit",
-  "focus",
-  "blur",
-  "keydown",
-  "keyup",
-  "mousedown",
-  "mouseup",
-  "mouseenter",
-  "mouseleave",
-  "scroll",
-] as const;
-
-const OP_HALT = 0x00;
-const OP_ELEM_OPEN = 0x01;
-const OP_ATTR_G = 0x02;
-const OP_ELEM_CLOSE_OPEN = 0x03;
-const OP_TEXT = 0x04;
-const OP_ELEM_END = 0x05;
-const OP_RENDER = 0x06;
-const OP_ATTR_L = 0x07;
-const OP_TEXT_VAR = 0x08;
-const OP_ATTR_G_VAR = 0x09;
-const OP_ATTR_L_VAR = 0x0a;
-const OP_PUSH_THROUGH = 0x0b;
-const OP_IF = 0x0c;
-const OP_ELSE = 0x0d;
-const OP_IF_END = 0x0e;
-const OP_LOAD_RES = 0x0f;
-const OP_BIND_EVENT = 0x10;
-const OP_PUSH_ARG_LIT = 0x11;
-const OP_PUSH_PATH_SEGMENT = 0x12;
-const OP_ENTER_CONTEXT = 0x13;
-const OP_EXIT_CONTEXT = 0x14;
-const OP_FOR_RAW = 0x15;
-const OP_FOR_COUNT_VAR = 0x16;
-const OP_FOR_END = 0x17;
-const OP_PUSH_PATH_INDEX_SEGMENT = 0x18;
-const OP_PUSH_FIELD = 0x19;
-const OP_FOR_ARRAY_VAR = 0x1a;
-const OP_PUSH_SLOT_PLACEHOLDER_CONTENT = 0x1b;
-const OP_SLOT_PLACEHOLDER_CONTENT_END = 0x1c;
-const OP_FILL_SLOT_PLACEHOLDER = 0x1d;
-const OP_IF_EXPR = 0x1e;
-const OP_TEXT_EXPR = 0x1f;
-const OP_ATTR_G_EXPR = 0x20;
-const OP_ATTR_L_EXPR = 0x21;
-
-// opcode의 operand 바이트 수를 돌려준다.
-//
-// skipBranch가 op 경계를 짚어 마커(IF/ELSE/IF_END)를 operand 값과 혼동하지 않게 한다.
-// (SSR renderer operand_len과 동일.)
-//
-// @param op opcode 바이트
-// @returns  operand 바이트 수(0/2/4)
-const operandLen = (op: number) => {
-  switch (op) {
-    case OP_HALT:
-    case OP_ELEM_CLOSE_OPEN:
-    case OP_ELEM_END:
-    case OP_ELSE:
-    case OP_IF_END:
-    case OP_EXIT_CONTEXT:
-    case OP_FOR_END:
-    case OP_SLOT_PLACEHOLDER_CONTENT_END:
-      return 0;
-    case OP_PUSH_THROUGH: // scope_index: u8
-    case OP_IF_EXPR: // expr_index: u8
-    case OP_TEXT_EXPR: // expr_index: u8
-      return 1;
-    case OP_ELEM_OPEN:
-    case OP_TEXT:
-    case OP_TEXT_VAR: // scope_index: u8, offset: u8
-    case OP_RENDER:
-    case OP_PUSH_FIELD: // scope_index: u8, offset: u8
-    case OP_PUSH_ARG_LIT:
-    case OP_PUSH_PATH_SEGMENT:
-    case OP_IF: // scope_index: u8, offset: u8
-    case OP_LOAD_RES:
-    case OP_ENTER_CONTEXT:
-    case OP_FOR_RAW:
-    case OP_FOR_COUNT_VAR: // scope_index: u8, offset: u8
-    case OP_FOR_ARRAY_VAR: // scope_index: u8, offset: u8
-    case OP_PUSH_PATH_INDEX_SEGMENT:
-    case OP_PUSH_SLOT_PLACEHOLDER_CONTENT:
-    case OP_FILL_SLOT_PLACEHOLDER:
-      return 2;
-    case OP_ATTR_G_EXPR: // name: u16, expr_index: u8
-    case OP_ATTR_L_EXPR: // name: u16, expr_index: u8
-      return 3;
-    case OP_ATTR_G:
-    case OP_ATTR_L:
-    case OP_ATTR_G_VAR: // name: u16, scope_index: u8, offset: u8
-    case OP_ATTR_L_VAR: // name: u16, scope_index: u8, offset: u8
-    case OP_BIND_EVENT:
-      return 4;
-    default:
-      throw new Error(`bad opcode 0x${op.toString(16)}`);
-  }
-};
-
-// 현재 가지를 통째로 스킵하고 끝 마커(ELSE/IF_END)의 pc를 돌려준다.
-//
-// op 경계를 따라 전진하며 중첩 if 깊이를 센다. 같은 깊이(0)에서 만난 ELSE/IF_END가 이 가지의
-// 끝이다. build 안 하는 비활성 가지의 경계 위치만 얻을 때 쓴다. (SSR skip_branch의 JS 포팅.)
-//
-// @param code    def 바이트코드
-// @param startPc 스킵 시작 위치(가지 첫 op)
-// @returns       끝 마커(ELSE/IF_END)의 pc - 호출자가 그 마커를 소비
-const skipBranch = (code: Uint8Array, startPc: number) => {
-  let pc = startPc;
-  let depth = 0;
-  while (pc < code.length) {
-    const markerPc = pc;
-    const op = code[pc++];
-    // IF_EXPR도 IF와 같은 분기다 - 깊이를 안 세면 중첩 안쪽의 IF_END를 이 가지 끝으로 오인한다.
-    if (op === OP_IF || op === OP_IF_EXPR) {
-      depth += 1;
-      pc += operandLen(op);
-    } else if (op === OP_IF_END) {
-      if (depth === 0) {
-        return markerPc;
-      }
-      depth -= 1;
-    } else if (op === OP_ELSE && depth === 0) {
-      return markerPc;
-    } else {
-      pc += operandLen(op);
-    }
-  }
-  throw new Error("unbalanced branch - no matching ELSE/IF_END");
-};
-
-// @for 몸체 끝(FOR_END)의 pc를 찾는다.
-//
-//   FOR op | operand | 몸체 ......... | FOR_END
-//                    ^bodyStart      ^반환 pc(호출자가 마커 소비)
-//
-// bodyStart부터 op 경계를 전진하며 중첩 @for 깊이를 센다(같은 깊이 0의 FOR_END가 이 몸체 끝).
-// IF는 몸체 안에 섞여도 무시 - @for 여는 opcode와 FOR_END만 깊이에 관여한다.
-const forBodyEnd = (code: Uint8Array, bodyStart: number) => {
-  let pc = bodyStart;
-  let depth = 0;
-  while (pc < code.length) {
-    const markerPc = pc;
-    const op = code[pc++];
-    if (op === OP_FOR_RAW || op === OP_FOR_COUNT_VAR || op === OP_FOR_ARRAY_VAR) {
-      depth += 1;
-      pc += operandLen(op);
-    } else if (op === OP_FOR_END) {
-      if (depth === 0) {
-        return markerPc;
-      }
-      depth -= 1;
-    } else {
-      pc += operandLen(op);
-    }
-  }
-  throw new Error("unbalanced @for - no matching FOR_END");
-};
-
-// 슬롯 콘텐츠 구간 끝(SLOT_PLACEHOLDER_CONTENT_END)의 pc를 찾는다.
-//
-//   PUSH_SLOT_PLACEHOLDER_CONTENT | idx | 콘텐츠 ........ | SLOT_PLACEHOLDER_CONTENT_END
-//                                       ^contentStart    ^반환 pc(호출자가 마커 소비)
-//
-// 콘텐츠 안에서 또 합성하며 슬롯을 채울 수 있어 깊이를 센다. IF/@for는 자기 마커로 닫히므로
-// 여기 깊이에 관여하지 않는다.
-const slotPlaceholderContentEnd = (code: Uint8Array, contentStart: number) => {
-  let pc = contentStart;
-  let depth = 0;
-  while (pc < code.length) {
-    const markerPc = pc;
-    const op = code[pc++];
-    if (op === OP_PUSH_SLOT_PLACEHOLDER_CONTENT) {
-      depth += 1;
-      pc += operandLen(op);
-    } else if (op === OP_SLOT_PLACEHOLDER_CONTENT_END) {
-      if (depth === 0) {
-        return markerPc;
-      }
-      depth -= 1;
-    } else {
-      pc += operandLen(op);
-    }
-  }
-  throw new Error("unbalanced slot content - no matching SLOT_PLACEHOLDER_CONTENT_END");
-};
-
-// IF 블록의 if/else 몸체 코드 경계를 구한다(순수 - code와 if 몸체 시작 pc만 본다).
-//
-//   IF operand | if 몸체 ... | ELSE | else 몸체 ... | IF_END
-//              ^ifBodyStart  ^ifBodyEnd             ^ifEndPc
-//                                   ^elseBodyStart
-//
-// else 없으면 elseBodyStart = -1이고 ifBodyEnd === ifEndPc === IF_END 위치.
-// 마커는 skipBranch로 찾고 호출자가 소비한다.
-const ifBranchRanges = (code: Uint8Array, ifBodyStart: number) => {
-  const ifBodyEnd = skipBranch(code, ifBodyStart); // ELSE 또는 IF_END
-  if (code[ifBodyEnd] === OP_ELSE) {
-    const elseBodyStart = ifBodyEnd + 1;
-    return { ifBodyEnd, elseBodyStart, ifEndPc: skipBranch(code, elseBodyStart) };
-  }
-  return { ifBodyEnd, elseBodyStart: -1, ifEndPc: ifBodyEnd }; // else 없는 if
-};
-
-// ── 디코드 (core/BYTECODE.md 포맷) ───────────────────────────────────
-class Reader {
-  bytes: Uint8Array;
-  pos: number;
-  constructor(bytes: Uint8Array) {
-    this.bytes = bytes;
-    this.pos = 0;
-  }
-  take(n: number) {
-    const subarray = this.bytes.subarray(this.pos, this.pos + n);
-    if (subarray.length !== n) {
-      throw new Error("unexpected eof");
-    }
-    this.pos += n;
-    return subarray;
-  }
-  u8() {
-    return this.take(1)[0];
-  }
-  u16() {
-    const s = this.take(2);
-    return s[0] | (s[1] << 8);
-  }
-  u32() {
-    const s = this.take(4);
-    return (s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24)) >>> 0;
-  }
-  f64() {
-    const s = this.take(8);
-    return new DataView(s.buffer, s.byteOffset, 8).getFloat64(0, true);
-  }
-  str() {
-    const len = this.u16();
-    return new TextDecoder().decode(this.take(len));
-  }
-  // 상수풀 엔트리: 태그 1바이트로 타입을 정해 payload를 읽는다(Rust put_const의 역).
-  // 런타임 값이 그대로 JS 값(string/number/boolean)이라 소비 지점은 타입을 다시 안 본다.
-  constant() {
-    const tag = this.u8();
-    if (tag === 0) {
-      return this.str();
-    }
-    if (tag === 1) {
-      return this.f64();
-    }
-    if (tag === 2) {
-      return this.u8() !== 0;
-    }
-    throw new Error(`bad const tag ${tag}`);
-  }
-}
+import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 
 // 슬롯 해석방법. argumentSourcePairs는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
 // argumentSourcePairs[2*offset](해석방법) / argumentSourcePairs[2*offset+1](참조)로 읽는다. STORE는 참조가 store
@@ -523,14 +229,17 @@ type TWalkStacks = {
 
 // 템플릿 복제 계획 - 한 범위(startPc~endPc)의 정적 뼈대와 값 자리 목록(templatePlanOf).
 //   template  요소/정적 속성/정적 텍스트만 든 뼈대. 값 자리 텍스트는 빈 텍스트 노드로 자리만 잡는다.
-//   holes     [명령 위치, 노드 번호]를 이어 담은 목록. 노드 번호는 뼈대를 앞순회한 순서다. 노드가
-//             없는 명령(PUSH_PATH_INDEX_SEGMENT)은 -1.
+//   holes     [명령 위치, steps 시작, steps 끝]을 이어 담은 목록. 복제본 위의 커서가 앞 값 자리 노드에서
+//             이 값 자리 노드까지 가는 걸음이 steps[시작, 끝)이다. 첫 값 자리는 복제본 root에서 시작한다.
+//             노드가 없는 명령(PUSH_PATH_INDEX_SEGMENT)과 앞 값 자리와 같은 노드는 걸음이 비어 있다.
+//   steps     값 자리마다 이어 붙인 걸음(STEP_FIRST_CHILD, STEP_NEXT_SIBLING, STEP_PARENT).
 //
 // li(class="row") { span() { ${row.label} } button(@click:PICK) { "pick" } } 이면
 //   template  <li class="row"><span>""</span><button>"pick"</button></li>
 //   노드 번호  0=li 1=span 2=span 안 텍스트 3=button 4="pick"
-//   holes     [TEXT_VAR 위치, 2, BIND_EVENT 위치, 3]
-type TTemplatePlan = { template: DocumentFragment; holes: number[] };
+//   걸음      root에서 텍스트까지 [FIRST_CHILD, FIRST_CHILD, FIRST_CHILD], 텍스트에서 button까지 [PARENT, NEXT_SIBLING]
+//   holes     [TEXT_VAR 위치, 0, 3, BIND_EVENT 위치, 3, 5]
+type TTemplatePlan = { template: DocumentFragment; holes: number[]; steps: number[] };
 
 // 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석
 // 컨텍스트도 부모 것을 그대로 들고 간다 - 실행은 자식의 FILL_SLOT_PLACEHOLDER 자리에서 하지만
@@ -558,84 +267,6 @@ const snapshotStacks = (walkStacks: TWalkStacks): TWalkStacks => ({
   activeContexts: [...walkStacks.activeContexts],
 });
 
-// FieldValue ref 출처 태그(Rust serialize <REF>와 대칭). ref마다 태그 1바이트 + payload.
-// 슬롯 해석방법(STORE/CONST)과 다른 층이다 - Scope 슬롯의 실제 kind는 argumentSourcePairs가 정한다.
-const FV_SCOPE = 0;
-const FV_CONST = 1;
-const FV_RAW = 2;
-const FV_EXPR = 3;
-
-// 타입 테이블 엔트리 태그(BYTECODE.md #4). Rust read_type 대칭.
-const TYPE_SCALAR = 0;
-const TYPE_OBJECT = 1;
-const TYPE_ARRAY = 2;
-
-// 타입 테이블 엔트리 하나를 읽는다. Scalar는 payload 없음, Object는 field_count +
-// [(nameConstIndex, typeRef)], Array는 elem_type_ref. typeRef로 자식을 가리켜 중첩/공유(Rust put_type 대칭).
-//
-// @param r Reader
-// @returns { tag: "scalar" } | { tag: "object", fields } | { tag: "array", elemTypeRef }
-type TType = { tag: "scalar" } | { tag: "object"; fields: TField[] } | { tag: "array"; elemTypeRef: number };
-type TField = [number, number];
-const readType = (reader: Reader): TType => {
-  const tag = reader.u8();
-  if (tag === TYPE_SCALAR) {
-    return { tag: "scalar" };
-  }
-  if (tag === TYPE_OBJECT) {
-    const count = reader.u16();
-    const fields: TField[] = [];
-    for (let i = 0; i < count; i++) {
-      fields.push([reader.u16(), reader.u16()]);
-    }
-    return { tag: "object", fields };
-  }
-  if (tag === TYPE_ARRAY) {
-    return { tag: "array", elemTypeRef: reader.u16() };
-  }
-  throw new Error(`bad type tag ${tag}`);
-};
-
-// field ref 하나를 읽는다 - 태그 1바이트 + payload(Rust read_ref 대칭). Scope는 부모 슬롯
-// 위치(scopeIndex, offset), Const/Raw는 값 하나(u16), Expr는 exprIndex(u8). offset은 Scope만
-// 의미 있어 나머진 0.
-//
-// @param r Reader
-// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=exprIndex
-const readRef = (reader: Reader): TRef => {
-  const tag = reader.u8();
-  if (tag === FV_SCOPE) {
-    return { kind: FV_SCOPE, ref: reader.u8(), offset: reader.u8() };
-  }
-  if (tag === FV_CONST) {
-    return { kind: FV_CONST, ref: reader.u16(), offset: 0 };
-  }
-  if (tag === FV_RAW) {
-    return { kind: FV_RAW, ref: reader.u16(), offset: 0 };
-  }
-  if (tag === FV_EXPR) {
-    return { kind: FV_EXPR, ref: reader.u8(), offset: 0 };
-  }
-  throw new Error(`bad ref tag ${tag}`);
-};
-
-// 필드 목록을 읽는다 - field_count, [(nameConstIndex, typeRef, ref)]. 이벤트 payload와
-// 컨텍스트가 같은 인코딩(Rust read_fields 대칭). 슬롯을 안 펼쳐 field당 ref 하나.
-//
-// @param r Reader
-// @returns [{ nameConstIndex, typeRef, ref }]
-const readFields = (reader: Reader): TFieldEntry[] => {
-  const count = reader.u16();
-  const fields: TFieldEntry[] = [];
-  for (let i = 0; i < count; i++) {
-    const nameConstIndex = reader.u16();
-    const typeRef = reader.u16();
-    const ref = readRef(reader);
-    fields.push({ nameConstIndex, typeRef, ref });
-  }
-  return fields;
-};
-
 // field ref 하나를 assemble이 커서로 소비할 [kind, ref, ...] 열로 푼다(바인딩 때 1회). 한 field는
 // 단일 출처다 - 리터럴이면 CONST 쌍 하나, 변수면 그 슬롯의 kind. 객체 변수는 store에 연속으로
 // 깔려(base부터 재귀적으로 이어짐) base+offset부터 leaf 개수만큼 STORE 쌍으로 펼친다. leaf
@@ -645,7 +276,6 @@ const readFields = (reader: Reader): TFieldEntry[] => {
 // @param leafCount  field.typeRef의 leaf 칸 수(객체를 몇 칸 펼칠지)
 // @param argumentSourcePairs flat 슬롯 배열
 // @returns          [kind, ref, ...] 열
-type TRef = { kind: number; ref: number; offset: number };
 const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[] => {
   if (ref.kind === FV_CONST) {
     return [CONST, ref.ref];
@@ -697,7 +327,6 @@ const STEP_ARRAY = 3;
 // @param constpool 상수풀(필드명 해석)
 // @returns       [[STEP_*, key, elemSteps?]] 평탄 열. 루트 key=null. STEP_ARRAY만 elemSteps(요소
 //                타입 step 열)를 셋째로 싣는다 - 요소는 store 끝 별도 base에 살아 인라인이 안 되므로.
-type TStep = [number, string | null, TStep[]?];
 const compileType = (types: TType[], typeRef: number, constpool: (string | number | boolean)[]): TStep[] => {
   const steps: TStep[] = [];
   // 한 노드로 내려간다: 스칼라면 LEAF 하나로 끝, 객체면 ENTER를 내고 남은 자식 큐를 돌려준다.
@@ -938,87 +567,6 @@ const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<TArrayIn
   return { leaves, rootFlat };
 };
 
-// qubb 바이트를 TModule로 디코드한다(core/BYTECODE.md 포맷).
-const decode = (bytes: Uint8Array) => {
-  const r = new Reader(bytes);
-  const magic = r.take(4);
-  if (!(magic[0] === 0x51 && magic[1] === 0x42 && magic[2] === 0x4c && magic[3] === 0x00)) {
-    throw new Error("bad magic"); // "QBL\0"
-  }
-  const version = r.u16();
-  if (version !== 0) {
-    throw new Error(`bad version ${version}`);
-  }
-
-  const poolCount = r.u16();
-  const constpool = [];
-  for (let i = 0; i < poolCount; i++) {
-    constpool.push(r.constant());
-  }
-
-  // 타입 테이블(모듈 전역) - type_count, [ (tag, payload) ]. Rust read_type 대칭.
-  const typeCount = r.u16();
-  const types = [];
-  for (let i = 0; i < typeCount; i++) {
-    types.push(readType(r));
-  }
-
-  const defCount = r.u16();
-  const defs = [];
-  for (let i = 0; i < defCount; i++) {
-    const nameConstIndex = r.u16();
-    // 이 comp props를 묶은 Object 타입(types 인덱스). defs[0]이 진입점 풀필 구조.
-    const propsTypeRef = r.u16();
-    const codeOff = r.u32();
-    const codeLen = r.u32();
-    // 이벤트 테이블 (BYTECODE.md #4) - event_count, [(nameConstIndex, fields)]
-    const eventCount = r.u16();
-    const events = [];
-    for (let i = 0; i < eventCount; i++) {
-      events.push({ nameConstIndex: r.u16(), fields: readFields(r) });
-    }
-    // 컨텍스트 테이블 - context_count, [(nameConstIndex, fields)]. fields는 이벤트와 같은 인코딩.
-    const contextCount = r.u16();
-    const contexts = [];
-    for (let i = 0; i < contextCount; i++) {
-      contexts.push({ nameConstIndex: r.u16(), fields: readFields(r) });
-    }
-    // 표현식 테이블 - expr_count:u8, [(len:u8, code)]. IF_EXPR의 expr_index가 이 배열의 인덱스.
-    const exprCount = r.u8();
-    const exprs = [];
-    for (let i = 0; i < exprCount; i++) {
-      exprs.push(r.take(r.u8()));
-    }
-    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprs });
-  }
-
-  const codeLen = r.u32();
-  const code = r.take(codeLen);
-  // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
-  // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
-  // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
-  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [] };
-};
-type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
-type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
-type TDef = {
-  nameConstIndex: number;
-  propsTypeRef: number;
-  codeOff: number;
-  codeLen: number;
-  events: TEventEntry[];
-  contexts: TEventEntry[];
-  // 이 def가 쓰는 표현식들(후위 표기 바이트). IF_EXPR의 expr_index가 이 배열의 인덱스.
-  exprs: Uint8Array[];
-};
-type TModule = {
-  code: Uint8Array;
-  constpool: (string | number | boolean)[];
-  types: TType[];
-  compiledSteps: TStep[][];
-  leafCounts: number[];
-  defs: TDef[];
-};
 // 발생 시점에 조립할 준비물(payload/컨텍스트 공용) - field.refs를 바인딩 때 flat sourcePairs로 미리 푼 것.
 // 식 필드는 식 바이트와 바인딩 때의 슬롯을 들고 발생 시점에 평가한다.
 type TAssembled =
@@ -1271,7 +819,7 @@ class Interpreter {
     }
     const context: Record<string, Record<string, unknown>> = {};
     if (binding.contextLeaves !== null) {
-      for (const ctxName in binding.contextLeaves) {
+      for (const ctxName of Object.keys(binding.contextLeaves)) {
         const values: Record<string, unknown> = {};
         for (const p of binding.contextLeaves[ctxName]) {
           values[p.name] = this.assembledValue(p);
@@ -1282,14 +830,15 @@ class Interpreter {
     // 회차 인덱스를 발화 시점에 읽는다 - STORE면 store.get(ref)(array-for: 중간 제거로 당겨진 현재 인덱스),
     // RAW면 ref 값 자체(count-for: 상수). 이제서야 읽어야 array-for $n이 정합한다(바인딩 시점 값은 낡을 수 있다).
     const currentIndices: Record<string, number> = {};
-    for (const key in binding.loopIndices) {
+    for (const key of Object.keys(binding.loopIndices)) {
       const src = binding.loopIndices[key as TIndexSymbol];
       if (src) {
         currentIndices[key] = src.kind === STORE ? (this.store.get(src.ref) as number) : src.ref;
       }
     }
     binding.props ??= this.buildProps(this.module.defs[binding.compId].propsTypeRef, binding.scope);
-    const handler = this.handlers[binding.fullName];
+    // own 키만 본다 - 상속된 키(Object.prototype의 constructor나 오염된 키)를 핸들러로 호출하지 않는다.
+    const handler = Object.hasOwn(this.handlers, binding.fullName) ? this.handlers[binding.fullName] : undefined;
     if (handler === undefined) {
       return;
     }
@@ -2198,26 +1747,52 @@ class Interpreter {
     const nameIndex = u16(pc);
     const name =
       op === OP_ATTR_G_VAR || op === OP_ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
-    const update = (v: unknown) => el.setAttribute(name, v as string);
+    const update = (v: unknown) => setAttributeSafely(el, name, v);
     const v =
       op === OP_ATTR_G_VAR || op === OP_ATTR_L_VAR
         ? // 이어서 scope_index, offset
           this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
         : // 이어서 expr_index
           this.bindExpr(this.module.defs[compId].exprs[code[pc + 2]], update, argumentSourcePairs, branch);
-    el.setAttribute(name, v as string);
+    setAttributeSafely(el, name, v);
+  };
+
+  // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
+  // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
+  // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
+  // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
+  loadResource = (resId: number) => {
+    const url = this.resources[resId];
+    if (url && !this.loadedHrefs.has(url)) {
+      this.loadedHrefs.add(url);
+      // resume이면 SSR 페이지가 head에 이미 넣었을 수 있다.
+      const inHead =
+        this.resumeCursor !== null &&
+        [...document.head.querySelectorAll("link")].some((l) => l.getAttribute("href") === url);
+      if (inHead) {
+        return;
+      }
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = url;
+      document.head.appendChild(link);
+    }
   };
 
   // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
   //
   // 범위가 아래 명령만으로 되어 있으면 뼈대를 DOM으로 만들고 값 자리를 적는다. 하나라도 다른 명령
-  // (@if, @for, 합성, 슬롯, @with, LOAD_RES)이 섞이면 null - interpret가 지금처럼 해석한다.
+  // (@if, @for, 합성, 슬롯, @with)이 섞이면 null - interpret가 지금처럼 해석한다.
   //   뼈대      ELEM_OPEN, ATTR_G, ATTR_L, ELEM_CLOSE_OPEN, ELEM_END, TEXT
   //   값 자리   TEXT_VAR, TEXT_EXPR, ATTR_G_VAR, ATTR_L_VAR, ATTR_G_EXPR, ATTR_L_EXPR, BIND_EVENT
   //   경로 상태  PUSH_PATH_INDEX_SEGMENT(뒤따르는 BIND_EVENT의 [$n])
+  //   리소스    LOAD_RES - 노드가 없다. 계획을 만들 때 한 번 로드하고 복제본마다 하지 않는다
+  //             (범위가 처음 그려질 때가 계획을 만드는 때고, 중복은 loadedHrefs가 막는다).
+  //   끝        HALT - def 범위의 마지막 명령. 노드가 없다.
   //
   // 노드 번호는 노드를 만든 순서다. 요소는 자식보다 먼저, 형제는 앞에서부터 만들므로 이 순서가
-  // 곧 뼈대의 앞순회 순서다 - 복제본을 앞순회로 모으면 같은 번호로 같은 노드를 찾는다.
+  // 곧 뼈대의 앞순회 순서다 - 값 자리의 노드 번호를 앞 값 자리에서의 걸음으로 바꿔 두면(template-steps.ts)
+  // 복제본 위에서 걸음을 따라가 같은 노드를 찾는다.
   templatePlanOf = (startPc: number, endPc: number): TTemplatePlan | null => {
     const cached = this.templatePlanCache.get(startPc);
     if (cached !== undefined) {
@@ -2227,11 +1802,12 @@ class Interpreter {
     const u16 = (at: number) => code[at] | (code[at + 1] << 8);
     const template = document.createDocumentFragment();
     const parents: Node[] = [template];
-    const holes: number[] = [];
+    const holePcs: number[] = [];
+    const holeNodeNumbers: number[] = [];
     let pending: HTMLElement | null = null;
     let nodeCount = 0;
-    let plan: TTemplatePlan | null = { template, holes };
-    for (let pc = startPc; pc < endPc && plan !== null; ) {
+    let plannable = true;
+    for (let pc = startPc; pc < endPc && plannable; ) {
       const at = pc;
       const op = code[pc++];
       switch (op) {
@@ -2253,7 +1829,8 @@ class Interpreter {
         case OP_ATTR_L_EXPR:
         case OP_BIND_EVENT:
           // 여는 중인 요소가 방금 만든 노드다.
-          holes.push(at, nodeCount - 1);
+          holePcs.push(at);
+          holeNodeNumbers.push(nodeCount - 1);
           break;
         case OP_ELEM_CLOSE_OPEN:
           // biome-ignore lint/style/noNonNullAssertion: CLOSE_OPEN은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
@@ -2272,16 +1849,34 @@ class Interpreter {
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR:
           parents[parents.length - 1].appendChild(document.createTextNode(""));
-          holes.push(at, nodeCount);
+          holePcs.push(at);
+          holeNodeNumbers.push(nodeCount);
           nodeCount++;
           break;
         case OP_PUSH_PATH_INDEX_SEGMENT:
-          holes.push(at, -1);
+          holePcs.push(at);
+          holeNodeNumbers.push(-1);
+          break;
+        case OP_LOAD_RES:
+          this.loadResource(u16(pc));
+          break;
+        case OP_HALT:
+          // def의 마지막 명령이다. 읽은 시점에 pc가 endPc라 반복문이 끝난다.
           break;
         default:
-          plan = null;
+          plannable = false;
       }
       pc += operandLen(op);
+    }
+    let plan: TTemplatePlan | null = null;
+    if (plannable) {
+      const holes: number[] = [];
+      const steps: number[] = [];
+      stepsToEachHole(template, holeNodeNumbers).forEach((stepsOfHole, i) => {
+        holes.push(holePcs[i], steps.length, steps.length + stepsOfHole.length);
+        steps.push(...stepsOfHole);
+      });
+      plan = { template, holes, steps };
     }
     this.templatePlanCache.set(startPc, plan);
     return plan;
@@ -2299,23 +1894,24 @@ class Interpreter {
     branch: TBranch,
   ): DocumentFragment => {
     const fragment = plan.template.cloneNode(true) as DocumentFragment;
-    // 복제본의 노드를 앞순회로 모은다 - 계획의 노드 번호와 같은 순서다.
-    const nodes: Node[] = [];
-    const collect = (parent: Node) => {
-      for (let child = parent.firstChild; child !== null; child = child.nextSibling) {
-        nodes.push(child);
-        collect(child);
-      }
-    };
-    collect(fragment);
 
     const code = this.code;
-    const { holes } = plan;
+    const { holes, steps } = plan;
+    // 커서는 fragment에서 출발해 값 자리마다 계획의 걸음만큼 움직여 그 자리의 노드에 닿는다.
+    let node: Node = fragment;
     // interpret의 segment와 같다 - PUSH_PATH_INDEX_SEGMENT가 깔고 다음 BIND_EVENT가 소비한다.
     let segment: string | null = null;
-    for (let h = 0; h < holes.length; h += 2) {
+    for (let h = 0; h < holes.length; h += 3) {
       const at = holes[h];
-      const node = nodes[holes[h + 1]];
+      for (let s = holes[h + 1]; s < holes[h + 2]; s++) {
+        const step = steps[s];
+        node =
+          step === STEP_FIRST_CHILD
+            ? (node.firstChild as Node)
+            : step === STEP_NEXT_SIBLING
+              ? (node.nextSibling as Node)
+              : (node.parentNode as Node);
+      }
       const op = code[at];
       const pc = at + 1;
       if (op === OP_PUSH_PATH_INDEX_SEGMENT) {
@@ -2475,25 +2071,7 @@ class Interpreter {
           break;
         }
         case OP_LOAD_RES: {
-          // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
-          // 스킵(한 compile의 여러 컴포넌트/인스턴스가 같은 리소스를 써도 한 번만). 삽입한 href를
-          // loadedHrefs(compile 단위)로 기억해 매번 head를 querySelector로 훑지 않는다
-          // (인스턴스가 많으면 그 비용이 지배적). dedup 범위가 compile이라 새 렌더 세션은 깨끗하다.
-          const url = this.resources[u16at()];
-          if (url && !this.loadedHrefs.has(url)) {
-            this.loadedHrefs.add(url);
-            // resume이면 SSR 페이지가 head에 이미 넣었을 수 있다.
-            const inHead =
-              this.resumeCursor !== null &&
-              [...document.head.querySelectorAll("link")].some((l) => l.getAttribute("href") === url);
-            if (inHead) {
-              break;
-            }
-            const link = document.createElement("link");
-            link.rel = "stylesheet";
-            link.href = url;
-            document.head.appendChild(link);
-          }
+          this.loadResource(u16at());
           break;
         }
         case OP_ELEM_OPEN: {

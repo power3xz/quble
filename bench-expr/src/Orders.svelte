@@ -19,7 +19,7 @@
     <button id="btn-pivot-price" onclick={() => rows[pivot].price++}>기준 행 가격 변경</button>
     <button id="btn-rate-tax" onclick={() => { rate++; tax++; }}>환율+세율 동시 변경</button>
     <button id="btn-rate-burst" onclick={() => { rate++; rate++; rate++; }}>환율 연속 3회 변경</button>
-    <button id="btn-bulk" onclick={() => { for (const r of rows) { r.price++; r.qty++; r.discount++; r.stock++; } }}>전체 행 일괄 갱신</button>
+    <button id="btn-bulk" onclick={() => { for (const r of rows) { r.price++; r.qty++; r.discount++; r.stock++; r.url += "1"; } }}>전체 행 일괄 갱신</button>
     <span class="orders__info">
       환율 <span class="orders__rate">{rate}</span> / 기준 <span class="orders__threshold">{threshold}</span> / 기준 행 <span class="orders__pivot">{pivot}</span>
     </span>
@@ -27,7 +27,7 @@
   <div class="orders__list">
     {#each rows as row (row.id)}
       <!-- 태그 사이 공백 텍스트 노드가 생기지 않게 한 줄로 이어 쓴다(다른 대상과 같은 마크업). -->
-      <div class="row"><span class="row__id">{row.id}</span><span class="row__price">{row.price}</span><span class="row__qty">{row.qty}</span><span class="row__amount">{((row.price * row.qty - row.discount) * (100 + tax)) / 100 * rate}</span><span class="row__left">{row.stock - row.qty}</span><span class="row__diff">{row.price - rows[pivot].price}</span><span class="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold)}>!</span><button class="row__inc" onclick={() => row.qty++}>+1</button></div>
+      <div class="row"><span class="row__id">{row.id}</span><span class="row__price">{row.price}</span><span class="row__qty">{row.qty}</span><span class="row__amount">{((row.price * row.qty - row.discount) * (100 + tax)) / 100 * rate}</span><span class="row__left">{row.stock - row.qty}</span><span class="row__diff">{row.price - rows[pivot].price}</span><span class="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold)}>!</span><a class="row__link" href={row.url}>link</a><button class="row__inc" onclick={() => row.qty++}>+1</button></div>
     {/each}
   </div>
 </div>

@@ -1,0 +1,53 @@
+component Orders {
+  props {
+    rows: { id: number, price: number, qty: number, discount: number, stock: number, url: string }[],
+    rate: number,
+    tax: number,
+    threshold: number,
+    pivot: number
+  }
+  events {
+    INC({})
+    RATE({ nextRate: 2650 - rate })
+    THRESHOLD({ nextThreshold: 60001 - threshold })
+    PIVOT({ nextPivot: (pivot + 1) % rows.length })
+    PIVOT_PRICE({ nextPrice: rows[pivot].price + 1 })
+    RATE_AND_TAX({ nextRate: rate + 1, nextTax: tax + 1 })
+    RATE_BURST({ first: rate + 1, second: rate + 2, third: rate + 3 })
+    BULK_UPDATE({ firstPrice: rows[0].price })
+  }
+  template {
+    div(class="orders") {
+      div(class="orders__bar") {
+        button(id="btn-rate" @click:RATE) { "환율 변경" }
+        button(id="btn-threshold" @click:THRESHOLD) { "기준 변경" }
+        button(id="btn-pivot" @click:PIVOT) { "기준 행 이동" }
+        button(id="btn-pivot-price" @click:PIVOT_PRICE) { "기준 행 가격 변경" }
+        button(id="btn-rate-tax" @click:RATE_AND_TAX) { "환율+세율 동시 변경" }
+        button(id="btn-rate-burst" @click:RATE_BURST) { "환율 연속 3회 변경" }
+        button(id="btn-bulk" @click:BULK_UPDATE) { "전체 행 일괄 갱신" }
+        span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } " / 기준 " span(class="orders__threshold") { ${threshold} } " / 기준 행 " span(class="orders__pivot") { ${pivot} } }
+      }
+      div(class="orders__list") {
+        @for (row of rows) {
+          div(class="row") {
+            span(class="row__id") { ${row.id} }
+            div(class="row__pad") { div() { div() { div() { span() { "." } span() { "." } } } } }
+            span(class="row__price") { ${row.price} }
+            div(class="row__deep") { div() { div() { div() { span(class="row__qty") { ${row.qty} } } } } }
+            span(class="row__amount") { ${(row.price * row.qty - row.discount) * (100 + tax) / 100 * rate} }
+            ul(class="row__meta") {
+              li() { "a" } li() { "b" } li() { "c" } li() { "d" } li() { ${row.stock} }
+              li() { "e" } li() { "f" } li() { "g" } li() { "h" } li() { "i" } li() { ${row.discount} }
+            }
+            span(class="row__left") { ${row.stock - row.qty} }
+            span(class="row__diff") { ${row.price - rows[pivot].price} }
+            span(class="row__warn" data-warn={row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold}) { "!" }
+            a(class="row__link" href={row.url} data-p={row.price} data-q={row.qty}) { "link" }
+            button(class="row__inc" @click:INC) { "+1" }
+          }
+        }
+      }
+    }
+  }
+}

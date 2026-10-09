@@ -34,6 +34,9 @@ pub enum ParseErrorKind {
     },
     /// 빈 자식 블록(`Comp() { }`) - 슬롯을 안 채우면 self-close로 쓴다(DESIGN #4.5).
     EmptyBlock(String),
+    /// 이름으로 못 쓰는 식별자. 런타임이 이름을 키로 객체에 값을 기록하는데, `__proto__`는 own
+    /// 속성 대신 프로토타입을 바꾼다.
+    ReservedName(String),
 }
 
 impl std::fmt::Display for ParseErrorKind {
@@ -59,6 +62,9 @@ impl std::fmt::Display for ParseErrorKind {
                 f,
                 "empty child block on `{tag}`: use self-close (`{tag}( /)`) when filling no slot"
             ),
+            ParseErrorKind::ReservedName(name) => {
+                write!(f, "`{name}` is reserved and cannot be used as a name")
+            }
         }
     }
 }
@@ -223,6 +229,10 @@ impl<'a> Parser<'a> {
 
     fn parse_ident(&mut self) -> Result<String, ParseError> {
         match self.next()? {
+            Token::Ident(s) if s == "__proto__" => {
+                let kind = ParseErrorKind::ReservedName(s.clone());
+                Err(self.err_read(kind))
+            }
             Token::Ident(s) => Ok(s.clone()),
             got => {
                 let kind = ParseErrorKind::Expected {
