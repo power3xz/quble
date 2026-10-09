@@ -45,7 +45,11 @@ pub fn render(bytes: &[u8], data: &str, resources: &[String]) -> Result<Rendered
 }
 
 /// render와 같되 data를 이미 만든 값으로 받는다 - 같은 data로 여러 번 렌더하는 쪽이 파싱을 한 번만 한다.
-pub fn render_value(bytes: &[u8], data: &Json, resources: &[String]) -> Result<Rendered, RenderError> {
+pub fn render_value(
+    bytes: &[u8],
+    data: &Json,
+    resources: &[String],
+) -> Result<Rendered, RenderError> {
     let module = bytecode::decode(bytes)?;
     let mut store = Store::default();
     let root_pairs = plant_root(&module, data, &mut store);
@@ -404,7 +408,10 @@ impl Renderer<'_> {
                             v
                         }
                     };
-                    emit_attr(name, &value.dom_string(), &mut self.out);
+                    let value = value.dom_string();
+                    if !is_script_url(name, &value) {
+                        emit_attr(name, &value, &mut self.out);
+                    }
                 }
                 Op::BindEvent => pc += 4,
                 Op::ElemCloseOpen => self.out.push('>'),
@@ -772,6 +779,23 @@ fn operand_len(op: Op) -> usize {
     }
 }
 
+/// URL을 받는 속성. 값이 javascript: 스킴이면 이동/제출 때 그 스크립트가 실행된다.
+/// core/web/dom-tables.ts의 URL_ATTRS와 같다.
+const URL_ATTRS: [&str; 4] = ["href", "src", "action", "formaction"];
+
+/// 동적 속성 값이 javascript: URL이라 달면 안 되는지. core/web/dom-tables.ts의 setAttributeSafely와
+/// 같은 판정이다 - 브라우저는 스킴 앞의 U+0000~U+0020과 스킴 안의 탭/개행을 무시하고 읽는다.
+fn is_script_url(name: &str, value: &str) -> bool {
+    URL_ATTRS.contains(&name)
+        && value
+            .trim_start_matches(|c: char| c <= ' ')
+            .chars()
+            .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+            .collect::<String>()
+            .to_lowercase()
+            .starts_with("javascript:")
+}
+
 /// ` name="value"`.
 fn emit_attr(name: &str, value: &str, out: &mut String) {
     out.push(' ');
@@ -803,6 +827,32 @@ fn escape_text(s: &str, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// setAttributeSafely와 같은 판정 - URL 속성의 javascript: 값만 막고, 앞 공백/제어 문자와 스킴 안의
+    /// 탭/개행으로 감춘 것도 막는다.
+    #[test]
+    fn script_url_matches_set_attribute_safely() {
+        let blocked = [
+            ("href", "javascript:alert(1)"),
+            ("src", "JavaScript:alert(1)"),
+            ("action", "  javascript:x"),
+            ("formaction", "\u{1}\u{0}javascript:x"),
+            ("href", "java\tscr\nipt:x"),
+        ];
+        for (name, value) in blocked {
+            assert!(is_script_url(name, value), "{name}={value:?}");
+        }
+        let allowed = [
+            ("href", "https://example.com"),
+            ("href", "/javascript:x"),
+            ("href", "xjavascript:x"),
+            ("title", "javascript:alert(1)"),
+            ("class", "javascript:x"),
+        ];
+        for (name, value) in allowed {
+            assert!(!is_script_url(name, value), "{name}={value:?}");
+        }
+    }
 
     /// JS `String(n)`과 같은 표기. 기댓값은 node에서 `String(n)`으로 확인한 것이다.
     #[test]

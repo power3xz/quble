@@ -1373,6 +1373,15 @@
       "d": "D"
     }
   ],
+  "attr_url_scheme": [{ "url": "https://example.com/a" }, { "url": "javascript:alert(1)" }],
+  "event_proto_name": [{}],
+  "for_row_shape": [
+    {
+      "rows": [{ "id": "1", "note": "n", "url": "/a" }, { "id": "2", "note": "", "url": "javascript:x" }]
+    },
+    { "rows": [] }
+  ],
+  "res_clone": [{}],
   "typed_lit_arg": [{}],
   "value_expr": [
     {
