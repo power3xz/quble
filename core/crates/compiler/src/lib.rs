@@ -9,6 +9,7 @@ mod dts;
 mod expr_type;
 mod flatten;
 mod lexer;
+mod nesting;
 mod parse;
 mod scope;
 mod src_range;
