@@ -102,3 +102,65 @@ test("스냅샷으로 시작한 인스턴스에서 push가 동작한다", () => 
   );
   inst.destroy();
 });
+
+// SSR HTML을 스냅샷으로 이어받은 인스턴스. 클릭이 위임 리스너에 닿도록 문서에 붙인다.
+const resumeFromSnapshot = (
+  name: string,
+  qubb: Uint8Array,
+  resmap: string[],
+  data: unknown,
+  handlers: THandlers = {},
+) => {
+  const host = document.createElement("div");
+  host.innerHTML = renderSsr(name, resmap, data).html;
+  document.body.replaceChildren(host);
+  const inst = resume(qubb, resmap)(0)(undefined, handlers, { resumeFrom: host, snapshot: snapshotSsr(name, data) });
+  host.replaceChildren(...inst.nodes);
+  return { host, inst };
+};
+
+test("스냅샷으로 시작한 인스턴스에서 클릭과 set이 CSR처럼 동작한다 - payload 식", () => {
+  const data = { n: 1, open: true, cursor: 0, rows: [{ title: "A", tags: ["a1"] }] };
+  const { qubb, resmap } = buildFixtureWithResmap("payload_expr");
+  const sent: unknown[] = [];
+  const { host, inst } = resumeFromSnapshot("payload_expr", qubb, resmap, data, { SEND: (d) => sent.push(d.next) });
+  const send = host.querySelector(".send") as HTMLButtonElement;
+  send.click();
+  inst.store.set(0, 10); // n
+  send.click();
+  assert.deepEqual(sent, [2, 11]);
+  inst.destroy();
+});
+
+test("스냅샷으로 시작한 인스턴스에서 인덱스가 바뀌면 텍스트가 갱신된다", () => {
+  const data = {
+    rows: [
+      { title: "A", score: 10 },
+      { title: "B", score: 20 },
+      { title: "C", score: 30 },
+    ],
+    scalars: [7, 8, 9],
+    cursor: 0,
+    show: false,
+  };
+  const { qubb, resmap } = buildFixtureWithResmap("expr_array_index");
+  const { host, inst } = resumeFromSnapshot("expr_array_index", qubb, resmap, data);
+  const field = host.querySelector(".field") as HTMLElement;
+  assert.equal(field.textContent, "A");
+  inst.store.set(2, 1); // cursor
+  assert.equal(field.textContent, "B");
+  inst.destroy();
+});
+
+test("스냅샷으로 시작한 인스턴스에서 @if가 바뀌면 가지가 바뀐다", () => {
+  const data = { tags: ["a", "b"], flag: true };
+  const { qubb, resmap } = buildFixtureWithResmap("for_if_lazy_slot");
+  const { host, inst } = resumeFromSnapshot("for_if_lazy_slot", qubb, resmap, data);
+  const spans = () => [...host.querySelectorAll("span")].map((s) => `${s.className}:${s.textContent}`);
+  assert.deepEqual(spans(), ["on:a", "on:b"]);
+  inst.store.set(1, false); // flag
+  assert.deepEqual(spans(), ["off:off", "off:off"]);
+  inst.store.set(1, true);
+  assert.deepEqual(spans(), ["on:a", "on:b"]);
+  inst.destroy();
+});
