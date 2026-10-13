@@ -8,7 +8,8 @@
 
 ## 하는 중
 
-없음
+- SSG - 빌드할 때 `quble-ssr`로 SSR HTML(스냅샷 포함)을 정적 파일로 낸다. 서버 없는 정적 호스팅
+  (GitHub Pages)에서 SSR 결과를 쓰기 위함(ROADMAP "SSG"). 브랜치 `ssg`.
 
 ## 할 것
 
