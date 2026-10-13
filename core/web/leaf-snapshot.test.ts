@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { decode } from "./decode.ts";
 import { Pool } from "./pool-allocator.ts";
 import type { TArrayInfo } from "./region.ts";
-import { adoptSnapshot, resume, type TLeafSnapshot } from "./resume.ts";
+import { adoptSnapshot, resume } from "./resume.ts";
 import { compile, plantRoot, type THandlers } from "./runtime.ts";
 import { buildFixtureWithResmap } from "./test-helpers/build.ts";
 import "./test-helpers/dom.ts";
