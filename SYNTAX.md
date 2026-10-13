@@ -167,6 +167,19 @@ hr( /)
 track wbr`)는 애초에 자식을 못 가지므로 항상 self-close이고, 자식 블록을 쓰면 컴파일
 에러(컴파일러가 void 집합을 안다).
 
+### 3.1.2 중첩 제한
+
+HTML 파서가 구조를 바꾸는 중첩은 **컴파일 에러**다. SSR이 낸 HTML을 브라우저가 파싱하면 CSR이 만든
+트리와 달라져 resume이 실패하기 때문이다. 호출한 컴포넌트의 최상위 element와 슬롯 내용도 호출 자리의
+조상에 견준다.
+
+- `p`가 열려 있을 때 `div`, `ul`, `table`, `h1`~`h6`처럼 `p`를 닫는 태그(`span` 등을 사이에 둬도 같다.
+  `button`, `td`, `th`, `table` 안쪽부터는 새로 센다)
+- `a` 안의 `a`, `button` 안의 `button`, `form` 안의 `form`
+- `table`의 자식은 `thead`/`tbody`만, `thead`/`tbody`의 자식은 `tr`만, `tr`의 자식은 `td`/`th`만,
+  `select`의 자식은 `option`만. 이 요소들 바로 아래의 텍스트와 `${}`도 안 된다.
+- `tr`은 `thead`/`tbody` 안에만, `td`/`th`는 `tr` 안에만, `thead`/`tbody`는 `table` 안에만 놓인다.
+
 ### 3.2 컴포넌트 합성 / 별칭
 
 ```

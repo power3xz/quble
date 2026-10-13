@@ -18,6 +18,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
   없이 시작한다.
 - [x] SSG - 빌드할 때 `quble-ssr`로 SSR HTML(스냅샷 포함)을 정적 파일로 낸다. 서버 없는 정적
   호스팅(GitHub Pages)에서 SSR 결과를 쓰기 위함. playground의 셸이 이것으로 빌드된다.
+- [x] HTML 중첩 검사 - HTML 파서가 구조를 바꾸는 중첩(`p` 안의 `div`, `table` 바로 아래 `tr` 등)을
+  컴파일 에러로 막아 SSR HTML과 CSR 트리가 달라지지 않게 한다.
 - [x] 전역 상수풀 (흔한 속성명을 스펙 상수로 분리)
 - [ ] 컴파일 타겟 - 같은 AST(IR)에서 qubb뿐 아니라 react/svelte/vue 컴포넌트로 코드
   생성. **동기:** quble를 실무에 점진 도입하기 위함 - 작성은 quble로 하되 산출을 기존

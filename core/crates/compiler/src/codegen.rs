@@ -84,6 +84,13 @@ pub enum CodegenErrorKind {
     /// `on`으로 시작하는 이벤트 핸들러 속성(`onclick`, `onerror`)이 왔다. 값이 JS로 실행되는
     /// 속성이라 값이 런타임 문자열이면 XSS가 된다. 이벤트는 `@click:EVENT`로 받는다.
     EventHandlerAttr(String),
+    /// HTML 파서가 구조를 바꾸는 중첩이다(`p` 안의 `div`, `table` 바로 아래 `tr`). SSR이 낸 HTML을
+    /// 브라우저가 파싱하면 CSR이 만든 트리와 달라져 resume이 실패한다. child가 `text`면 텍스트다.
+    InvalidNesting {
+        child: String,
+        parent: String,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for CodegenErrorKind {
@@ -183,6 +190,7 @@ impl std::fmt::Display for CodegenErrorKind {
                     "`{name}` is an event handler attribute; use `@click:EVENT`"
                 )
             }
+            CodegenErrorKind::InvalidNesting { message, .. } => write!(f, "{message}"),
         }
     }
 }
@@ -198,7 +206,7 @@ pub struct CodegenError {
 }
 
 impl CodegenErrorKind {
-    fn at(self, range: SrcRange) -> CodegenError {
+    pub(crate) fn at(self, range: SrcRange) -> CodegenError {
         CodegenError { kind: self, range }
     }
 }
@@ -347,6 +355,7 @@ type Emitted = (
 /// 에러의 range는 그 컴포넌트가 정의된 파일의 오프셋이라, 어느 파일인지를 함께 실어 보낸다
 /// (Sourced) - 엔트리 소스에 대고 세면 use한 파일의 에러가 엉뚱한 줄을 짚는다.
 pub fn generate(comps: &[FlatComp]) -> Result<Emitted, Sourced<CodegenError>> {
+    crate::nesting::check_nesting(comps)?;
     let comp_lookup = CompLookup::build(comps);
     let mut pool = ConstPool::new();
     let mut types = TypeTable::new();
