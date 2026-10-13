@@ -90,6 +90,27 @@ test("SSR이 head에 <style data-qb-href>로 인라인한 리소스는 <link>로
   inlined.remove();
 });
 
+test("data-qb-href가 상대 경로여도 문서 주소 기준으로 같은 리소스면 <link>로 다시 넣지 않는다", () => {
+  for (const link of [...document.head.querySelectorAll("link")]) {
+    link.remove();
+  }
+  const base = document.createElement("base");
+  base.href = "https://example.com/app/";
+  document.head.append(base);
+  const { qubb, resmap } = buildFixtureWithResmap("styled_res");
+  const host = ssrHost("styled_res", resmap, {});
+  const inlined = document.createElement("style");
+  inlined.setAttribute("data-qb-href", "res/a.css"); // SSR이 적은 상대 경로
+  inlined.textContent = ".box { color: red }";
+  document.head.append(inlined);
+  // 페이지 스크립트가 넘기는 값은 qubb 주소 기준으로 푼 절대 URL이다.
+  const inst = resume(qubb, ["https://example.com/app/res/a.css"], host, {});
+  assert.equal(document.head.querySelectorAll("link").length, 0, "인라인한 리소스를 <link>로 또 넣었다");
+  inst.destroy();
+  inlined.remove();
+  base.remove();
+});
+
 test("이어받은 뒤 클릭과 set이 CSR처럼 동작한다 - payload 식", () => {
   const data = { n: 1, open: true, cursor: 0, rows: [{ title: "A", tags: ["a1"] }] };
   const { qubb, resmap } = buildFixtureWithResmap("payload_expr");
