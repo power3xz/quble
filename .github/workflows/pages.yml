@@ -127,6 +127,10 @@ jobs:
       - name: quble 바이너리 빌드
         run: cargo build --manifest-path core/Cargo.toml --bin quble
 
+      # playground 셸을 빌드 때 SSR한다(build-playground.mjs).
+      - name: quble-ssr 바이너리 빌드
+        run: cargo build --manifest-path core/Cargo.toml -p renderer --bin quble-ssr
+
       - name: playground 빌드
         run: node build/build-playground.mjs
         working-directory: core

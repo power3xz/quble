@@ -16,9 +16,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
   노드에 구독/핸들러만 붙여 SSR이 멈춘 실행을 이어받는다. 인터프리터가 노드 공급자(`TNodeSource`)로
   SSR 노드를 받는다. 시작 상태는 data로 `plantRoot`를 하거나, SSR이 낸 leaf store 스냅샷으로 `plantRoot`
   없이 시작한다.
-- [ ] SSG - 빌드할 때 `quble-ssr`로 SSR HTML(스냅샷 포함)을 정적 파일로 낸다. 서버 없는 정적
-  호스팅(GitHub Pages)에서 SSR 결과를 쓰기 위함. 지금은 프리뷰 서버(`serve-ssr-preview.mjs`)가
-  요청마다 메모리에서 조립한다.
+- [x] SSG - 빌드할 때 `quble-ssr`로 SSR HTML(스냅샷 포함)을 정적 파일로 낸다. 서버 없는 정적
+  호스팅(GitHub Pages)에서 SSR 결과를 쓰기 위함. playground의 셸이 이것으로 빌드된다.
 - [x] 전역 상수풀 (흔한 속성명을 스펙 상수로 분리)
 - [ ] 컴파일 타겟 - 같은 AST(IR)에서 qubb뿐 아니라 react/svelte/vue 컴포넌트로 코드
   생성. **동기:** quble를 실무에 점진 도입하기 위함 - 작성은 quble로 하되 산출을 기존

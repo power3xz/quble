@@ -15,9 +15,6 @@ import { caretTarget } from "./caretkey.ts";
 import { entryOf, handlerBody, isKeySlot, usedKeys } from "./completion.ts";
 import { lineCountOf, markError, type TLine, tokenize } from "./tokenize.ts";
 
-// 진입 페이지가 초기 data를 만들 때 쓴다 - 해시 붙은 이 번들이 그것들이 실려 나가는 유일한 길이다.
-export { lineCountOf, tokenize };
-
 // 헬퍼가 받는 ctx의 타입. 손으로 적지 않고 `handlers`에서 역산한다 - 그 선언에는 ts-plugin이
 // 짝 .qubc의 `Partial<Handlers>`를 표기로 붙이므로 주입된 것이 유일한 출처가 된다. 손으로 적으면
 // `set`의 `LeafIndex<T>`처럼 주입된 모양과 어긋나 대입 검사에서 걸린다.

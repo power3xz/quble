@@ -41,11 +41,22 @@ export const adoptSnapshot = (module: TModule, snapshot: TLeafSnapshot, arrayPoo
   return { leaves, rootFlat };
 };
 
-// SSR 페이지가 head에 이미 넣은 리소스 - <link href>, 또는 인라인한 <style data-qb-href>.
-const inHead = (url: string): boolean =>
-  [...document.head.querySelectorAll("link, style[data-qb-href]")].some(
-    (el) => (el.getAttribute("href") ?? el.getAttribute("data-qb-href")) === url,
+// SSR 페이지가 head에 이미 넣은 리소스 - <link href>, 또는 인라인한 <style data-qb-href>. 속성은 상대 경로일
+// 수 있어 둘 다 문서 주소 기준으로 푼 값끼리 견준다. about:blank 문서처럼 풀 기준이 없으면 문자열 그대로 견준다.
+const resolveHref = (href: string): string => {
+  try {
+    return new URL(href, document.baseURI).href;
+  } catch {
+    return href;
+  }
+};
+
+const inHead = (url: string): boolean => {
+  const resolved = resolveHref(url);
+  return [...document.head.querySelectorAll("link, style[data-qb-href]")].some(
+    (el) => resolveHref(el.getAttribute("href") ?? el.getAttribute("data-qb-href") ?? "") === resolved,
   );
+};
 
 const resumeNodeSource = (cursor: ResumeCursor): TNodeSource => ({
   reuses: true,
