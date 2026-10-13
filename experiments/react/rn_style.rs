@@ -127,8 +127,7 @@ fn convert_rule(class: &str, body: &str) -> Result<Vec<(String, String)>, CssErr
             "line-height" => match to_px(value) {
                 Some(size) => push("lineHeight", number(size)),
                 None => {
-                    unitless_line_height =
-                        Some(value.parse::<f64>().map_err(|_| unsupported())?);
+                    unitless_line_height = Some(value.parse::<f64>().map_err(|_| unsupported())?);
                 }
             },
             "margin" | "padding" => {
@@ -136,7 +135,8 @@ fn convert_rule(class: &str, body: &str) -> Result<Vec<(String, String)>, CssErr
                 match sides.as_slice() {
                     [all] => push(&prop, all.clone()),
                     _ => {
-                        for (side, literal) in ["Top", "Right", "Bottom", "Left"].iter().zip(sides) {
+                        for (side, literal) in ["Top", "Right", "Bottom", "Left"].iter().zip(sides)
+                        {
                             push(&format!("{prop}{side}"), literal);
                         }
                     }
@@ -194,7 +194,8 @@ fn convert_rule(class: &str, body: &str) -> Result<Vec<(String, String)>, CssErr
         }
     }
     if let Some(ratio) = unitless_line_height {
-        let size = font_size.ok_or_else(|| CssError::LineHeightWithoutFontSize(class.to_string()))?;
+        let size =
+            font_size.ok_or_else(|| CssError::LineHeightWithoutFontSize(class.to_string()))?;
         out.push((
             "lineHeight".to_string(),
             number((size * ratio * 100.0).round() / 100.0),
@@ -341,7 +342,8 @@ mod tests {
 
     #[test]
     fn shorthands_expand() {
-        let css = ".a { padding: 8px 12px; margin: 0; border: 1px solid #d7dde5; border-radius: 10px; }";
+        let css =
+            ".a { padding: 8px 12px; margin: 0; border: 1px solid #d7dde5; border-radius: 10px; }";
         assert_eq!(
             decls(css, "a"),
             pairs(&[
@@ -424,7 +426,14 @@ mod tests {
 
     #[test]
     fn unsupported_selectors_are_errors() {
-        for selector in [".a:hover", "span.dark", ".a, .b", ".a .b", "@media (x)", "div"] {
+        for selector in [
+            ".a:hover",
+            "span.dark",
+            ".a, .b",
+            ".a .b",
+            "@media (x)",
+            "div",
+        ] {
             let css = format!("{selector} {{ color: red; }}");
             assert_eq!(
                 css_to_styles(&css),
@@ -457,10 +466,13 @@ mod tests {
 
     #[test]
     fn comments_ignored_and_same_class_merges_in_order() {
-        let css = "/* c */ .a { color: red; padding: 4px; } .b { gap: 2px; } .a { color: blue; /* x */ }";
+        let css =
+            "/* c */ .a { color: red; padding: 4px; } .b { gap: 2px; } .a { color: blue; /* x */ }";
         let all = styles(css);
         assert_eq!(
-            all.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            all.iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
             ["a", "b"]
         );
         assert_eq!(

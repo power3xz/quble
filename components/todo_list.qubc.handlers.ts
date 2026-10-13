@@ -8,7 +8,7 @@ type DelCtx = { $0: number; props: Record<string, number>; removeAt: (a: number,
 let seq = 4; // 초기 3개 뒤 순번
 export const handlers = {
   ADD: (_data: Record<string, unknown>, ctx: AddCtx) => {
-    ctx.push(ctx.props.todos, { text: `새 할 일 ${seq++}`, done: "o" });
+    ctx.push(ctx.props.todos, { text: `새 할 일 ${seq++}`, done: "○" });
   },
   "[$0].DEL": (_data: Record<string, unknown>, ctx: DelCtx) => {
     ctx.removeAt(ctx.props.todos, ctx.$0);

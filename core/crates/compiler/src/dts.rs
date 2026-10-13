@@ -242,7 +242,9 @@ fn value_type(v: &Expr, props: &[Prop]) -> String {
         // 객체/배열에도 도달한다. 타입이 안 맞으면 codegen이 거르는 몫이다 - d.ts는 편집기가
         // 컴파일 실패 중에도 부르므로 에러 대신 unknown으로 낸다.
         Expr::Unary(..) | Expr::Binary(..) => ts_or_unknown(expr_type(v, props, &[])),
-        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => ts_or_unknown(path_type(v, props, &[])),
+        Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => {
+            ts_or_unknown(path_type(v, props, &[]))
+        }
         // 배열은 이 자리에서 codegen이 거른다.
         Expr::List(..) => "unknown".to_string(),
     }

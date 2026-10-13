@@ -4,9 +4,8 @@ Rust(cargo)와 JS(npm) 워크스페이스가 각각 있다.
 
 ## Rust - `core/Cargo.toml`
 
-members: `crates/bytecode`, `crates/compiler`, `crates/compiler-wasm`
-exclude: `crates/renderer`
-루트 패키지 `quble`가 `quble` 바이너리를 낸다.
+members: `crates/bytecode`, `crates/compiler`, `crates/compiler-wasm`, `crates/renderer`
+루트 패키지 `quble`가 `quble` 바이너리를, `renderer`가 `quble-ssr` 바이너리를 낸다.
 
 | 크레이트 | 의존 |
 |---|---|
@@ -62,6 +61,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 |---|---|---|
 | `core/wasm-compiler/compiler_wasm.wasm` | `npm run build:wasm --prefix core/wasm-compiler` | `quble-wasm-compiler` 실행, `npm run typecheck`, `editors/vscode` 빌드(build.mjs가 `dist/`로 복사) |
 | `core/target/debug/quble` | `cargo build --manifest-path core/Cargo.toml --bin quble` | `core/web` 테스트 (`test-helpers/build.ts`) |
+| `core/target/debug/quble-ssr` | `cargo build --manifest-path core/Cargo.toml -p renderer --bin quble-ssr` | `core/web` SSR 일치 테스트 (`ssr-match.test.ts`) |
 | `core/target/wasm32-unknown-unknown/release/compiler_wasm.wasm` | `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` | `build:wasm`이 `core/wasm-compiler/`로 복사 |
 
 ## 명령별 선행 조건
@@ -77,6 +77,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 | `npm run typecheck` | `npm ci`, `build:wasm` |
 | `npm run lint` | `npm ci` |
 | `node core/build/build-playground.mjs` | `npm ci --prefix core/build`, `cargo build --bin quble`, `cargo build -p compiler-wasm --target wasm32-unknown-unknown --release` |
+| `./quble-ssr-preview.sh` | 포트 8152가 비어 있을 것. 나머지는 스크립트가 `cargo build --bin quble`과 `-p renderer --bin quble-ssr`을 먼저 돌린다 |
 | `./bench-expr.sh` | 없음 - 스크립트가 의존 설치와 `cargo build --bin quble`을 먼저 돌린다 |
 | `./bench-expr-quick.sh` | 포트 8144가 비어 있을 것. 나머지는 스크립트가 의존과 playwright Chromium 설치, `cargo build --bin quble`을 먼저 돌린다 |
 | `./bench-krausest.sh` | 포트 8080이 비어 있을 것. 나머지는 스크립트가 krausest clone, 의존 설치, `cargo build --bin quble`을 먼저 돌린다 |
@@ -88,7 +89,7 @@ gitignore(`*.wasm`, `target/`)라 레포에 없다.
 
 | 멤버 | 먼저 필요한 것 |
 |---|---|
-| `core/web` | 없음 - 자기 `test`가 `cargo build --bin quble`을 먼저 돌린다 |
+| `core/web` | 없음 - 자기 `test`가 `quble`과 `quble-ssr`를 먼저 빌드한다 |
 | `core/playground` | 없음 |
 | `core/wasm-compiler` | `build:wasm` - 테스트가 `.wasm`을 읽는다 |
 | `editors/ts-plugin` | `build:wasm` - `quble-wasm-compiler`를 거쳐 `.wasm`을 읽는다 |

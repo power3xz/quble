@@ -1,0 +1,1404 @@
+{
+  "array_payload": [
+    {
+      "items": [
+        {
+          "id": 1,
+          "name": "kim"
+        },
+        {
+          "id": 2,
+          "name": "lee"
+        }
+      ],
+      "tags": ["vip", "new"]
+    },
+    {
+      "items": [],
+      "tags": []
+    }
+  ],
+  "array_prop_plant": [
+    {
+      "title": "T",
+      "tags": ["a", "b"],
+      "rows": [
+        {
+          "label": "L1",
+          "cells": ["x"]
+        },
+        {
+          "label": "L2",
+          "cells": ["y", "z"]
+        }
+      ]
+    }
+  ],
+  "attr_dynamic_class": [
+    {
+      "lines": [
+        {
+          "tokens": [
+            {
+              "text": "use",
+              "cls": "tok tok--keyword"
+            },
+            {
+              "text": " x",
+              "cls": "tok"
+            }
+          ]
+        },
+        {
+          "tokens": [
+            {
+              "text": "42",
+              "cls": "tok tok--number"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "big_payload": [
+    {
+      "big": {
+        "g0": {
+          "g1": {
+            "g2": {
+              "g3": {
+                "f4": "v",
+                "f5": "v"
+              },
+              "g6": {
+                "f7": "v"
+              }
+            },
+            "g8": {
+              "g9": {
+                "f10": "v",
+                "f11": "v"
+              },
+              "g12": {
+                "f13": "v"
+              }
+            },
+            "g14": {
+              "g15": {
+                "f16": "v"
+              }
+            }
+          },
+          "g17": {
+            "g18": {
+              "g19": {
+                "f20": "v",
+                "f21": "v"
+              },
+              "g22": {
+                "f23": "v"
+              }
+            },
+            "g24": {
+              "g25": {
+                "f26": "v",
+                "f27": "v"
+              },
+              "g28": {
+                "f29": "v"
+              }
+            },
+            "g30": {
+              "g31": {
+                "f32": "v"
+              }
+            }
+          },
+          "g33": {
+            "g34": {
+              "g35": {
+                "f36": "v",
+                "f37": "v"
+              },
+              "g38": {
+                "f39": "v"
+              }
+            },
+            "g40": {
+              "g41": {
+                "f42": "v",
+                "f43": "v"
+              },
+              "g44": {
+                "f45": "v"
+              }
+            },
+            "g46": {
+              "g47": {
+                "f48": "v"
+              }
+            }
+          },
+          "g49": {
+            "g50": {
+              "g51": {
+                "f52": "v"
+              },
+              "g53": {
+                "f54": "v"
+              }
+            },
+            "g55": {
+              "g56": {
+                "f57": "v"
+              },
+              "g58": {
+                "f59": "v"
+              }
+            }
+          }
+        },
+        "g60": {
+          "g61": {
+            "g62": {
+              "g63": {
+                "f64": "v",
+                "f65": "v"
+              },
+              "g66": {
+                "f67": "v"
+              }
+            },
+            "g68": {
+              "g69": {
+                "f70": "v",
+                "f71": "v"
+              },
+              "g72": {
+                "f73": "v"
+              }
+            },
+            "g74": {
+              "g75": {
+                "f76": "v"
+              }
+            }
+          },
+          "g77": {
+            "g78": {
+              "g79": {
+                "f80": "v",
+                "f81": "v"
+              },
+              "g82": {
+                "f83": "v"
+              }
+            },
+            "g84": {
+              "g85": {
+                "f86": "v",
+                "f87": "v"
+              },
+              "g88": {
+                "f89": "v"
+              }
+            },
+            "g90": {
+              "g91": {
+                "f92": "v"
+              }
+            }
+          },
+          "g93": {
+            "g94": {
+              "g95": {
+                "f96": "v",
+                "f97": "v"
+              },
+              "g98": {
+                "f99": "v"
+              }
+            },
+            "g100": {
+              "g101": {
+                "f102": "v",
+                "f103": "v"
+              },
+              "g104": {
+                "f105": "v"
+              }
+            },
+            "g106": {
+              "g107": {
+                "f108": "v"
+              }
+            }
+          },
+          "g109": {
+            "g110": {
+              "g111": {
+                "f112": "v"
+              },
+              "g113": {
+                "f114": "v"
+              }
+            },
+            "g115": {
+              "g116": {
+                "f117": "v"
+              },
+              "g118": {
+                "f119": "v"
+              }
+            }
+          }
+        },
+        "g120": {
+          "g121": {
+            "g122": {
+              "g123": {
+                "f124": "v",
+                "f125": "v"
+              },
+              "g126": {
+                "f127": "v"
+              }
+            },
+            "g128": {
+              "g129": {
+                "f130": "v",
+                "f131": "v"
+              },
+              "g132": {
+                "f133": "v"
+              }
+            },
+            "g134": {
+              "g135": {
+                "f136": "v"
+              }
+            }
+          },
+          "g137": {
+            "g138": {
+              "g139": {
+                "f140": "v",
+                "f141": "v"
+              },
+              "g142": {
+                "f143": "v"
+              }
+            },
+            "g144": {
+              "g145": {
+                "f146": "v",
+                "f147": "v"
+              },
+              "g148": {
+                "f149": "v"
+              }
+            },
+            "g150": {
+              "g151": {
+                "f152": "v"
+              }
+            }
+          },
+          "g153": {
+            "g154": {
+              "g155": {
+                "f156": "v",
+                "f157": "v"
+              },
+              "g158": {
+                "f159": "v"
+              }
+            },
+            "g160": {
+              "g161": {
+                "f162": "v",
+                "f163": "v"
+              },
+              "g164": {
+                "f165": "v"
+              }
+            },
+            "g166": {
+              "g167": {
+                "f168": "v"
+              }
+            }
+          },
+          "g169": {
+            "g170": {
+              "g171": {
+                "f172": "v"
+              },
+              "g173": {
+                "f174": "v"
+              }
+            },
+            "g175": {
+              "g176": {
+                "f177": "v"
+              },
+              "g178": {
+                "f179": "v"
+              }
+            }
+          }
+        },
+        "g180": {
+          "g181": {
+            "g182": {
+              "g183": {
+                "f184": "v",
+                "f185": "v"
+              },
+              "g186": {
+                "f187": "v"
+              }
+            },
+            "g188": {
+              "g189": {
+                "f190": "v",
+                "f191": "v"
+              },
+              "g192": {
+                "f193": "v"
+              }
+            },
+            "g194": {
+              "g195": {
+                "f196": "v"
+              }
+            }
+          },
+          "g197": {
+            "g198": {
+              "g199": {
+                "f200": "v",
+                "f201": "v"
+              },
+              "g202": {
+                "f203": "v"
+              }
+            },
+            "g204": {
+              "g205": {
+                "f206": "v",
+                "f207": "v"
+              },
+              "g208": {
+                "f209": "v"
+              }
+            },
+            "g210": {
+              "g211": {
+                "f212": "v"
+              }
+            }
+          },
+          "g213": {
+            "g214": {
+              "g215": {
+                "f216": "v",
+                "f217": "v"
+              },
+              "g218": {
+                "f219": "v"
+              }
+            },
+            "g220": {
+              "g221": {
+                "f222": "v",
+                "f223": "v"
+              },
+              "g224": {
+                "f225": "v"
+              }
+            },
+            "g226": {
+              "g227": {
+                "f228": "v"
+              }
+            }
+          },
+          "g229": {
+            "g230": {
+              "g231": {
+                "f232": "v"
+              },
+              "g233": {
+                "f234": "v"
+              }
+            },
+            "g235": {
+              "g236": {
+                "f237": "v"
+              },
+              "g238": {
+                "f239": "v"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "composed_triple": [
+    {
+      "c1": true,
+      "c2": true,
+      "c3": true,
+      "a": "A",
+      "b": "B",
+      "c": "C",
+      "d": "D"
+    }
+  ],
+  "dup_context": [
+    {
+      "userId": 7
+    }
+  ],
+  "event_alias": [{}],
+  "event_context": [
+    {
+      "userId": 42
+    },
+    {
+      "userId": 1
+    }
+  ],
+  "event_fullname": [{}],
+  "event_input": [
+    {
+      "value": "A"
+    },
+    {
+      "value": "초기값"
+    }
+  ],
+  "event_lit_payload": [
+    {
+      "count": 7
+    }
+  ],
+  "event_nested": [
+    {
+      "label": "X"
+    }
+  ],
+  "event_toggle": [
+    {
+      "label": "A",
+      "on": false
+    },
+    {
+      "label": "할일",
+      "on": true
+    },
+    {
+      "label": "켜기",
+      "on": false
+    },
+    {
+      "label": "현재값",
+      "on": false
+    },
+    {
+      "label": "t",
+      "on": "on"
+    }
+  ],
+  "expr_array_index": [
+    {
+      "rows": [
+        {
+          "title": "A",
+          "score": 10
+        },
+        {
+          "title": "B",
+          "score": 20
+        },
+        {
+          "title": "C",
+          "score": 30
+        }
+      ],
+      "scalars": [7, 8, 9],
+      "cursor": 0,
+      "show": false
+    }
+  ],
+  "expr_count_index": [
+    {
+      "base": 100,
+      "n": 2,
+      "items": ["a", "b", "c"]
+    }
+  ],
+  "expr_index_alias": [
+    {
+      "rows": [
+        {
+          "score": 10
+        },
+        {
+          "score": 20
+        }
+      ],
+      "cursor": 0
+    }
+  ],
+  "expr_index_unsubscribe": [
+    {
+      "rows": [
+        {
+          "title": "A"
+        },
+        {
+          "title": "B"
+        },
+        {
+          "title": "C"
+        }
+      ],
+      "cursor": 0,
+      "show": true
+    }
+  ],
+  "expr_multi_skip": [
+    {
+      "a": 1,
+      "b": 2,
+      "c": 3,
+      "d": 4,
+      "e": 5
+    }
+  ],
+  "expr_nested_index": [
+    {
+      "columns": [
+        {
+          "name": "L0",
+          "cards": [
+            {
+              "title": "a"
+            },
+            {
+              "title": "b"
+            }
+          ]
+        },
+        {
+          "name": "L1",
+          "cards": [
+            {
+              "title": "c"
+            },
+            {
+              "title": "d"
+            }
+          ]
+        }
+      ],
+      "lane": 0,
+      "seat": 0
+    }
+  ],
+  "expr_partial_reeval": [
+    {
+      "a": 1,
+      "b": 2,
+      "c": 5,
+      "d": 3,
+      "rows": [
+        {
+          "score": 10
+        },
+        {
+          "score": 20
+        }
+      ],
+      "cursor": 0,
+      "x": 100,
+      "shared": 2,
+      "z": 3,
+      "show": false,
+      "big": 100
+    }
+  ],
+  "expr_self_index": [
+    {
+      "nums": [0, 7]
+    }
+  ],
+  "for_array_edit": [
+    {
+      "tags": ["a", "b", "c"]
+    },
+    {
+      "tags": ["a", "b"]
+    }
+  ],
+  "for_array_index_del": [
+    {
+      "tags": ["a", "b", "c", "d"]
+    },
+    {
+      "tags": ["a", "b", "c"]
+    },
+    {
+      "tags": ["a"]
+    }
+  ],
+  "for_array_nested_edit": [
+    {
+      "rows": [
+        {
+          "label": "R1",
+          "cells": ["a", "b"]
+        },
+        {
+          "label": "R2",
+          "cells": ["c"]
+        }
+      ]
+    }
+  ],
+  "for_array_push": [
+    {
+      "tags": ["a", "b"]
+    },
+    {
+      "tags": []
+    },
+    {
+      "tags": ["a"]
+    }
+  ],
+  "for_array_push_obj": [
+    {
+      "stats": [
+        {
+          "label": "HP",
+          "value": "100"
+        }
+      ]
+    },
+    {
+      "stats": [
+        {
+          "label": "HP",
+          "value": "100"
+        },
+        {
+          "label": "MP",
+          "value": "50"
+        }
+      ]
+    },
+    {
+      "stats": [
+        {
+          "label": "HP",
+          "value": "100"
+        },
+        {
+          "label": "MP",
+          "value": "50"
+        },
+        {
+          "label": "ATK",
+          "value": "12"
+        }
+      ]
+    }
+  ],
+  "for_array_replace": [
+    {
+      "rows": [
+        {
+          "label": "a",
+          "cells": ["a1", "a2"]
+        },
+        {
+          "label": "b",
+          "cells": ["b1"]
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "label": "p",
+          "cells": ["p1"]
+        },
+        {
+          "label": "q",
+          "cells": ["q1"]
+        },
+        {
+          "label": "r",
+          "cells": ["r1"]
+        }
+      ]
+    }
+  ],
+  "for_array_scalar": [
+    {
+      "tags": ["red", "green", "blue"]
+    },
+    {
+      "tags": []
+    }
+  ],
+  "for_count": [
+    {
+      "n": 5
+    },
+    {
+      "n": 4
+    },
+    {
+      "n": 0
+    },
+    {
+      "n": 2
+    },
+    {
+      "n": 3
+    }
+  ],
+  "for_count_index": [
+    {
+      "count": 3
+    },
+    {
+      "count": 0
+    },
+    {
+      "count": 2
+    }
+  ],
+  "for_event_component": [{}],
+  "for_event_count": [
+    {
+      "n": 1
+    },
+    {
+      "n": 3
+    }
+  ],
+  "for_event_element": [{}],
+  "for_if_count": [
+    {
+      "n": 3,
+      "flag": true
+    },
+    {
+      "n": 1,
+      "flag": true
+    }
+  ],
+  "for_if_lazy_index": [
+    {
+      "n": 3,
+      "flag": true
+    },
+    {
+      "n": 3,
+      "flag": false
+    }
+  ],
+  "for_if_lazy_slot": [
+    {
+      "tags": ["a", "b", "c"],
+      "flag": true
+    },
+    {
+      "tags": ["a", "b", "c"],
+      "flag": false
+    }
+  ],
+  "for_if_push_order": [
+    {
+      "tags": ["a"],
+      "flag": true
+    }
+  ],
+  "for_item_object_to_child": [
+    {
+      "items": [
+        {
+          "tag": "x",
+          "detail": {
+            "label": "A",
+            "value": "1"
+          }
+        },
+        {
+          "tag": "y",
+          "detail": {
+            "label": "B",
+            "value": "2"
+          }
+        },
+        {
+          "tag": "z",
+          "detail": {
+            "label": "C",
+            "value": "3"
+          }
+        }
+      ]
+    }
+  ],
+  "for_item_props_set": [
+    {
+      "items": [
+        {
+          "tag": "x",
+          "detail": {
+            "label": "A",
+            "value": "1"
+          }
+        },
+        {
+          "tag": "y",
+          "detail": {
+            "label": "B",
+            "value": "2"
+          }
+        },
+        {
+          "tag": "z",
+          "detail": {
+            "label": "C",
+            "value": "3"
+          }
+        }
+      ]
+    }
+  ],
+  "for_literal": [{}],
+  "for_nested_index_del": [
+    {
+      "rows": [
+        {
+          "label": "R0",
+          "cells": ["a", "b"]
+        },
+        {
+          "label": "R1",
+          "cells": ["c", "d"]
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "label": "R0",
+          "cells": ["a", "b"]
+        },
+        {
+          "label": "R1",
+          "cells": ["c"]
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "label": "R0",
+          "cells": ["a"]
+        },
+        {
+          "label": "R1",
+          "cells": ["b", "c", "d"]
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "label": "R0",
+          "cells": []
+        },
+        {
+          "label": "R1",
+          "cells": ["a", "b"]
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "label": "R0",
+          "cells": ["a"]
+        },
+        {
+          "label": "R1",
+          "cells": ["d", "e"]
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "label": "R0",
+          "cells": ["a", "b", "c"]
+        },
+        {
+          "label": "R1",
+          "cells": ["d", "e"]
+        }
+      ]
+    }
+  ],
+  "for_nested_render": [{}],
+  "for_obj_field": [
+    {
+      "c": {
+        "count": 3
+      }
+    },
+    {
+      "c": {
+        "count": 2
+      }
+    }
+  ],
+  "for_shared_array": [
+    {
+      "tags": ["t0", "t1", "t2"]
+    }
+  ],
+  "if_expr": [
+    {
+      "count": 0,
+      "limit": 0,
+      "isPaid": false,
+      "isCancelled": false,
+      "note": "",
+      "tags": []
+    },
+    {
+      "count": 3,
+      "limit": 1,
+      "isPaid": false,
+      "isCancelled": false,
+      "note": "",
+      "tags": []
+    },
+    {
+      "count": 0,
+      "limit": 0,
+      "isPaid": true,
+      "isCancelled": false,
+      "note": "",
+      "tags": []
+    },
+    {
+      "count": 0,
+      "limit": 0,
+      "isPaid": true,
+      "isCancelled": true,
+      "note": "",
+      "tags": []
+    },
+    {
+      "count": 0,
+      "limit": 0,
+      "isPaid": false,
+      "isCancelled": false,
+      "note": "hi",
+      "tags": []
+    },
+    {
+      "count": 0,
+      "limit": 0,
+      "isPaid": false,
+      "isCancelled": false,
+      "note": "",
+      "tags": ["a", "b"]
+    },
+    {
+      "count": 0,
+      "limit": 0,
+      "isPaid": false,
+      "isCancelled": false,
+      "note": "",
+      "tags": ["a"]
+    },
+    {
+      "count": 1,
+      "limit": 1,
+      "isPaid": false,
+      "isCancelled": false,
+      "note": "",
+      "tags": []
+    }
+  ],
+  "if_expr_in_for": [
+    {
+      "rows": [
+        {
+          "n": 1
+        },
+        {
+          "n": -1
+        },
+        {
+          "n": 2
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        },
+        {
+          "n": 3
+        }
+      ]
+    },
+    {
+      "rows": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        }
+      ]
+    }
+  ],
+  "if_lazy_fullname": [
+    {
+      "cond": true
+    },
+    {
+      "cond": false
+    }
+  ],
+  "if_sibling_click": [
+    {
+      "rows": [
+        {
+          "name": "a"
+        },
+        {
+          "name": "b"
+        },
+        {
+          "name": "c"
+        }
+      ],
+      "note": "",
+      "shown": false
+    }
+  ],
+  "if_sibling_update": [
+    {
+      "text": "a",
+      "lines": "1",
+      "count": 1,
+      "note": "",
+      "shown": false
+    }
+  ],
+  "if_with_context": [
+    {
+      "cond": false,
+      "a": "A",
+      "b": "B"
+    }
+  ],
+  "lazy_res_if": [
+    {
+      "show": false
+    }
+  ],
+  "lit_arg": [{}],
+  "lit_bool_if": [{}],
+  "nested_context": [
+    {
+      "userId": 7
+    }
+  ],
+  "nested_if": [
+    {
+      "outer": true,
+      "inner": true,
+      "a": "A",
+      "b": "B",
+      "c": "C"
+    }
+  ],
+  "no_else_if": [
+    {
+      "cond": true,
+      "a": "A"
+    },
+    {
+      "cond": false,
+      "a": "A"
+    }
+  ],
+  "notify_batch": [
+    {
+      "a": 0,
+      "b": 0,
+      "rows": []
+    },
+    {
+      "a": 0,
+      "b": 0,
+      "rows": [
+        {
+          "label": "a"
+        },
+        {
+          "label": "b"
+        }
+      ]
+    },
+    {
+      "a": 0,
+      "b": 0,
+      "rows": [
+        {
+          "label": "a"
+        },
+        {
+          "label": "b"
+        },
+        {
+          "label": "c"
+        }
+      ]
+    }
+  ],
+  "object_path": [
+    {
+      "title": "제목",
+      "user": {
+        "name": "김철수",
+        "contact": {
+          "email": "kim@ex.com"
+        }
+      }
+    }
+  ],
+  "object_payload": [
+    {
+      "user": {
+        "name": {
+          "short": "kim",
+          "long": "kim gil-dong"
+        },
+        "email": "kim@x.com"
+      },
+      "tag": "vip"
+    },
+    {
+      "tag": "x"
+    }
+  ],
+  "payload_expr": [
+    {
+      "n": 1,
+      "open": true,
+      "cursor": 0,
+      "rows": [
+        {
+          "title": "A",
+          "tags": ["a1"]
+        },
+        {
+          "title": "B",
+          "tags": ["b1", "b2"]
+        }
+      ]
+    }
+  ],
+  "props_beyond_payload": [
+    {
+      "label": "제목",
+      "hidden": "before"
+    },
+    {
+      "label": "제목",
+      "hidden": "숨은값"
+    }
+  ],
+  "props_const_slot": [
+    {
+      "flowed": "흐른값"
+    },
+    {
+      "flowed": "before"
+    }
+  ],
+  "set_object": [
+    {
+      "title": "t",
+      "user": {
+        "name": "kim",
+        "age": 30,
+        "tags": ["a", "b"],
+        "posts": [
+          {
+            "title": "p1",
+            "marks": ["m1", "m2"]
+          },
+          {
+            "title": "p2",
+            "marks": ["m3"]
+          }
+        ],
+        "contact": {
+          "email": "kim@x.com"
+        }
+      }
+    },
+    {
+      "title": "T",
+      "user": {
+        "name": "kim",
+        "age": 30,
+        "tags": ["a", "b"],
+        "posts": [
+          {
+            "title": "p1",
+            "marks": ["x"]
+          },
+          {
+            "title": "p2",
+            "marks": []
+          }
+        ],
+        "contact": {
+          "email": "k@x"
+        }
+      }
+    }
+  ],
+  "sibling_if": [
+    {
+      "c1": true,
+      "c2": false,
+      "a": "A",
+      "b": "B",
+      "c": "C",
+      "d": "D"
+    }
+  ],
+  "single_if": [
+    {
+      "cond": true,
+      "a": "A",
+      "b": "B"
+    },
+    {
+      "cond": false,
+      "a": "A",
+      "b": "B"
+    }
+  ],
+  "slot_placeholder": [
+    {
+      "title": "제목",
+      "note": "메모"
+    }
+  ],
+  "slot_placeholder_control": [
+    {
+      "tags": ["a", "b", "c"],
+      "open": false,
+      "label": "L"
+    },
+    {
+      "tags": ["a", "b"],
+      "open": false,
+      "label": "L"
+    },
+    {
+      "tags": ["a"],
+      "open": false,
+      "label": "지연"
+    },
+    {
+      "tags": ["a"],
+      "open": true,
+      "label": "즉시"
+    }
+  ],
+  "styled_res": [{}],
+  "template_clone": [
+    {
+      "rows": [
+        {
+          "label": "a",
+          "n": 1
+        },
+        {
+          "label": "b",
+          "n": 2
+        },
+        {
+          "label": "c",
+          "n": 3
+        }
+      ],
+      "k": 10
+    }
+  ],
+  "triple_if": [
+    {
+      "c1": true,
+      "c2": true,
+      "c3": true,
+      "a": "A",
+      "b": "B",
+      "c": "C",
+      "d": "D"
+    }
+  ],
+  "attr_url_scheme": [{ "url": "https://example.com/a" }, { "url": "javascript:alert(1)" }],
+  "event_proto_name": [{}],
+  "for_row_shape": [
+    {
+      "rows": [{ "id": "1", "note": "n", "url": "/a" }, { "id": "2", "note": "", "url": "javascript:x" }]
+    },
+    { "rows": [] }
+  ],
+  "res_clone": [{}],
+  "typed_lit_arg": [{}],
+  "value_expr": [
+    {
+      "count": 3,
+      "limit": 5,
+      "isPaid": true,
+      "note": "hello",
+      "tags": ["a", "b"]
+    }
+  ],
+  "whole_object_arg": [
+    {
+      "title": "제목",
+      "row": {
+        "label": "알림",
+        "on": true
+      }
+    }
+  ]
+}

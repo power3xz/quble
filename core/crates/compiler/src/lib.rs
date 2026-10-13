@@ -1052,7 +1052,8 @@ mod tests {
     /// `on`으로 시작하는 속성은 값이 JS로 실행되어 막는다 - 리터럴/동적 값, 대소문자 모두.
     #[test]
     fn event_handler_attr_errors() {
-        let msg = |name: &str| format!("`{name}` is an event handler attribute; use `@click:EVENT`");
+        let msg =
+            |name: &str| format!("`{name}` is an event handler attribute; use `@click:EVENT`");
         let lit = r#"component C { template { div(onclick="a()" /) } }"#;
         assert_eq!(error_message(lit), msg("onclick"));
         let dynamic = r#"component C { props { x: string } template { div(onclick={x} /) } }"#;

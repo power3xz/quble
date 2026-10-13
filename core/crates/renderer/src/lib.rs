@@ -1,31 +1,27 @@
-//! Quble SSR 렌더러: 직렬화된 바이트코드(`&[u8]`)를 받아 HTML 문자열로 렌더한다.
-//! 출력은 SSR 문자열(브라우저 DOM 아님). 일회성/무상태 순수 함수. 상세는 core/BYTECODE.md.
+//! Quble SSR 렌더러(프로토타입): qubb + 루트 props 데이터(JSON)로 HTML 문자열을 만든다.
+//!
+//! JS 런타임(core/web/runtime.ts)이 처음 그릴 때 만드는 DOM과 같은 모양을 문자열로 낸다 - 같은
+//! 순서로 opcode를 해석하되 노드 대신 문자열을, 구독 대신 아무것도 만들지 않는다. region 앵커 주석
+//! (`<!--qb:region#N-->`)도 런타임과 같은 번호로 낸다.
 
-use bytecode::{DecodeError, Module, Op};
-use std::collections::HashSet;
+pub mod json;
 
-#[derive(Debug, PartialEq, Eq)]
+use bytecode::{Const, DecodeError, ExprOp, Module, Op, TypeEntry};
+use json::Json;
+
+#[derive(Debug, PartialEq)]
 pub enum RenderError {
-    /// 바이트코드 디코드 실패.
     Decode(DecodeError),
-    /// 알 수 없는 opcode 바이트.
+    Json(String),
     BadOpcode(u8),
-    /// operand 읽다가 코드 끝.
-    UnexpectedEof,
-    /// 범위 밖 컴포넌트 ID.
-    BadComponent(u16),
-    /// 범위 밖 상수풀 인덱스.
-    BadConst(u16),
-    /// 범위 밖 내장 태그 ID.
-    BadTag(u16),
-    /// 범위 밖 전역 속성명 ID.
-    BadAttr(u16),
-    /// 여는 태그 없이 END (스택 불균형 - 손상된 바이트코드).
-    UnbalancedEnd,
-    /// 범위 밖 scope 인덱스 (주입 값 부족).
-    BadScope(u16),
-    /// 범위 밖 리소스 ID (res_paths 부족).
-    BadResource(u16),
+    BadExprOpcode(u8),
+    /// 요소가 없는 인덱스(범위 밖, 음수, 정수 아님) - 런타임의 RangeError.
+    IndexOutOfRange {
+        index: f64,
+        len: usize,
+    },
+    /// 짝 마커(ELSE/IF_END, FOR_END, SLOT_PLACEHOLDER_CONTENT_END)가 없다 - 손상된 바이트코드.
+    Unbalanced(&'static str),
 }
 
 impl From<DecodeError> for RenderError {
@@ -34,220 +30,865 @@ impl From<DecodeError> for RenderError {
     }
 }
 
-/// 바이트코드를 디코드하고 comp_id를 진입점으로 렌더해 HTML 문자열을 만든다.
-/// scope는 런타임 주입 값 배열 - `TEXT_VAR index`가 `scope[index]`를 참조한다.
-/// res_paths는 resId -> 리소스 경로(resmap) - `LOAD_RES resId`를 `<link href>`로 인라인한다.
-pub fn render_to_string(
-    bytes: &[u8],
-    comp_id: u16,
-    scope: &[String],
-    res_paths: &[String],
-) -> Result<String, RenderError> {
-    let module = bytecode::decode(bytes)?;
-    let mut out = String::new();
-    // 이미 <link>로 낸 resId - 여러 컴포넌트가 같은 리소스를 써도 한 번만 낸다.
-    let mut emitted = HashSet::new();
-    exec(&module, comp_id, scope, res_paths, &mut emitted, &mut out)?;
-    Ok(out)
+/// SSR 결과. html은 루트 인스턴스의 노드들, links는 LOAD_RES가 처음 만난 순서의 리소스 URL(중복 없음)
+/// - 런타임은 `<link>`를 본문이 아니라 `document.head`에 넣으므로 따로 돌려준다.
+#[derive(Debug)]
+pub struct Rendered {
+    pub html: String,
+    pub links: Vec<String>,
 }
 
-/// 한 컴포넌트 정의의 코드를 실행한다. RENDER를 만나면 재귀한다.
-/// emitted는 재귀 전체에서 공유되는 <link> dedup 집합.
-fn exec(
-    module: &Module,
-    comp_id: u16,
-    scope: &[String],
-    res_paths: &[String],
-    emitted: &mut HashSet<u16>,
-    out: &mut String,
-) -> Result<(), RenderError> {
-    let def = module.def(comp_id).ok_or(RenderError::BadComponent(comp_id))?;
-    let start = def.code_off as usize;
-    let end = start + def.code_len as usize;
-    let code = &module.code[start..end];
+/// qubb를 디코드해 진입점(def 0)을 data(루트 props JSON 문자열)로 렌더한다.
+pub fn render(bytes: &[u8], data: &str, resources: &[String]) -> Result<Rendered, RenderError> {
+    let data = json::parse(data).map_err(RenderError::Json)?;
+    render_value(bytes, &data, resources)
+}
 
-    // 연 태그를 쌓아둔다. END는 operand 없이 top을 닫는다(중첩 보장).
-    let mut tag_stack: Vec<&str> = Vec::new();
-    // 자식에게 넘길 인자 버퍼. PUSH_ARG가 부모 scope[scope_index] 값을 쌓고, RENDER가 소비.
-    let mut args: Vec<String> = Vec::new();
-    let mut pc = 0usize;
-    while pc < code.len() {
-        let op = Op::from_u8(code[pc]).ok_or(RenderError::BadOpcode(code[pc]))?;
-        pc += 1;
-        match op {
-            Op::Halt => break,
-            Op::ElemOpen => {
-                let tag = read_u16(code, &mut pc)?;
-                let name = bytecode::tags::tag_name(tag).ok_or(RenderError::BadTag(tag))?;
-                tag_stack.push(name);
-                out.push('<');
-                out.push_str(name);
+/// render와 같되 data를 이미 만든 값으로 받는다 - 같은 data로 여러 번 렌더하는 쪽이 파싱을 한 번만 한다.
+pub fn render_value(
+    bytes: &[u8],
+    data: &Json,
+    resources: &[String],
+) -> Result<Rendered, RenderError> {
+    let module = bytecode::decode(bytes)?;
+    let mut store = Store::default();
+    let root_pairs = plant_root(&module, data, &mut store);
+    let def = module.def(0).expect("진입점 def 0");
+    let mut r = Renderer {
+        module: &module,
+        store,
+        resources,
+        out: String::new(),
+        links: Vec::new(),
+        loaded_res: Vec::new(),
+        next_region: 0,
+        last_was_text: false,
+    };
+    // 루트도 region 하나다(런타임 compile의 rootRegion) - 앵커가 루트 노드들 맨 앞에 선다.
+    r.region_anchor();
+    let start = def.code_off as usize;
+    r.interpret(
+        &mut root_pairs.clone(),
+        0,
+        start,
+        start + def.code_len as usize,
+        &[],
+    )?;
+    Ok(Rendered {
+        html: r.out,
+        links: r.links,
+    })
+}
+
+/// qubb를 data(루트 props JSON 문자열)로 심은 store를 JS 런타임이 그대로 받는 JSON으로 낸다.
+///
+/// {"leaves":[...],"undef":[i,...],"arrays":[[elemTypeRef,start,count],...]}
+///   leaves  store 배열(런타임 plantRoot의 leaves). JSON에 undefined가 없어 그 자리는 null로 두고 undef에 적는다.
+///   arrays  arrayInfoIndex 순서. 한 배열의 요소는 연속이라 첫 요소 시작 leafIndex와 개수면 충분하다.
+/// 루트 슬롯 base(rootFlat)는 타입에서 나오므로 싣지 않는다.
+pub fn snapshot(bytes: &[u8], data: &str) -> Result<String, RenderError> {
+    let data = json::parse(data).map_err(RenderError::Json)?;
+    let module = bytecode::decode(bytes)?;
+    let mut store = Store::default();
+    plant_root(&module, &data, &mut store);
+    Ok(snapshot_json(&store))
+}
+
+fn snapshot_json(store: &Store) -> String {
+    let mut out = String::from("{\"leaves\":[");
+    let mut undef = Vec::new();
+    for (i, leaf) in store.leaves.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        match leaf {
+            Val::Undef => {
+                undef.push(i);
+                out.push_str("null");
             }
-            Op::AttrG => {
-                let name = read_u16(code, &mut pc)?;
-                let value_const_index = read_u16(code, &mut pc)?;
-                let name = bytecode::attrs::attr_name(name).ok_or(RenderError::BadAttr(name))?;
-                emit_attr(name, get_const(module, value_const_index)?, out);
-            }
-            Op::AttrL => {
-                let name_const_index = read_u16(code, &mut pc)?;
-                let value_const_index = read_u16(code, &mut pc)?;
-                emit_attr(get_const(module, name_const_index)?, get_const(module, value_const_index)?, out);
-            }
-            Op::AttrGVar => {
-                let name = read_u16(code, &mut pc)?;
-                let scope_index = read_u16(code, &mut pc)?;
-                let name = bytecode::attrs::attr_name(name).ok_or(RenderError::BadAttr(name))?;
-                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
-                emit_attr(name, val, out);
-            }
-            Op::AttrLVar => {
-                let name_const_index = read_u16(code, &mut pc)?;
-                let scope_index = read_u16(code, &mut pc)?;
-                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
-                emit_attr(get_const(module, name_const_index)?, val, out);
-            }
-            Op::ElemCloseOpen => out.push('>'),
-            Op::Text => {
-                let text_const_index = read_u16(code, &mut pc)?;
-                escape_text(get_const(module, text_const_index)?, out);
-            }
-            Op::TextVar => {
-                let scope_index = read_u16(code, &mut pc)?;
-                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
-                escape_text(val, out);
-            }
-            Op::ElemEnd => {
-                let name = tag_stack.pop().ok_or(RenderError::UnbalancedEnd)?;
-                out.push_str("</");
-                out.push_str(name);
-                out.push('>');
-            }
-            Op::PushThrough => {
-                let scope_index = read_u16(code, &mut pc)?;
-                let val = scope.get(scope_index as usize).ok_or(RenderError::BadScope(scope_index))?;
-                args.push(val.clone());
-            }
-            // 리터럴 인자: 상수풀 값을 그대로 자식 scope로 넘긴다. SSR은 정적 렌더라 자식이
-            // 수정하든 말든 상관없어(leaf/반응성 없음) 변수 인자와 같은 문자열로 취급한다.
-            Op::PushArgLit => {
-                let value_const_index = read_u16(code, &mut pc)?;
-                args.push(get_const(module, value_const_index)?.to_string());
-            }
-            Op::Render => {
-                let child_comp_id = read_u16(code, &mut pc)?;
-                // 쌓인 인자(부모 값들)를 자식 scope로 넘기고 버퍼를 비운다.
-                let child_scope = std::mem::take(&mut args);
-                exec(module, child_comp_id, &child_scope, res_paths, emitted, out)?;
-            }
-            Op::If => {
-                let cond_scope_index = read_u16(code, &mut pc)?;
-                let val = scope.get(cond_scope_index as usize).ok_or(RenderError::BadScope(cond_scope_index))?;
-                if !truthy(val) {
-                    // then을 통 스킵. pc는 매칭 ELSE 다음(else 본문 시작)이나 IF_END 다음에 선다.
-                    skip_branch(code, &mut pc)?;
-                }
-                // truthy면 다음 op부터 then을 정상 해석한다.
-            }
-            // truthy로 then을 해석하고 ELSE에 도달한 경우. else 가지를 통 스킵 -> IF_END 다음에 선다
-            // (else 본문엔 매칭 ELSE가 없어 IF_END에서 멈춘다).
-            Op::Else => skip_branch(code, &mut pc)?,
-            // 정상 종료 마커. 할 일 없음.
-            Op::IfEnd => {}
-            // 외부 리소스 로드. resId의 리소스 경로를 <link>로 인라인한다(중복 resId 스킵).
-            // head 조립 계층이 없어 조각 자리에 인라인 - <link>는 body에서도 브라우저가 처리한다.
-            Op::LoadRes => {
-                let res_id = read_u16(code, &mut pc)?;
-                if emitted.insert(res_id) {
-                    let path = res_paths
-                        .get(res_id as usize)
-                        .ok_or(RenderError::BadResource(res_id))?;
-                    out.push_str("<link rel=\"stylesheet\" href=\"");
-                    escape_attr(path, out);
-                    out.push_str("\">");
-                }
-            }
-            // 이벤트 배선. SSR은 정적 HTML이라 리스너가 없다 - operand만 소비하고 무시한다
-            // (이벤트는 클라 런타임이 단다). event_type/event_index 4바이트.
-            Op::BindEvent => {
-                read_u16(code, &mut pc)?;
-                read_u16(code, &mut pc)?;
-            }
-            // 합성 경로 세그먼트. fullname은 이벤트(클라 전용)를 위한 것이라 SSR엔 무의미 -
-            // operand만 소비하고 무시한다.
-            Op::PushPathSegment => {
-                read_u16(code, &mut pc)?;
-            }
-            // 컨텍스트는 핸들러로 가는 메타데이터(클라 전용)라 DOM 출력엔 영향 없다 -
-            // ENTER는 context_index만 소비하고, EXIT는 operand 없이 무시한다.
-            Op::EnterContext => {
-                read_u16(code, &mut pc)?;
-            }
-            Op::ExitContext => {}
+            Val::Null => out.push_str("null"),
+            Val::Bool(b) => out.push_str(&b.to_string()),
+            Val::Num(n) => out.push_str(&js_number(*n)),
+            Val::Str(s) => write_json_string(s, &mut out),
         }
     }
-    Ok(())
+    out.push_str("],\"undef\":[");
+    out.push_str(
+        &undef
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    out.push_str("],\"arrays\":[");
+    for (i, starts) in store.arrays.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "[{},{},{}]",
+            store.array_elem_types[i],
+            starts.first().copied().unwrap_or(0),
+            starts.len()
+        ));
+    }
+    out.push_str("]}");
+    out
 }
 
-fn read_u16(code: &[u8], pc: &mut usize) -> Result<u16, RenderError> {
-    let b = code.get(*pc..*pc + 2).ok_or(RenderError::UnexpectedEof)?;
-    *pc += 2;
-    Ok(u16::from_le_bytes([b[0], b[1]]))
+/// JSON 문자열 리터럴. 따옴표, 역슬래시, 제어 문자(U+0000~U+001F)를 이스케이프한다.
+fn write_json_string(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
-/// 불리언 scope 값의 truthy 판정. 빈 문자열/"false"/"0"은 falsy, 그 외 truthy.
-/// (cond는 불리언 scope index 하나 - BYTECODE.md #5.1)
-fn truthy(val: &str) -> bool {
-    !(val.is_empty() || val == "false" || val == "0")
+// ── 값과 store ─────────────────────────────────────────────────────────
+
+/// store leaf 값 하나. JS 런타임의 leaf가 담는 것과 같은 종류.
+#[derive(Debug, Clone, PartialEq)]
+enum Val {
+    Undef,
+    Null,
+    Bool(bool),
+    Num(f64),
+    Str(String),
 }
 
-/// opcode의 operand 바이트 수. 스킵 시 op 경계를 짚어 마커(IF/ELSE/IF_END)를 operand 값과
-/// 혼동하지 않게 한다.
+impl Val {
+    fn from_const(c: &Const) -> Val {
+        match c {
+            Const::Str(s) => Val::Str(s.clone()),
+            Const::Num(n) => Val::Num(*n),
+            Const::Bool(b) => Val::Bool(*b),
+        }
+    }
+
+    /// JS 참/거짓 판정.
+    fn truthy(&self) -> bool {
+        match self {
+            Val::Undef | Val::Null => false,
+            Val::Bool(b) => *b,
+            Val::Num(n) => *n != 0.0 && !n.is_nan(),
+            Val::Str(s) => !s.is_empty(),
+        }
+    }
+
+    /// 숫자 연산의 피연산자. 타입은 컴파일타임에 맞춰져 숫자만 온다.
+    fn num(&self) -> f64 {
+        match self {
+            Val::Num(n) => *n,
+            Val::Bool(b) => *b as u8 as f64,
+            _ => f64::NAN,
+        }
+    }
+
+    /// DOM에 기록될 문자열 - 런타임 bindVar의 `?? ""`처럼 없는 값은 빈 문자열.
+    fn dom_string(&self) -> String {
+        match self {
+            Val::Undef | Val::Null => String::new(),
+            Val::Bool(b) => b.to_string(),
+            Val::Num(n) => js_number(*n),
+            Val::Str(s) => s.clone(),
+        }
+    }
+}
+
+/// JS `String(n)`. 정수는 소수점 없이, 지수 표기는 절댓값이 1e21 이상이거나 1e-6 미만일 때만.
+fn js_number(n: f64) -> String {
+    if n.is_nan() {
+        return "NaN".into();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 {
+            "Infinity".into()
+        } else {
+            "-Infinity".into()
+        };
+    }
+    if n == 0.0 {
+        return "0".into();
+    }
+    let abs = n.abs();
+    if (1e-6..1e21).contains(&abs) {
+        return format!("{n}");
+    }
+    // Rust `{:e}`는 `1e21`, JS는 `1e+21` - 양의 지수에 `+`를 붙인다.
+    let s = format!("{n:e}");
+    match s.find('e') {
+        Some(i) if !s[i + 1..].starts_with('-') => format!("{}e+{}", &s[..i], &s[i + 1..]),
+        _ => s,
+    }
+}
+
+/// 런타임 store와 arrayPool에 해당. arrays[i] = i번 배열의 요소 시작 leafIndex들.
+/// 배열 leaf에는 그 배열의 번호(arrayInfoIndex)가 Num으로 든다.
+#[derive(Default)]
+struct Store {
+    leaves: Vec<Val>,
+    arrays: Vec<Vec<usize>>,
+    /// arrays[i]의 요소 타입(type_ref) - 스냅샷이 런타임 arrayInfo의 elemTypeRef로 싣는다.
+    array_elem_types: Vec<u16>,
+}
+
+/// 슬롯 하나의 출처(런타임 argumentSourcePairs의 (kind, ref) 한 쌍).
+#[derive(Debug, Clone, Copy)]
+enum Slot {
+    Store(usize),
+    Const(u16),
+    /// 개수 반복의 회차 번호 - 번호 자체가 값이다.
+    Raw(usize),
+}
+
+/// 고정부 뒤로 미룬 배열 하나(런타임 TDeferredArray).
+struct Deferred<'d> {
+    array_index: usize,
+    value: Option<&'d Json>,
+    elem_type: u16,
+}
+
+fn const_str(module: &Module, index: u16) -> &str {
+    match module.pool.get(index) {
+        Some(Const::Str(s)) => s,
+        other => panic!("상수풀 {index}는 문자열이어야: {other:?}"),
+    }
+}
+
+/// 런타임 plantFixed - value의 고정 칸만 연속으로 심고 만난 배열을 돌려준다.
+fn plant_fixed<'d>(
+    value: Option<&'d Json>,
+    type_ref: u16,
+    module: &Module,
+    store: &mut Store,
+) -> Vec<Deferred<'d>> {
+    match &module.types[type_ref as usize] {
+        TypeEntry::Scalar => {
+            store.leaves.push(match value {
+                None => Val::Undef,
+                Some(Json::Null) => Val::Null,
+                Some(Json::Bool(b)) => Val::Bool(*b),
+                Some(Json::Num(n)) => Val::Num(*n),
+                Some(Json::Str(s)) => Val::Str(s.clone()),
+                // 스칼라 자리에 객체/배열 - 타입이 어긋난 데이터. 런타임은 그 값을 그대로 담는다.
+                Some(_) => Val::Undef,
+            });
+            Vec::new()
+        }
+        TypeEntry::Array(elem_type) => {
+            let array_index = store.arrays.len();
+            store.arrays.push(Vec::new());
+            store.array_elem_types.push(*elem_type);
+            store.leaves.push(Val::Num(array_index as f64));
+            vec![Deferred {
+                array_index,
+                value,
+                elem_type: *elem_type,
+            }]
+        }
+        TypeEntry::Object(fields) => {
+            let mut deferred = Vec::new();
+            for (name, child) in fields {
+                let child_value = value.and_then(|v| v.get(const_str(module, *name)));
+                deferred.extend(plant_fixed(child_value, *child, module, store));
+            }
+            deferred
+        }
+    }
+}
+
+/// 런타임 plantRoot - 루트 고정부를 먼저, 배열 요소는 레벨별로 뒤에 심고 루트 슬롯들을 돌려준다.
+fn plant_root(module: &Module, data: &Json, store: &mut Store) -> Vec<Slot> {
+    let props_type = module.def(0).expect("진입점 def 0").props_type_ref;
+    let fields = match &module.types[props_type as usize] {
+        TypeEntry::Object(fields) => fields,
+        other => panic!("루트 props 타입은 객체여야: {other:?}"),
+    };
+    let mut root_pairs = Vec::new();
+    let mut pending = Vec::new();
+    for (name, child) in fields {
+        root_pairs.push(Slot::Store(store.leaves.len()));
+        pending.extend(plant_fixed(
+            data.get(const_str(module, *name)),
+            *child,
+            module,
+            store,
+        ));
+    }
+    while !pending.is_empty() {
+        let mut next = Vec::new();
+        for d in pending {
+            let elems: &[Json] = match d.value {
+                Some(Json::Arr(items)) => items,
+                _ => &[],
+            };
+            for elem in elems {
+                let start = store.leaves.len();
+                store.arrays[d.array_index].push(start);
+                next.extend(plant_fixed(Some(elem), d.elem_type, module, store));
+            }
+        }
+        pending = next;
+    }
+    root_pairs
+}
+
+// ── 해석 ──────────────────────────────────────────────────────────────
+
+/// 사용쪽이 담아 둔 슬롯 콘텐츠 - 부모 def 안의 코드 구간과 그때의 슬롯.
+#[derive(Clone)]
+struct SlotContent {
+    start: usize,
+    end: usize,
+    pairs: Vec<Slot>,
+    comp_id: u16,
+}
+
+struct Renderer<'m> {
+    module: &'m Module,
+    store: Store,
+    resources: &'m [String],
+    out: String,
+    links: Vec<String>,
+    loaded_res: Vec<u16>,
+    /// 다음 region 번호. 런타임 regionPool이 처음 그릴 때 매기는 순서(앞순회)와 같다.
+    next_region: usize,
+    /// 바로 앞에 낸 노드가 텍스트인가 - 이어서 텍스트를 내면 경계 표시를 끼운다.
+    last_was_text: bool,
+}
+
+/// 이웃한 두 텍스트 노드 사이의 경계. HTML 파서는 붙은 텍스트를 하나로 합치므로, resume이 노드를
+/// 하나씩 되찾을 수 있게 사이에 둔다. resume은 이 주석을 지운다.
+const TEXT_BOUNDARY_MARK: &str = "<!---->";
+/// 값이 빈 텍스트 노드 자리. 빈 텍스트는 HTML에 흔적이 없어 자리를 표시한다. resume은 이 주석을
+/// 빈 텍스트 노드로 바꾼다.
+const EMPTY_TEXT_MARK: &str = "<!--qb:empty-->";
+
+/// 내용을 가질 수 없는 요소 - 닫는 태그를 내지 않는다.
+const VOID_TAGS: [&str; 13] = [
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
+    "wbr",
+];
+
+impl Renderer<'_> {
+    fn region_anchor(&mut self) {
+        self.out
+            .push_str(&format!("<!--qb:region#{}-->", self.next_region));
+        self.next_region += 1;
+        self.last_was_text = false;
+    }
+
+    /// 텍스트 노드 하나를 낸다. 노드 경계가 HTML에서 사라지는 두 경우에 표시를 남긴다.
+    fn text_node(&mut self, s: &str) {
+        if s.is_empty() {
+            self.out.push_str(EMPTY_TEXT_MARK);
+            self.last_was_text = false;
+            return;
+        }
+        if self.last_was_text {
+            self.out.push_str(TEXT_BOUNDARY_MARK);
+        }
+        escape_text(s, &mut self.out);
+        self.last_was_text = true;
+    }
+
+    fn slot_value(&self, slot: Slot, offset: usize) -> Val {
+        match slot {
+            Slot::Const(i) => Val::from_const(self.module.pool.get(i).expect("상수풀 인덱스")),
+            Slot::Raw(v) => Val::Num(v as f64),
+            Slot::Store(base) => self.store.leaves[base + offset].clone(),
+        }
+    }
+
+    fn interpret(
+        &mut self,
+        pairs: &mut Vec<Slot>,
+        comp_id: u16,
+        start: usize,
+        end: usize,
+        slot_contents: &[Option<SlotContent>],
+    ) -> Result<(), RenderError> {
+        let module = self.module;
+        let code = &module.code;
+        let def = module.def(comp_id).expect("def");
+        let mut tags: Vec<&'static str> = Vec::new();
+        let mut args: Vec<Slot> = Vec::new();
+        let mut pending_slots: Vec<Option<SlotContent>> = Vec::new();
+        let mut pc = start;
+        let u16at = |pc: &mut usize| {
+            let v = u16::from_le_bytes([code[*pc], code[*pc + 1]]);
+            *pc += 2;
+            v
+        };
+        while pc < end {
+            let byte = code[pc];
+            let op = Op::from_u8(byte).ok_or(RenderError::BadOpcode(byte))?;
+            pc += 1;
+            match op {
+                Op::Halt => break,
+                Op::LoadRes => {
+                    let res_id = u16at(&mut pc);
+                    if !self.loaded_res.contains(&res_id) {
+                        self.loaded_res.push(res_id);
+                        if let Some(url) = self.resources.get(res_id as usize) {
+                            self.links.push(url.clone());
+                        }
+                    }
+                }
+                Op::ElemOpen => {
+                    let tag = u16at(&mut pc);
+                    let name = bytecode::tags::tag_name(tag).expect("내장 태그 ID");
+                    tags.push(name);
+                    self.out.push('<');
+                    self.out.push_str(name);
+                    self.last_was_text = false;
+                }
+                Op::AttrG | Op::AttrL => {
+                    let name = u16at(&mut pc);
+                    let value = u16at(&mut pc);
+                    let name = match op {
+                        Op::AttrG => bytecode::attrs::attr_name(name).expect("전역 속성 ID"),
+                        _ => const_str(module, name),
+                    };
+                    let value =
+                        Val::from_const(module.pool.get(value).expect("상수풀")).dom_string();
+                    emit_attr(name, &value, &mut self.out);
+                }
+                Op::AttrGVar | Op::AttrLVar | Op::AttrGExpr | Op::AttrLExpr => {
+                    let name = u16at(&mut pc);
+                    let name = match op {
+                        Op::AttrGVar | Op::AttrGExpr => {
+                            bytecode::attrs::attr_name(name).expect("전역 속성 ID")
+                        }
+                        _ => const_str(module, name),
+                    };
+                    let value = match op {
+                        Op::AttrGVar | Op::AttrLVar => {
+                            let v =
+                                self.slot_value(pairs[code[pc] as usize], code[pc + 1] as usize);
+                            pc += 2;
+                            v
+                        }
+                        _ => {
+                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            pc += 1;
+                            v
+                        }
+                    };
+                    let value = value.dom_string();
+                    if !is_script_url(name, &value) {
+                        emit_attr(name, &value, &mut self.out);
+                    }
+                }
+                Op::BindEvent => pc += 4,
+                Op::ElemCloseOpen => self.out.push('>'),
+                Op::Text => {
+                    let text = Val::from_const(module.pool.get(u16at(&mut pc)).expect("상수풀"));
+                    self.text_node(&text.dom_string());
+                }
+                Op::TextVar => {
+                    let v = self.slot_value(pairs[code[pc] as usize], code[pc + 1] as usize);
+                    pc += 2;
+                    self.text_node(&v.dom_string());
+                }
+                Op::TextExpr => {
+                    let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                    pc += 1;
+                    self.text_node(&v.dom_string());
+                }
+                Op::ElemEnd => {
+                    let name = tags.pop().ok_or(RenderError::Unbalanced("ELEM_END"))?;
+                    if !VOID_TAGS.contains(&name) {
+                        self.out.push_str("</");
+                        self.out.push_str(name);
+                        self.out.push('>');
+                    }
+                    self.last_was_text = false;
+                }
+                Op::PushThrough => {
+                    args.push(pairs[code[pc] as usize]);
+                    pc += 1;
+                }
+                Op::PushField => {
+                    let offset = code[pc + 1] as usize;
+                    args.push(match pairs[code[pc] as usize] {
+                        Slot::Store(base) => Slot::Store(base + offset),
+                        other => other,
+                    });
+                    pc += 2;
+                }
+                Op::PushArgLit => args.push(Slot::Const(u16at(&mut pc))),
+                // 경로 세그먼트와 컨텍스트는 이벤트(클라 전용)를 위한 것 - operand만 소비한다.
+                Op::PushPathSegment | Op::PushPathIndexSegment | Op::EnterContext => pc += 2,
+                Op::ExitContext => {}
+                Op::PushSlotPlaceholderContent => {
+                    let index = u16at(&mut pc) as usize;
+                    let content_end = scan_end(code, pc, Scan::SlotContent)?;
+                    if pending_slots.len() <= index {
+                        pending_slots.resize(index + 1, None);
+                    }
+                    pending_slots[index] = Some(SlotContent {
+                        start: pc,
+                        end: content_end,
+                        pairs: pairs.clone(),
+                        comp_id,
+                    });
+                    pc = content_end + 1;
+                }
+                Op::FillSlotPlaceholder => {
+                    let index = u16at(&mut pc) as usize;
+                    if let Some(Some(content)) = slot_contents.get(index) {
+                        let content = content.clone();
+                        self.interpret(
+                            &mut content.pairs.clone(),
+                            content.comp_id,
+                            content.start,
+                            content.end,
+                            &[],
+                        )?;
+                    }
+                }
+                Op::Render => {
+                    let child_id = u16at(&mut pc);
+                    let child = module.def(child_id).expect("자식 def");
+                    let mut child_pairs = std::mem::take(&mut args);
+                    let child_slots = std::mem::take(&mut pending_slots);
+                    let child_start = child.code_off as usize;
+                    self.interpret(
+                        &mut child_pairs,
+                        child_id,
+                        child_start,
+                        child_start + child.code_len as usize,
+                        &child_slots,
+                    )?;
+                }
+                Op::If | Op::IfExpr => {
+                    let cond = match op {
+                        Op::If => {
+                            let v =
+                                self.slot_value(pairs[code[pc] as usize], code[pc + 1] as usize);
+                            pc += 2;
+                            v
+                        }
+                        _ => {
+                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            pc += 1;
+                            v
+                        }
+                    };
+                    self.region_anchor();
+                    let then_end = scan_end(code, pc, Scan::Branch)?;
+                    let (else_start, if_end) = match Op::from_u8(code[then_end]) {
+                        Some(Op::Else) => (
+                            Some(then_end + 1),
+                            scan_end(code, then_end + 1, Scan::Branch)?,
+                        ),
+                        _ => (None, then_end),
+                    };
+                    // 활성 가지만 그린다. 비활성 가지는 런타임이 lazy build로 남겨 두는 것과 같다.
+                    match (cond.truthy(), else_start) {
+                        (true, _) => self.interpret(pairs, comp_id, pc, then_end, slot_contents)?,
+                        (false, Some(s)) => {
+                            self.interpret(pairs, comp_id, s, if_end, slot_contents)?
+                        }
+                        (false, None) => {}
+                    }
+                    pc = if_end + 1;
+                }
+                Op::ForRaw | Op::ForCountVar | Op::ForArrayVar => {
+                    // (반응형이라 region이 있는가, 회차 수, 회차마다 요소 시작 leaf)
+                    let (reactive, count, elem_starts): (bool, usize, Option<Vec<usize>>) = match op
+                    {
+                        Op::ForRaw => (false, u16at(&mut pc) as usize, None),
+                        Op::ForCountVar => {
+                            let slot = pairs[code[pc] as usize];
+                            let v = self.slot_value(slot, code[pc + 1] as usize);
+                            pc += 2;
+                            let count = v.num();
+                            let count = if count.is_nan() || count < 0.0 {
+                                0
+                            } else {
+                                count as usize
+                            };
+                            (matches!(slot, Slot::Store(_)), count, None)
+                        }
+                        _ => {
+                            let leaf = match pairs[code[pc] as usize] {
+                                Slot::Store(base) => base + code[pc + 1] as usize,
+                                other => panic!("배열 @for 슬롯은 STORE여야: {other:?}"),
+                            };
+                            pc += 2;
+                            let starts =
+                                self.store.arrays[self.store.leaves[leaf].num() as usize].clone();
+                            (true, starts.len(), Some(starts))
+                        }
+                    };
+                    let body_end = scan_end(code, pc, Scan::For)?;
+                    if reactive {
+                        self.region_anchor();
+                    }
+                    for i in 0..count {
+                        // 회차변수 슬롯 2칸 - item, index. 배열 @for의 item은 그 요소 leaf다.
+                        let item = match &elem_starts {
+                            Some(starts) => Slot::Store(starts[i]),
+                            None => Slot::Raw(i),
+                        };
+                        pairs.push(item);
+                        pairs.push(Slot::Raw(i));
+                        self.interpret(pairs, comp_id, pc, body_end, slot_contents)?;
+                        pairs.pop();
+                        pairs.pop();
+                    }
+                    pc = body_end + 1;
+                }
+                Op::Else | Op::IfEnd | Op::ForEnd | Op::SlotPlaceholderContentEnd => {
+                    return Err(RenderError::Unbalanced("stray marker"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 후위 식 하나를 센다(런타임 runExpr에서 cache/reads를 뺀 것).
+    fn eval(&self, expr: &[u8], pairs: &[Slot]) -> Result<Val, RenderError> {
+        let mut stack: Vec<Val> = Vec::new();
+        let mut pc = 0;
+        let pop = |stack: &mut Vec<Val>| stack.pop().expect("식 스택");
+        while pc < expr.len() {
+            let byte = expr[pc];
+            let op = ExprOp::from_u8(byte).ok_or(RenderError::BadExprOpcode(byte))?;
+            pc += 1;
+            match op {
+                ExprOp::LoadVar => {
+                    stack.push(self.slot_value(pairs[expr[pc] as usize], expr[pc + 1] as usize));
+                    pc += 2;
+                }
+                ExprOp::LoadArrayLength => {
+                    let leaf = match pairs[expr[pc] as usize] {
+                        Slot::Store(base) => base + expr[pc + 1] as usize,
+                        other => panic!("배열 길이 슬롯은 STORE여야: {other:?}"),
+                    };
+                    let len = self.store.arrays[self.store.leaves[leaf].num() as usize].len();
+                    stack.push(Val::Num(len as f64));
+                    pc += 2;
+                }
+                ExprOp::LoadStringLength => {
+                    let s = self.slot_value(pairs[expr[pc] as usize], expr[pc + 1] as usize);
+                    // JS 문자열 길이는 UTF-16 단위다.
+                    stack.push(Val::Num(s.dom_string().encode_utf16().count() as f64));
+                    pc += 2;
+                }
+                ExprOp::LoadConst => {
+                    let index = u16::from_le_bytes([expr[pc], expr[pc + 1]]);
+                    stack.push(Val::from_const(
+                        self.module.pool.get(index).expect("상수풀"),
+                    ));
+                    pc += 2;
+                }
+                ExprOp::LoadSmallInt => {
+                    stack.push(Val::Num(expr[pc] as f64));
+                    pc += 1;
+                }
+                ExprOp::LoadTrue => stack.push(Val::Bool(true)),
+                ExprOp::LoadFalse => stack.push(Val::Bool(false)),
+                ExprOp::Not => {
+                    let v = pop(&mut stack);
+                    stack.push(Val::Bool(!v.truthy()));
+                }
+                ExprOp::Neg => {
+                    let v = pop(&mut stack);
+                    stack.push(Val::Num(-v.num()));
+                }
+                ExprOp::ElemAt => {
+                    let index = pop(&mut stack).num();
+                    let array = pop(&mut stack).num() as usize;
+                    let starts = &self.store.arrays[array];
+                    let ok =
+                        index.fract() == 0.0 && index >= 0.0 && (index as usize) < starts.len();
+                    if !ok {
+                        return Err(RenderError::IndexOutOfRange {
+                            index,
+                            len: starts.len(),
+                        });
+                    }
+                    stack.push(Val::Num(starts[index as usize] as f64));
+                }
+                ExprOp::FieldAt => {
+                    let base = pop(&mut stack).num();
+                    stack.push(Val::Num(base + expr[pc] as f64));
+                    pc += 1;
+                }
+                ExprOp::ReadLeaf => {
+                    let leaf = pop(&mut stack).num() as usize;
+                    stack.push(self.store.leaves[leaf].clone());
+                }
+                binary => {
+                    let right = pop(&mut stack);
+                    let left = pop(&mut stack);
+                    stack.push(apply_binary(binary, left, right));
+                }
+            }
+        }
+        Ok(pop(&mut stack))
+    }
+}
+
+fn apply_binary(op: ExprOp, left: Val, right: Val) -> Val {
+    let (l, r) = (left.num(), right.num());
+    match op {
+        ExprOp::Add => Val::Num(l + r),
+        ExprOp::Sub => Val::Num(l - r),
+        ExprOp::Mul => Val::Num(l * r),
+        ExprOp::Div => Val::Num(l / r),
+        ExprOp::Rem => Val::Num(l % r),
+        // JS `===` - 타입까지 같아야 하고 NaN은 자기와도 다르다(PartialEq for f64가 그렇다).
+        ExprOp::Eq => Val::Bool(left == right),
+        ExprOp::Ne => Val::Bool(left != right),
+        ExprOp::Lt => Val::Bool(l < r),
+        ExprOp::Le => Val::Bool(l <= r),
+        ExprOp::Gt => Val::Bool(l > r),
+        ExprOp::Ge => Val::Bool(l >= r),
+        // JS `&&`/`||` - 피연산자를 그대로 돌려준다.
+        ExprOp::And => {
+            if left.truthy() {
+                right
+            } else {
+                left
+            }
+        }
+        ExprOp::Or => {
+            if left.truthy() {
+                left
+            } else {
+                right
+            }
+        }
+        other => unreachable!("이항 연산이 아니다: {other:?}"),
+    }
+}
+
+/// 짝 마커를 찾는 대상. 같은 종류가 안쪽에 중첩되면 깊이를 센다.
+#[derive(Clone, Copy)]
+enum Scan {
+    /// ELSE 또는 IF_END(깊이 0에서). IF/IF_EXPR이 깊이를 올린다.
+    Branch,
+    /// FOR_END. @for 여는 opcode 셋이 깊이를 올린다.
+    For,
+    /// SLOT_PLACEHOLDER_CONTENT_END. PUSH_SLOT_PLACEHOLDER_CONTENT가 깊이를 올린다.
+    SlotContent,
+}
+
+/// from부터 op 경계를 따라가며 짝 마커의 pc를 찾는다(런타임 skipBranch/forBodyEnd/
+/// slotPlaceholderContentEnd).
+fn scan_end(code: &[u8], from: usize, scan: Scan) -> Result<usize, RenderError> {
+    let mut pc = from;
+    let mut depth = 0u32;
+    while pc < code.len() {
+        let at = pc;
+        let op = Op::from_u8(code[pc]).ok_or(RenderError::BadOpcode(code[pc]))?;
+        pc += 1 + operand_len(op);
+        let (opens, closes) = match scan {
+            Scan::Branch => (
+                matches!(op, Op::If | Op::IfExpr),
+                matches!(op, Op::IfEnd) || (matches!(op, Op::Else) && depth == 0),
+            ),
+            Scan::For => (
+                matches!(op, Op::ForRaw | Op::ForCountVar | Op::ForArrayVar),
+                matches!(op, Op::ForEnd),
+            ),
+            Scan::SlotContent => (
+                matches!(op, Op::PushSlotPlaceholderContent),
+                matches!(op, Op::SlotPlaceholderContentEnd),
+            ),
+        };
+        if opens {
+            depth += 1;
+        } else if closes {
+            if depth == 0 {
+                return Ok(at);
+            }
+            depth -= 1;
+        }
+    }
+    Err(RenderError::Unbalanced("no matching end marker"))
+}
+
+/// opcode 뒤 operand 바이트 수(런타임 operandLen).
 fn operand_len(op: Op) -> usize {
     match op {
-        Op::Halt | Op::ElemCloseOpen | Op::ElemEnd | Op::Else | Op::IfEnd | Op::ExitContext => 0,
-        Op::ElemOpen | Op::Text | Op::TextVar | Op::Render | Op::PushThrough | Op::PushArgLit | Op::PushPathSegment | Op::If | Op::LoadRes | Op::EnterContext => 2,
+        Op::Halt
+        | Op::ElemCloseOpen
+        | Op::ElemEnd
+        | Op::Else
+        | Op::IfEnd
+        | Op::ExitContext
+        | Op::ForEnd
+        | Op::SlotPlaceholderContentEnd => 0,
+        Op::PushThrough | Op::IfExpr | Op::TextExpr => 1,
+        Op::ElemOpen
+        | Op::Text
+        | Op::TextVar
+        | Op::Render
+        | Op::PushField
+        | Op::PushArgLit
+        | Op::PushPathSegment
+        | Op::If
+        | Op::LoadRes
+        | Op::EnterContext
+        | Op::ForRaw
+        | Op::ForCountVar
+        | Op::ForArrayVar
+        | Op::PushPathIndexSegment
+        | Op::PushSlotPlaceholderContent
+        | Op::FillSlotPlaceholder => 2,
+        Op::AttrGExpr | Op::AttrLExpr => 3,
         Op::AttrG | Op::AttrL | Op::AttrGVar | Op::AttrLVar | Op::BindEvent => 4,
     }
 }
 
-/// 현재 가지를 통 스킵한다. op 경계를 따라 전진하며 중첩 깊이를 세고, 같은 깊이(depth 0)에서
-/// 만난 ELSE 또는 IF_END **다음**에 pc를 둔다. ELSE에서 멈추면 호출자는 else 본문을, IF_END에서
-/// 멈추면 if 블록 다음을 이어 해석한다.
-fn skip_branch(code: &[u8], pc: &mut usize) -> Result<(), RenderError> {
-    let mut depth = 0u32;
-    while *pc < code.len() {
-        let op = Op::from_u8(code[*pc]).ok_or(RenderError::BadOpcode(code[*pc]))?;
-        *pc += 1;
-        match op {
-            Op::If => {
-                depth += 1;
-                *pc += operand_len(Op::If); // cond operand 건너뛰기
-            }
-            Op::IfEnd if depth == 0 => return Ok(()),
-            Op::IfEnd => depth -= 1,
-            Op::Else if depth == 0 => return Ok(()),
-            _ => *pc += operand_len(op),
-        }
-    }
-    // 매칭 마커 없이 코드 끝 - 손상된 바이트코드.
-    Err(RenderError::UnbalancedEnd)
+/// URL을 받는 속성. 값이 javascript: 스킴이면 이동/제출 때 그 스크립트가 실행된다.
+/// core/web/dom-tables.ts의 URL_ATTRS와 같다.
+const URL_ATTRS: [&str; 4] = ["href", "src", "action", "formaction"];
+
+/// 동적 속성 값이 javascript: URL이라 달면 안 되는지. core/web/dom-tables.ts의 setAttributeSafely와
+/// 같은 판정이다 - 브라우저는 스킴 앞의 U+0000~U+0020과 스킴 안의 탭/개행을 무시하고 읽는다.
+fn is_script_url(name: &str, value: &str) -> bool {
+    URL_ATTRS.contains(&name)
+        && value
+            .trim_start_matches(|c: char| c <= ' ')
+            .chars()
+            .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+            .collect::<String>()
+            .to_lowercase()
+            .starts_with("javascript:")
 }
 
-/// ` name="value"` (값 이스케이프 포함) 출력.
+/// ` name="value"`.
 fn emit_attr(name: &str, value: &str, out: &mut String) {
     out.push(' ');
     out.push_str(name);
     out.push_str("=\"");
-    escape_attr(value, out);
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
     out.push('"');
 }
 
-fn get_const(module: &Module, index: u16) -> Result<&str, RenderError> {
-    module.pool.get(index).ok_or(RenderError::BadConst(index))
-}
-
-/// 텍스트 노드 이스케이프: `& < >`.
 fn escape_text(s: &str, out: &mut String) {
     for c in s.chars() {
         match c {
@@ -259,471 +900,67 @@ fn escape_text(s: &str, out: &mut String) {
     }
 }
 
-/// 속성값 이스케이프: 텍스트 규칙 + `"`.
-fn escape_attr(s: &str, out: &mut String) {
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(c),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytecode::{encode, CompDef, ConstPool, Module};
 
-    /// 바이트코드를 손으로 짜는 어셈블러 (파서 전까지 테스트용).
-    struct Asm {
-        code: Vec<u8>,
-    }
-    impl Asm {
-        fn new() -> Self {
-            Self { code: Vec::new() }
-        }
-        fn open(&mut self, tag: u16) -> &mut Self {
-            self.code.push(Op::ElemOpen as u8);
-            self.code.extend_from_slice(&tag.to_le_bytes());
-            self
-        }
-        fn attr(&mut self, n: u16, v: u16) -> &mut Self {
-            self.code.push(Op::AttrL as u8);
-            self.code.extend_from_slice(&n.to_le_bytes());
-            self.code.extend_from_slice(&v.to_le_bytes());
-            self
-        }
-        fn close_open(&mut self) -> &mut Self {
-            self.code.push(Op::ElemCloseOpen as u8);
-            self
-        }
-        fn text(&mut self, t: u16) -> &mut Self {
-            self.code.push(Op::Text as u8);
-            self.code.extend_from_slice(&t.to_le_bytes());
-            self
-        }
-        fn text_var(&mut self, index: u16) -> &mut Self {
-            self.code.push(Op::TextVar as u8);
-            self.code.extend_from_slice(&index.to_le_bytes());
-            self
-        }
-        /// 전역 속성명 ID + scope index.
-        fn attr_g_var(&mut self, name: u16, index: u16) -> &mut Self {
-            self.code.push(Op::AttrGVar as u8);
-            self.code.extend_from_slice(&name.to_le_bytes());
-            self.code.extend_from_slice(&index.to_le_bytes());
-            self
-        }
-        /// 컴포넌트 상수풀 속성명 인덱스 + scope index.
-        fn attr_l_var(&mut self, name: u16, index: u16) -> &mut Self {
-            self.code.push(Op::AttrLVar as u8);
-            self.code.extend_from_slice(&name.to_le_bytes());
-            self.code.extend_from_slice(&index.to_le_bytes());
-            self
-        }
-        fn end(&mut self) -> &mut Self {
-            self.code.push(Op::ElemEnd as u8);
-            self
-        }
-        fn render(&mut self, id: u16) -> &mut Self {
-            self.code.push(Op::Render as u8);
-            self.code.extend_from_slice(&id.to_le_bytes());
-            self
-        }
-        /// 부모 scope index를 자식 인자로 push.
-        fn push_arg(&mut self, scope_index: u16) -> &mut Self {
-            self.code.push(Op::PushThrough as u8);
-            self.code.extend_from_slice(&scope_index.to_le_bytes());
-            self
-        }
-        fn halt(&mut self) -> &mut Self {
-            self.code.push(Op::Halt as u8);
-            self
-        }
-        fn if_(&mut self, cond: u16) -> &mut Self {
-            self.code.push(Op::If as u8);
-            self.code.extend_from_slice(&cond.to_le_bytes());
-            self
-        }
-        fn else_(&mut self) -> &mut Self {
-            self.code.push(Op::Else as u8);
-            self
-        }
-        fn if_end(&mut self) -> &mut Self {
-            self.code.push(Op::IfEnd as u8);
-            self
-        }
-        fn load_res(&mut self, res_id: u16) -> &mut Self {
-            self.code.push(Op::LoadRes as u8);
-            self.code.extend_from_slice(&res_id.to_le_bytes());
-            self
-        }
-    }
-
-    fn t(name: &str) -> u16 {
-        bytecode::tags::tag_id(name).unwrap()
-    }
-
-    /// BYTECODE.md #6 hello 예시. encode로 바이트화한 뒤 render에 넘긴다.
+    /// 스냅샷의 문자열은 JSON.parse가 원래 값으로 읽어야 한다 - 따옴표, 역슬래시, 제어 문자를 이스케이프한다.
     #[test]
-    fn renders_hello() {
-        let mut pool = ConstPool::new();
-        let class = pool.intern("class");
-        let greeting = pool.intern("greeting");
-        let hello = pool.intern("Hello");
-        let sub = pool.intern("sub");
-        let world = pool.intern("world");
-
-        let mut a = Asm::new();
-        a.open(t("div"))
-            .attr(class, greeting)
-            .close_open()
-            .open(t("h1"))
-            .close_open()
-            .text(hello)
-            .end()
-            .open(t("p"))
-            .attr(class, sub)
-            .close_open()
-            .text(world)
-            .end()
-            .end()
-            .halt();
-
-        let code = a.code;
-        let defs = vec![CompDef {
-            name_const_index: hello,
-            code_off: 0,
-            code_len: code.len() as u32,
-            events: vec![],
-            contexts: vec![],
-        }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        assert_eq!(
-            render_to_string(&bytes, 0, &[], &[]).unwrap(),
-            r#"<div class="greeting"><h1>Hello</h1><p class="sub">world</p></div>"#
-        );
+    fn json_string_escapes_for_json_parse() {
+        let mut out = String::new();
+        write_json_string("a\"b\\c\n\t\u{1}한", &mut out);
+        assert_eq!(out, "\"a\\\"b\\\\c\\n\\t\\u0001한\"");
     }
 
+    /// setAttributeSafely와 같은 판정 - URL 속성의 javascript: 값만 막고, 앞 공백/제어 문자와 스킴 안의
+    /// 탭/개행으로 감춘 것도 막는다.
     #[test]
-    fn escapes_text_and_attr() {
-        let mut pool = ConstPool::new();
-        let title = pool.intern("title");
-        let attr_val = pool.intern(r#"a"b<c"#);
-        let body = pool.intern("x < y & z");
-        let name = pool.intern("C");
-
-        let mut a = Asm::new();
-        a.open(t("div"))
-            .attr(title, attr_val)
-            .close_open()
-            .text(body)
-            .end()
-            .halt();
-
-        let code = a.code;
-        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        assert_eq!(
-            render_to_string(&bytes, 0, &[], &[]).unwrap(),
-            r#"<div title="a&quot;b&lt;c">x &lt; y &amp; z</div>"#
-        );
-    }
-
-    /// RENDER로 자식 컴포넌트 합성 (프로토타입 코드엔 없지만 opcode 동작 검증).
-    #[test]
-    fn renders_child_via_render_op() {
-        let mut pool = ConstPool::new();
-        let parent = pool.intern("Parent");
-        let child = pool.intern("Child");
-        let hi = pool.intern("hi");
-
-        let mut c = Asm::new();
-        c.open(t("span")).close_open().text(hi).end().halt();
-        let mut p = Asm::new();
-        p.open(t("div")).close_open().render(1).end().halt();
-
-        let child_len = c.code.len() as u32;
-        let parent_len = p.code.len() as u32;
-
-        let mut code = c.code;
-        code.extend_from_slice(&p.code);
-
-        let defs = vec![
-            CompDef { name_const_index: parent, code_off: child_len, code_len: parent_len, events: vec![], contexts: vec![] },
-            CompDef { name_const_index: child, code_off: 0, code_len: child_len, events: vec![], contexts: vec![] },
+    fn script_url_matches_set_attribute_safely() {
+        let blocked = [
+            ("href", "javascript:alert(1)"),
+            ("src", "JavaScript:alert(1)"),
+            ("action", "  javascript:x"),
+            ("formaction", "\u{1}\u{0}javascript:x"),
+            ("href", "java\tscr\nipt:x"),
         ];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        assert_eq!(render_to_string(&bytes, 0, &[], &[]).unwrap(), "<div><span>hi</span></div>");
-    }
-
-    /// LOAD_RES가 정의 앞머리에서 <link>를 인라인한다. res_paths[resId]가 href.
-    #[test]
-    fn load_res_inlines_link() {
-        let mut pool = ConstPool::new();
-        let name = pool.intern("Styled");
-
-        // LOAD_RES 0; span() {} - 정의 앞머리에 리소스 로드.
-        let mut a = Asm::new();
-        a.load_res(0).open(t("span")).close_open().end().halt();
-        let code = a.code;
-        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        let res_paths = vec!["/res/styled.abc.css".to_string()];
-        assert_eq!(
-            render_to_string(&bytes, 0, &[], &res_paths).unwrap(),
-            r#"<link rel="stylesheet" href="/res/styled.abc.css"><span></span>"#
-        );
-    }
-
-    /// 부모와 자식이 같은 resId를 LOAD_RES하면 <link>는 한 번만 난다(재귀 전체 dedup).
-    #[test]
-    fn load_res_dedups_across_render() {
-        let mut pool = ConstPool::new();
-        let parent = pool.intern("Parent");
-        let child = pool.intern("Child");
-
-        // 자식: LOAD_RES 0; span() {}
-        let mut c = Asm::new();
-        c.load_res(0).open(t("span")).close_open().end().halt();
-        // 부모: LOAD_RES 0; div() { RENDER child }
-        let mut p = Asm::new();
-        p.load_res(0).open(t("div")).close_open().render(1).end().halt();
-
-        let child_len = c.code.len() as u32;
-        let parent_len = p.code.len() as u32;
-        let mut code = c.code;
-        code.extend_from_slice(&p.code);
-        let defs = vec![
-            CompDef { name_const_index: parent, code_off: child_len, code_len: parent_len, events: vec![], contexts: vec![] },
-            CompDef { name_const_index: child, code_off: 0, code_len: child_len, events: vec![], contexts: vec![] },
+        for (name, value) in blocked {
+            assert!(is_script_url(name, value), "{name}={value:?}");
+        }
+        let allowed = [
+            ("href", "https://example.com"),
+            ("href", "/javascript:x"),
+            ("href", "xjavascript:x"),
+            ("title", "javascript:alert(1)"),
+            ("class", "javascript:x"),
         ];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        let res_paths = vec!["/res/x.css".to_string()];
-        // 부모가 먼저 <link>를 내고, 자식의 같은 resId는 스킵된다.
-        assert_eq!(
-            render_to_string(&bytes, 0, &[], &res_paths).unwrap(),
-            r#"<link rel="stylesheet" href="/res/x.css"><div><span></span></div>"#
-        );
+        for (name, value) in allowed {
+            assert!(!is_script_url(name, value), "{name}={value:?}");
+        }
     }
 
-    /// res_paths 범위 밖 resId면 BadResource.
+    /// JS `String(n)`과 같은 표기. 기댓값은 node에서 `String(n)`으로 확인한 것이다.
     #[test]
-    fn load_res_out_of_range_errors() {
-        let mut pool = ConstPool::new();
-        let name = pool.intern("Styled");
-        let mut a = Asm::new();
-        a.load_res(5).open(t("span")).close_open().end().halt();
-        let code = a.code;
-        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadResource(5)));
-    }
-
-    /// 합성 + PUSH_ARG: 부모가 자기 scope의 일부를 자식에게 넘긴다.
-    /// 부모 div() { {a} Comp(name={b}) } - 부모 scope=["A","B"], 자식은 b만 받아 출력.
-    #[test]
-    fn render_passes_args_to_child() {
-        let mut pool = ConstPool::new();
-        let parent = pool.intern("Parent");
-        let child = pool.intern("Child");
-
-        // 자식: span() { {0} }  - 받은 scope[0]을 출력.
-        let mut c = Asm::new();
-        c.open(t("span")).close_open().text_var(0).end().halt();
-        // 부모: div() { {0} PUSH_ARG 1; RENDER child }  - 자기 scope[0] 출력 + 자식엔 scope[1] 전달.
-        let mut p = Asm::new();
-        p.open(t("div"))
-            .close_open()
-            .text_var(0)
-            .push_arg(1)
-            .render(1)
-            .end()
-            .halt();
-
-        let child_len = c.code.len() as u32;
-        let parent_len = p.code.len() as u32;
-        let mut code = c.code;
-        code.extend_from_slice(&p.code);
-
-        let defs = vec![
-            CompDef { name_const_index: parent, code_off: child_len, code_len: parent_len, events: vec![], contexts: vec![] },
-            CompDef { name_const_index: child, code_off: 0, code_len: child_len, events: vec![], contexts: vec![] },
+    fn js_number_matches_js_string() {
+        let cases = [
+            (0.0, "0"),
+            (-0.0, "0"),
+            (42.0, "42"),
+            (-7.0, "-7"),
+            (1.5, "1.5"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1e20, "100000000000000000000"),
+            (1e21, "1e+21"),
+            (1.5e21, "1.5e+21"),
+            (1e-6, "0.000001"),
+            (9.99e-7, "9.99e-7"),
+            (1e-7, "1e-7"),
+            (-2.5e-8, "-2.5e-8"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
         ];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        let scope = vec!["A".to_string(), "B".to_string()];
-        assert_eq!(
-            render_to_string(&bytes, 0, &scope, &[]).unwrap(),
-            "<div>A<span>B</span></div>"
-        );
-    }
-
-    /// TEXT_VAR가 scope[index] 값을 출력하고, 텍스트 이스케이프를 적용한다.
-    #[test]
-    fn renders_text_var_from_scope() {
-        let mut pool = ConstPool::new();
-        let name = pool.intern("Greeting");
-
-        let mut a = Asm::new();
-        a.open(t("h1")).close_open().text_var(0).end().halt();
-
-        let code = a.code;
-        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        let scope = vec!["세계 <b>".to_string()];
-        assert_eq!(
-            render_to_string(&bytes, 0, &scope, &[]).unwrap(),
-            "<h1>세계 &lt;b&gt;</h1>"
-        );
-    }
-
-    /// 속성값 변수: 전역 name(class)/로컬 name(data-x) 둘 다 scope에서 채우고 속성 이스케이프를 적용.
-    #[test]
-    fn renders_attr_var_global_and_local() {
-        let mut pool = ConstPool::new();
-        let name = pool.intern("C");
-        let data_x = pool.intern("data-x"); // 전역 테이블에 없는 속성명 -> 로컬
-        let class_g = bytecode::attrs::attr_id("class").unwrap();
-
-        let mut a = Asm::new();
-        a.open(t("div"))
-            .attr_g_var(class_g, 0)
-            .attr_l_var(data_x, 1)
-            .close_open()
-            .end()
-            .halt();
-
-        let code = a.code;
-        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        let scope = vec!["card".to_string(), r#"a"b"#.to_string()];
-        assert_eq!(
-            render_to_string(&bytes, 0, &scope, &[]).unwrap(),
-            r#"<div class="card" data-x="a&quot;b"></div>"#
-        );
-    }
-
-    /// 속성값 변수도 scope 범위를 벗어나면 BadScope.
-    #[test]
-    fn attr_var_out_of_scope() {
-        let mut pool = ConstPool::new();
-        let name = pool.intern("C");
-        let class_g = bytecode::attrs::attr_id("class").unwrap();
-        let mut a = Asm::new();
-        a.open(t("div")).attr_g_var(class_g, 0).close_open().end().halt();
-        let code = a.code;
-        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
-    }
-
-    /// scope에 값이 없으면 BadScope.
-    #[test]
-    fn text_var_out_of_scope() {
-        let mut pool = ConstPool::new();
-        let name = pool.intern("C");
-        let mut a = Asm::new();
-        a.open(t("p")).close_open().text_var(0).end().halt();
-        let code = a.code;
-        let defs = vec![CompDef { name_const_index: name, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-
-        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadScope(0)));
-    }
-
-    /// 한 컴포넌트 정의를 인코딩해 렌더 (단일 def, scope 주입). if 테스트 공용.
-    fn render_one(pool: ConstPool, code: Vec<u8>, scope: &[String]) -> String {
-        let defs = vec![CompDef { name_const_index: 0, code_off: 0, code_len: code.len() as u32, events: vec![], contexts: vec![] }];
-        let bytes = encode(&Module::new(pool, defs, code));
-        render_to_string(&bytes, 0, scope, &[]).unwrap()
-    }
-
-    /// if true -> then 가지를, false -> else 가지를 출력. div() { @if c { "T" } @else { "F" } }
-    #[test]
-    fn if_else_picks_branch() {
-        let make = || {
-            let mut pool = ConstPool::new();
-            let tt = pool.intern("T");
-            let ff = pool.intern("F");
-            let mut a = Asm::new();
-            a.open(t("div")).close_open()
-                .if_(0).text(tt).else_().text(ff).if_end()
-                .end().halt();
-            (pool, a.code)
-        };
-        let (pool, code) = make();
-        assert_eq!(render_one(pool, code, &["true".into()]), "<div>T</div>");
-        let (pool, code) = make();
-        assert_eq!(render_one(pool, code, &["false".into()]), "<div>F</div>");
-    }
-
-    /// else 없는 if. false면 then을 통째로 건너뛰고 아무것도 안 남긴다.
-    #[test]
-    fn if_only_skips_when_false() {
-        let make = || {
-            let mut pool = ConstPool::new();
-            let hi = pool.intern("hi");
-            let mut a = Asm::new();
-            a.open(t("div")).close_open()
-                .if_(0).open(t("span")).close_open().text(hi).end().if_end()
-                .end().halt();
-            (pool, a.code)
-        };
-        let (pool, code) = make();
-        assert_eq!(render_one(pool, code, &["true".into()]), "<div><span>hi</span></div>");
-        let (pool, code) = make();
-        assert_eq!(render_one(pool, code, &["false".into()]), "<div></div>");
-    }
-
-    /// 중첩 if - 바깥 then 안의 안쪽 if/else가 바깥 ELSE를 침범하지 않는지(depth 카운팅).
-    /// @if a { @if b { "AB" } @else { "Ab" } } @else { "x" }
-    #[test]
-    fn nested_if_depth() {
-        let make = || {
-            let mut pool = ConstPool::new();
-            let ab = pool.intern("AB");
-            let ab2 = pool.intern("Ab");
-            let x = pool.intern("x");
-            let mut a = Asm::new();
-            a.if_(0) // a
-                .if_(1).text(ab).else_().text(ab2).if_end() // 안쪽 b
-                .else_().text(x) // 바깥 else
-                .if_end()
-                .halt();
-            (pool, a.code)
-        };
-        // a=true, b=true -> AB
-        let (pool, code) = make();
-        assert_eq!(render_one(pool, code, &["true".into(), "true".into()]), "AB");
-        // a=true, b=false -> Ab
-        let (pool, code) = make();
-        assert_eq!(render_one(pool, code, &["true".into(), "false".into()]), "Ab");
-        // a=false -> x (안쪽은 통째로 스킵, 바깥 ELSE를 정확히 찾아야 함)
-        let (pool, code) = make();
-        assert_eq!(render_one(pool, code, &["false".into(), "true".into()]), "x");
-    }
-
-    #[test]
-    fn bad_component_id() {
-        let bytes = encode(&Module::new(ConstPool::new(), vec![], vec![]));
-        assert_eq!(render_to_string(&bytes, 0, &[], &[]), Err(RenderError::BadComponent(0)));
-    }
-
-    #[test]
-    fn rejects_bad_bytes() {
-        assert!(matches!(render_to_string(b"nope", 0, &[], &[]), Err(RenderError::Decode(_))));
+        for (n, want) in cases {
+            assert_eq!(js_number(n), want, "{n:?}");
+        }
     }
 }

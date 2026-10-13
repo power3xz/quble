@@ -26,3 +26,10 @@ version = "0.0.0"
 dependencies = [
  "compiler",
 ]
+
+[[package]]
+name = "renderer"
+version = "0.0.0"
+dependencies = [
+ "bytecode",
+]

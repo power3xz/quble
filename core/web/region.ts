@@ -201,13 +201,14 @@ const attachIf = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBra
 // regionPool에 @if Region을 스폰한다 - anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 alloc하고
 // 그 인덱스를 돌려준다. anchor를 DOM 트리 어디에 붙일지는 호출자 몫(IF는 nodeTop, 루트는 fragment).
 // 인덱스는 alloc이 정한다(빈 칸 재사용 시 length와 다름) - 그래서 anchor 라벨은 alloc 후 채운다.
+// anchor는 resume이 SSR DOM의 앵커를 넘길 때만 받는다. 안 받으면 새로 만든다.
 export const appendIfRegion = (
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   condLeafIndex: number,
   ownsCondLeaf = false,
+  anchor: Comment = document.createComment(""),
 ): number => {
-  const anchor = document.createComment("");
   const regionIndex = regionPool.alloc({
     branchIndices: [appendBranch(branchPool), appendBranch(branchPool)],
     condLeafIndex,
@@ -272,9 +273,12 @@ const attachFor = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBr
 };
 
 // regionPool에 @for Region을 스폰한다 - anchor만 만들고 회차는 0개(회차는 appendBranchOfForRegion이
-// 하나씩 더한다). countLeafIndex = 반복 횟수를 읽는 leaf(구독 대상).
-export const appendForRegion = (regionPool: Pool<TRegion>, countLeafIndex: number): number => {
-  const anchor = document.createComment("");
+// 하나씩 더한다). countLeafIndex = 반복 횟수를 읽는 leaf(구독 대상). anchor는 appendIfRegion과 같다.
+export const appendForRegion = (
+  regionPool: Pool<TRegion>,
+  countLeafIndex: number,
+  anchor: Comment = document.createComment(""),
+): number => {
   const regionIndex = regionPool.alloc({
     branchIndices: [],
     condLeafIndex: countLeafIndex,
