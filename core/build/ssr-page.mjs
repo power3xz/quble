@@ -1,5 +1,6 @@
 // SSR + resume 페이지 한 장을 HTML 문자열로 만든다. 요청마다 만드는 프리뷰 서버(serve-ssr-preview.mjs)와
 // 빌드 때 파일로 쓰는 SSG(build-ssg.mjs)가 같이 쓴다. build-preview.mjs가 만든 dist/preview를 읽는다.
+// renderSsr, snapshotJson, inlineResource는 playground 빌드(build-playground.mjs)도 부른다.
 //
 // mode
 //   resume  SSR HTML + leaf store 스냅샷(HTML에 JSON으로 실음) + resume. data를 따로 받지 않는다
@@ -17,10 +18,11 @@ import { join, normalize } from "node:path";
 const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // quble-ssr로 렌더한다. 리소스는 manifest의 상대 경로 그대로 넘기고 quble-ssr는 만난 것을 그대로 돌려준다.
-const renderSsr = (distDir, stem, ssrBin) => {
+// dataFile - 렌더할 data. 없으면 distDir의 data.json.
+export const renderSsr = (distDir, stem, ssrBin, dataFile = join(distDir, "data.json")) => {
   const manifest = JSON.parse(readFileSync(join(distDir, `${stem}.manifest.json`), "utf8"));
   const started = performance.now();
-  const run = spawnSync(ssrBin, [join(distDir, `${stem}.qubb`), join(distDir, "data.json"), ...manifest.resources], {
+  const run = spawnSync(ssrBin, [join(distDir, `${stem}.qubb`), dataFile, ...manifest.resources], {
     encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024,
   });
@@ -37,8 +39,8 @@ const renderSsr = (distDir, stem, ssrBin) => {
 
 // leaf store 스냅샷을 만든다(quble-ssr --snapshot). <script type="application/json"> 안에 넣으므로 `<`를
 // 유니코드 이스케이프(u003c)로 바꾼다 - JSON으로는 같은 값이고 `</script`나 `<!--`가 본문에서 태그를 닫지 못한다.
-const snapshotJson = (distDir, stem, ssrBin) => {
-  const run = spawnSync(ssrBin, ["--snapshot", join(distDir, `${stem}.qubb`), join(distDir, "data.json")], {
+export const snapshotJson = (distDir, stem, ssrBin, dataFile = join(distDir, "data.json")) => {
+  const run = spawnSync(ssrBin, ["--snapshot", join(distDir, `${stem}.qubb`), dataFile], {
     encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024,
   });
@@ -54,7 +56,7 @@ const inlineCss = (css) => css.replace(/<\/(style)/gi, "<\\/$1");
 
 // 컴포넌트 CSS를 dist 안 상대 경로로 읽어 인라인한다. 런타임의 resume이 `data-qb-href`를 문서 주소 기준으로 풀어
 // 이미 넣었는지 안다.
-const inlineResource = (distDir, asset, path) => {
+export const inlineResource = (distDir, asset, path) => {
   const file = join(distDir, normalize(path));
   return `  <style data-qb-href="${escapeHtml(asset(path))}">${inlineCss(readFileSync(file, "utf8"))}</style>`;
 };
