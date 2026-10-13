@@ -131,12 +131,6 @@
   워크스페이스 루트를 패키지 루트로 봐서 레포 전체(7만여 파일)를 담으려 든다. 플러그인을
   node_modules 밖에 두는 것도 안 된다 - tsserver가 node_modules 체인으로만 찾는다.
 
-- **renderer(SSR) 보류** - 상수풀 엔트리가 타입(Str/Num/Bool)을 갖게 바뀌면서 renderer가 빌드
-  실패한다(`get_const`가 `&str` 대신 `&Const` 반환). renderer는 바이트코드로 렌더 가능한지 보는
-  POC였고 그 역할은 끝났다 - 언어가 어느 정도 완성된 뒤 다시 본다. 당분간 처리하지 않는다.
-  워크스페이스 members에서 빼고 exclude로 뒀다(크레이트 파일은 복구용으로 남김). quble 크레이트의
-  render_source/render_with와 tests/end_to_end.rs(SSR 통합 테스트)도 제거했다.
-
 - **props가 전부 필수** - 자식이 선언한 prop을 하나라도 안 넘기면 `MissingArg`다(슬롯은 안
   채워도 된다 - SYNTAX #3.3). 기본값이 있거나 없으면 안 그리는 prop을 표현할 방법이 없어
   호출부가 매번 다 넘겨야 한다. 선택적 prop을 들이려면 문법(`tone?: string`), 타입 표기,
