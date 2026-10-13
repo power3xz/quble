@@ -34,14 +34,7 @@ createServer((req, res) => {
   try {
     if (url.pathname === "/") {
       const mode = ["nojs", "csr", "data"].find((name) => url.searchParams.has(name)) ?? "resume";
-      const body = renderPage({
-        distDir,
-        stem,
-        ssrBin,
-        baseUrl: `http://${req.headers.host}`,
-        mode,
-        showStatus: true,
-      });
+      const body = renderPage({ distDir, stem, ssrBin, mode, showStatus: true });
       res.writeHead(200, { "content-type": TYPES[".html"] });
       res.end(body);
       return;
