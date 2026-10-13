@@ -89,7 +89,7 @@ pub enum CodegenErrorKind {
     InvalidNesting {
         child: String,
         parent: String,
-        reason: &'static str,
+        message: String,
     },
 }
 
@@ -190,13 +190,7 @@ impl std::fmt::Display for CodegenErrorKind {
                     "`{name}` is an event handler attribute; use `@click:EVENT`"
                 )
             }
-            CodegenErrorKind::InvalidNesting {
-                child,
-                parent,
-                reason,
-            } => {
-                write!(f, "`{child}` inside `{parent}`: {reason}")
-            }
+            CodegenErrorKind::InvalidNesting { message, .. } => write!(f, "{message}"),
         }
     }
 }

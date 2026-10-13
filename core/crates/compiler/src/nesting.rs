@@ -47,15 +47,24 @@ pub fn check_nesting(comps: &[FlatComp]) -> Result<(), Sourced<CodegenError>> {
 fn check(ancestors: &[Anc], child: &Child, at: SrcRange) -> Result<(), CodegenError> {
     match conflict(ancestors, child) {
         None => Ok(()),
-        Some((parent, reason)) => Err(CodegenErrorKind::InvalidNesting {
-            child: match child {
+        Some((parent, direct, reason)) => {
+            let child = match child {
                 Child::Tag(tag) => tag.to_string(),
                 Child::Text => "text".to_string(),
-            },
-            parent: parent.to_string(),
-            reason,
+            };
+            let relation = if direct { "a child of" } else { "inside" };
+            let mut message = format!("`{child}` cannot be {relation} `{parent}`");
+            if let Some(reason) = reason {
+                message.push_str(": ");
+                message.push_str(reason);
+            }
+            Err(CodegenErrorKind::InvalidNesting {
+                child,
+                parent: parent.to_string(),
+                message,
+            }
+            .at(at))
         }
-        .at(at)),
     }
 }
 
@@ -239,16 +248,17 @@ fn nearest<'a>(ancestors: &[Anc<'a>], tag: &str, stops: &[&str]) -> Option<&'a s
     None
 }
 
-/// child가 ancestors 아래에서 파서에게 구조를 바꾸게 하면 (탓할 조상 태그, 이유).
+/// child가 ancestors 아래에서 파서에게 구조를 바꾸게 하면 (탓할 조상 태그, 직계 자식으로만 막히는지, 이유).
 /// 조상이 없으면(컴포넌트 최상위) 알 수 있는 것이 없어 None이다 - 호출 자리에서 견준다.
-fn conflict<'a>(ancestors: &[Anc<'a>], child: &Child) -> Option<(&'a str, &'static str)> {
+fn conflict<'a>(
+    ancestors: &[Anc<'a>],
+    child: &Child,
+) -> Option<(&'a str, bool, Option<&'static str>)> {
     let parent = ancestors.last()?.tag;
     let tag = match child {
         Child::Text => {
             return match parent {
-                "table" | "thead" | "tbody" | "tr" => {
-                    Some((parent, "the HTML parser moves text out of the table"))
-                }
+                "table" | "thead" | "tbody" | "tr" => Some((parent, true, None)),
                 _ => None,
             };
         }
@@ -269,24 +279,22 @@ fn conflict<'a>(ancestors: &[Anc<'a>], child: &Child) -> Option<(&'a str, &'stat
         _ => None,
     };
     if let Some(reason) = structural {
-        return Some((parent, reason));
+        return Some((parent, true, Some(reason)));
     }
     let table_edge = ["table", "td", "th"];
     if CLOSES_P.contains(&tag) {
         let stops = ["button", "table", "td", "th"];
         if let Some(p) = nearest(ancestors, "p", &stops) {
-            return Some((p, "the HTML parser closes the open <p> first"));
+            return Some((p, false, Some("<p> takes only inline elements")));
         }
     }
-    match tag {
-        "a" => nearest(ancestors, "a", &["button", "table", "td", "th"])
-            .map(|a| (a, "<a> cannot contain <a>")),
-        "button" => {
-            nearest(ancestors, "button", &table_edge).map(|b| (b, "<button> cannot contain <button>"))
-        }
-        "form" => nearest(ancestors, "form", &[]).map(|f| (f, "<form> cannot contain <form>")),
+    let same = match tag {
+        "a" => nearest(ancestors, "a", &["button", "table", "td", "th"]),
+        "button" => nearest(ancestors, "button", &table_edge),
+        "form" => nearest(ancestors, "form", &[]),
         _ => None,
-    }
+    };
+    same.map(|ancestor| (ancestor, false, None))
 }
 
 #[cfg(test)]
@@ -314,6 +322,37 @@ mod tests {
 
     fn pair(child: &str, parent: &str) -> (String, String) {
         (child.to_string(), parent.to_string())
+    }
+
+    fn message(src: &str) -> String {
+        match compile(src) {
+            Err(CompileError::Codegen(e)) => e.err.kind.to_string(),
+            other => panic!("에러가 아니다: {:?}", other.map(|_| ())),
+        }
+    }
+
+    #[test]
+    fn message_says_inside_for_descendant_rules() {
+        assert_eq!(
+            message("component A { template { p() { span() { div( /) } } } }"),
+            "`div` cannot be inside `p`: <p> takes only inline elements"
+        );
+        assert_eq!(
+            message("component A { template { a() { span() { a( /) } } } }"),
+            "`a` cannot be inside `a`"
+        );
+    }
+
+    #[test]
+    fn message_says_child_of_for_direct_rules() {
+        assert_eq!(
+            message("component A { template { table() { tr( /) } } }"),
+            "`tr` cannot be a child of `table`: <table> takes only <thead> and <tbody>"
+        );
+        assert_eq!(
+            message(r#"component A { template { table() { tbody() { tr() { "x" } } } } }"#),
+            "`text` cannot be a child of `tr`"
+        );
     }
 
     #[test]
