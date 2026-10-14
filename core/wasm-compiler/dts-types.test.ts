@@ -210,7 +210,7 @@ test("배열 안 객체 안 배열까지 내려간다", () => {
   );
 });
 
-// 객체 prop은 필드마다 leaf가 따로 서므로(runtime.ts leafTree) 통째로는 주소가 아니다.
+// 객체 prop은 필드마다 leaf가 따로 서므로(vm.ts leafTree) 통째로는 주소가 아니다.
 test("객체 prop의 필드가 각각 leaf라 set으로 짚힌다", () => {
   assert.equal(
     typecheck(`
