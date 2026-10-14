@@ -8,7 +8,8 @@
 
 ## 하는 중
 
-없음
+`bench-expr`에 Solid 대상(`orders`, `orders-deep`) 추가. 브랜치 `bench-solid`. 대상 페이지와 번들 설정,
+`quick.mjs`의 대상 선택, README 갱신까지.
 
 ## 할 것
 
