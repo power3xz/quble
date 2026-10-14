@@ -8,7 +8,9 @@
 
 ## 하는 중
 
-없음
+runtime에서 resume 코드를 걷어내기 위해 인터프리터를 분리한다. 1) `runtime.ts`에서 `Interpreter`를
+`interpreter.ts`로 옮긴다(동작 변경 없음). 2) 복사해 runtime용과 resume용으로 나눈다(중복 허용).
+3) 공통부를 뽑는다. `resume-split` 브랜치.
 
 ## 할 것
 
