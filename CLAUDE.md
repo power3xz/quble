@@ -51,6 +51,7 @@
 | `effect` | `효과` (반응형 프로그래밍에서 읽은 값이 바뀌면 다시 도는 함수를 가리킬 때) |
 | `예외를 throw한다` | `던진다` |
 | `예외를 catch한다` | `잡는다` |
+| `resume` | `이어받는다`, `실행 재개` (resume을 번역하지 않는다) |
 
 ## Read First (new session / after compact)
 
