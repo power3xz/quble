@@ -9,6 +9,7 @@ import { decode, type TField, type TModule } from "./decode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import { appendIfRegion, type TArrayInfo, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
+import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import {
   assemble,
   compiledStepsOf,
@@ -78,7 +79,7 @@ export const instantiate = (
   // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
   // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
   // rootFlat은 plantRoot가 준 [STORE, base, ...] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
-  const interpreter = new VM(
+  const vm = new VM(
     module,
     handlers,
     resources,
@@ -89,8 +90,9 @@ export const instantiate = (
     branchPool,
     createdContexts,
     rootFlat,
+    new RuntimeInterpreter(),
   );
-  const fragment = interpreter.interpret(
+  const fragment = vm.interpret(
     rootFlat,
     compId, // 루트 def
     def.codeOff,
@@ -112,7 +114,7 @@ export const instantiate = (
   const destroy = () => {
     rootRegion.detach(store, regionPool, branchPool, rootRegion);
     rootRegion.anchor.remove();
-    interpreter.removeDelegates();
+    vm.removeDelegates();
   };
   // 루트 props의 지금 값. mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다(핸들러 payload와 같은 조립).
   // 루트 슬롯 base는 rootFlat의 [STORE, base] 쌍에 루트 props 필드 순서로 놓여 있다.

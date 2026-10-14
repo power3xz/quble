@@ -55,6 +55,7 @@ import {
   type TRegion,
   truncateFor,
 } from "./region.ts";
+import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import { staticElementEnds } from "./static-spans.ts";
 import {
   assemble,
@@ -982,6 +983,7 @@ export const instantiate = (
     branchPool,
     createdContexts,
     rootFlat,
+    new RuntimeInterpreter(),
   );
   const resume = new ResumeInterpreter(vm, root);
   const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, resume.anchor())];
