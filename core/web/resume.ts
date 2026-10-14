@@ -12,6 +12,7 @@ import {
   assemble,
   compiledStepsOf,
   leafCountOf,
+  nodesOf,
   plantRoot,
   STORE,
   storeSourcePairs,
@@ -102,7 +103,7 @@ const instantiate = (
   );
   resume.finish();
   vm.interpreter = new RuntimeInterpreter();
-  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(built.childNodes);
+  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = nodesOf(built);
   rootRegion.attach(store, regionPool, branchPool, rootRegion);
   // 붙인 뒤 root 아래가 이 인스턴스의 루트 노드들이다(앵커 + 붙은 트리).
   const nodes = Array.from(root.childNodes);

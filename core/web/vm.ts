@@ -559,9 +559,13 @@ type TBinding = {
   loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
 };
 
-// 해석기가 만든 직속 노드 묶음. DocumentFragment가 이 모양을 만족하고, resume 해석기는 SSR이 그린 제자리
-// 노드를 옮기지 않으려고 노드 배열을 childNodes에 담은 객체를 낸다.
-export type TBuiltNodes = { readonly childNodes: ArrayLike<ChildNode> };
+// 해석기가 만든 직속 노드 묶음. 표현은 해석기가 정한다 - runtime 해석기는 부모에 한 번에 붙일 수 있는
+// DocumentFragment를, resume 해석기는 SSR이 그린 제자리 노드를 옮기지 않으려고 노드 배열을 낸다.
+export type TBuiltNodes = ChildNode[] | DocumentFragment;
+
+// 받는 쪽이 노드 묶음을 배열로 읽는다.
+export const nodesOf = (built: TBuiltNodes): ChildNode[] =>
+  Array.isArray(built) ? built : Array.from(built.childNodes);
 
 // 바이트코드를 읽어 노드를 내는 해석기. VM이 지금의 해석기를 interpreter 필드로 들고, lazy build와
 // @for grow가 그 시점의 해석기로 노드를 만든다. 상태는 VM이 들고 해석기는 첫 인자로 받는다.

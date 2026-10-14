@@ -14,6 +14,7 @@ import {
   assemble,
   compiledStepsOf,
   leafCountOf,
+  nodesOf,
   plantRoot,
   storeSourcePairs,
   type TCreatedContext,
@@ -102,7 +103,7 @@ export const instantiate = (
     0, // 세그먼트 인덱스 base 0
     { loopIndexStack: [], activeContexts: [] }, // 루트는 @for/@with 밖 - 빈 스택
   );
-  const rootNodes = Array.from(built.childNodes);
+  const rootNodes = nodesOf(built);
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = rootNodes;
   // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
   const fragment = document.createDocumentFragment();

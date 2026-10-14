@@ -51,7 +51,7 @@ import {
   truncateFor,
 } from "./region.ts";
 import { staticElementEnds } from "./static-spans.ts";
-import { STORE, type VM } from "./vm.ts";
+import { nodesOf, STORE, type VM } from "./vm.ts";
 
 // vm.ts의 같은 이름 도우미와 타입의 사본이다. 공통부를 뽑을 때 합친다.
 const CONST = 1;
@@ -231,7 +231,7 @@ export class ResumeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
     slotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [],
-  ): { childNodes: ChildNode[] } => {
+  ): ChildNode[] => {
     const code = this.code;
     const tops: ChildNode[] = [];
     let depth = 0; // 열린 요소 수. 0이면 지금 꺼내는 노드가 최상위다.
@@ -410,7 +410,7 @@ export class ResumeInterpreter {
               content.pathPrefix,
               content.loopIndexBase,
               content.walkStacks,
-            ).childNodes,
+            ),
           );
           break;
         }
@@ -436,7 +436,7 @@ export class ResumeInterpreter {
               walkStacks.loopIndexStack.length / 2,
               walkStacks,
               childSlotPlaceholderContents,
-            ).childNodes,
+            ),
           );
           break;
         }
@@ -554,7 +554,7 @@ export class ResumeInterpreter {
         }
       }
     }
-    return { childNodes: tops };
+    return tops;
   };
 
   // @for 회차 i의 몸체를 SSR 노드에 연결한다. 회차 인덱스를 공유 스택에 push -> 재귀 -> pop한다.
@@ -570,7 +570,7 @@ export class ResumeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-  ): { childNodes: ChildNode[] } => {
+  ): ChildNode[] => {
     walkStacks.loopIndexStack.push(indexKind, indexRef);
     const nodes = this.interpret(
       vm,
@@ -617,7 +617,7 @@ export class ResumeInterpreter {
         walkStacks,
       );
       if (tops !== null) {
-        for (const node of nodes.childNodes) {
+        for (const node of nodes) {
           tops.push(node);
         }
       }
@@ -660,12 +660,12 @@ export class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      ).childNodes;
+      );
     };
     // count가 늘 때의 회차는 노드를 새로 짓는다.
     const growIteration = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
-      vm.branchPool.entries[newBranchIndex].nodes = Array.from(
+      vm.branchPool.entries[newBranchIndex].nodes = nodesOf(
         vm.buildIteration(
           RAW,
           i,
@@ -677,7 +677,7 @@ export class ResumeInterpreter {
           pathPrefix,
           loopIndexBase,
           stacks,
-        ).childNodes,
+        ),
       );
     };
 
@@ -752,12 +752,12 @@ export class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      ).childNodes;
+      );
     };
     const growIteration = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
-      vm.branchPool.entries[newBranchIndex].nodes = Array.from(
+      vm.branchPool.entries[newBranchIndex].nodes = nodesOf(
         vm.buildIteration(
           STORE,
           indexLeaf,
@@ -769,7 +769,7 @@ export class ResumeInterpreter {
           pathPrefix,
           loopIndexBase,
           stacks,
-        ).childNodes,
+        ),
       );
     };
 
@@ -900,12 +900,12 @@ export class ResumeInterpreter {
         loopIndexBase,
         stacks,
       );
-      thenBranch.nodes = Array.from(f.childNodes);
+      thenBranch.nodes = nodesOf(f);
     };
     elseBranch.lazyBuild = () => {
       const f =
         elseBodyStart === -1
-          ? document.createDocumentFragment()
+          ? []
           : vm.interpret(
               argumentSourcePairs,
               compId,
@@ -916,7 +916,7 @@ export class ResumeInterpreter {
               loopIndexBase,
               stacks,
             );
-      elseBranch.nodes = Array.from(f.childNodes);
+      elseBranch.nodes = nodesOf(f);
     };
 
     if (condLeafIndex !== -1) {
@@ -942,7 +942,7 @@ export class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      ).childNodes;
+      );
     } else {
       initialBranch.nodes =
         elseBodyStart === -1
@@ -957,7 +957,7 @@ export class ResumeInterpreter {
               pathPrefix,
               loopIndexBase,
               stacks,
-            ).childNodes;
+            );
     }
     initialBranch.built = true;
     region.shownIndex = initialShownIndex;
