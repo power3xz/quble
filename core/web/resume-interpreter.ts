@@ -5,9 +5,7 @@
 // 한다. 그 뒤의 lazy build(꺼진 @if 가지가 켜질 때)와 @for grow는 vm.ts의 VM이 한다 -
 // 바인딩과 이벤트 위임도 그 인스턴스의 것을 불러, 이 해석기가 건 것과 이후 건 것이 한 곳에 모인다.
 
-import type { TField, TModule } from "./decode.ts";
 import { TAGS } from "./dom-tables.ts";
-import { createLeafStoreSubject } from "./leaf-store.ts";
 import {
   OP_ATTR_G,
   OP_ATTR_G_EXPR,
@@ -41,7 +39,6 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
   appendBranchOfForRegion,
@@ -49,24 +46,12 @@ import {
   appendIfRegion,
   attachGrownIterations,
   ELSE_INDEX,
-  type TArrayInfo,
   type TBranch,
   THEN_INDEX,
-  type TRegion,
   truncateFor,
 } from "./region.ts";
-import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import { staticElementEnds } from "./static-spans.ts";
-import {
-  assemble,
-  compiledStepsOf,
-  leafCountOf,
-  STORE,
-  storeSourcePairs,
-  type TCreatedContext,
-  type THandlers,
-  VM,
-} from "./vm.ts";
+import { STORE, type VM } from "./vm.ts";
 
 // vm.ts의 같은 이름 도우미와 타입의 사본이다. 공통부를 뽑을 때 합친다.
 const CONST = 1;
@@ -125,8 +110,7 @@ const inHead = (url: string): boolean => {
   );
 };
 
-class ResumeInterpreter {
-  vm: VM;
+export class ResumeInterpreter {
   code: Uint8Array;
   staticEnds: Map<number, number>;
 
@@ -136,10 +120,9 @@ class ResumeInterpreter {
   // 둔다. 자식(firstChild)은 노드를 옮겨도 그대로다.
   after: (Node | null)[] = [];
 
-  constructor(vm: VM, root: Node) {
-    this.vm = vm;
-    this.code = vm.code;
-    this.staticEnds = staticElementEnds(vm.code, 0, vm.code.length);
+  constructor(code: Uint8Array, root: Node) {
+    this.code = code;
+    this.staticEnds = staticElementEnds(code, 0, code.length);
     this.upcoming = root.firstChild;
   }
 
@@ -219,10 +202,10 @@ class ResumeInterpreter {
   };
 
   // LOAD_RES. SSR 페이지가 head에 이미 넣었으면 <link>를 또 넣지 않는다.
-  loadResource = (resId: number) => {
-    const url = this.vm.resources[resId];
-    if (url && !this.vm.loadedHrefs.has(url)) {
-      this.vm.loadedHrefs.add(url);
+  loadResource = (vm: VM, resId: number) => {
+    const url = vm.resources[resId];
+    if (url && !vm.loadedHrefs.has(url)) {
+      vm.loadedHrefs.add(url);
       if (inHead(url)) {
         return;
       }
@@ -238,6 +221,7 @@ class ResumeInterpreter {
   // startPc~endPc를 SSR 노드에 연결하고, 이 범위의 최상위 노드(앵커 포함)를 낸다. 최상위 노드는 가지가
   // branch.nodes로 들고 있다가 떼고 붙인다. 요소 안의 노드는 제자리에 있어 따로 모으지 않는다.
   interpret = (
+    vm: VM,
     argumentSourcePairs: TScope,
     compId: number,
     startPc: number,
@@ -247,8 +231,7 @@ class ResumeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
     slotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [],
-  ): ChildNode[] => {
-    const vm = this.vm;
+  ): { childNodes: ChildNode[] } => {
     const code = this.code;
     const tops: ChildNode[] = [];
     let depth = 0; // 열린 요소 수. 0이면 지금 꺼내는 노드가 최상위다.
@@ -287,7 +270,7 @@ class ResumeInterpreter {
           break;
         }
         case OP_LOAD_RES: {
-          this.loadResource(u16at());
+          this.loadResource(vm, u16at());
           break;
         }
         case OP_ELEM_OPEN: {
@@ -418,6 +401,7 @@ class ResumeInterpreter {
           }
           addTops(
             this.interpret(
+              vm,
               content.argumentSourcePairs,
               content.compId,
               content.startPc,
@@ -426,7 +410,7 @@ class ResumeInterpreter {
               content.pathPrefix,
               content.loopIndexBase,
               content.walkStacks,
-            ),
+            ).childNodes,
           );
           break;
         }
@@ -441,6 +425,7 @@ class ResumeInterpreter {
           const childDef = vm.module.defs[childCompId];
           addTops(
             this.interpret(
+              vm,
               childArgumentSourcePairs,
               childCompId,
               childDef.codeOff,
@@ -451,16 +436,27 @@ class ResumeInterpreter {
               walkStacks.loopIndexStack.length / 2,
               walkStacks,
               childSlotPlaceholderContents,
-            ),
+            ).childNodes,
           );
           break;
         }
         case OP_IF: {
-          pc = this.runIf(pc, argumentSourcePairs, compId, pathPrefix, loopIndexBase, walkStacks, branch, topsIfTop());
+          pc = this.runIf(
+            vm,
+            pc,
+            argumentSourcePairs,
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            walkStacks,
+            branch,
+            topsIfTop(),
+          );
           break;
         }
         case OP_IF_EXPR: {
           pc = this.runIfExpr(
+            vm,
             pc,
             argumentSourcePairs,
             compId,
@@ -477,6 +473,7 @@ class ResumeInterpreter {
           const bodyStart = pc;
           const forEndPc = vm.cachedForEnd(bodyStart);
           this.inlineFor(
+            vm,
             count,
             bodyStart,
             forEndPc,
@@ -500,6 +497,7 @@ class ResumeInterpreter {
           const forEndPc = vm.cachedForEnd(bodyStart);
           if (kind === CONST || kind === RAW) {
             this.inlineFor(
+              vm,
               kind === RAW ? ref : Number(vm.module.constpool[ref]) || 0,
               bodyStart,
               forEndPc,
@@ -513,6 +511,7 @@ class ResumeInterpreter {
             );
           } else {
             this.reactiveCountFor(
+              vm,
               ref + offset,
               bodyStart,
               forEndPc,
@@ -535,6 +534,7 @@ class ResumeInterpreter {
           const bodyStart = pc;
           const forEndPc = vm.cachedForEnd(bodyStart);
           this.reactiveArrayFor(
+            vm,
             arrayLeafIndex,
             bodyStart,
             forEndPc,
@@ -554,11 +554,12 @@ class ResumeInterpreter {
         }
       }
     }
-    return tops;
+    return { childNodes: tops };
   };
 
   // @for 회차 i의 몸체를 SSR 노드에 연결한다. 회차 인덱스를 공유 스택에 push -> 재귀 -> pop한다.
   buildIteration = (
+    vm: VM,
     indexKind: number,
     indexRef: number,
     bodyStart: number,
@@ -569,9 +570,10 @@ class ResumeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-  ): ChildNode[] => {
+  ): { childNodes: ChildNode[] } => {
     walkStacks.loopIndexStack.push(indexKind, indexRef);
     const nodes = this.interpret(
+      vm,
       argumentSourcePairs,
       compId,
       bodyStart,
@@ -588,6 +590,7 @@ class ResumeInterpreter {
 
   // 안 변하는 @for - 각 회차를 지금 가지에 인라인한다. 회차 노드는 부모의 최상위(tops)로 모은다.
   inlineFor = (
+    vm: VM,
     count: number,
     bodyStart: number,
     forEndPc: number,
@@ -601,6 +604,7 @@ class ResumeInterpreter {
   ) => {
     for (let i = 0; i < count; i++) {
       const nodes = this.buildIteration(
+        vm,
         RAW,
         i,
         bodyStart,
@@ -613,7 +617,7 @@ class ResumeInterpreter {
         walkStacks,
       );
       if (tops !== null) {
-        for (const node of nodes) {
+        for (const node of nodes.childNodes) {
           tops.push(node);
         }
       }
@@ -622,6 +626,7 @@ class ResumeInterpreter {
 
   // 숫자 count 반응 @for. region과 처음 회차는 SSR 노드에 연결하고, count가 늘 때의 회차는 VM이 노드를 만든다.
   reactiveCountFor = (
+    vm: VM,
     countLeafIndex: number,
     bodyStart: number,
     forEndPc: number,
@@ -633,7 +638,6 @@ class ResumeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const vm = this.vm;
     const forRegionIndex = appendForRegion(vm.regionPool, countLeafIndex, this.anchor());
     const region = vm.regionPool.entries[forRegionIndex];
     branch.childRegionIndices.push(forRegionIndex);
@@ -645,6 +649,7 @@ class ResumeInterpreter {
     const resumeIteration = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
       vm.branchPool.entries[newBranchIndex].nodes = this.buildIteration(
+        vm,
         RAW,
         i,
         bodyStart,
@@ -655,7 +660,7 @@ class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      );
+      ).childNodes;
     };
     // count가 늘 때의 회차는 노드를 새로 짓는다.
     const growIteration = (i: number) => {
@@ -701,6 +706,7 @@ class ResumeInterpreter {
 
   // 배열 반응 @for - reactiveCountFor와 같은 구조에서 회차변수 slot이 그 요소 leaf에 붙는다.
   reactiveArrayFor = (
+    vm: VM,
     arrayLeafIndex: number,
     bodyStart: number,
     forEndPc: number,
@@ -712,7 +718,6 @@ class ResumeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const vm = this.vm;
     const info = vm.arrayPool.entries[Number(vm.store.get(arrayLeafIndex))];
     if (info.sizeLeafIndex === null) {
       info.sizeLeafIndex = vm.store.alloc([info.elemStartLeafIndices.length]);
@@ -736,6 +741,7 @@ class ResumeInterpreter {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchPool.entries[newBranchIndex].nodes = this.buildIteration(
+        vm,
         STORE,
         indexLeaf,
         bodyStart,
@@ -746,7 +752,7 @@ class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      );
+      ).childNodes;
     };
     const growIteration = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
@@ -791,6 +797,7 @@ class ResumeInterpreter {
 
   // IF - 조건 슬롯을 그대로 조건 칸으로 쓴다. pc는 IF operand 직후이고 IF_END 다음 pc를 돌려준다.
   runIf = (
+    vm: VM,
     pc: number,
     argumentSourcePairs: TScope,
     compId: number,
@@ -806,9 +813,10 @@ class ResumeInterpreter {
     const condRef = slotRef(argumentSourcePairs, condScopeIndex);
     const condLeafIndex = condIsConst ? -1 : condRef + condOffset;
     return this.buildIfRegion(
+      vm,
       pc,
       condLeafIndex,
-      condIsConst ? this.vm.module.constpool[condRef] : this.vm.store.get(condLeafIndex),
+      condIsConst ? vm.module.constpool[condRef] : vm.store.get(condLeafIndex),
       false,
       argumentSourcePairs,
       compId,
@@ -822,6 +830,7 @@ class ResumeInterpreter {
 
   // IF_EXPR - 식의 결과를 담을 파생 칸을 잡고, 식이 읽는 칸을 구독해 다시 센다. 그 뒤는 IF와 같다.
   runIfExpr = (
+    vm: VM,
     pc: number,
     argumentSourcePairs: TScope,
     compId: number,
@@ -831,11 +840,11 @@ class ResumeInterpreter {
     branch: TBranch,
     tops: ChildNode[] | null,
   ): number => {
-    const vm = this.vm;
     const expr = vm.module.defs[compId].exprs[this.code[pc++]];
     const value = vm.subscribeExpr(expr, argumentSourcePairs, branch, (v) => vm.store.set(condLeafIndex, v));
     const condLeafIndex = vm.store.alloc([value]);
     return this.buildIfRegion(
+      vm,
       pc,
       condLeafIndex,
       vm.store.get(condLeafIndex),
@@ -853,6 +862,7 @@ class ResumeInterpreter {
   // IF/IF_EXPR 공통 - then/else region을 만들고 지금 보이는 가지만 SSR 노드에 연결한다. 안 보이는 가지는
   // VM으로 build하는 lazyBuild를 심어 둔다(켜질 때 노드를 새로 짓는다).
   buildIfRegion = (
+    vm: VM,
     pc: number,
     condLeafIndex: number,
     condInitial: unknown,
@@ -865,7 +875,6 @@ class ResumeInterpreter {
     branch: TBranch,
     tops: ChildNode[] | null,
   ): number => {
-    const vm = this.vm;
     const regionIndex = appendIfRegion(vm.regionPool, vm.branchPool, condLeafIndex, ownsCondLeaf, this.anchor());
     const region = vm.regionPool.entries[regionIndex];
     branch.childRegionIndices.push(regionIndex);
@@ -924,6 +933,7 @@ class ResumeInterpreter {
     const initialBranch = vm.branchPool.entries[region.branchIndices[initialShownIndex]];
     if (initialShownIndex === THEN_INDEX) {
       initialBranch.nodes = this.interpret(
+        vm,
         argumentSourcePairs,
         compId,
         ifBodyStart,
@@ -932,12 +942,13 @@ class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      );
+      ).childNodes;
     } else {
       initialBranch.nodes =
         elseBodyStart === -1
           ? []
           : this.interpret(
+              vm,
               argumentSourcePairs,
               compId,
               elseBodyStart,
@@ -946,7 +957,7 @@ class ResumeInterpreter {
               pathPrefix,
               loopIndexBase,
               stacks,
-            );
+            ).childNodes;
     }
     initialBranch.built = true;
     region.shownIndex = initialShownIndex;
@@ -954,76 +965,3 @@ class ResumeInterpreter {
     return ifEndPc + 1;
   };
 }
-
-// store를 심은 뒤 SSR 노드를 이어서 한 인스턴스를 짓는다. root의 자식들이 SSR이 그린 노드들이다.
-// 반환은 runtime.ts의 instantiate와 같고, nodes가 바로 그 SSR 노드들이다.
-export const instantiate = (
-  module: TModule,
-  resources: string[],
-  loadedHrefs: Set<unknown>,
-  compId: number,
-  handlers: THandlers,
-  { leaves, rootFlat }: { leaves: unknown[]; rootFlat: number[] },
-  arrayPool: Pool<TArrayInfo>,
-  root: Node,
-) => {
-  const def = module.defs[compId];
-  const store = createLeafStoreSubject(leaves);
-  const regionPool: Pool<TRegion> = new Pool();
-  const branchPool: Pool<TBranch> = new Pool();
-  const createdContexts: TCreatedContext[] = [];
-  const vm = new VM(
-    module,
-    handlers,
-    resources,
-    loadedHrefs,
-    store,
-    arrayPool,
-    regionPool,
-    branchPool,
-    createdContexts,
-    rootFlat,
-    new RuntimeInterpreter(),
-  );
-  const resume = new ResumeInterpreter(vm, root);
-  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, resume.anchor())];
-  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true;
-  rootRegion.shownIndex = THEN_INDEX;
-
-  const tops = resume.interpret(
-    rootFlat,
-    compId,
-    def.codeOff,
-    def.codeOff + def.codeLen,
-    rootRegion.branchIndices[THEN_INDEX],
-    "",
-    0,
-    { loopIndexStack: [], activeContexts: [] },
-  );
-  resume.finish();
-  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = tops;
-  rootRegion.attach(store, regionPool, branchPool, rootRegion);
-  // 붙인 뒤 root 아래가 이 인스턴스의 루트 노드들이다(앵커 + 붙은 트리).
-  const nodes = Array.from(root.childNodes);
-  const destroy = () => {
-    rootRegion.detach(store, regionPool, branchPool, rootRegion);
-    rootRegion.anchor.remove();
-    vm.removeDelegates();
-  };
-  const snapshot = (): Record<string, unknown> => {
-    const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
-    const value: Record<string, unknown> = {};
-    rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
-      const pairs = storeSourcePairs(rootFlat[i * 2 + 1], leafCountOf(module, typeRef));
-      value[module.constpool[nameConstIndex] as string] = assemble(
-        compiledStepsOf(module, typeRef),
-        pairs,
-        store,
-        module,
-        arrayPool,
-      );
-    });
-    return value;
-  };
-  return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
-};
