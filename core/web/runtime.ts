@@ -3,25 +3,25 @@
 //   compile(bytes)  -> blueprintOf(compId) => Blueprint  (def를 청사진으로)
 //   Blueprint(store, argumentSourcePairs) -> Instance     (청사진 호출 = 인스턴스화. DOM/구독 생성)
 //
-// 바이트코드를 훑어 DOM/구독을 짓는 인터프리터는 interpreter.ts에 있다.
+// 바이트코드를 훑어 DOM/구독을 짓는 VM은 vm.ts에 있다.
 
 import { decode, type TField, type TModule } from "./decode.ts";
+import { createLeafStoreSubject } from "./leaf-store.ts";
+import { Pool } from "./pool-allocator.ts";
+import { appendIfRegion, type TArrayInfo, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
 import {
   assemble,
   compiledStepsOf,
-  Interpreter,
   leafCountOf,
   plantRoot,
   storeSourcePairs,
   type TCreatedContext,
   type THandlers,
-} from "./interpreter.ts";
-import { createLeafStoreSubject } from "./leaf-store.ts";
-import { Pool } from "./pool-allocator.ts";
-import { appendIfRegion, type TArrayInfo, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
+  VM,
+} from "./vm.ts";
 
 // 다른 파일이 runtime.ts에서 가져다 쓰는 이름들.
-export { leafCountOf, plantRoot, STORE, swapDeleteAt, type THandlers } from "./interpreter.ts";
+export { leafCountOf, plantRoot, STORE, swapDeleteAt, type THandlers } from "./vm.ts";
 
 // ── 공개 API ─────────────────────────────────────────────────────────
 // qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
@@ -78,7 +78,7 @@ export const instantiate = (
   // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
   // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
   // rootFlat은 plantRoot가 준 [STORE, base, ...] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
-  const interpreter = new Interpreter(
+  const interpreter = new VM(
     module,
     handlers,
     resources,

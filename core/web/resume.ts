@@ -1,11 +1,11 @@
 // SSR이 그린 DOM에 resume하는 진입점. 첫 그리기는 resume-interpreter.ts가 하고, 그 뒤의 build는
-// interpreter.ts가 한다. CSR만 쓰는 번들은 이 파일을 싣지 않는다.
+// vm.ts의 VM이 한다. CSR만 쓰는 번들은 이 파일을 싣지 않는다.
 
 import { decode, type TField, type TModule } from "./decode.ts";
-import { leafCountOf, plantRoot, STORE, type THandlers } from "./interpreter.ts";
 import { Pool } from "./pool-allocator.ts";
 import { appendArrayInfo, type TArrayInfo } from "./region.ts";
 import { instantiate } from "./resume-interpreter.ts";
+import { leafCountOf, plantRoot, STORE, type THandlers } from "./vm.ts";
 
 // quble-ssr --snapshot(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
 //   leaves  store 배열. JSON에 undefined가 없어 그 자리는 null이고 undef에 인덱스가 적혀 있다.

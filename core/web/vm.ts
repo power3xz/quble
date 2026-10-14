@@ -597,7 +597,7 @@ type TBinding = {
 // 한 Blueprint 호출(인스턴스화)마다 하나. 인스턴스 불변 상태(store/각종 pool/module 등)를
 // 필드로 들고, interpret으로 바이트코드를 훑어 DOM/구독을 짓는다. 호출마다 다른 값(code/pc/
 // 가지 등)은 파라미터로 남기고, 인스턴스 내내 같은 값만 필드로 올린다.
-export class Interpreter {
+export class VM {
   module: TModule;
   code: Uint8Array;
   handlers: THandlers;
