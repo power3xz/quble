@@ -5,7 +5,7 @@ import { decode, type TField, type TModule } from "./decode.ts";
 import { Pool } from "./pool-allocator.ts";
 import { appendArrayInfo, type TArrayInfo } from "./region.ts";
 import { ResumeCursor } from "./resume-cursor.ts";
-import { instantiate, leafCountOf, plantRoot, STORE, type THandlers, type TNodeSource } from "./runtime.ts";
+import { instantiate, leafCountOf, plantRoot, STORE, type THandlers, type TNodeSource } from "./resume-interpreter.ts";
 
 // quble-ssr --snapshot(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
 //   leaves  store 배열. JSON에 undefined가 없어 그 자리는 null이고 undef에 인덱스가 적혀 있다.
