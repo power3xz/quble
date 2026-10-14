@@ -8,7 +8,7 @@
 |---|---|
 | expr-opcode.ts | opcode와 명령 크기 |
 | expr-skip-table.ts | 식 정의마다 한 번 만드는 표(`buildSkipTable`) |
-| runtime.ts | 평가(`runExpr`), 구독(`subscribeExpr`), 구독 다시 걸기(`resubscribeReadLeaf`) |
+| vm.ts | 평가(`runExpr`), 구독(`subscribeExpr`), 구독 다시 걸기(`resubscribeReadLeaf`) |
 | region.ts | 가지를 떼고 붙일 때 구독 풀기와 다시 걸기(`restoreBranchSubs`) |
 
 ## 1. 식의 모양 - 트리와 후위 바이트

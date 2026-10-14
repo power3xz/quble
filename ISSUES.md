@@ -50,7 +50,7 @@
   목록에 닿는다. 타입은 `TLeafIndex<T[]>`에서 `TLeafArray<T>`로 갈리고, 요소가 객체면 객체 노드,
   스칼라면 leaf로 파생된다. `length`도 지금 개수를 준다.
 
-- **라이브 NodeList 순회로 노드 누락 (@for 다중 노드에서 발각)** - runtime.ts가 fragment의
+- **라이브 NodeList 순회로 노드 누락 (@for 다중 노드에서 발각)** - runtime-interpreter.ts가 fragment의
   자식을 부모에 붙일 때 `for (const node of fragment.childNodes) parent.appendChild(node)`로
   돌았다. `childNodes`는 라이브라 `appendChild`가 노드를 fragment에서 떼어낼 때마다 컬렉션이
   줄어 인덱스가 밀리고, 매 순회 한 노드씩 건너뛴다. 단일 노드 컴포넌트에선 안 드러났고, `@for`가
@@ -87,7 +87,7 @@
   (React의 `e.target.value`)에 도달할 길이 없었다. payload 식은 props 변수/리터럴만 참조해
   (SYNTAX.md #2.3) 선언 시점 store 값에 묶이고, 타이핑한 값은 어디에도 안 실렸다. **해결:**
   payload 문법을 늘리지 않고 핸들러 ctx에 발화한 DOM `Event`를 그대로 넘긴다(`ctx.event`,
-  runtime.ts dispatch). 값은 `event.target.value`로 읽고, 필요하면 `set`으로 store에 되먹여
+  vm.ts dispatch). 값은 `event.target.value`로 읽고, 필요하면 `set`으로 store에 되먹여
   형제 보간을 갱신한다 - 입력 요소 자신은 재대입하지 않는 **uncontrolled** 방식이다(DOM이 표시값의
   주인, store는 되먹인 값만 가짐). payload는 여전히 store 값이라 타이핑 값과 다르고, 그 구분까지
   테스트가 못박는다(`core/web/event-dom-types.test.ts`).
@@ -145,7 +145,7 @@
   qubb에 그대로 있다.)
 
 - **버블 차단 끄는 옵션 미정** - 위임 리스너는 `stopPropagation`을 디폴트로 호출해 버블을
-  끊는다(runtime.ts). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
+  끊는다(vm.ts). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
   필요가 구체화되면 그 모양에 맞춰 설계한다.
 
 - **createdContexts 회수 - 지금 구현 불가** - 런타임은 EnterContext마다 컨텍스트를

@@ -454,11 +454,11 @@ interpret(startPc, endPc, regionIndex, branchIndex)
 
 검증 순서: (1) 스킵 없는 버전(양쪽 다 build, IF_END에서 비활성 구독 해제)으로 뼈대 확인 ->
 (2) cond 변경 swap 동작 확인 -> (3) skip + lazy build 도입. **(1)/(2)/(3) 모두 완료**
-(`core/web/runtime.ts` 해석, `region.ts`, 테스트는 `if-integration.test.ts`로 이관).
+(`core/web/runtime-interpreter.ts` 해석, `region.ts`, 테스트는 `if-integration.test.ts`로 이관).
 
 ### `@for`/`@if` 회차 뼈대 cloneNode
 
--> **구현 완료.** 구현은 `core/web/runtime.ts`의 `templatePlanOf`/`cloneTemplate`(뼈대와 값 자리 목록)이고
+-> **구현 완료.** 구현은 `core/web/runtime-interpreter.ts`의 `templatePlanOf`/`cloneTemplate`(뼈대와 값 자리 목록)이고
 별도 확정 설계 문서는 없다. 아래는 도입 당시 설계 메모(기록 보존).
 
 경계(if/for) 사이 구간은 요소 구조가 회차 불변이고 값(TextVar)만 바뀐다. 회차마다
