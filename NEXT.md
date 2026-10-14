@@ -8,13 +8,11 @@
 
 ## 하는 중
 
-runtime에서 resume 코드를 걷어내기 위해 runtime 해석기와 resume 해석기를 대등하게 나눈다. 둘은
-공통 객체 `VM`의 `interpreter` 필드에 끼워지고, 첫 그리기 뒤에 `VM`이 resume 해석기를 runtime
-해석기로 바꾼다. 1) `Interpreter` 클래스를 `VM`(`vm.ts`)으로 이름 변경. 2) 바이트코드를 해석하는
-멤버를 `RuntimeInterpreter`(`runtime-interpreter.ts`)로 이동하고 `TInterpreter`(`interpreter.ts`)를
-정의. 3) `ResumeInterpreter`가 `VM`에만 기대도록 변경하고 첫 그리기 뒤 `vm.interpreter`를 교체.
-4) 공통부 추출. `resume-split` 브랜치.
+없음
 
 ## 할 것
 
-없음
+runtime 해석기와 resume 해석기의 공통부 추출. `resume-interpreter.ts`에 복사해 둔 도우미와 타입
+(`CONST`, `RAW`, `TScope`, `slotKind`, `slotRef`, `scopeWithIteration`, `TWalkStacks`,
+`snapshotStacks`, `TSlotPlaceholderContent`)을 `vm.ts`의 export로 합친다. 두 해석기에 비슷하게 있는
+`inlineFor`, `runIf`, region 만들기의 같은 부분은 뽑되, 분기(if/else)로 합치지 않는다.
