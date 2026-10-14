@@ -1342,6 +1342,7 @@
       "label": "즉시"
     }
   ],
+  "static_spans": [{}],
   "styled_res": [{}],
   "template_clone": [
     {
