@@ -53,6 +53,7 @@
 | `예외를 catch한다` | `잡는다` |
 | `resume` | `이어받는다`, `실행 재개` (resume을 번역하지 않는다) |
 | `해석한다` / `순회한다` | `걷는다` (바이트코드를 처리할 때) |
+| `만든다` | `짓는다` (build/create를 번역할 때) |
 
 ## Read First (new session / after compact)
 
