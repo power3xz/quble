@@ -593,28 +593,6 @@ type TBinding = {
   loopIndices: Partial<{ [key in TIndexSymbol]: { kind: number; ref: number } }>; // 회차 인덱스 소스(kind, ref) - 발화 시 store.get(STORE)/값(RAW)으로 해소
 };
 
-// 인터프리터가 노드를 받는 곳. 기본(domNodeSource)은 새로 만들고, resume.ts는 SSR DOM의 기존 노드를 준다.
-//   reuses       true면 노드가 이미 있다 - 템플릿 복제를 하지 않는다
-//   anchor       region 앵커. undefined면 region이 새로 만든다
-//   hasResource  LOAD_RES의 URL이 이미 문서에 있는지 - 있으면 <link>를 넣지 않는다
-//   finish       처음 그리기가 끝났을 때 한 번 부른다(없을 수 있다)
-export type TNodeSource = {
-  reuses: boolean;
-  element: (tag: string) => HTMLElement;
-  text: (text: string) => Text;
-  anchor: () => Comment | undefined;
-  hasResource: (url: string) => boolean;
-  finish?: () => void;
-};
-
-export const domNodeSource: TNodeSource = {
-  reuses: false,
-  element: (tag) => document.createElement(tag),
-  text: (text) => document.createTextNode(text),
-  anchor: () => undefined,
-  hasResource: () => false,
-};
-
 // ── 한 인스턴스의 인터프리터 ─────────────────────────────────────────
 // 한 Blueprint 호출(인스턴스화)마다 하나. 인스턴스 불변 상태(store/각종 pool/module 등)를
 // 필드로 들고, interpret으로 바이트코드를 훑어 DOM/구독을 짓는다. 호출마다 다른 값(code/pc/
@@ -654,11 +632,6 @@ export class Interpreter {
   // 범위 -> 템플릿 복제 계획(복제할 수 없는 범위면 null). 키는 시작 pc - interpret 범위는 끝이 시작에서
   // 정해진다(@for 본문은 FOR_END, @if 가지는 ELSE/IF_END, 합성은 def 끝).
   templatePlanCache = new Map<number, TTemplatePlan | null>();
-
-  // 노드를 만들던 자리가 여기서 노드를 받는다. 기본은 새로 만들고, resume.ts는 SSR DOM의 기존 노드를
-  // 꺼내 준다. 처음 그리기가 끝나면 호출측이 domNodeSource로 되돌린다 - 그 뒤의 lazy build와
-  // @for grow는 노드를 새로 만든다.
-  nodeSource: TNodeSource = domNodeSource;
 
   constructor(
     module: TModule,
@@ -1285,7 +1258,7 @@ export class Interpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex, this.nodeSource.anchor());
+    const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex);
     const region = this.regionPool.entries[forRegionIndex];
     branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
     parent.appendChild(region.anchor);
@@ -1374,7 +1347,7 @@ export class Interpreter {
       }
     }
 
-    const forRegionIndex = appendForRegion(this.regionPool, sizeLeafIndex, this.nodeSource.anchor());
+    const forRegionIndex = appendForRegion(this.regionPool, sizeLeafIndex);
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
     const region = this.regionPool.entries[forRegionIndex];
     branch.childRegionIndices.push(forRegionIndex);
@@ -1786,9 +1759,6 @@ export class Interpreter {
     const url = this.resources[resId];
     if (url && !this.loadedHrefs.has(url)) {
       this.loadedHrefs.add(url);
-      if (this.nodeSource.hasResource(url)) {
-        return;
-      }
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = url;
@@ -2045,8 +2015,7 @@ export class Interpreter {
     slotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [],
   ): DocumentFragment => {
     // 요소/텍스트/값 자리/이벤트만으로 된 범위(@for 회차 본문 등)는 해석하지 않고 뼈대를 복제한다.
-    // 이어받는 동안(nodeSource.reuses)에는 복제하지 않는다 - 노드는 SSR DOM에 이미 있고, 해석하며 하나씩 꺼낸다.
-    const plan = this.nodeSource.reuses ? null : this.templatePlanOf(startPc, endPc);
+    const plan = this.templatePlanOf(startPc, endPc);
     if (plan !== null) {
       return this.cloneTemplate(
         plan,
@@ -2093,7 +2062,7 @@ export class Interpreter {
         }
         case OP_ELEM_OPEN: {
           const tag = TAGS[u16at()];
-          pending = this.nodeSource.element(tag);
+          pending = document.createElement(tag);
           break;
         }
         case OP_ATTR_G: {
@@ -2147,12 +2116,12 @@ export class Interpreter {
         }
         case OP_TEXT: {
           const text = this.module.constpool[u16at()] as string;
-          nodeTop().appendChild(this.nodeSource.text(text));
+          nodeTop().appendChild(document.createTextNode(text));
           break;
         }
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR: {
-          const node = this.nodeSource.text("");
+          const node = document.createTextNode("");
           this.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
           pc += operandLen(op);
           nodeTop().appendChild(node);
@@ -2668,13 +2637,7 @@ export class Interpreter {
     branch: TBranch,
     parent: Node,
   ): number => {
-    const regionIndex = appendIfRegion(
-      this.regionPool,
-      this.branchPool,
-      condLeafIndex,
-      ownsCondLeaf,
-      this.nodeSource.anchor(),
-    );
+    const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, ownsCondLeaf);
     const region = this.regionPool.entries[regionIndex];
     branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
     const thenBranchIndex = region.branchIndices[THEN_INDEX];

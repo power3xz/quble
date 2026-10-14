@@ -9,21 +9,19 @@ import { decode, type TField, type TModule } from "./decode.ts";
 import {
   assemble,
   compiledStepsOf,
-  domNodeSource,
   Interpreter,
   leafCountOf,
   plantRoot,
   storeSourcePairs,
   type TCreatedContext,
   type THandlers,
-  type TNodeSource,
 } from "./interpreter.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import { appendIfRegion, type TArrayInfo, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
 
 // 다른 파일이 runtime.ts에서 가져다 쓰는 이름들.
-export { leafCountOf, plantRoot, STORE, swapDeleteAt, type THandlers, type TNodeSource } from "./interpreter.ts";
+export { leafCountOf, plantRoot, STORE, swapDeleteAt, type THandlers } from "./interpreter.ts";
 
 // ── 공개 API ─────────────────────────────────────────────────────────
 // qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
@@ -47,13 +45,12 @@ export const compile = (bytes: Uint8Array, resources: string[] = []) => {
       // rootValue를 루트 props 타입대로 store에 펴 심고(고정부 연속 + 배열 요소는 뒤로), 각 루트
       // 슬롯의 base leafIndex를 rootFlat([STORE, base, ...])으로 얻는다. 배열 요소는 arrayPool에 등록된다.
       const planted = plantRoot(module, rootValue, arrayPool);
-      return instantiate(module, resources, loadedHrefs, compId, handlers, planted, arrayPool, domNodeSource);
+      return instantiate(module, resources, loadedHrefs, compId, handlers, planted, arrayPool);
     };
 };
 
-// store를 심은 뒤 한 인스턴스를 짓는다. compile(plantRoot)과 resume.ts(스냅샷 또는 plantRoot, SSR 노드 이어받기)가
-// 함께 쓴다. code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 - def/자식 구간마다
-// subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
+// store를 심은 뒤 한 인스턴스를 짓는다. code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 -
+// def/자식 구간마다 subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 export const instantiate = (
   module: TModule,
   resources: string[],
@@ -62,7 +59,6 @@ export const instantiate = (
   handlers: THandlers,
   { leaves, rootFlat }: { leaves: unknown[]; rootFlat: number[] },
   arrayPool: Pool<TArrayInfo>,
-  nodeSource: TNodeSource,
 ) => {
   const def = module.defs[compId];
   const store = createLeafStoreSubject(leaves);
@@ -74,7 +70,7 @@ export const instantiate = (
   // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
   // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
   const createdContexts: TCreatedContext[] = [];
-  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, nodeSource.anchor())]; // 루트도 region(인덱스 0)
+  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1)]; // 루트도 region(인덱스 0)
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
   rootRegion.shownIndex = THEN_INDEX;
 
@@ -94,7 +90,6 @@ export const instantiate = (
     createdContexts,
     rootFlat,
   );
-  interpreter.nodeSource = nodeSource;
   const fragment = interpreter.interpret(
     rootFlat,
     compId, // 루트 def
@@ -105,9 +100,6 @@ export const instantiate = (
     0, // 세그먼트 인덱스 base 0
     { loopIndexStack: [], activeContexts: [] }, // 루트는 @for/@with 밖 - 빈 스택
   );
-  // 처음 그리기가 끝났다 - SSR 노드를 다 짚었는지 보고, 이후의 build는 노드를 새로 만들게 한다.
-  nodeSource.finish?.();
-  interpreter.nodeSource = domNodeSource;
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(fragment.childNodes);
   fragment.prepend(rootRegion.anchor); // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
   rootRegion.attach(store, regionPool, branchPool, rootRegion);
