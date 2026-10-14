@@ -175,7 +175,7 @@ fn signature(h: &Handler, root_name: &str) -> String {
     format!("THandler<{data}, {props}, {ctx}, {loops}, {store}>")
 }
 
-/// prop 선언 타입 -> 핸들러가 받는 주소 트리(runtime.ts leafTree와 같은 규칙).
+/// prop 선언 타입 -> 핸들러가 받는 주소 트리(vm.ts leafTree와 같은 규칙).
 ///
 /// ```text
 /// 원시  string              -> TLeafIndex<string>
@@ -608,7 +608,7 @@ mod tests {
     }
 
     /// 핸들러 params에 event와 store가 있다. 런타임이 실제로 넘기는 것들이라 빠지면 핸들러가
-    /// 그것을 받는 순간 타입이 안 맞는다(core/web/runtime.ts의 핸들러 호출부).
+    /// 그것을 받는 순간 타입이 안 맞는다(core/web/vm.ts의 핸들러 호출부).
     ///
     /// store는 TStore 제네릭으로 받고 시그니처가 루트 props 타입을 채운다 - 런타임이 루트
     /// (defs[0]) 기준 leafIndex 트리를 넘기므로 그 트리가 곧 루트의 props다.
@@ -734,7 +734,7 @@ mod tests {
     }
 
     /// 배열은 칸 하나가 leaf(TLeafIndex<T[]>)고 객체는 여러 leaf의 묶음(TLeafObject)이다 -
-    /// 나란히 두면 그 갈림이 드러난다(runtime.ts leafTree와 같은 규칙).
+    /// 나란히 두면 그 갈림이 드러난다(vm.ts leafTree와 같은 규칙).
     #[test]
     fn array_is_one_leaf_object_is_a_node() {
         let out = dts(r#"

@@ -1,0 +1,68 @@
+component StaticOnly {
+  template {
+    div(class="a") {
+      span() { "x" }
+      p() { "y" }
+    }
+  }
+}
+
+component DynamicText {
+  props { t: string }
+  template {
+    div() {
+      span() { ${t} }
+      p() { "y" }
+    }
+  }
+}
+
+component DynamicAttrAndEvent {
+  props { c: string }
+  events { PICK({}) }
+  template {
+    div() {
+      a(class={c}) { "x" }
+      button(@click:PICK) { "go" }
+      em() { "s" }
+    }
+  }
+}
+
+component WithRender {
+  template {
+    div() {
+      Leaf( /)
+      b() { "s" }
+    }
+  }
+}
+
+component Leaf {
+  template {
+    i() { "c" }
+  }
+}
+
+component WithIf {
+  props { on: bool }
+  template {
+    div() {
+      @if (on) {
+        span() { "s" }
+      }
+      p() { "x" }
+    }
+  }
+}
+
+component DeepStatic {
+  template {
+    div() {
+      ul() {
+        li() { "a" }
+        li() { "b" }
+      }
+    }
+  }
+}

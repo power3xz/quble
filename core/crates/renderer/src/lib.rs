@@ -1,6 +1,6 @@
 //! Quble SSR 렌더러(프로토타입): qubb + 루트 props 데이터(JSON)로 HTML 문자열을 만든다.
 //!
-//! JS 런타임(core/web/runtime.ts)이 처음 그릴 때 만드는 DOM과 같은 모양을 문자열로 낸다 - 같은
+//! JS 런타임(core/web/runtime-interpreter.ts)이 처음 그릴 때 만드는 DOM과 같은 모양을 문자열로 낸다 - 같은
 //! 순서로 opcode를 해석하되 노드 대신 문자열을, 구독 대신 아무것도 만들지 않는다. region 앵커 주석
 //! (`<!--qb:region#N-->`)도 런타임과 같은 번호로 낸다.
 

@@ -1,11 +1,24 @@
-// SSR이 그린 DOM을 이어받는(resume) 진입점. 인터프리터는 runtime.ts의 것을 그대로 쓰고, 노드를 새로
-// 만들던 자리에 SSR 노드를 꺼내 주는 TNodeSource만 바꿔 끼운다. CSR만 쓰는 번들은 이 파일을 싣지 않는다.
+// SSR이 그린 DOM에 resume하는 진입점. 첫 그리기는 resume-interpreter.ts의 ResumeInterpreter가 하고,
+// 그 뒤의 lazy build와 @for grow는 runtime-interpreter.ts의 RuntimeInterpreter가 한다. 둘은 서로를
+// 모르고 VM의 interpreter 필드에 번갈아 끼워진다. CSR만 쓰는 번들은 이 파일을 싣지 않는다.
 
 import { decode, type TField, type TModule } from "./decode.ts";
+import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
-import { appendArrayInfo, type TArrayInfo } from "./region.ts";
-import { ResumeCursor } from "./resume-cursor.ts";
-import { instantiate, leafCountOf, plantRoot, STORE, type THandlers, type TNodeSource } from "./runtime.ts";
+import { appendArrayInfo, appendIfRegion, type TArrayInfo, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
+import { ResumeInterpreter } from "./resume-interpreter.ts";
+import { RuntimeInterpreter } from "./runtime-interpreter.ts";
+import {
+  assemble,
+  compiledStepsOf,
+  leafCountOf,
+  plantRoot,
+  STORE,
+  storeSourcePairs,
+  type TCreatedContext,
+  type THandlers,
+  VM,
+} from "./vm.ts";
 
 // quble-ssr --snapshot(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
 //   leaves  store 배열. JSON에 undefined가 없어 그 자리는 null이고 undef에 인덱스가 적혀 있다.
@@ -41,34 +54,83 @@ export const adoptSnapshot = (module: TModule, snapshot: TLeafSnapshot, arrayPoo
   return { leaves, rootFlat };
 };
 
-// SSR 페이지가 head에 이미 넣은 리소스 - <link href>, 또는 인라인한 <style data-qb-href>. 속성은 상대 경로일
-// 수 있어 둘 다 문서 주소 기준으로 푼 값끼리 견준다. about:blank 문서처럼 풀 기준이 없으면 문자열 그대로 견준다.
-const resolveHref = (href: string): string => {
-  try {
-    return new URL(href, document.baseURI).href;
-  } catch {
-    return href;
-  }
-};
-
-const inHead = (url: string): boolean => {
-  const resolved = resolveHref(url);
-  return [...document.head.querySelectorAll("link, style[data-qb-href]")].some(
-    (el) => resolveHref(el.getAttribute("href") ?? el.getAttribute("data-qb-href") ?? "") === resolved,
+// store를 심은 뒤 SSR 노드를 이어서 한 인스턴스를 만든다. root의 자식들이 SSR이 그린 노드들이다.
+// 반환은 runtime.ts의 instantiate와 같고, nodes가 바로 그 SSR 노드들이다. 첫 그리기를 마치면 VM의
+// 해석기를 RuntimeInterpreter로 바꿔, 그 뒤의 lazy build와 @for grow가 노드를 새로 만들게 한다.
+const instantiate = (
+  module: TModule,
+  resources: string[],
+  loadedHrefs: Set<unknown>,
+  compId: number,
+  handlers: THandlers,
+  { leaves, rootFlat }: { leaves: unknown[]; rootFlat: number[] },
+  arrayPool: Pool<TArrayInfo>,
+  root: Node,
+) => {
+  const def = module.defs[compId];
+  const store = createLeafStoreSubject(leaves);
+  const regionPool: Pool<TRegion> = new Pool();
+  const branchPool: Pool<TBranch> = new Pool();
+  const createdContexts: TCreatedContext[] = [];
+  const resume = new ResumeInterpreter(module.code, root);
+  const vm = new VM(
+    module,
+    handlers,
+    resources,
+    loadedHrefs,
+    store,
+    arrayPool,
+    regionPool,
+    branchPool,
+    createdContexts,
+    rootFlat,
+    resume,
   );
-};
+  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, resume.anchor())];
+  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true;
+  rootRegion.shownIndex = THEN_INDEX;
 
-const resumeNodeSource = (cursor: ResumeCursor): TNodeSource => ({
-  reuses: true,
-  element: cursor.element,
-  text: () => cursor.text(),
-  anchor: cursor.anchor,
-  hasResource: inHead,
-  finish: cursor.finish,
-});
+  const built = vm.interpret(
+    rootFlat,
+    compId,
+    def.codeOff,
+    def.codeOff + def.codeLen,
+    rootRegion.branchIndices[THEN_INDEX],
+    "",
+    0,
+    { loopIndexStack: [], activeContexts: [] },
+  );
+  resume.finish();
+  vm.interpreter = new RuntimeInterpreter();
+  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = Array.from(built.childNodes);
+  rootRegion.attach(store, regionPool, branchPool, rootRegion);
+  // 붙인 뒤 root 아래가 이 인스턴스의 루트 노드들이다(앵커 + 붙은 트리).
+  const nodes = Array.from(root.childNodes);
+  const destroy = () => {
+    rootRegion.detach(store, regionPool, branchPool, rootRegion);
+    rootRegion.anchor.remove();
+    vm.removeDelegates();
+  };
+  const snapshot = (): Record<string, unknown> => {
+    const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
+    const value: Record<string, unknown> = {};
+    rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
+      const pairs = storeSourcePairs(rootFlat[i * 2 + 1], leafCountOf(module, typeRef));
+      value[module.constpool[nameConstIndex] as string] = assemble(
+        compiledStepsOf(module, typeRef),
+        pairs,
+        store,
+        module,
+        arrayPool,
+      );
+    });
+    return value;
+  };
+  return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
+};
 
 // compile과 같은 모양이다. 인스턴스를 만들 때 options.resumeFrom(SSR이 그린 노드들의 부모)의 노드를
-// 새로 만들지 않고 이어받는다. 반환한 nodes가 바로 그 노드들이다.
+// 새로 만들지 않고 resume한다. 반환한 nodes가 바로 그 노드들이다.
 // options.snapshot - quble-ssr --snapshot이 낸 store. 주면 plantRoot 없이 그것으로 시작하고 rootValue는 안 본다.
 // 없으면 rootValue로 plantRoot를 하며, 그 값은 SSR에 넘긴 data와 같아야 한다.
 export const resume = (bytes: Uint8Array, resources: string[] = []) => {
@@ -80,15 +142,6 @@ export const resume = (bytes: Uint8Array, resources: string[] = []) => {
       const planted = options.snapshot
         ? adoptSnapshot(module, options.snapshot, arrayPool)
         : plantRoot(module, rootValue, arrayPool);
-      return instantiate(
-        module,
-        resources,
-        loadedHrefs,
-        compId,
-        handlers,
-        planted,
-        arrayPool,
-        resumeNodeSource(new ResumeCursor(options.resumeFrom)),
-      );
+      return instantiate(module, resources, loadedHrefs, compId, handlers, planted, arrayPool, options.resumeFrom);
     };
 };

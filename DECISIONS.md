@@ -113,7 +113,7 @@
 에서 `user`가 `{ name: ..., email: ... }` 같은 객체면 핸들러의 `data.user`가 그 객체다.
 전에는 값 자리에 한 칸짜리(문자열/숫자/불리언)만 담겨서 `{ user }`가 컴파일되지 않았다.
 
-지금 계약은 core/BYTECODE.md, 조립하는 코드는 `core/web/runtime.ts`.
+지금 계약은 core/BYTECODE.md, 조립하는 코드는 `core/web/vm.ts`.
 
 **채택 이유:**
 
@@ -208,7 +208,7 @@ React `key` / Svelte `(id)`에 해당하는 것. `@for`에 항목마다 안정�
 
 ## 런타임 클래스 멤버를 `#private`로 바꿔 번들 줄이기 - 기각
 
-**대안:** `runtime.ts`의 `Interpreter` 멤버를 `#private`로 바꾼다. minify는 속성 이름을 줄이지 않지만
+**대안:** `vm.ts`의 `VM` 멤버를 `#private`로 바꾼다. minify는 속성 이름을 줄이지 않지만
 `#private` 이름은 줄여서, esbuild를 대상 지정 없이 돌리면 gzip 크기가 줄었다.
 
 **기각 이유:** 번들러가 `#private`를 지원하지 않는 브라우저까지 대상으로 잡으면 필드마다 WeakMap으로

@@ -1,7 +1,7 @@
 // resume - SSR이 그린 DOM을 노드를 새로 만들지 않고 이어받는다.
 //
-// blueprint에 { resumeFrom: host }를 주면 런타임이 노드를 만들던 자리에서 host 아래 SSR 노드를
-// 앞순회로 꺼내 쓴다(resume-cursor.ts). store, region, 구독, 이벤트 바인딩은 처음 그릴 때와 같이 짓는다.
+// blueprint에 { resumeFrom: host }를 주면 resume 해석기가 host 아래 SSR 노드를 앞순회로 꺼내 쓴다
+// (resume-interpreter.ts). store, region, 구독, 이벤트 바인딩은 처음 그릴 때와 같이 짓는다.
 //
 // 확인은 둘로 나뉜다.
 //   - 모든 SSR 일치 시드로: SSR 노드를 그대로 쓰는지(새로 만드는 것은 빈 텍스트 자리뿐), 이어받은

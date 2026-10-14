@@ -17,7 +17,7 @@ export type TType = { tag: "scalar" } | { tag: "object"; fields: TField[] } | { 
 export type TRef = { kind: number; ref: number; offset: number };
 export type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
 export type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
-// 조립 step 하나 - [STEP_*, key, elemSteps?]. STEP_* 상수와 의미는 runtime.ts.
+// 조립 step 하나 - [STEP_*, key, elemSteps?]. STEP_* 상수와 의미는 vm.ts.
 export type TStep = [number, string | null, TStep[]?];
 type TDef = {
   nameConstIndex: number;
