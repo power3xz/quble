@@ -5,7 +5,7 @@
 //
 // 확인은 둘로 나뉜다.
 //   - 모든 SSR 일치 시드로: SSR 노드를 그대로 쓰는지(새로 만드는 것은 빈 텍스트 자리뿐), 이어받은
-//     DOM이 CSR DOM과 같은지
+//     DOM이 CSR DOM과 같은지, 이어받는 동안 SSR 노드를 DOM에서 떼었다 다시 붙이지 않는지
 //   - 픽스처 몇 개로: 이어받은 뒤의 set, 클릭, lazy build, push가 CSR처럼 동작하는지
 
 import assert from "node:assert/strict";
@@ -70,6 +70,27 @@ for (const [name, list] of Object.entries(seeds)) {
       assert.equal(created.length, emptyMarks, "새로 만든 노드는 빈 텍스트 자리뿐이다");
       assert.ok(created.every((n) => n.nodeType === n.TEXT_NODE && n.textContent === ""));
       assert.equal(html, csrHtml(qubb, resmap, data));
+    });
+  });
+}
+
+for (const [name, list] of Object.entries(seeds)) {
+  list.forEach((data, i) => {
+    test(`${name} 시드 ${i} - resume 중 SSR 노드를 DOM에서 떼었다 다시 붙이지 않는다`, () => {
+      const { qubb, resmap } = buildFixtureWithResmap(name);
+      const host = ssrHost(name, resmap, data);
+      const ssrNodes = new Set(allNodes(host).filter((n) => !isTextMark(n)));
+
+      const view = host.ownerDocument.defaultView as Window & typeof globalThis;
+      const observer = new view.MutationObserver(() => {});
+      observer.observe(host, { childList: true, subtree: true });
+      const inst = resumeFrom(qubb, resmap)(0)(data, {}, { resumeFrom: host });
+      const records = observer.takeRecords();
+      observer.disconnect();
+      inst.destroy();
+
+      const touched = records.flatMap((r) => [...r.removedNodes, ...r.addedNodes]).filter((n) => ssrNodes.has(n));
+      assert.equal(touched.length, 0, "SSR 노드를 떼었다 다시 붙였다");
     });
   });
 }

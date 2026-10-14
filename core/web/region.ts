@@ -169,7 +169,10 @@ const attachOneBranch = (
   branchIndex: number,
 ): ChildNode => {
   const branch = branchPool.entries[branchIndex];
-  anchor.after(...branch.nodes);
+  // resume이 낸 노드는 SSR이 이미 앵커 뒤에 놓았다. 다시 삽입하면 DOM에서 떼었다 붙이는 비용만 든다.
+  if (branch.nodes.length === 0 || anchor.nextSibling !== branch.nodes[0]) {
+    anchor.after(...branch.nodes);
+  }
   restoreBranchSubs(store, branch);
   // branch.nodes 마지막 노드(없으면 anchor 자신)가 이 가지의 끝 - 단 그게 자식 region anchor면
   // 그 자식이 붙인 노드가 진짜 끝이다.
