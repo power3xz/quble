@@ -86,15 +86,15 @@ pub fn render_value(
 ///   leaves  store 배열(런타임 plantRoot의 leaves). JSON에 undefined가 없어 그 자리는 null로 두고 undef에 적는다.
 ///   arrays  arrayInfoIndex 순서. 한 배열의 요소는 연속이라 첫 요소 시작 leafIndex와 개수면 충분하다.
 /// 루트 슬롯 base(rootFlat)는 타입에서 나오므로 싣지 않는다.
-pub fn snapshot(bytes: &[u8], data: &str) -> Result<String, RenderError> {
+pub fn flat_data(bytes: &[u8], data: &str) -> Result<String, RenderError> {
     let data = json::parse(data).map_err(RenderError::Json)?;
     let module = bytecode::decode(bytes)?;
     let mut store = Store::default();
     plant_root(&module, &data, &mut store);
-    Ok(snapshot_json(&store))
+    Ok(flat_data_json(&store))
 }
 
-fn snapshot_json(store: &Store) -> String {
+fn flat_data_json(store: &Store) -> String {
     let mut out = String::from("{\"leaves\":[");
     let mut undef = Vec::new();
     for (i, leaf) in store.leaves.iter().enumerate() {
@@ -237,7 +237,7 @@ fn js_number(n: f64) -> String {
 struct Store {
     leaves: Vec<Val>,
     arrays: Vec<Vec<usize>>,
-    /// arrays[i]의 요소 타입(type_ref) - 스냅샷이 런타임 arrayInfo의 elemTypeRef로 싣는다.
+    /// arrays[i]의 요소 타입(type_ref) - 펴진 데이터가 런타임 arrayInfo의 elemTypeRef로 싣는다.
     array_elem_types: Vec<u16>,
 }
 
@@ -904,7 +904,7 @@ fn escape_text(s: &str, out: &mut String) {
 mod tests {
     use super::*;
 
-    /// 스냅샷의 문자열은 JSON.parse가 원래 값으로 읽어야 한다 - 따옴표, 역슬래시, 제어 문자를 이스케이프한다.
+    /// 펴진 데이터의 문자열은 JSON.parse가 원래 값으로 읽어야 한다 - 따옴표, 역슬래시, 제어 문자를 이스케이프한다.
     #[test]
     fn json_string_escapes_for_json_parse() {
         let mut out = String::new();

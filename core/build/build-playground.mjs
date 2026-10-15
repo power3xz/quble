@@ -13,7 +13,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { build } from "esbuild";
-import { inlineResource, renderSsr, snapshotJson } from "./ssr-page.mjs";
+import { flatDataJson, inlineResource, renderSsr } from "./ssr-page.mjs";
 
 // FNV-1a 64bit - build-preview.mjs와 같은 규칙(Rust content_hash와 통일).
 const fnv1a = (bytes) => {
@@ -108,7 +108,7 @@ for (const css of ["reset.css", "global.css"]) {
 
 // 5. 진입 페이지 - 셸을 초기 data로 SSR해 index.html의 자리표시자를 채운다(SSG). 초기 data는 브라우저가 쓰던
 // 것과 같은 initial-data.ts가 만든다. 초기 파일은 sources.json의 이름 순서대로 demo/에서 읽는다 - 브라우저는
-// 이것을 따로 받지 않고 스냅샷에서 얻는다. esbuild로 묶어 Node에서 부른다(.ts를 직접 import할 수 없다).
+// 이것을 따로 받지 않고 펴진 데이터에서 얻는다. esbuild로 묶어 Node에서 부른다(.ts를 직접 import할 수 없다).
 const playgroundDir = join(coreDir, "playground");
 const initialDataBundle = await build({
   entryPoints: [join(playgroundDir, "initial-data.ts")],
@@ -128,7 +128,7 @@ const workDir = mkdtempSync(join(tmpdir(), "quble-playground-"));
 const dataFile = join(workDir, "data.json");
 writeFileSync(dataFile, JSON.stringify(initialData(sources)));
 const { html, links } = renderSsr(distDir, "playground", ssrBin, dataFile);
-const snapshot = snapshotJson(distDir, "playground", ssrBin, dataFile);
+const flatData = flatDataJson(distDir, "playground", ssrBin, dataFile);
 rmSync(workDir, { recursive: true, force: true });
 
 // 자리표시자를 채운다. 값에 `$&` 같은 치환 패턴이 들어 있을 수 있어 함수로 넘긴다. 자리표시자가 없으면 실패한다.
@@ -141,7 +141,7 @@ const fill = (page, marker, value) => {
 let page = readFileSync(join(playgroundDir, "index.html"), "utf8");
 page = fill(page, "<!--qb:styles-->", links.map((path) => inlineResource(distDir, (p) => `./${p}`, path)).join("\n"));
 page = fill(page, "<!--qb:editor-->", html);
-page = fill(page, "<!--qb:snapshot-->", `<script id="qb-snapshot" type="application/json">${snapshot}</script>`);
+page = fill(page, "<!--qb:flat-data-->", `<script id="qb-flat-data" type="application/json">${flatData}</script>`);
 writeFileSync(join(distDir, "index.html"), page);
 
 console.log(`${join(distDir, "index.html")} (playground)`);

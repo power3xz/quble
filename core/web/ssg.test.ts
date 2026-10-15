@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildFixtureWithResmap } from "./test-helpers/build.ts";
-import { renderSsr, snapshotSsr } from "./test-helpers/ssr.ts";
+import { flatDataSsr, renderSsr } from "./test-helpers/ssr.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // core/web
 const BUILD_SSG = join(HERE, "..", "build", "build-ssg.mjs");
@@ -44,13 +44,13 @@ const buildSsg = (name: string, data: unknown, css: string, assetsUrl?: string) 
   return { html: readFileSync(join(dist, "index.html"), "utf8"), resmap };
 };
 
-test("페이지에 SSR HTML과 스냅샷이 실리고 상태 표시줄은 없다", () => {
+test("페이지에 SSR HTML과 펴진 데이터가 실리고 상태 표시줄은 없다", () => {
   const data = { tags: ["a", "b"] };
   const { html } = buildSsg("for_array_push", data, "");
   assert.ok(html.includes(`<div id="quble-app">${renderSsr("for_array_push", [], data).html}</div>`), "SSR HTML");
-  const tag = html.match(/<script id="qb-snapshot" type="application\/json">(.*?)<\/script>/s);
-  assert.ok(tag, "스냅샷 태그");
-  assert.deepEqual(JSON.parse(tag[1]), snapshotSsr("for_array_push", data));
+  const tag = html.match(/<script id="qb-flat-data" type="application\/json">(.*?)<\/script>/s);
+  assert.ok(tag, "펴진 데이터 태그");
+  assert.deepEqual(JSON.parse(tag[1]), flatDataSsr("for_array_push", data));
   assert.ok(html.includes('<script type="module">'), "resume 스크립트");
   assert.ok(!html.includes("ssr-status"), "상태 표시줄이 없다");
 });
