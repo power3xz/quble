@@ -4,7 +4,7 @@
 // 하네스가 재서 localStorage에 넣은 결과를 읽고, 힙만 여기서 mount 직후 GC를 강제하고 읽는다.
 // 클릭 시간은 하네스의 DOM 반영 시간(클릭부터 MutationObserver까지)이다.
 //
-// 보통 ./bench-expr-quick.sh가 빌드를 띄우고 부른다. 직접 부를 때:
+// 보통 ./bench-expr-quick.sh가 빌드를 띄우고 부른다. 직접 부를 때(대상은 TARGET=solid처럼 고른다):
 //   node bench-expr/quick.mjs http://localhost:포트 기록.json [orders|orders-deep]
 import { writeFileSync } from "node:fs";
 import { chromium } from "playwright";
@@ -15,10 +15,12 @@ const ROUNDS = 5;
 const N = Number(process.env.BENCH_N ?? 1000);
 // 하네스 SCENARIOS와 같은 키와 순서. 표의 열을 padEnd로 맞추므로 라벨도 키 그대로 둔다(한글은 폭이 2칸).
 const SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk"];
+// 재는 대상. 환경 변수 TARGET(기본 quble)으로 고른다. 페이지 이름은 <대상>.html, orders-deep이면 <대상>-deep.html이다.
+const TARGET = process.env.TARGET ?? "quble";
 // 테스트마다 페이지와 하네스가 결과를 담는 id가 다르다 - 결과가 서로 섞이지 않는다.
 const TESTS = {
-  orders: { page: "quble.html", id: "quble" },
-  "orders-deep": { page: "quble-deep.html", id: "quble-deep" },
+  orders: { page: `${TARGET}.html`, id: TARGET },
+  "orders-deep": { page: `${TARGET}-deep.html`, id: `${TARGET}-deep` },
 };
 
 const [url, outPath, testName = "orders"] = process.argv.slice(2);
