@@ -721,8 +721,9 @@ export class VM {
       rootRegion.detach(store, regionPool, branchPool, rootRegion);
       rootRegion.anchor.remove();
       this.removeDelegates();
-      // 떼어진 노드와 region/branch/배열 정보를 인스턴스가 붙들지 않게 한다.
+      // 떼어진 노드, region/branch/배열 정보, store의 값을 인스턴스가 붙들지 않게 한다.
       nodes.length = 0;
+      store.clear();
       regionPool.clear();
       branchPool.clear();
       arrayPool.clear();

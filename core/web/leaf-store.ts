@@ -48,6 +48,7 @@ export type LeafStoreSubject = {
   free: (start: LeafIndex, size: number) => void;
   subscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
   unsubscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
+  clear: () => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
@@ -127,6 +128,14 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     subscribers[leafIndex]?.delete(fn);
   };
 
+  // 값, 구독, 빈 블록 기록, 미룬 통지를 모두 비운다 - 인스턴스를 해체할 때 store가 값과 구독 함수를 놓는다.
+  const clear = (): void => {
+    leaves.length = 0;
+    subscribers.length = 0;
+    freeBySize.clear();
+    pendingLeaves.clear();
+  };
+
   // fn 안의 set/notify가 보낼 통지를 모았다가 가장 바깥 batch가 끝날 때 칸마다 한 번 보낸다. 값은 set이
   // 바로 기록하므로 fn 안의 get은 새 값을 읽는다. fn이 예외를 throw해도 모은 통지는 나가고 예외는 올라간다.
   const batch = (fn: () => void): void => {
@@ -174,5 +183,6 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     free,
     subscribe,
     unsubscribe,
+    clear,
   };
 };
