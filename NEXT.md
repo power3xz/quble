@@ -8,12 +8,8 @@
 
 ## 하는 중
 
-`bench-expr`에 Solid 대상(`orders`, `orders-deep`) 추가. 브랜치 `bench-solid`. 대상 페이지와 번들 설정,
-`quick.mjs`의 대상 선택, README 갱신까지.
+없음
 
 ## 할 것
 
-runtime 해석기와 resume 해석기의 공통부 추출. `resume-interpreter.ts`에 복사해 둔 도우미와 타입
-(`CONST`, `RAW`, `TScope`, `slotKind`, `slotRef`, `scopeWithIteration`, `TWalkStacks`,
-`snapshotStacks`, `TSlotPlaceholderContent`)을 `vm.ts`의 export로 합친다. 두 해석기에 비슷하게 있는
-`inlineFor`, `runIf`, region 만들기의 같은 부분은 뽑되, 분기(if/else)로 합치지 않는다.
+없음

@@ -77,11 +77,17 @@ import {
 } from "./opcodes.ts";
 import type { Pool } from "./pool-allocator.ts";
 import {
+  activateIf,
   appendArrayInfo,
+  appendBranchOfForRegion,
+  appendForRegion,
+  attachGrownIterations,
+  ELSE_INDEX,
   freeArrayInfo,
   removeBranchAt,
   type TArrayInfo,
   type TBranch,
+  THEN_INDEX,
   type TRegion,
   truncateFor,
 } from "./region.ts";
@@ -582,19 +588,6 @@ export type TInterpreter = {
     walkStacks: TWalkStacks,
     slotPlaceholderContents?: (TSlotPlaceholderContent | undefined)[],
   ): TBuiltNodes;
-  buildIteration(
-    vm: VM,
-    indexKind: number,
-    indexRef: number,
-    bodyStart: number,
-    forEndPc: number,
-    targetBranchIndex: number,
-    argumentSourcePairs: TScope,
-    compId: number,
-    pathPrefix: string,
-    loopIndexBase: number,
-    walkStacks: TWalkStacks,
-  ): TBuiltNodes;
 };
 
 // ── 한 인스턴스의 VM ─────────────────────────────────────────────────
@@ -705,19 +698,25 @@ export class VM {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ): TBuiltNodes => {
-    return this.interpreter.buildIteration(
+    // 회차 인덱스를 공유 스택에 push -> 재귀 -> pop한다 - 매 회차 [...stack, i] 복사 대신 배열 하나를 재사용한다
+    // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는 BIND_EVENT가
+    // 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
+    // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf).
+    walkStacks.loopIndexStack.push(indexKind, indexRef);
+    const built = this.interpreter.interpret(
       this,
-      indexKind,
-      indexRef,
+      argumentSourcePairs,
+      compId,
       bodyStart,
       forEndPc,
       targetBranchIndex,
-      argumentSourcePairs,
-      compId,
       pathPrefix,
       loopIndexBase,
       walkStacks,
-    );
+    ); // walkStacks.loopIndexStack에 방금 push된 회차 인덱스를 물려준다
+    walkStacks.loopIndexStack.pop(); // ref
+    walkStacks.loopIndexStack.pop(); // kind
+    return built;
   };
 
   // forBodyEnd의 캐시 통과 조회.
@@ -834,6 +833,65 @@ export class VM {
   // 배열 칸에서 arrayInfo를 얻는다 - 그 칸 값이 arrayInfoIndex다. 핸들러가 넘긴 배열 노드는
   // 호출부가 NODE_BASE로 칸을 꺼내 넘긴다(노드가 그 칸을 싣고 있다).
   arrayInfoOf = (arrayLeafIndex: number): TArrayInfo => this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
+
+  // 배열이 @for에 처음 쓰일 때 길이 칸(sizeLeafIndex)과 인덱스 leaf(indexLeafIndices)를 확보하고 길이 칸을
+  // 돌려준다. 이후 push/removeAt이 둘을 동기로 유지한다. 이미 확보했으면 아무것도 하지 않는다.
+  ensureIterationLeaves = (info: TArrayInfo): number => {
+    if (info.sizeLeafIndex === null) {
+      info.sizeLeafIndex = this.store.alloc([info.elemStartLeafIndices.length]);
+    }
+    if (info.indexLeafIndices.length === 0) {
+      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+        info.indexLeafIndices[i] = this.store.alloc([i]);
+      }
+    }
+    return info.sizeLeafIndex;
+  };
+
+  // @for region의 회차를 next개로 맞춘다 - 늘면 늘어난 꼬리 회차 i마다 buildIteration(i)로 만들고 한 번에 붙이고,
+  // 줄면 꼬리를 떼어낸다. buildIteration은 회차 branch를 region에 더하고 노드를 담는 일까지 한다.
+  resizeFor = (forRegionIndex: number, next: number, buildIteration: (i: number) => void): void => {
+    const cur = this.regionPool.entries[forRegionIndex].branchIndices.length;
+    for (let i = cur; i < next; i++) {
+      buildIteration(i);
+    }
+    if (next > cur) {
+      attachGrownIterations(this.store, this.regionPool, this.branchPool, forRegionIndex, cur);
+    }
+    if (next < cur) {
+      truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next);
+    }
+  };
+
+  // 부모 가지 밑에 @for region을 열고 그 regionIndex를 돌려준다. 부모 가지에 자식으로 등록해 부모가 detach될 때
+  // 따라 떼어지게 한다. anchor는 resume이 SSR DOM의 앵커를 넘길 때만 받는다. 앵커를 DOM 어디에 붙일지는 호출자 몫.
+  openForRegion = (branch: TBranch, countLeafIndex: number, anchor?: Comment): number => {
+    const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex, anchor);
+    branch.childRegionIndices.push(forRegionIndex);
+    return forRegionIndex;
+  };
+
+  // @for region에 빈 회차 가지를 더하고 그 branchIndex를 돌려준다. 노드와 구독은 호출자가 build해 담는다.
+  appendIteration = (forRegionIndex: number): number =>
+    appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
+
+  // @if 조건 칸 구독을 부모 가지에 실어, 조건이 바뀌면 then/else 가지를 켠다. 조건 칸이 없으면(-1, CONST 조건)
+  // 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
+  subscribeIfCond = (branch: TBranch, condLeafIndex: number, regionIndex: number): void => {
+    if (condLeafIndex === -1) {
+      return;
+    }
+    this.subscribeOnBranch(branch, condLeafIndex, (condValue) => {
+      activateIf(this.store, this.regionPool, this.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+    });
+  };
+
+  // leafIndex 구독을 가지에 실어 가지와 생애를 함께 한다 - 가지가 detach/free되면 감시도 꺼진다.
+  subscribeOnBranch = (branch: TBranch, leafIndex: number, onChange: (v: unknown) => void): void => {
+    branch.leafIndices.push(leafIndex);
+    branch.updateFns.push(onChange);
+    this.store.subscribe(leafIndex, onChange);
+  };
 
   // 바인딩 때 필드 하나를 발생 시점에 조립할 준비물로 푼다(payload/컨텍스트 공용).
   toAssembled = (compId: number, field: TFieldEntry, argumentSourcePairs: TScope): TAssembled => {

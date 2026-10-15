@@ -32,17 +32,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import {
-  activateIf,
-  appendBranchOfForRegion,
-  appendForRegion,
-  appendIfRegion,
-  attachGrownIterations,
-  ELSE_INDEX,
-  type TBranch,
-  THEN_INDEX,
-  truncateFor,
-} from "./region.ts";
+import { appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import {
   CONST,
@@ -60,41 +50,6 @@ import {
 } from "./vm.ts";
 
 export class RuntimeInterpreter {
-  // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드/구독/자식region은
-  // target 가지에 쌓인다(인라인이면 지금 가지, 반응이면 회차 branch). 회차 인덱스를 공유
-  // 스택에 push -> 재귀 -> pop한다 - 매 회차 [...stack, i] 복사 대신 배열 하나를 재사용한다
-  // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는
-  // BIND_EVENT가 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
-  buildIteration = (
-    vm: VM,
-    indexKind: number,
-    indexRef: number,
-    bodyStart: number,
-    forEndPc: number,
-    targetBranchIndex: number,
-    argumentSourcePairs: TScope,
-    compId: number,
-    pathPrefix: string,
-    loopIndexBase: number,
-    walkStacks: TWalkStacks,
-  ) => {
-    walkStacks.loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
-    const f = this.interpret(
-      vm,
-      argumentSourcePairs,
-      compId,
-      bodyStart,
-      forEndPc,
-      targetBranchIndex,
-      pathPrefix,
-      loopIndexBase,
-      walkStacks,
-    ); // walkStacks.loopIndexStack에 방금 push된 회차 인덱스를 물려준다
-    walkStacks.loopIndexStack.pop(); // ref
-    walkStacks.loopIndexStack.pop(); // kind
-    return f;
-  };
-
   // 안 변하는 @for(FOR_RAW/CONST) - 각 회차를 지금 가지(startRegion/Branch)에 fragment로
   // 인라인한다. @for는 컴포넌트 경계가 아니라 같은 가지의 제어 흐름이라 부모 노드에 통째로
   // 붙인다. appendChild(fragment)는 내용 전체를 한 번에 옮기고 fragment를 비운다(노드별 재입양
@@ -114,8 +69,7 @@ export class RuntimeInterpreter {
   ) => {
     for (let i = 0; i < count; i++) {
       parent.appendChild(
-        this.buildIteration(
-          vm,
+        vm.buildIteration(
           RAW,
           i,
           bodyStart,
@@ -126,7 +80,7 @@ export class RuntimeInterpreter {
           pathPrefix,
           loopIndexBase,
           walkStacks,
-        ),
+        ) as DocumentFragment, // 이 해석기는 늘 fragment를 낸다
       );
     }
   };
@@ -149,9 +103,8 @@ export class RuntimeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const forRegionIndex = appendForRegion(vm.regionPool, countLeafIndex);
+    const forRegionIndex = vm.openForRegion(branch, countLeafIndex);
     const region = vm.regionPool.entries[forRegionIndex];
-    branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
     parent.appendChild(region.anchor);
 
     // grow(onCount 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
@@ -160,26 +113,27 @@ export class RuntimeInterpreter {
     const stacks = snapshotStacks(walkStacks);
 
     // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
-    // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
+    // 되찾게 branch.nodes에 보관). 껍데기 push(appendIteration) + build(buildIteration).
     // 새 회차의 전역 branchIndex를 돌려준다.
     // 몸체 `${i}`가 읽을 회차변수(인덱스) 슬롯 [RAW, i]를 바깥 스코프 뒤에 붙인다. 슬롯 번호 =
     // props+바깥 회차변수 뒤.
     const addIterationBranch = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       vm.branchPool.entries[newBranchIndex].nodes = Array.from(
-        this.buildIteration(
-          vm,
-          RAW,
-          i,
-          bodyStart,
-          forEndPc,
-          newBranchIndex,
-          scopeWithIteration(argumentSourcePairs, RAW, i, RAW, i), // item(회차값)/index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
-          compId,
-          pathPrefix,
-          loopIndexBase,
-          stacks,
-        ).childNodes,
+        (
+          vm.buildIteration(
+            RAW,
+            i,
+            bodyStart,
+            forEndPc,
+            newBranchIndex,
+            scopeWithIteration(argumentSourcePairs, RAW, i, RAW, i), // item(회차값)/index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            stacks,
+          ) as DocumentFragment
+        ).childNodes, // 이 해석기는 늘 fragment를 낸다
       );
       return newBranchIndex;
     };
@@ -190,22 +144,9 @@ export class RuntimeInterpreter {
     }
 
     const onCount = (v: unknown) => {
-      const next = Number(v) || 0;
-      const cur = region.branchIndices.length;
-      for (let i = cur; i < next; i++) {
-        addIterationBranch(i); // 늘어난 꼬리만 build
-      }
-      if (next > cur) {
-        attachGrownIterations(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, cur);
-      }
-      if (next < cur) {
-        truncateFor(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
-      }
+      vm.resizeFor(forRegionIndex, Number(v) || 0, addIterationBranch);
     };
-    // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
-    branch.leafIndices.push(countLeafIndex);
-    branch.updateFns.push(onCount);
-    vm.store.subscribe(countLeafIndex, onCount);
+    vm.subscribeOnBranch(branch, countLeafIndex, onCount); // 부모 가지와 생애를 함께 한다
   };
 
   // 배열 반응 @for - reactiveCountFor와 같은 구조(전용 region + 회차 branch + 길이 구독으로 grow/shrink)로,
@@ -227,23 +168,12 @@ export class RuntimeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const info = vm.arrayPool.entries[Number(vm.store.get(arrayLeafIndex))];
-    if (info.sizeLeafIndex === null) {
-      info.sizeLeafIndex = vm.store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
-    }
-    const sizeLeafIndex = info.sizeLeafIndex;
-    // 인덱스 leaf도 @for에 처음 쓰일 때만 lazy 채운다(sizeLeafIndex와 같은 결). elemStartLeafIndices와
-    // 나란히 요소 수만큼 확보 - [i]=i번째 요소의 회차 번호. 이후 push/removeAt이 둘을 동기로 유지한다.
-    if (info.indexLeafIndices.length === 0) {
-      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
-        info.indexLeafIndices[i] = vm.store.alloc([i]);
-      }
-    }
+    const info = vm.arrayInfoOf(arrayLeafIndex);
+    const sizeLeafIndex = vm.ensureIterationLeaves(info);
 
-    const forRegionIndex = appendForRegion(vm.regionPool, sizeLeafIndex);
+    const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex);
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
     const region = vm.regionPool.entries[forRegionIndex];
-    branch.childRegionIndices.push(forRegionIndex);
     parent.appendChild(region.anchor);
 
     // grow(onSize 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
@@ -255,22 +185,23 @@ export class RuntimeInterpreter {
     // 인덱스 슬롯은 몸체 ${i}가 읽는다. 인덱스 leaf는 발화 시 $n으로도 해소되게 loopIndexStack에
     // (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
     const addIterationBranch = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchPool.entries[newBranchIndex].nodes = Array.from(
-        this.buildIteration(
-          vm,
-          STORE,
-          indexLeaf,
-          bodyStart,
-          forEndPc,
-          newBranchIndex,
-          scopeWithIteration(argumentSourcePairs, STORE, info.elemStartLeafIndices[i], STORE, indexLeaf),
-          compId,
-          pathPrefix,
-          loopIndexBase,
-          stacks,
-        ).childNodes,
+        (
+          vm.buildIteration(
+            STORE,
+            indexLeaf,
+            bodyStart,
+            forEndPc,
+            newBranchIndex,
+            scopeWithIteration(argumentSourcePairs, STORE, info.elemStartLeafIndices[i], STORE, indexLeaf),
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            stacks,
+          ) as DocumentFragment
+        ).childNodes, // 이 해석기는 늘 fragment를 낸다
       );
       return newBranchIndex;
     };
@@ -280,21 +211,10 @@ export class RuntimeInterpreter {
     }
 
     const onSize = () => {
-      const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
-      const cur = region.branchIndices.length;
-      for (let i = cur; i < next; i++) {
-        addIterationBranch(i); // 늘어난 꼬리만 build
-      }
-      if (next > cur) {
-        attachGrownIterations(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, cur);
-      }
-      if (next < cur) {
-        truncateFor(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
-      }
+      // store 값이 아니라 요소 목록 길이가 진실
+      vm.resizeFor(forRegionIndex, info.elemStartLeafIndices.length, addIterationBranch);
     };
-    branch.leafIndices.push(sizeLeafIndex);
-    branch.updateFns.push(onSize);
-    vm.store.subscribe(sizeLeafIndex, onSize);
+    vm.subscribeOnBranch(branch, sizeLeafIndex, onSize);
   };
 
   // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
@@ -1015,16 +935,7 @@ export class RuntimeInterpreter {
     elseBranch.lazyBuild = buildElse;
 
     // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
-    // 조건 칸이 없으면(-1, CONST 조건) 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
-    if (condLeafIndex !== -1) {
-      const onCond = (condValue: unknown) => {
-        activateIf(vm.store, vm.regionPool, vm.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
-      };
-      // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
-      branch.leafIndices.push(condLeafIndex);
-      branch.updateFns.push(onCond);
-      vm.store.subscribe(condLeafIndex, onCond);
-    }
+    vm.subscribeIfCond(branch, condLeafIndex, regionIndex);
     // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
     // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
     // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
