@@ -8,9 +8,7 @@
 
 ## 하는 중
 
-CSR 진입점을 상황별 함수로 나눈다. 먼저 `runtime.ts`와 `resume.ts`의 `instantiate`에 겹친 코드를 `VM`으로
-올리고, 이어서 `mount.ts`를 바이트코드를 받는 `mount`와 URL을 받는 `mountFromUrl`로 나눈다. SSR 진입점
-(`resume`)의 상황별 분리는 CSR을 마친 뒤 같은 방식으로 한다.
+없음
 
 ## 할 것
 
