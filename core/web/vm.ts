@@ -721,12 +721,19 @@ export class VM {
       rootRegion.detach(store, regionPool, branchPool, rootRegion);
       rootRegion.anchor.remove();
       this.removeDelegates();
-      // 떼어진 노드, region/branch/배열 정보, store의 값을 인스턴스가 붙들지 않게 한다.
+      // 떼어진 노드, region/branch/배열 정보, store의 값, VM의 캐시를 인스턴스가 붙들지 않게 한다.
+      // destroy 클로저가 VM을 붙들므로 호출자가 인스턴스를 들고 있으면 VM이 살아 있다.
       nodes.length = 0;
       store.clear();
       regionPool.clear();
       branchPool.clear();
       arrayPool.clear();
+      this.createdContexts.length = 0;
+      this.forEndCache.clear();
+      this.ifRangesCache.clear();
+      this.slotContentEndCache.clear();
+      this.templatePlanCache.clear();
+      this.storeTree = null;
     };
     const snapshot = (): Record<string, unknown> => {
       const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
