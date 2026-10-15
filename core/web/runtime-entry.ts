@@ -1,32 +1,13 @@
 // Quble 앱 CSR 진입점 -배포된 산출물(qubb + manifest)을 fetch해 브라우저에 마운트한다.
 // qubc 컴파일은 빌드가 이미 끝났고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
 
+import { loadHandlers, type TManifest } from "./load-handlers.ts";
 import { compile, type THandlers } from "./runtime.ts";
 
 // 이 번들이 런타임을 통째로 담으므로 compile도 함께 내보낸다 - 바이트코드를 이미 손에 든 쪽은
 // mount의 fetch 단계 없이 이것만 있으면 된다.
 export { compile, type THandlers } from "./runtime.ts";
-
-type TManifest = {
-  resources: string[];
-  handlers?: string;
-};
-
-/**
- * manifest.handlers가 가리키는 JS를 로드해 fullname -> handler 맵(handlers export)을 돌려준다.
- * handlers 필드가 없으면 빈 맵. 핸들러 경로는 manifest 기준 상대경로라 base로 해소한다.
- * @param manifest  파싱된 manifest 객체 ({ resources, handlers? })
- * @param base      manifest.handlers 상대경로 해소 기준 URL
- * @returns         fullname -> handler 맵 (핸들러 없으면 {})
- */
-export const loadHandlers = async (manifest: TManifest, base: string | URL): Promise<THandlers> => {
-  if (!manifest.handlers) {
-    return {};
-  }
-  const url = new URL(manifest.handlers, base).href;
-  const mod = await import(url);
-  return mod.handlers;
-};
+export { loadHandlers } from "./load-handlers.ts";
 
 type TMountOptions = {
   data: unknown;
@@ -68,7 +49,7 @@ export const mountFromUrl = async (qubbUrl: string, rootEl: Element, data: unkno
   // manifest만 있으면 qubb fetch와 핸들러 로드는 서로 독립 - 병렬로.
   const [bytesBuf, handlers] = await Promise.all([
     fetch(qubbUrl).then((r) => r.arrayBuffer()),
-    loadHandlers(manifest, base),
+    loadHandlers<THandlers>(manifest, base),
   ]);
 
   // 리소스 경로(res/...)를 qubb origin 기준 절대 URL로. LOAD_RES가 <link>로 삽입한다.
