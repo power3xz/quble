@@ -51,40 +51,20 @@ import {
   truncateFor,
 } from "./region.ts";
 import { staticElementEnds } from "./static-spans.ts";
-import { nodesOf, STORE, type VM } from "./vm.ts";
-
-// vm.ts의 같은 이름 도우미와 타입의 사본이다. 공통부를 뽑을 때 합친다.
-const CONST = 1;
-const RAW = 2;
-type TScope = readonly number[];
-const slotKind = (scope: TScope, o: number): number => scope[2 * o];
-const slotRef = (scope: TScope, o: number): number => scope[2 * o + 1];
-const scopeWithIteration = (
-  scope: TScope,
-  itemKind: number,
-  itemRef: number,
-  indexKind: number,
-  indexRef: number,
-): TScope => scope.concat([itemKind, itemRef, indexKind, indexRef]);
-type TWalkStacks = {
-  loopIndexStack: number[];
-  activeContexts: number[];
-};
-const snapshotStacks = (walkStacks: TWalkStacks): TWalkStacks => ({
-  loopIndexStack: [...walkStacks.loopIndexStack],
-  activeContexts: [...walkStacks.activeContexts],
-});
-// 사용쪽이 RENDER 앞에 깔아둔 슬롯 콘텐츠 한 덩이. 코드 구간은 부모 def 안에 있고 해석 컨텍스트도 부모 것을 든다.
-type TSlotPlaceholderContent = {
-  startPc: number;
-  endPc: number;
-  argumentSourcePairs: TScope;
-  compId: number;
-  pathPrefix: string;
-  loopIndexBase: number;
-  walkStacks: TWalkStacks;
-  branchIndex: number;
-};
+import {
+  CONST,
+  nodesOf,
+  RAW,
+  STORE,
+  scopeWithIteration,
+  slotKind,
+  slotRef,
+  snapshotStacks,
+  type TScope,
+  type TSlotPlaceholderContent,
+  type TWalkStacks,
+  type VM,
+} from "./vm.ts";
 
 // SSR이 텍스트 경계를 주석으로 남긴다(crates/renderer).
 //   <!---->          이웃한 두 텍스트 노드 사이의 경계 - 지운다
