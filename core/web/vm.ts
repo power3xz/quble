@@ -591,6 +591,29 @@ export type TInterpreter = {
   ): TBuiltNodes;
 };
 
+// 해체된 인스턴스의 destroy가 되는 함수. 아무것도 잡지 않는다.
+const noop = (): void => {};
+
+// 루트 props의 지금 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는 함수를 돌려준다. VM이 아니라
+// 인자만 잡으므로, 인스턴스를 쥔 호출자가 VM까지 붙들지 않는다.
+const rootSnapshotOf =
+  (module: TModule, store: TLeafStoreSubject, arrayPool: Pool<TArrayInfo>, rootScope: TScope) =>
+  (): Record<string, unknown> => {
+    const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
+    const value: Record<string, unknown> = {};
+    rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
+      const pairs = storeSourcePairs(rootScope[i * 2 + 1], leafCountOf(module, typeRef));
+      value[module.constpool[nameConstIndex] as string] = assemble(
+        compiledStepsOf(module, typeRef),
+        pairs,
+        store,
+        module,
+        arrayPool,
+      );
+    });
+    return value;
+  };
+
 // ── 한 인스턴스의 VM ─────────────────────────────────────────────────
 // 한 Blueprint 호출(인스턴스화)마다 하나. 인스턴스 불변 상태(store/각종 pool/module 등)와
 // 바인딩(값, 식, 이벤트)을 들고, 바이트코드를 읽어 노드를 만드는 일은 interpreter 필드의 해석기에
@@ -729,7 +752,6 @@ export class VM {
       root = null;
       this.removeDelegates();
       // 떼어진 노드, region/branch/배열 정보, store의 값, VM의 캐시를 인스턴스가 붙들지 않게 한다.
-      // destroy 클로저가 VM을 붙들므로 호출자가 인스턴스를 들고 있으면 VM이 살아 있다.
       nodes.length = 0;
       store.clear();
       regionPool.clear();
@@ -741,23 +763,19 @@ export class VM {
       this.slotContentEndCache.clear();
       this.templatePlanCache.clear();
       this.storeTree = null;
+      // 이 클로저는 VM을 잡고 있다. 호출자가 인스턴스를 들고 있어도 VM이 거둬지도록 VM을 안 잡는 함수로 바꾼다.
+      inst.destroy = noop;
     };
-    const snapshot = (): Record<string, unknown> => {
-      const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
-      const value: Record<string, unknown> = {};
-      rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
-        const pairs = storeSourcePairs(rootScope[i * 2 + 1], leafCountOf(module, typeRef));
-        value[module.constpool[nameConstIndex] as string] = assemble(
-          compiledStepsOf(module, typeRef),
-          pairs,
-          store,
-          module,
-          arrayPool,
-        );
-      });
-      return value;
+    const inst = {
+      nodes,
+      regionPool,
+      branchPool,
+      arrayPool,
+      store,
+      destroy,
+      snapshot: rootSnapshotOf(module, store, arrayPool, rootScope),
     };
-    return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
+    return inst;
   };
 
   buildIteration = (
