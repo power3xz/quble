@@ -8,7 +8,10 @@
 
 ## 하는 중
 
-없음
+SSR이 내보내는 펴진 데이터의 이름을 snapshot에서 flat data로 바꾸고, 인스턴스의 snapshot이 타입과 위치를 받게 하기 (브랜치 flat-data)
+
+- `TLeafSnapshot` -> `TFlatData` 등. 인스턴스의 `inst.snapshot()`(현재 값 읽기)은 이름을 유지한다.
+- `inst.snapshot(typeRef?, base?, offset?)` - 생략하면 루트 props 전체.
 
 ## 할 것
 
