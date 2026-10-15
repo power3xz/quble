@@ -1,0 +1,14 @@
+component LazyWithContext {
+  props { cond: bool, owner: string }
+  contexts { Area { who: owner } }
+  events { PING({ n: 1 }) }
+  template {
+    div() {
+      @if (cond) {
+        @with Area {
+          button(@click:PING) { "x" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+component ForDirectWithContext {
+  props { items: string[], owner: string }
+  contexts { Area { who: owner } }
+  events {
+    PING({ n: 1 })
+    ADD({ items })
+  }
+  template {
+    div() {
+      button(class="add" @click:ADD) { "+" }
+      @for (item of items) {
+        @with Area {
+          button(class="row" @click:PING) { "x" }
+        }
+      }
+    }
+  }
+}

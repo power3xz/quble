@@ -1377,6 +1377,14 @@
   "attr_url_scheme": [{ "url": "https://example.com/a" }, { "url": "javascript:alert(1)" }],
   "event_proto_name": [{}],
   "for_with_context": [{ "items": ["a", "b"] }, { "items": [] }],
+  "for_direct_with_context": [
+    { "items": ["a", "b"], "owner": "kim" },
+    { "items": [], "owner": "lee" }
+  ],
+  "lazy_with_context": [
+    { "cond": true, "owner": "kim" },
+    { "cond": false, "owner": "lee" }
+  ],
   "for_row_shape": [
     {
       "rows": [{ "id": "1", "note": "n", "url": "/a" }, { "id": "2", "note": "", "url": "javascript:x" }]
