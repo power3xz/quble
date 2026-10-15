@@ -667,9 +667,7 @@ export class ResumeInterpreter {
     const onCount = (v: unknown) => {
       vm.resizeFor(forRegionIndex, Number(v) || 0, growIteration);
     };
-    branch.leafIndices.push(countLeafIndex);
-    branch.updateFns.push(onCount);
-    vm.store.subscribe(countLeafIndex, onCount);
+    vm.subscribeOnBranch(branch, countLeafIndex, onCount);
   };
 
   // 배열 반응 @for - reactiveCountFor와 같은 구조에서 회차변수 slot이 그 요소 leaf에 붙는다.
@@ -740,9 +738,7 @@ export class ResumeInterpreter {
     const onSize = () => {
       vm.resizeFor(forRegionIndex, info.elemStartLeafIndices.length, growIteration);
     };
-    branch.leafIndices.push(sizeLeafIndex);
-    branch.updateFns.push(onSize);
-    vm.store.subscribe(sizeLeafIndex, onSize);
+    vm.subscribeOnBranch(branch, sizeLeafIndex, onSize);
   };
 
   // IF - 조건 슬롯을 그대로 조건 칸으로 쓴다. pc는 IF operand 직후이고 IF_END 다음 pc를 돌려준다.
@@ -873,9 +869,7 @@ export class ResumeInterpreter {
       const onCond = (condValue: unknown) => {
         activateIf(vm.store, vm.regionPool, vm.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
       };
-      branch.leafIndices.push(condLeafIndex);
-      branch.updateFns.push(onCond);
-      vm.store.subscribe(condLeafIndex, onCond);
+      vm.subscribeOnBranch(branch, condLeafIndex, onCond);
     }
 
     // 지금 보이는 가지는 SSR 노드에서 연결한다. 보이지 않는 가지는 SSR이 그리지 않았다.

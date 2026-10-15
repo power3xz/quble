@@ -865,6 +865,13 @@ export class VM {
     }
   };
 
+  // leafIndex 구독을 가지에 실어 가지와 생애를 함께 한다 - 가지가 detach/free되면 감시도 꺼진다.
+  subscribeOnBranch = (branch: TBranch, leafIndex: number, onChange: (v: unknown) => void): void => {
+    branch.leafIndices.push(leafIndex);
+    branch.updateFns.push(onChange);
+    this.store.subscribe(leafIndex, onChange);
+  };
+
   // 바인딩 때 필드 하나를 발생 시점에 조립할 준비물로 푼다(payload/컨텍스트 공용).
   toAssembled = (compId: number, field: TFieldEntry, argumentSourcePairs: TScope): TAssembled => {
     const name = this.module.constpool[field.nameConstIndex] as string;

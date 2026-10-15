@@ -190,10 +190,7 @@ export class RuntimeInterpreter {
     const onCount = (v: unknown) => {
       vm.resizeFor(forRegionIndex, Number(v) || 0, addIterationBranch);
     };
-    // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
-    branch.leafIndices.push(countLeafIndex);
-    branch.updateFns.push(onCount);
-    vm.store.subscribe(countLeafIndex, onCount);
+    vm.subscribeOnBranch(branch, countLeafIndex, onCount); // 부모 가지와 생애를 함께 한다
   };
 
   // 배열 반응 @for - reactiveCountFor와 같은 구조(전용 region + 회차 branch + 길이 구독으로 grow/shrink)로,
@@ -261,9 +258,7 @@ export class RuntimeInterpreter {
       // store 값이 아니라 요소 목록 길이가 진실
       vm.resizeFor(forRegionIndex, info.elemStartLeafIndices.length, addIterationBranch);
     };
-    branch.leafIndices.push(sizeLeafIndex);
-    branch.updateFns.push(onSize);
-    vm.store.subscribe(sizeLeafIndex, onSize);
+    vm.subscribeOnBranch(branch, sizeLeafIndex, onSize);
   };
 
   // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
@@ -989,10 +984,7 @@ export class RuntimeInterpreter {
       const onCond = (condValue: unknown) => {
         activateIf(vm.store, vm.regionPool, vm.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
       };
-      // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 조건 감시도 꺼진다.
-      branch.leafIndices.push(condLeafIndex);
-      branch.updateFns.push(onCond);
-      vm.store.subscribe(condLeafIndex, onCond);
+      vm.subscribeOnBranch(branch, condLeafIndex, onCond); // 부모 가지와 생애를 함께 한다
     }
     // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
     // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
