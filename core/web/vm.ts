@@ -594,25 +594,23 @@ export type TInterpreter = {
 // 해체된 인스턴스의 destroy가 되는 함수. 아무것도 잡지 않는다.
 const noop = (): void => {};
 
-// 루트 props의 지금 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는 함수를 돌려준다. VM이 아니라
-// 인자만 잡으므로, 인스턴스를 쥔 호출자가 VM까지 붙들지 않는다.
-const rootSnapshotOf =
-  (module: TModule, store: TLeafStoreSubject, arrayPool: Pool<TArrayInfo>, rootScope: TScope) =>
-  (): Record<string, unknown> => {
-    const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
-    const value: Record<string, unknown> = {};
-    rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
-      const pairs = storeSourcePairs(rootScope[i * 2 + 1], leafCountOf(module, typeRef));
-      value[module.constpool[nameConstIndex] as string] = assemble(
-        compiledStepsOf(module, typeRef),
-        pairs,
-        store,
-        module,
-        arrayPool,
-      );
-    });
-    return value;
-  };
+// 인스턴스의 snapshot - typeRef 타입의 값을 store의 base + offset 자리에서 읽어 data와 같은 모양으로 다시 짓는다.
+// 인자를 모두 생략하면 루트 props 전체(propsTypeRef, 0, 0)다. 루트 props의 필드는 앞 필드의 칸 수만큼 이어서
+// 놓이므로 루트를 base 0의 한 객체로 읽을 수 있다. VM이 아니라 인자만 잡으므로, 인스턴스를 쥔 호출자가
+// VM까지 붙들지 않는다.
+type TSnapshot = {
+  (): Record<string, unknown>;
+  (typeRef: number, base: number, offset: number): unknown;
+};
+const snapshotOf = (module: TModule, store: TLeafStoreSubject, arrayPool: Pool<TArrayInfo>): TSnapshot =>
+  ((typeRef: number = module.defs[0].propsTypeRef, base: number = 0, offset: number = 0): unknown =>
+    assemble(
+      compiledStepsOf(module, typeRef),
+      storeSourcePairs(base + offset, leafCountOf(module, typeRef)),
+      store,
+      module,
+      arrayPool,
+    )) as TSnapshot;
 
 // ── 한 인스턴스의 VM ─────────────────────────────────────────────────
 // 한 Blueprint 호출(인스턴스화)마다 하나. 인스턴스 불변 상태(store/각종 pool/module 등)와
@@ -736,10 +734,10 @@ export class VM {
   // destroy는 인스턴스를 해체한다 - 붙은 DOM/구독을 region 트리 재귀로 떼고(detach - 반응 갱신으로 나중에
   // 붙은 노드까지 region이 안다), 루트 anchor와 document 위임 리스너를 제거해 인스턴스가 GC되게 한다.
   //
-  // snapshot은 루트 props의 지금 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다(핸들러 payload와
-  // 같은 조립). 루트 슬롯 base는 rootScope의 [STORE, base] 쌍에 루트 props 필드 순서로 놓여 있다.
+  // snapshot은 타입과 위치를 받아 store의 그 자리 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다
+  // (핸들러 payload와 같은 조립). 인자를 생략하면 루트 props 전체다(snapshotOf).
   instanceOf = (rootRegion: TRegion, nodes: ChildNode[]) => {
-    const { module, store, regionPool, branchPool, arrayPool, rootScope } = this;
+    const { module, store, regionPool, branchPool, arrayPool } = this;
     // 해체한 뒤에는 루트 region을 놓는다 - destroy 클로저가 붙들고 있으면 루트 anchor가 남는다. 이미 해체했으면
     // 풀이 비어 있어 detach가 예외를 throw하므로 두 번째 호출은 건너뛴다.
     let root: TRegion | null = rootRegion;
@@ -773,7 +771,7 @@ export class VM {
       arrayPool,
       store,
       destroy,
-      snapshot: rootSnapshotOf(module, store, arrayPool, rootScope),
+      snapshot: snapshotOf(module, store, arrayPool),
     };
     return inst;
   };

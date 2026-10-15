@@ -9,20 +9,20 @@ import { ResumeInterpreter } from "./resume-interpreter.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import { leafCountOf, nodesOf, plantRoot, STORE, type THandlers, VM } from "./vm.ts";
 
-// quble-ssr --snapshot(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
+// quble-ssr --flat-data(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
 //   leaves  store 배열. JSON에 undefined가 없어 그 자리는 null이고 undef에 인덱스가 적혀 있다.
 //   arrays  arrayInfoIndex 순서의 [요소 타입, 첫 요소 시작 leafIndex, 요소 수]. 한 배열의 요소는 연속이다.
-export type TLeafSnapshot = {
+export type TFlatData = {
   leaves: unknown[];
   undef: number[];
   arrays: [elemTypeRef: number, start: number, count: number][];
 };
 
-// 스냅샷을 plantRoot 대신 store에 넣는다. 반환은 plantRoot와 같다 - leaves와 rootFlat([STORE, base, ...]).
+// 펴진 데이터를 plantRoot 대신 store에 넣는다. 반환은 plantRoot와 같다 - leaves와 rootFlat([STORE, base, ...]).
 // 루트 prop의 base는 앞 prop들의 고정 칸 수의 합이라 타입에서 구한다. arrayPool은 빈 것이어야 한다
-// (appendArrayInfo가 0부터 매기는 arrayInfoIndex가 스냅샷의 배열 순서와 같다).
-export const adoptSnapshot = (module: TModule, snapshot: TLeafSnapshot, arrayPool: Pool<TArrayInfo>) => {
-  const { leaves, undef, arrays } = snapshot;
+// (appendArrayInfo가 0부터 매기는 arrayInfoIndex가 펴진 데이터의 배열 순서와 같다).
+export const adoptFlatData = (module: TModule, flatData: TFlatData, arrayPool: Pool<TArrayInfo>) => {
+  const { leaves, undef, arrays } = flatData;
   for (const i of undef) {
     leaves[i] = undefined;
   }
@@ -73,16 +73,16 @@ const instantiate = (
 
 // compile과 같은 모양이다. 인스턴스를 만들 때 options.resumeFrom(SSR이 그린 노드들의 부모)의 노드를
 // 새로 만들지 않고 resume한다. 반환한 nodes가 바로 그 노드들이다.
-// options.snapshot - quble-ssr --snapshot이 낸 store. 주면 plantRoot 없이 그것으로 시작하고 rootValue는 안 본다.
+// options.flatData - quble-ssr --flat-data가 낸 store. 주면 plantRoot 없이 그것으로 시작하고 rootValue는 안 본다.
 // 없으면 rootValue로 plantRoot를 하며, 그 값은 SSR에 넘긴 data와 같아야 한다.
 export const resume = (bytes: Uint8Array, resources: string[] = []) => {
   const module = decode(bytes);
   const loadedHrefs = new Set();
   return (compId: number) =>
-    (rootValue: unknown, handlers: THandlers, options: { resumeFrom: Node; snapshot?: TLeafSnapshot }) => {
+    (rootValue: unknown, handlers: THandlers, options: { resumeFrom: Node; flatData?: TFlatData }) => {
       const arrayPool: Pool<TArrayInfo> = new Pool();
-      const planted = options.snapshot
-        ? adoptSnapshot(module, options.snapshot, arrayPool)
+      const planted = options.flatData
+        ? adoptFlatData(module, options.flatData, arrayPool)
         : plantRoot(module, rootValue, arrayPool);
       return instantiate(module, resources, loadedHrefs, compId, handlers, planted, arrayPool, options.resumeFrom);
     };

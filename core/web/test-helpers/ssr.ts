@@ -25,9 +25,9 @@ export const renderSsr = (name: string, resmap: string[], data: unknown) => {
   return { html: run.stdout, links };
 };
 
-// quble-ssr --snapshot이 낸 leaf store 스냅샷(JSON)을 객체로 돌려준다. 픽스처는 buildFixture로 먼저 빌드돼 있어야 한다.
-export const snapshotSsr = (name: string, data: unknown) => {
-  const run = spawnSync(SSR_BIN, ["--snapshot", fixtureQubbPath(name), "-"], {
+// quble-ssr --flat-data가 낸 leaf store 펴진 데이터(JSON)를 객체로 돌려준다. 픽스처는 buildFixture로 먼저 빌드돼 있어야 한다.
+export const flatDataSsr = (name: string, data: unknown) => {
+  const run = spawnSync(SSR_BIN, ["--flat-data", fixtureQubbPath(name), "-"], {
     input: JSON.stringify(data),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,

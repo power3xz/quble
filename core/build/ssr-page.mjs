@@ -1,10 +1,10 @@
 // SSR + resume 페이지 한 장을 HTML 문자열로 만든다. 요청마다 만드는 프리뷰 서버(serve-ssr-preview.mjs)와
 // 빌드 때 파일로 쓰는 SSG(build-ssg.mjs)가 같이 쓴다. build-preview.mjs가 만든 dist/preview를 읽는다.
-// renderSsr, snapshotJson, inlineResource는 playground 빌드(build-playground.mjs)도 부른다.
+// renderSsr, flatDataJson, inlineResource는 playground 빌드(build-playground.mjs)도 부른다.
 //
 // mode
-//   resume  SSR HTML + leaf store 스냅샷(HTML에 JSON으로 실음) + resume. data를 따로 받지 않는다
-//   data    SSR HTML + resume, data.json을 받아 plantRoot로 시작 - 스냅샷과 견주는 용도
+//   resume  SSR HTML + leaf store 펴진 데이터(HTML에 JSON으로 실음) + resume. data를 따로 받지 않는다
+//   data    SSR HTML + resume, data.json을 받아 plantRoot로 시작 - 펴진 데이터와 견주는 용도
 //   nojs    SSR HTML만(스크립트 없음)
 //   csr     SSR HTML 없이 클라이언트가 처음부터 그린다 - resume과 견주는 용도
 // showStatus  오른쪽 아래에 이어받은 결과를 알리는 줄을 둔다(개발자 확인용).
@@ -37,15 +37,15 @@ export const renderSsr = (distDir, stem, ssrBin, dataFile = join(distDir, "data.
   return { html: run.stdout, links, ms };
 };
 
-// leaf store 스냅샷을 만든다(quble-ssr --snapshot). <script type="application/json"> 안에 넣으므로 `<`를
+// leaf store 펴진 데이터를 만든다(quble-ssr --flat-data). <script type="application/json"> 안에 넣으므로 `<`를
 // 유니코드 이스케이프(u003c)로 바꾼다 - JSON으로는 같은 값이고 `</script`나 `<!--`가 본문에서 태그를 닫지 못한다.
-export const snapshotJson = (distDir, stem, ssrBin, dataFile = join(distDir, "data.json")) => {
-  const run = spawnSync(ssrBin, ["--snapshot", join(distDir, `${stem}.qubb`), dataFile], {
+export const flatDataJson = (distDir, stem, ssrBin, dataFile = join(distDir, "data.json")) => {
+  const run = spawnSync(ssrBin, ["--flat-data", join(distDir, `${stem}.qubb`), dataFile], {
     encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024,
   });
   if (run.status !== 0) {
-    throw new Error(run.stderr || "quble-ssr --snapshot 실패");
+    throw new Error(run.stderr || "quble-ssr --flat-data 실패");
   }
   return run.stdout.replace(/</g, "\\u003c");
 };
@@ -69,9 +69,9 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
     .map((name) => `  <style>${inlineCss(readFileSync(join(distDir, name), "utf8"))}</style>`)
     .join("\n");
   const linkTags = links.map((path) => inlineResource(distDir, asset, path)).join("\n");
-  const snapshot = mode === "resume" ? snapshotJson(distDir, stem, ssrBin) : null;
-  const snapshotTag =
-    snapshot === null ? "" : `\n  <script id="qb-snapshot" type="application/json">${snapshot}</script>`;
+  const flatData = mode === "resume" ? flatDataJson(distDir, stem, ssrBin) : null;
+  const flatDataTag =
+    flatData === null ? "" : `\n  <script id="qb-flat-data" type="application/json">${flatData}</script>`;
   // 상태 표시줄(showStatus)을 쓰는 스크립트 조각. 끄면 코드째 빠진다.
   const statusInit = showStatus
     ? `
@@ -84,7 +84,7 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
       const ms = (performance.now() - t0).toFixed(1);
       status.textContent = csr
         ? "CSR: 처음부터 그림 " + ms + "ms"
-        : "resume(" + (snapshot ? "스냅샷" : "data") + "): SSR 요소 " + ssrNodes + "개를 " + ms + "ms로 이어받음, 첫 요소 재사용 " + (app.firstElementChild === firstElement);`
+        : "resume(" + (flatData ? "펴진 데이터" : "data") + "): SSR 요소 " + ssrNodes + "개를 " + ms + "ms로 이어받음, 첫 요소 재사용 " + (app.firstElementChild === firstElement);`
     : "";
   const statusFail = showStatus
     ? `
@@ -99,13 +99,13 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
     import { loadHandlers, ${mode === "csr" ? "mount" : "resume"} } from "${asset(mode === "csr" ? "quble-runtime.js" : "quble-resume.js")}";
     const app = document.getElementById("quble-app");
     const csr = ${mode === "csr"};
-    const snapshotTag = document.getElementById("qb-snapshot");
-    const snapshot = snapshotTag ? JSON.parse(snapshotTag.textContent) : null;${statusInit}
+    const flatDataTag = document.getElementById("qb-flat-data");
+    const flatData = flatDataTag ? JSON.parse(flatDataTag.textContent) : null;${statusInit}
     const base = new URL("${asset(`${stem}.qubb`)}", location.href);
     const [manifest, bytes, data] = await Promise.all([
       fetch("${asset(`${stem}.manifest.json`)}").then((r) => r.json()),
       fetch("${asset(`${stem}.qubb`)}").then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b)),
-      snapshot ? undefined : fetch("${asset("data.json")}").then((r) => r.json()),
+      flatData ? undefined : fetch("${asset("data.json")}").then((r) => r.json()),
     ]);
     const handlers = await loadHandlers(manifest, base);
     const resources = manifest.resources.map((p) => new URL(p, base).href);
@@ -113,7 +113,7 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
     try {
       window.__quble = csr
         ? mount(bytes, app, { data, handlers, resources })
-        : resume(bytes, app, { snapshot, data, handlers, resources });${statusDone}
+        : resume(bytes, app, { flatData, data, handlers, resources });${statusDone}
     } catch (error) {${statusFail}
       console.error(error);
     }
@@ -138,7 +138,7 @@ ${globalStyles}
 ${linkTags}${statusStyle}
 </head>
 <body>
-  <div id="quble-app">${html}</div>${statusLine}${snapshotTag}${script}
+  <div id="quble-app">${html}</div>${statusLine}${flatDataTag}${script}
 </body>
 </html>
 `;
