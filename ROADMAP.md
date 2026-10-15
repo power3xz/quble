@@ -14,9 +14,9 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
   같은 HTML이 나오는지 픽스처마다 비교한다.
 - [x] 실행 재개 (resume, ~=hydration) - 클라가 SSR이 만든 HTML을 새로 만들지 않고, 기존
   노드에 구독/핸들러만 붙여 SSR이 멈춘 실행을 이어받는다. 인터프리터가 노드 공급자(`TNodeSource`)로
-  SSR 노드를 받는다. 시작 상태는 data로 `plantRoot`를 하거나, SSR이 낸 leaf store 스냅샷으로 `plantRoot`
-  없이 시작한다.
-- [x] SSG - 빌드할 때 `quble-ssr`로 SSR HTML(스냅샷 포함)을 정적 파일로 낸다. 서버 없는 정적
+  SSR 노드를 받는다. 시작 상태는 data로 `plantRoot`를 하거나, SSR이 낸 펴진 데이터(flat data)로
+  `plantRoot` 없이 시작한다.
+- [x] SSG - 빌드할 때 `quble-ssr`로 SSR HTML(펴진 데이터 포함)을 정적 파일로 낸다. 서버 없는 정적
   호스팅(GitHub Pages)에서 SSR 결과를 쓰기 위함. playground의 셸이 이것으로 빌드된다.
 - [x] HTML 중첩 검사 - HTML 파서가 구조를 바꾸는 중첩(`p` 안의 `div`, `table` 바로 아래 `tr` 등)을
   컴파일 에러로 막아 SSR HTML과 CSR 트리가 달라지지 않게 한다.

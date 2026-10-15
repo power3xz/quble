@@ -368,9 +368,11 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
     fields(이벤트와 같은 인코딩)로 컨텍스트 배열에 들어간다. `context_index`는 이 배열의 인덱스.
   - **활성화**는 코드의 `ENTER_CONTEXT context_index` ... `EXIT_CONTEXT`다. `@with Area { ... }`가
     이 짝으로 감싼다(IF/IF_END와 동형 - 점프 없는 마커, 중첩 보장).
-  - **런타임**: ENTER가 그 컨텍스트를 활성 스택에 올리고(각 field를 type_ref 구조로 조립), 그 범위 안의
-    `BIND_EVENT`가 활성 컨텍스트를 핸들러의 `context`로 전달한다(`context.Area.userId` = 발생 시점
-    현재값, payload와 같은 조립). EXIT가 스택에서 내린다. 컨텍스트는 DOM 출력엔 영향 없다(SSR은 skip).
+  - **런타임**: ENTER가 어느 컨텍스트인지와 그 컴포넌트의 스코프만 활성 스택에 올리고, 그 범위 안의
+    `BIND_EVENT`가 처음 바인딩할 때 각 field를 type_ref 구조로 조립해 핸들러의 `context`로 전달한다
+    (`context.Area.userId` = 발생 시점 현재값, payload와 같은 조립). 컨텍스트 값은 컴포넌트 props에서만
+    오므로 별도 인스턴스 저장소는 없고, 항목은 바인딩이 사라지면 함께 사라진다. EXIT가 스택에서 내린다.
+    컨텍스트는 DOM 출력엔 영향 없다(SSR은 skip).
   - 같은 컨텍스트명 중첩은 비정상이나(맥락은 중복이 없는 게 맞다), 합성 경계 너머 중첩은 컴파일타임에
     못 봐 런타임이 안쪽 우선으로 덮고 경고한다(ISSUES.md).
 
