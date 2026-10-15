@@ -698,16 +698,8 @@ export class ResumeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const info = vm.arrayPool.entries[Number(vm.store.get(arrayLeafIndex))];
-    if (info.sizeLeafIndex === null) {
-      info.sizeLeafIndex = vm.store.alloc([info.elemStartLeafIndices.length]);
-    }
-    const sizeLeafIndex = info.sizeLeafIndex;
-    if (info.indexLeafIndices.length === 0) {
-      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
-        info.indexLeafIndices[i] = vm.store.alloc([i]);
-      }
-    }
+    const info = vm.arrayInfoOf(arrayLeafIndex);
+    const sizeLeafIndex = vm.ensureIterationLeaves(info);
 
     const forRegionIndex = appendForRegion(vm.regionPool, sizeLeafIndex, this.anchor());
     info.forRegionIndices.push(forRegionIndex);

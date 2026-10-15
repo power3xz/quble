@@ -227,18 +227,8 @@ export class RuntimeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const info = vm.arrayPool.entries[Number(vm.store.get(arrayLeafIndex))];
-    if (info.sizeLeafIndex === null) {
-      info.sizeLeafIndex = vm.store.alloc([info.elemStartLeafIndices.length]); // @for에 처음 쓰일 때만 길이 칸 확보
-    }
-    const sizeLeafIndex = info.sizeLeafIndex;
-    // 인덱스 leaf도 @for에 처음 쓰일 때만 lazy 채운다(sizeLeafIndex와 같은 결). elemStartLeafIndices와
-    // 나란히 요소 수만큼 확보 - [i]=i번째 요소의 회차 번호. 이후 push/removeAt이 둘을 동기로 유지한다.
-    if (info.indexLeafIndices.length === 0) {
-      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
-        info.indexLeafIndices[i] = vm.store.alloc([i]);
-      }
-    }
+    const info = vm.arrayInfoOf(arrayLeafIndex);
+    const sizeLeafIndex = vm.ensureIterationLeaves(info);
 
     const forRegionIndex = appendForRegion(vm.regionPool, sizeLeafIndex);
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)

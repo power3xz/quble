@@ -835,6 +835,20 @@ export class VM {
   // 호출부가 NODE_BASE로 칸을 꺼내 넘긴다(노드가 그 칸을 싣고 있다).
   arrayInfoOf = (arrayLeafIndex: number): TArrayInfo => this.arrayPool.entries[Number(this.store.get(arrayLeafIndex))];
 
+  // 배열이 @for에 처음 쓰일 때 길이 칸(sizeLeafIndex)과 인덱스 leaf(indexLeafIndices)를 확보하고 길이 칸을
+  // 돌려준다. 이후 push/removeAt이 둘을 동기로 유지한다. 이미 확보했으면 아무것도 하지 않는다.
+  ensureIterationLeaves = (info: TArrayInfo): number => {
+    if (info.sizeLeafIndex === null) {
+      info.sizeLeafIndex = this.store.alloc([info.elemStartLeafIndices.length]);
+    }
+    if (info.indexLeafIndices.length === 0) {
+      for (let i = 0; i < info.elemStartLeafIndices.length; i++) {
+        info.indexLeafIndices[i] = this.store.alloc([i]);
+      }
+    }
+    return info.sizeLeafIndex;
+  };
+
   // 바인딩 때 필드 하나를 발생 시점에 조립할 준비물로 푼다(payload/컨텍스트 공용).
   toAssembled = (compId: number, field: TFieldEntry, argumentSourcePairs: TScope): TAssembled => {
     const name = this.module.constpool[field.nameConstIndex] as string;
