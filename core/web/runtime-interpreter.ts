@@ -37,11 +37,9 @@ import {
   appendBranchOfForRegion,
   appendForRegion,
   appendIfRegion,
-  attachGrownIterations,
   ELSE_INDEX,
   type TBranch,
   THEN_INDEX,
-  truncateFor,
 } from "./region.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import {
@@ -190,17 +188,7 @@ export class RuntimeInterpreter {
     }
 
     const onCount = (v: unknown) => {
-      const next = Number(v) || 0;
-      const cur = region.branchIndices.length;
-      for (let i = cur; i < next; i++) {
-        addIterationBranch(i); // 늘어난 꼬리만 build
-      }
-      if (next > cur) {
-        attachGrownIterations(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, cur);
-      }
-      if (next < cur) {
-        truncateFor(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
-      }
+      vm.resizeFor(forRegionIndex, Number(v) || 0, addIterationBranch);
     };
     // 부모 가지 구독에 실어 생애를 함께 한다 - 부모가 detach/free되면 count 감시도 꺼진다.
     branch.leafIndices.push(countLeafIndex);
@@ -270,17 +258,8 @@ export class RuntimeInterpreter {
     }
 
     const onSize = () => {
-      const next = info.elemStartLeafIndices.length; // store 값이 아니라 요소 목록 길이가 진실
-      const cur = region.branchIndices.length;
-      for (let i = cur; i < next; i++) {
-        addIterationBranch(i); // 늘어난 꼬리만 build
-      }
-      if (next > cur) {
-        attachGrownIterations(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, cur);
-      }
-      if (next < cur) {
-        truncateFor(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, next); // 줄어든 꼬리 제거
-      }
+      // store 값이 아니라 요소 목록 길이가 진실
+      vm.resizeFor(forRegionIndex, info.elemStartLeafIndices.length, addIterationBranch);
     };
     branch.leafIndices.push(sizeLeafIndex);
     branch.updateFns.push(onSize);

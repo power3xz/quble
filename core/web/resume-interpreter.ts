@@ -44,11 +44,9 @@ import {
   appendBranchOfForRegion,
   appendForRegion,
   appendIfRegion,
-  attachGrownIterations,
   ELSE_INDEX,
   type TBranch,
   THEN_INDEX,
-  truncateFor,
 } from "./region.ts";
 import { staticElementEnds } from "./static-spans.ts";
 import {
@@ -667,17 +665,7 @@ export class ResumeInterpreter {
     }
 
     const onCount = (v: unknown) => {
-      const next = Number(v) || 0;
-      const cur = region.branchIndices.length;
-      for (let i = cur; i < next; i++) {
-        growIteration(i);
-      }
-      if (next > cur) {
-        attachGrownIterations(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, cur);
-      }
-      if (next < cur) {
-        truncateFor(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, next);
-      }
+      vm.resizeFor(forRegionIndex, Number(v) || 0, growIteration);
     };
     branch.leafIndices.push(countLeafIndex);
     branch.updateFns.push(onCount);
@@ -750,17 +738,7 @@ export class ResumeInterpreter {
     }
 
     const onSize = () => {
-      const next = info.elemStartLeafIndices.length;
-      const cur = region.branchIndices.length;
-      for (let i = cur; i < next; i++) {
-        growIteration(i);
-      }
-      if (next > cur) {
-        attachGrownIterations(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, cur);
-      }
-      if (next < cur) {
-        truncateFor(vm.store, vm.regionPool, vm.branchPool, forRegionIndex, next);
-      }
+      vm.resizeFor(forRegionIndex, info.elemStartLeafIndices.length, growIteration);
     };
     branch.leafIndices.push(sizeLeafIndex);
     branch.updateFns.push(onSize);

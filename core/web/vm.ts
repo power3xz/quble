@@ -78,6 +78,7 @@ import {
 import type { Pool } from "./pool-allocator.ts";
 import {
   appendArrayInfo,
+  attachGrownIterations,
   freeArrayInfo,
   removeBranchAt,
   type TArrayInfo,
@@ -847,6 +848,21 @@ export class VM {
       }
     }
     return info.sizeLeafIndex;
+  };
+
+  // @for region의 회차를 next개로 맞춘다 - 늘면 늘어난 꼬리 회차 i마다 buildIteration(i)로 만들고 한 번에 붙이고,
+  // 줄면 꼬리를 떼어낸다. buildIteration은 회차 branch를 region에 더하고 노드를 담는 일까지 한다.
+  resizeFor = (forRegionIndex: number, next: number, buildIteration: (i: number) => void): void => {
+    const cur = this.regionPool.entries[forRegionIndex].branchIndices.length;
+    for (let i = cur; i < next; i++) {
+      buildIteration(i);
+    }
+    if (next > cur) {
+      attachGrownIterations(this.store, this.regionPool, this.branchPool, forRegionIndex, cur);
+    }
+    if (next < cur) {
+      truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next);
+    }
   };
 
   // 바인딩 때 필드 하나를 발생 시점에 조립할 준비물로 푼다(payload/컨텍스트 공용).
