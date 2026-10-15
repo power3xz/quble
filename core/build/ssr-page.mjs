@@ -96,7 +96,7 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
       ? ""
       : `
   <script type="module">
-    import { compile, loadHandlers, resume } from "${asset("quble-resume.js")}";
+    import { loadHandlers, ${mode === "csr" ? "mount" : "resume"} } from "${asset(mode === "csr" ? "quble-runtime.js" : "quble-resume.js")}";
     const app = document.getElementById("quble-app");
     const csr = ${mode === "csr"};
     const snapshotTag = document.getElementById("qb-snapshot");
@@ -111,11 +111,9 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
     const resources = manifest.resources.map((p) => new URL(p, base).href);
     const t0 = performance.now();
     try {
-      const inst = csr
-        ? compile(bytes, resources)(0)(data, handlers)
-        : resume(bytes, resources)(0)(data, handlers, snapshot ? { resumeFrom: app, snapshot } : { resumeFrom: app });
-      app.replaceChildren(...inst.nodes);
-      window.__quble = inst;${statusDone}
+      window.__quble = csr
+        ? mount(bytes, app, { data, handlers, resources })
+        : resume(bytes, app, { snapshot, data, handlers, resources });${statusDone}
     } catch (error) {${statusFail}
       console.error(error);
     }
