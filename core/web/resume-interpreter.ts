@@ -333,14 +333,13 @@ export class ResumeInterpreter {
           break;
         }
         case OP_ENTER_CONTEXT: {
-          const contextDef = vm.componentContexts(compId)[u16at()];
+          const contextIndex = u16at();
+          const contextDef = vm.componentContexts(compId)[contextIndex];
           const name = vm.module.constpool[contextDef.nameConstIndex as number] as string;
-          const fields = contextDef.fields.map((field) => vm.toAssembled(compId, field, argumentSourcePairs));
-          if (walkStacks.activeContexts.some((i) => vm.createdContexts[i].name === name)) {
+          if (walkStacks.activeContexts.some((active) => active.name === name)) {
             console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
           }
-          walkStacks.activeContexts.push(vm.createdContexts.length);
-          vm.createdContexts.push({ name, fields });
+          walkStacks.activeContexts.push({ name, compId, contextIndex, scope: argumentSourcePairs, fields: null });
           break;
         }
         case OP_EXIT_CONTEXT: {
