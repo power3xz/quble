@@ -77,14 +77,17 @@ import {
 } from "./opcodes.ts";
 import type { Pool } from "./pool-allocator.ts";
 import {
+  activateIf,
   appendArrayInfo,
   appendBranchOfForRegion,
   appendForRegion,
   attachGrownIterations,
+  ELSE_INDEX,
   freeArrayInfo,
   removeBranchAt,
   type TArrayInfo,
   type TBranch,
+  THEN_INDEX,
   type TRegion,
   truncateFor,
 } from "./region.ts";
@@ -871,6 +874,17 @@ export class VM {
   // @for region에 빈 회차 가지를 더하고 그 branchIndex를 돌려준다. 노드와 구독은 호출자가 build해 담는다.
   appendIteration = (forRegionIndex: number): number =>
     appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
+
+  // @if 조건 칸 구독을 부모 가지에 실어, 조건이 바뀌면 then/else 가지를 켠다. 조건 칸이 없으면(-1, CONST 조건)
+  // 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
+  subscribeIfCond = (branch: TBranch, condLeafIndex: number, regionIndex: number): void => {
+    if (condLeafIndex === -1) {
+      return;
+    }
+    this.subscribeOnBranch(branch, condLeafIndex, (condValue) => {
+      activateIf(this.store, this.regionPool, this.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+    });
+  };
 
   // leafIndex 구독을 가지에 실어 가지와 생애를 함께 한다 - 가지가 detach/free되면 감시도 꺼진다.
   subscribeOnBranch = (branch: TBranch, leafIndex: number, onChange: (v: unknown) => void): void => {

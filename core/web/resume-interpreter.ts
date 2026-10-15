@@ -39,7 +39,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { activateIf, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
+import { appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
 import { staticElementEnds } from "./static-spans.ts";
 import {
   CONST,
@@ -821,12 +821,7 @@ export class ResumeInterpreter {
       elseBranch.nodes = nodesOf(f);
     };
 
-    if (condLeafIndex !== -1) {
-      const onCond = (condValue: unknown) => {
-        activateIf(vm.store, vm.regionPool, vm.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
-      };
-      vm.subscribeOnBranch(branch, condLeafIndex, onCond);
-    }
+    vm.subscribeIfCond(branch, condLeafIndex, regionIndex);
 
     // 지금 보이는 가지는 SSR 노드에서 연결한다. 보이지 않는 가지는 SSR이 그리지 않았다.
     const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;

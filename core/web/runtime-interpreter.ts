@@ -32,7 +32,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { activateIf, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
+import { appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import {
   CONST,
@@ -935,13 +935,7 @@ export class RuntimeInterpreter {
     elseBranch.lazyBuild = buildElse;
 
     // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
-    // 조건 칸이 없으면(-1, CONST 조건) 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
-    if (condLeafIndex !== -1) {
-      const onCond = (condValue: unknown) => {
-        activateIf(vm.store, vm.regionPool, vm.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
-      };
-      vm.subscribeOnBranch(branch, condLeafIndex, onCond); // 부모 가지와 생애를 함께 한다
-    }
+    vm.subscribeIfCond(branch, condLeafIndex, regionIndex);
     // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
     // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
     // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
