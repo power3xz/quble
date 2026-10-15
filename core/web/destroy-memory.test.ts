@@ -70,3 +70,49 @@ test("destroy 전에는 노드와 region/branch가 살아 있고, 후에는 인�
   assert.equal(after, 0, `destroy 후 ${before}개 중 ${after}개가 남았다`);
   assert.equal(inst.nodes.length, 0);
 });
+
+// 힙 전체로 견준다 - WeakRef로 지정한 객체 밖의 것(리스너, 클로저, 캐시)이 새는 것도 잡는다. 인스턴스를 많이
+// 만들었다 버리고 gc한 뒤, 시작 전 힙과의 차이를 인스턴스당 바이트로 본다. 이벤트가 있는 컴포넌트는 안 해체하면
+// document 위임 리스너가 VM을 붙들어 인스턴스마다 쌓이므로, 해체하지 않은 쪽을 대조로 두고 해체한 쪽이 그보다
+// 훨씬 작은지 본다. 절대값은 실행 환경에 따라 달라 기준으로 삼지 않는다.
+const COUNT = 1000;
+
+const heapUsed = async () => {
+  for (let i = 0; i < 4; i++) {
+    await setImmediate();
+    gc();
+  }
+  return process.memoryUsage().heapUsed;
+};
+
+// 인스턴스를 COUNT개 만들고 버린 뒤 힙이 인스턴스당 몇 바이트 늘었는지 돌려준다. 앞의 20개는 예열이다.
+const retainedPerInstance = async (shouldDestroy: boolean) => {
+  const blueprint = compile(buildFixture("event_toggle"))(0);
+  const once = () => {
+    const inst = blueprint({ label: "t", on: "on" });
+    mount(inst);
+    if (shouldDestroy) {
+      inst.destroy();
+    }
+  };
+  for (let i = 0; i < 20; i++) {
+    once();
+  }
+  document.body.replaceChildren();
+  const before = await heapUsed();
+  for (let i = 0; i < COUNT; i++) {
+    once();
+  }
+  document.body.replaceChildren();
+  return ((await heapUsed()) - before) / COUNT;
+};
+
+test("인스턴스를 버린 뒤 힙은 destroy한 쪽이 안 한 쪽보다 훨씬 적게 남는다", async () => {
+  const kept = await retainedPerInstance(false);
+  const destroyed = await retainedPerInstance(true);
+  assert.ok(kept > 10_000, `대조(destroy 안 함)가 누수를 보여야 한다: ${Math.round(kept)}B/인스턴스`);
+  assert.ok(
+    destroyed < kept / 5,
+    `destroy한 쪽 ${Math.round(destroyed)}B/인스턴스, 안 한 쪽 ${Math.round(kept)}B/인스턴스`,
+  );
+});
