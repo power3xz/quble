@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { mount } from "./mount.ts";
+import { mount } from "./runtime-entry.ts";
 import type { THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import "./test-helpers/dom.ts";
