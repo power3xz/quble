@@ -4,7 +4,7 @@
 
 import { decode, type TField, type TModule } from "./decode.ts";
 import { Pool } from "./pool-allocator.ts";
-import { appendArrayInfo, appendIfRegion, type TArrayInfo, THEN_INDEX } from "./region.ts";
+import { appendArrayInfo, type TArrayInfo, THEN_INDEX } from "./region.ts";
 import { ResumeInterpreter } from "./resume-interpreter.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import {
@@ -66,24 +66,12 @@ const instantiate = (
   arrayPool: Pool<TArrayInfo>,
   root: Node,
 ) => {
-  const def = module.defs[compId];
   const resumeInterpreter = new ResumeInterpreter(module.code, root);
   const vm = new VM(module, handlers, resources, loadedHrefs, leaves, arrayPool, rootFlat, resumeInterpreter);
   const { store, regionPool, branchPool } = vm;
-  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, resumeInterpreter.anchor())];
-  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true;
-  rootRegion.shownIndex = THEN_INDEX;
+  const rootRegion = vm.openRootRegion(resumeInterpreter.anchor());
 
-  const built = vm.interpret(
-    rootFlat,
-    compId,
-    def.codeOff,
-    def.codeOff + def.codeLen,
-    rootRegion.branchIndices[THEN_INDEX],
-    "",
-    0,
-    { loopIndexStack: [], activeContexts: [] },
-  );
+  const built = vm.interpretRoot(compId, rootRegion);
   resumeInterpreter.finish();
   vm.interpreter = new RuntimeInterpreter();
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = nodesOf(built);

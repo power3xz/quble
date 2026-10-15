@@ -8,7 +8,7 @@
 import { decode, type TField, type TModule } from "./decode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
-import { appendIfRegion, type TArrayInfo, THEN_INDEX } from "./region.ts";
+import { type TArrayInfo, THEN_INDEX } from "./region.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import {
   assemble,
@@ -61,29 +61,16 @@ export const instantiate = (
   { leaves, rootFlat }: { leaves: unknown[]; rootFlat: number[] },
   arrayPool: Pool<TArrayInfo>,
 ) => {
-  const def = module.defs[compId];
   // rootFlat은 plantRoot가 준 [STORE, base, ...] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
   const vm = new VM(module, handlers, resources, loadedHrefs, leaves, arrayPool, rootFlat, new RuntimeInterpreter());
   const { store, regionPool, branchPool } = vm;
-  // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
-  // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
-  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1)]; // 루트도 region(인덱스 0)
-  branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
-  rootRegion.shownIndex = THEN_INDEX;
+  // 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
+  const rootRegion = vm.openRootRegion();
 
   // build: 트리(regionPool/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
   // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
   // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-  const built = vm.interpret(
-    rootFlat,
-    compId, // 루트 def
-    def.codeOff,
-    def.codeOff + def.codeLen,
-    rootRegion.branchIndices[THEN_INDEX], // branch index
-    "", // 루트 경로 prefix 비어 있음
-    0, // 세그먼트 인덱스 base 0
-    { loopIndexStack: [], activeContexts: [] }, // 루트는 @for/@with 밖 - 빈 스택
-  );
+  const built = vm.interpretRoot(compId, rootRegion);
   const rootNodes = nodesOf(built);
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = rootNodes;
   // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
