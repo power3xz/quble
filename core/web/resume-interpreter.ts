@@ -39,15 +39,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import {
-  activateIf,
-  appendBranchOfForRegion,
-  appendForRegion,
-  appendIfRegion,
-  ELSE_INDEX,
-  type TBranch,
-  THEN_INDEX,
-} from "./region.ts";
+import { activateIf, appendBranchOfForRegion, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
 import { staticElementEnds } from "./static-spans.ts";
 import {
   CONST,
@@ -584,9 +576,8 @@ export class ResumeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const forRegionIndex = appendForRegion(vm.regionPool, countLeafIndex, this.anchor());
+    const forRegionIndex = vm.openForRegion(branch, countLeafIndex, this.anchor());
     const region = vm.regionPool.entries[forRegionIndex];
-    branch.childRegionIndices.push(forRegionIndex);
     tops?.push(region.anchor);
 
     const stacks = snapshotStacks(walkStacks);
@@ -654,10 +645,9 @@ export class ResumeInterpreter {
     const info = vm.arrayInfoOf(arrayLeafIndex);
     const sizeLeafIndex = vm.ensureIterationLeaves(info);
 
-    const forRegionIndex = appendForRegion(vm.regionPool, sizeLeafIndex, this.anchor());
+    const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex, this.anchor());
     info.forRegionIndices.push(forRegionIndex);
     const region = vm.regionPool.entries[forRegionIndex];
-    branch.childRegionIndices.push(forRegionIndex);
     tops?.push(region.anchor);
 
     const stacks = snapshotStacks(walkStacks);

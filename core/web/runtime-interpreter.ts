@@ -32,15 +32,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import {
-  activateIf,
-  appendBranchOfForRegion,
-  appendForRegion,
-  appendIfRegion,
-  ELSE_INDEX,
-  type TBranch,
-  THEN_INDEX,
-} from "./region.ts";
+import { activateIf, appendBranchOfForRegion, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import {
   CONST,
@@ -111,9 +103,8 @@ export class RuntimeInterpreter {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const forRegionIndex = appendForRegion(vm.regionPool, countLeafIndex);
+    const forRegionIndex = vm.openForRegion(branch, countLeafIndex);
     const region = vm.regionPool.entries[forRegionIndex];
-    branch.childRegionIndices.push(forRegionIndex); // 부모 가지에 자식 등록(detach 재귀 대상)
     parent.appendChild(region.anchor);
 
     // grow(onCount 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
@@ -180,10 +171,9 @@ export class RuntimeInterpreter {
     const info = vm.arrayInfoOf(arrayLeafIndex);
     const sizeLeafIndex = vm.ensureIterationLeaves(info);
 
-    const forRegionIndex = appendForRegion(vm.regionPool, sizeLeafIndex);
+    const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex);
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
     const region = vm.regionPool.entries[forRegionIndex];
-    branch.childRegionIndices.push(forRegionIndex);
     parent.appendChild(region.anchor);
 
     // grow(onSize 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼

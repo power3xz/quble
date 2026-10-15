@@ -78,6 +78,7 @@ import {
 import type { Pool } from "./pool-allocator.ts";
 import {
   appendArrayInfo,
+  appendForRegion,
   attachGrownIterations,
   freeArrayInfo,
   removeBranchAt,
@@ -856,6 +857,14 @@ export class VM {
     if (next < cur) {
       truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next);
     }
+  };
+
+  // 부모 가지 밑에 @for region을 열고 그 regionIndex를 돌려준다. 부모 가지에 자식으로 등록해 부모가 detach될 때
+  // 따라 떼어지게 한다. anchor는 resume이 SSR DOM의 앵커를 넘길 때만 받는다. 앵커를 DOM 어디에 붙일지는 호출자 몫.
+  openForRegion = (branch: TBranch, countLeafIndex: number, anchor?: Comment): number => {
+    const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex, anchor);
+    branch.childRegionIndices.push(forRegionIndex);
+    return forRegionIndex;
   };
 
   // leafIndex 구독을 가지에 실어 가지와 생애를 함께 한다 - 가지가 detach/free되면 감시도 꺼진다.
