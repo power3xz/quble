@@ -116,3 +116,33 @@ test("인스턴스를 버린 뒤 힙은 destroy한 쪽이 안 한 쪽보다 훨�
     `destroy한 쪽 ${Math.round(destroyed)}B/인스턴스, 안 한 쪽 ${Math.round(kept)}B/인스턴스`,
   );
 });
+
+// 인스턴스를 해체한 뒤에도 호출자가 쥐고 있으면 destroy 클로저가 VM을 붙들어 VM의 필드(화살표 함수 수십
+// 개)가 인스턴스마다 남는다. 해체한 인스턴스는 쥐고 있어도 VM을 놓아야 한다.
+const heldAfterDestroyPerInstance = async () => {
+  const blueprint = compile(buildFixture("event_toggle"))(0);
+  const make = () => {
+    const inst = blueprint({ label: "t", on: "on" });
+    mount(inst);
+    inst.destroy();
+    return inst;
+  };
+  for (let i = 0; i < 20; i++) {
+    make();
+  }
+  document.body.replaceChildren();
+  const before = await heapUsed();
+  const held = [];
+  for (let i = 0; i < COUNT; i++) {
+    held.push(make());
+  }
+  document.body.replaceChildren();
+  const perInstance = ((await heapUsed()) - before) / COUNT;
+  assert.equal(held.length, COUNT);
+  return perInstance;
+};
+
+test("destroy한 인스턴스를 쥐고 있어도 VM을 붙들지 않는다", async () => {
+  const perInstance = await heldAfterDestroyPerInstance();
+  assert.ok(perInstance < 5_000, `쥐고 있는 해체된 인스턴스가 ${Math.round(perInstance)}B/인스턴스 남긴다`);
+});
