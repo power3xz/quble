@@ -3,9 +3,8 @@
 // 모르고 VM의 interpreter 필드에 번갈아 끼워진다. CSR만 쓰는 번들은 이 파일을 싣지 않는다.
 
 import { decode, type TField, type TModule } from "./decode.ts";
-import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
-import { appendArrayInfo, appendIfRegion, type TArrayInfo, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
+import { appendArrayInfo, appendIfRegion, type TArrayInfo, THEN_INDEX } from "./region.ts";
 import { ResumeInterpreter } from "./resume-interpreter.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import {
@@ -16,7 +15,6 @@ import {
   plantRoot,
   STORE,
   storeSourcePairs,
-  type TCreatedContext,
   type THandlers,
   VM,
 } from "./vm.ts";
@@ -69,25 +67,10 @@ const instantiate = (
   root: Node,
 ) => {
   const def = module.defs[compId];
-  const store = createLeafStoreSubject(leaves);
-  const regionPool: Pool<TRegion> = new Pool();
-  const branchPool: Pool<TBranch> = new Pool();
-  const createdContexts: TCreatedContext[] = [];
-  const resume = new ResumeInterpreter(module.code, root);
-  const vm = new VM(
-    module,
-    handlers,
-    resources,
-    loadedHrefs,
-    store,
-    arrayPool,
-    regionPool,
-    branchPool,
-    createdContexts,
-    rootFlat,
-    resume,
-  );
-  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, resume.anchor())];
+  const resumeInterpreter = new ResumeInterpreter(module.code, root);
+  const vm = new VM(module, handlers, resources, loadedHrefs, leaves, arrayPool, rootFlat, resumeInterpreter);
+  const { store, regionPool, branchPool } = vm;
+  const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1, false, resumeInterpreter.anchor())];
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true;
   rootRegion.shownIndex = THEN_INDEX;
 
@@ -101,7 +84,7 @@ const instantiate = (
     0,
     { loopIndexStack: [], activeContexts: [] },
   );
-  resume.finish();
+  resumeInterpreter.finish();
   vm.interpreter = new RuntimeInterpreter();
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = nodesOf(built);
   rootRegion.attach(store, regionPool, branchPool, rootRegion);

@@ -64,7 +64,7 @@ import {
   instrSize,
 } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, buildSkipTable, type TExprSkipTable, type TSkipPastOps } from "./expr-skip-table.ts";
-import type { LeafStoreSubject as TLeafStoreSubject, TSubscriber } from "./leaf-store.ts";
+import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
 import {
   forBodyEnd,
   ifBranchRanges,
@@ -75,7 +75,7 @@ import {
   OP_TEXT_VAR,
   slotPlaceholderContentEnd,
 } from "./opcodes.ts";
-import type { Pool } from "./pool-allocator.ts";
+import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
   appendArrayInfo,
@@ -637,11 +637,8 @@ export class VM {
     handlers: THandlers,
     resources: string[],
     loadedHrefs: Set<unknown>,
-    store: TLeafStoreSubject,
+    leaves: unknown[],
     arrayPool: Pool<TArrayInfo>,
-    regionPool: Pool<TRegion>,
-    branchPool: Pool<TBranch>,
-    createdContexts: TCreatedContext[],
     rootScope: TScope,
     interpreter: TInterpreter,
   ) {
@@ -650,11 +647,11 @@ export class VM {
     this.handlers = handlers;
     this.resources = resources;
     this.loadedHrefs = loadedHrefs;
-    this.store = store;
+    this.store = createLeafStoreSubject(leaves);
     this.arrayPool = arrayPool;
-    this.regionPool = regionPool;
-    this.branchPool = branchPool;
-    this.createdContexts = createdContexts;
+    this.regionPool = new Pool();
+    this.branchPool = new Pool();
+    this.createdContexts = [];
     this.rootScope = rootScope;
     this.interpreter = interpreter;
   }

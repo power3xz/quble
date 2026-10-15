@@ -8,7 +8,7 @@
 import { decode, type TField, type TModule } from "./decode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
-import { appendIfRegion, type TArrayInfo, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
+import { appendIfRegion, type TArrayInfo, THEN_INDEX } from "./region.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import {
   assemble,
@@ -17,7 +17,6 @@ import {
   nodesOf,
   plantRoot,
   storeSourcePairs,
-  type TCreatedContext,
   type THandlers,
   VM,
 } from "./vm.ts";
@@ -63,15 +62,11 @@ export const instantiate = (
   arrayPool: Pool<TArrayInfo>,
 ) => {
   const def = module.defs[compId];
-  const store = createLeafStoreSubject(leaves);
+  // rootFlat은 plantRoot가 준 [STORE, base, ...] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
+  const vm = new VM(module, handlers, resources, loadedHrefs, leaves, arrayPool, rootFlat, new RuntimeInterpreter());
+  const { store, regionPool, branchPool } = vm;
   // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰
   // attachIf가 분기 없이 처리한다. 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
-  const regionPool: Pool<TRegion> = new Pool(); // 한 인스턴스의 모든 Region. alloc/free(@for 회차 제거 시 자식 region 반납).
-  const branchPool: Pool<TBranch> = new Pool(); // 한 인스턴스의 모든 Branch. alloc/free(@for 회차 제거 시 반납).
-  // 만들어진 컨텍스트 저장소. EnterContext마다 { name, fields }를 append하고 그 인덱스를
-  // activeContexts에 싣는다. fields는 그 시점 argumentSourcePairs로 푼 leafIndex라 인스턴스마다 달라 공유
-  // 안 됨. 지금은 append만(회수는 @for+leafIndex 회수 때 - ISSUES).
-  const createdContexts: TCreatedContext[] = [];
   const rootRegion = regionPool.entries[appendIfRegion(regionPool, branchPool, -1)]; // 루트도 region(인덱스 0)
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true; // 루트 then은 즉시 build됨(아래 interpret)
   rootRegion.shownIndex = THEN_INDEX;
@@ -79,20 +74,6 @@ export const instantiate = (
   // build: 트리(regionPool/branch.nodes/shownIndex)만 만든다. 루트 직속 노드는 fragment에 모여
   // 루트 가지에 담긴다(자식 region 노드는 아직 안 붙음 - 부모 nodes 오염 방지). 그 뒤
   // attachIf가 루트부터 재귀로 노드를 anchor 뒤에 끼우고 구독을 건다.
-  // rootFlat은 plantRoot가 준 [STORE, base, ...] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
-  const vm = new VM(
-    module,
-    handlers,
-    resources,
-    loadedHrefs,
-    store,
-    arrayPool,
-    regionPool,
-    branchPool,
-    createdContexts,
-    rootFlat,
-    new RuntimeInterpreter(),
-  );
   const built = vm.interpret(
     rootFlat,
     compId, // 루트 def
