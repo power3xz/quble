@@ -64,7 +64,7 @@ import {
   instrSize,
 } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, buildSkipTable, type TExprSkipTable, type TSkipPastOps } from "./expr-skip-table.ts";
-import type { LeafStoreSubject as TLeafStoreSubject, TSubscriber } from "./leaf-store.ts";
+import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
 import {
   forBodyEnd,
   ifBranchRanges,
@@ -75,12 +75,13 @@ import {
   OP_TEXT_VAR,
   slotPlaceholderContentEnd,
 } from "./opcodes.ts";
-import type { Pool } from "./pool-allocator.ts";
+import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
   appendArrayInfo,
   appendBranchOfForRegion,
   appendForRegion,
+  appendIfRegion,
   attachGrownIterations,
   ELSE_INDEX,
   freeArrayInfo,
@@ -637,11 +638,8 @@ export class VM {
     handlers: THandlers,
     resources: string[],
     loadedHrefs: Set<unknown>,
-    store: TLeafStoreSubject,
+    leaves: unknown[],
     arrayPool: Pool<TArrayInfo>,
-    regionPool: Pool<TRegion>,
-    branchPool: Pool<TBranch>,
-    createdContexts: TCreatedContext[],
     rootScope: TScope,
     interpreter: TInterpreter,
   ) {
@@ -650,11 +648,11 @@ export class VM {
     this.handlers = handlers;
     this.resources = resources;
     this.loadedHrefs = loadedHrefs;
-    this.store = store;
+    this.store = createLeafStoreSubject(leaves);
     this.arrayPool = arrayPool;
-    this.regionPool = regionPool;
-    this.branchPool = branchPool;
-    this.createdContexts = createdContexts;
+    this.regionPool = new Pool();
+    this.branchPool = new Pool();
+    this.createdContexts = [];
     this.rootScope = rootScope;
     this.interpreter = interpreter;
   }
@@ -684,6 +682,82 @@ export class VM {
       walkStacks,
       slotPlaceholderContents,
     );
+  };
+
+  // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰 attach가
+  // 분기 없이 처리한다. 루트 then은 곧바로 build되므로 built로 둔다. anchor를 주지 않으면 새로 만든다.
+  openRootRegion = (anchor?: Comment): TRegion => {
+    const rootRegion = this.regionPool.entries[appendIfRegion(this.regionPool, this.branchPool, -1, false, anchor)];
+    this.branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true;
+    rootRegion.shownIndex = THEN_INDEX;
+    return rootRegion;
+  };
+
+  // 루트 def 전체를 루트 region의 then 가지로 해석한다. 루트는 경로 prefix가 비고 @for/@with 밖이다.
+  interpretRoot = (compId: number, rootRegion: TRegion): TBuiltNodes => {
+    const def = this.module.defs[compId];
+    return this.interpret(
+      this.rootScope,
+      compId,
+      def.codeOff,
+      def.codeOff + def.codeLen,
+      rootRegion.branchIndices[THEN_INDEX],
+      "",
+      0,
+      { loopIndexStack: [], activeContexts: [] },
+    );
+  };
+
+  // 첫 그리기를 마친 인스턴스를 호출자에게 내준다. store를 실어 호출측이 set(leafIndex, v)로 반응성을 건다.
+  //
+  // destroy는 인스턴스를 해체한다 - 붙은 DOM/구독을 region 트리 재귀로 떼고(detach - 반응 갱신으로 나중에
+  // 붙은 노드까지 region이 안다), 루트 anchor와 document 위임 리스너를 제거해 인스턴스가 GC되게 한다.
+  //
+  // snapshot은 루트 props의 지금 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다(핸들러 payload와
+  // 같은 조립). 루트 슬롯 base는 rootScope의 [STORE, base] 쌍에 루트 props 필드 순서로 놓여 있다.
+  instanceOf = (rootRegion: TRegion, nodes: ChildNode[]) => {
+    const { module, store, regionPool, branchPool, arrayPool, rootScope } = this;
+    // 해체한 뒤에는 루트 region을 놓는다 - destroy 클로저가 붙들고 있으면 루트 anchor가 남는다. 이미 해체했으면
+    // 풀이 비어 있어 detach가 예외를 throw하므로 두 번째 호출은 건너뛴다.
+    let root: TRegion | null = rootRegion;
+    const destroy = () => {
+      if (root === null) {
+        return;
+      }
+      root.detach(store, regionPool, branchPool, root);
+      root.anchor.remove();
+      root = null;
+      this.removeDelegates();
+      // 떼어진 노드, region/branch/배열 정보, store의 값, VM의 캐시를 인스턴스가 붙들지 않게 한다.
+      // destroy 클로저가 VM을 붙들므로 호출자가 인스턴스를 들고 있으면 VM이 살아 있다.
+      nodes.length = 0;
+      store.clear();
+      regionPool.clear();
+      branchPool.clear();
+      arrayPool.clear();
+      this.createdContexts.length = 0;
+      this.forEndCache.clear();
+      this.ifRangesCache.clear();
+      this.slotContentEndCache.clear();
+      this.templatePlanCache.clear();
+      this.storeTree = null;
+    };
+    const snapshot = (): Record<string, unknown> => {
+      const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
+      const value: Record<string, unknown> = {};
+      rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
+        const pairs = storeSourcePairs(rootScope[i * 2 + 1], leafCountOf(module, typeRef));
+        value[module.constpool[nameConstIndex] as string] = assemble(
+          compiledStepsOf(module, typeRef),
+          pairs,
+          store,
+          module,
+          arrayPool,
+        );
+      });
+      return value;
+    };
+    return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
   };
 
   buildIteration = (

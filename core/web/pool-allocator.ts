@@ -22,4 +22,10 @@ export class Pool<T> {
     (this.entries as (T | null)[])[index] = null;
     this.free.push(index);
   };
+
+  // 모든 칸을 비운다 - 인스턴스를 해체할 때 칸이 붙든 노드와 구독을 놓는다.
+  clear = (): void => {
+    this.entries.length = 0;
+    this.free.length = 0;
+  };
 }
