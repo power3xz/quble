@@ -7,17 +7,7 @@ import { Pool } from "./pool-allocator.ts";
 import { appendArrayInfo, type TArrayInfo, THEN_INDEX } from "./region.ts";
 import { ResumeInterpreter } from "./resume-interpreter.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
-import {
-  assemble,
-  compiledStepsOf,
-  leafCountOf,
-  nodesOf,
-  plantRoot,
-  STORE,
-  storeSourcePairs,
-  type THandlers,
-  VM,
-} from "./vm.ts";
+import { leafCountOf, nodesOf, plantRoot, STORE, type THandlers, VM } from "./vm.ts";
 
 // quble-ssr --snapshot(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
 //   leaves  store 배열. JSON에 undefined가 없어 그 자리는 null이고 undef에 인덱스가 적혀 있다.
@@ -77,28 +67,8 @@ const instantiate = (
   branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].nodes = nodesOf(built);
   rootRegion.attach(store, regionPool, branchPool, rootRegion);
   // 붙인 뒤 root 아래가 이 인스턴스의 루트 노드들이다(앵커 + 붙은 트리).
-  const nodes = Array.from(root.childNodes);
-  const destroy = () => {
-    rootRegion.detach(store, regionPool, branchPool, rootRegion);
-    rootRegion.anchor.remove();
-    vm.removeDelegates();
-  };
-  const snapshot = (): Record<string, unknown> => {
-    const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
-    const value: Record<string, unknown> = {};
-    rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
-      const pairs = storeSourcePairs(rootFlat[i * 2 + 1], leafCountOf(module, typeRef));
-      value[module.constpool[nameConstIndex] as string] = assemble(
-        compiledStepsOf(module, typeRef),
-        pairs,
-        store,
-        module,
-        arrayPool,
-      );
-    });
-    return value;
-  };
-  return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
+  const nodes = Array.from(root.childNodes) as ChildNode[];
+  return vm.instanceOf(rootRegion, nodes);
 };
 
 // compile과 같은 모양이다. 인스턴스를 만들 때 options.resumeFrom(SSR이 그린 노드들의 부모)의 노드를

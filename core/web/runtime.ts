@@ -5,21 +5,12 @@
 //
 // 바이트코드를 훑어 DOM/구독을 짓는 VM은 vm.ts에 있다.
 
-import { decode, type TField, type TModule } from "./decode.ts";
+import { decode, type TModule } from "./decode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import { type TArrayInfo, THEN_INDEX } from "./region.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
-import {
-  assemble,
-  compiledStepsOf,
-  leafCountOf,
-  nodesOf,
-  plantRoot,
-  storeSourcePairs,
-  type THandlers,
-  VM,
-} from "./vm.ts";
+import { nodesOf, plantRoot, type THandlers, VM } from "./vm.ts";
 
 // 다른 파일이 runtime.ts에서 가져다 쓰는 이름들.
 export { leafCountOf, plantRoot, STORE, swapDeleteAt, type THandlers } from "./vm.ts";
@@ -79,33 +70,7 @@ export const instantiate = (
   rootRegion.attach(store, regionPool, branchPool, rootRegion);
   // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
   const nodes = Array.from(fragment.childNodes);
-  // store를 인스턴스에 실어 반환 - 호출측이 set(leafIndex, v)로 반응성을 건다(옛 setPath 대체).
-  // destroy = 인스턴스 해체: 붙은 DOM/구독을 region 트리 재귀로 떼고(detach - 반응 갱신으로
-  // 나중에 붙은 노드까지 region이 안다), 루트 anchor와 document 위임 리스너를 제거해 인스턴스가
-  // GC되게 한다.
-  const destroy = () => {
-    rootRegion.detach(store, regionPool, branchPool, rootRegion);
-    rootRegion.anchor.remove();
-    vm.removeDelegates();
-  };
-  // 루트 props의 지금 값. mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다(핸들러 payload와 같은 조립).
-  // 루트 슬롯 base는 rootFlat의 [STORE, base] 쌍에 루트 props 필드 순서로 놓여 있다.
-  const snapshot = (): Record<string, unknown> => {
-    const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
-    const value: Record<string, unknown> = {};
-    rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
-      const pairs = storeSourcePairs(rootFlat[i * 2 + 1], leafCountOf(module, typeRef));
-      value[module.constpool[nameConstIndex] as string] = assemble(
-        compiledStepsOf(module, typeRef),
-        pairs,
-        store,
-        module,
-        arrayPool,
-      );
-    });
-    return value;
-  };
-  return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
+  return vm.instanceOf(rootRegion, nodes);
 };
 
 // 상태 저장소(store)는 leaf-store.ts가 정의한다. blueprint가 받는 store가 이것 - 편의상 여기서 재공개한다.

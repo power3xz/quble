@@ -708,6 +708,38 @@ export class VM {
     );
   };
 
+  // 첫 그리기를 마친 인스턴스를 호출자에게 내준다. store를 실어 호출측이 set(leafIndex, v)로 반응성을 건다.
+  //
+  // destroy는 인스턴스를 해체한다 - 붙은 DOM/구독을 region 트리 재귀로 떼고(detach - 반응 갱신으로 나중에
+  // 붙은 노드까지 region이 안다), 루트 anchor와 document 위임 리스너를 제거해 인스턴스가 GC되게 한다.
+  //
+  // snapshot은 루트 props의 지금 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다(핸들러 payload와
+  // 같은 조립). 루트 슬롯 base는 rootScope의 [STORE, base] 쌍에 루트 props 필드 순서로 놓여 있다.
+  instanceOf = (rootRegion: TRegion, nodes: ChildNode[]) => {
+    const { module, store, regionPool, branchPool, arrayPool, rootScope } = this;
+    const destroy = () => {
+      rootRegion.detach(store, regionPool, branchPool, rootRegion);
+      rootRegion.anchor.remove();
+      this.removeDelegates();
+    };
+    const snapshot = (): Record<string, unknown> => {
+      const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };
+      const value: Record<string, unknown> = {};
+      rootType.fields.forEach(([nameConstIndex, typeRef], i) => {
+        const pairs = storeSourcePairs(rootScope[i * 2 + 1], leafCountOf(module, typeRef));
+        value[module.constpool[nameConstIndex] as string] = assemble(
+          compiledStepsOf(module, typeRef),
+          pairs,
+          store,
+          module,
+          arrayPool,
+        );
+      });
+      return value;
+    };
+    return { nodes, regionPool, branchPool, arrayPool, store, destroy, snapshot };
+  };
+
   buildIteration = (
     indexKind: number,
     indexRef: number,
