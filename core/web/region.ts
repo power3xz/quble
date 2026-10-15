@@ -355,12 +355,12 @@ export const attachGrownIterations = (
 // 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
 const freeBranchTree = (
   store: Store,
-  branchPool: Pool<TBranch>,
   regionPool: Pool<TRegion>,
+  branchPool: Pool<TBranch>,
   branchIndex: number,
 ): void => {
   for (const childRegionIndex of branchPool.entries[branchIndex].childRegionIndices) {
-    freeRegionTree(store, branchPool, regionPool, childRegionIndex);
+    freeRegionTree(store, regionPool, branchPool, childRegionIndex);
   }
   branchPool.release(branchIndex);
 };
@@ -369,13 +369,13 @@ const freeBranchTree = (
 // 자기가 잡은 파생 칸(IF_EXPR 조건)이 있으면 store에도 반납한다 - region이 소유한 유일한 칸이다.
 const freeRegionTree = (
   store: Store,
-  branchPool: Pool<TBranch>,
   regionPool: Pool<TRegion>,
+  branchPool: Pool<TBranch>,
   regionIndex: number,
 ): void => {
   const region = regionPool.entries[regionIndex];
   for (const branchIndex of region.branchIndices) {
-    freeBranchTree(store, branchPool, regionPool, branchIndex);
+    freeBranchTree(store, regionPool, branchPool, branchIndex);
   }
   if (region.ownsCondLeaf) {
     store.free(region.condLeafIndex, 1);
@@ -395,7 +395,7 @@ export const truncateFor = (
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   for (let i = branchIndices.length - 1; i >= count; i--) {
     detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-    freeBranchTree(store, branchPool, regionPool, branchIndices[i]);
+    freeBranchTree(store, regionPool, branchPool, branchIndices[i]);
   }
   branchIndices.length = count;
 };
@@ -412,6 +412,6 @@ export const removeBranchAt = (
 ): void => {
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-  freeBranchTree(store, branchPool, regionPool, branchIndices[i]);
+  freeBranchTree(store, regionPool, branchPool, branchIndices[i]);
   branchIndices.splice(i, 1);
 };
