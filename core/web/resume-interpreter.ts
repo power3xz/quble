@@ -39,7 +39,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { activateIf, appendBranchOfForRegion, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
+import { activateIf, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
 import { staticElementEnds } from "./static-spans.ts";
 import {
   CONST,
@@ -584,7 +584,7 @@ export class ResumeInterpreter {
 
     // 처음 회차는 SSR 노드에서 연결한다.
     const resumeIteration = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       vm.branchPool.entries[newBranchIndex].nodes = vm.buildIteration(
         RAW,
         i,
@@ -600,7 +600,7 @@ export class ResumeInterpreter {
     };
     // count가 늘 때의 회차는 노드를 새로 짓는다.
     const growIteration = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       vm.branchPool.entries[newBranchIndex].nodes = nodesOf(
         vm.buildIteration(
           RAW,
@@ -653,7 +653,7 @@ export class ResumeInterpreter {
     const stacks = snapshotStacks(walkStacks);
 
     const resumeIteration = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchPool.entries[newBranchIndex].nodes = vm.buildIteration(
         STORE,
@@ -669,7 +669,7 @@ export class ResumeInterpreter {
       ) as ChildNode[]; // 이 해석기는 늘 배열을 낸다
     };
     const growIteration = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchPool.entries[newBranchIndex].nodes = nodesOf(
         vm.buildIteration(

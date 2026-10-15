@@ -78,6 +78,7 @@ import {
 import type { Pool } from "./pool-allocator.ts";
 import {
   appendArrayInfo,
+  appendBranchOfForRegion,
   appendForRegion,
   attachGrownIterations,
   freeArrayInfo,
@@ -866,6 +867,10 @@ export class VM {
     branch.childRegionIndices.push(forRegionIndex);
     return forRegionIndex;
   };
+
+  // @for region에 빈 회차 가지를 더하고 그 branchIndex를 돌려준다. 노드와 구독은 호출자가 build해 담는다.
+  appendIteration = (forRegionIndex: number): number =>
+    appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
 
   // leafIndex 구독을 가지에 실어 가지와 생애를 함께 한다 - 가지가 detach/free되면 감시도 꺼진다.
   subscribeOnBranch = (branch: TBranch, leafIndex: number, onChange: (v: unknown) => void): void => {

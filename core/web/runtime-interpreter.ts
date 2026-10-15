@@ -32,7 +32,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { activateIf, appendBranchOfForRegion, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
+import { activateIf, appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import {
   CONST,
@@ -113,12 +113,12 @@ export class RuntimeInterpreter {
     const stacks = snapshotStacks(walkStacks);
 
     // 회차 branch 하나를 추가하고 build해 담는다(interpret이 fragment로 낸 노드를 detach 때
-    // 되찾게 branch.nodes에 보관). 껍데기 push(appendBranchOfForRegion) + build(buildIteration).
+    // 되찾게 branch.nodes에 보관). 껍데기 push(appendIteration) + build(buildIteration).
     // 새 회차의 전역 branchIndex를 돌려준다.
     // 몸체 `${i}`가 읽을 회차변수(인덱스) 슬롯 [RAW, i]를 바깥 스코프 뒤에 붙인다. 슬롯 번호 =
     // props+바깥 회차변수 뒤.
     const addIterationBranch = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       vm.branchPool.entries[newBranchIndex].nodes = Array.from(
         (
           vm.buildIteration(
@@ -185,7 +185,7 @@ export class RuntimeInterpreter {
     // 인덱스 슬롯은 몸체 ${i}가 읽는다. 인덱스 leaf는 발화 시 $n으로도 해소되게 loopIndexStack에
     // (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
     const addIterationBranch = (i: number) => {
-      const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchPool.entries[newBranchIndex].nodes = Array.from(
         (
