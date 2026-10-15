@@ -58,41 +58,6 @@ import {
 } from "./vm.ts";
 
 export class RuntimeInterpreter {
-  // @for 회차 i의 몸체(bodyStart~forEndPc)를 해석해 fragment로 낸다. 노드/구독/자식region은
-  // target 가지에 쌓인다(인라인이면 지금 가지, 반응이면 회차 branch). 회차 인덱스를 공유
-  // 스택에 push -> 재귀 -> pop한다 - 매 회차 [...stack, i] 복사 대신 배열 하나를 재사용한다
-  // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는
-  // BIND_EVENT가 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
-  buildIteration = (
-    vm: VM,
-    indexKind: number,
-    indexRef: number,
-    bodyStart: number,
-    forEndPc: number,
-    targetBranchIndex: number,
-    argumentSourcePairs: TScope,
-    compId: number,
-    pathPrefix: string,
-    loopIndexBase: number,
-    walkStacks: TWalkStacks,
-  ) => {
-    walkStacks.loopIndexStack.push(indexKind, indexRef); // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf)
-    const f = this.interpret(
-      vm,
-      argumentSourcePairs,
-      compId,
-      bodyStart,
-      forEndPc,
-      targetBranchIndex,
-      pathPrefix,
-      loopIndexBase,
-      walkStacks,
-    ); // walkStacks.loopIndexStack에 방금 push된 회차 인덱스를 물려준다
-    walkStacks.loopIndexStack.pop(); // ref
-    walkStacks.loopIndexStack.pop(); // kind
-    return f;
-  };
-
   // 안 변하는 @for(FOR_RAW/CONST) - 각 회차를 지금 가지(startRegion/Branch)에 fragment로
   // 인라인한다. @for는 컴포넌트 경계가 아니라 같은 가지의 제어 흐름이라 부모 노드에 통째로
   // 붙인다. appendChild(fragment)는 내용 전체를 한 번에 옮기고 fragment를 비운다(노드별 재입양
@@ -112,8 +77,7 @@ export class RuntimeInterpreter {
   ) => {
     for (let i = 0; i < count; i++) {
       parent.appendChild(
-        this.buildIteration(
-          vm,
+        vm.buildIteration(
           RAW,
           i,
           bodyStart,
@@ -124,7 +88,7 @@ export class RuntimeInterpreter {
           pathPrefix,
           loopIndexBase,
           walkStacks,
-        ),
+        ) as DocumentFragment, // 이 해석기는 늘 fragment를 낸다
       );
     }
   };
@@ -165,19 +129,20 @@ export class RuntimeInterpreter {
     const addIterationBranch = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
       vm.branchPool.entries[newBranchIndex].nodes = Array.from(
-        this.buildIteration(
-          vm,
-          RAW,
-          i,
-          bodyStart,
-          forEndPc,
-          newBranchIndex,
-          scopeWithIteration(argumentSourcePairs, RAW, i, RAW, i), // item(회차값)/index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
-          compId,
-          pathPrefix,
-          loopIndexBase,
-          stacks,
-        ).childNodes,
+        (
+          vm.buildIteration(
+            RAW,
+            i,
+            bodyStart,
+            forEndPc,
+            newBranchIndex,
+            scopeWithIteration(argumentSourcePairs, RAW, i, RAW, i), // item(회차값)/index 모두 [RAW,i](count-for는 중간 제거 없어 인덱스 상수)
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            stacks,
+          ) as DocumentFragment
+        ).childNodes, // 이 해석기는 늘 fragment를 낸다
       );
       return newBranchIndex;
     };
@@ -233,19 +198,20 @@ export class RuntimeInterpreter {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchPool.entries[newBranchIndex].nodes = Array.from(
-        this.buildIteration(
-          vm,
-          STORE,
-          indexLeaf,
-          bodyStart,
-          forEndPc,
-          newBranchIndex,
-          scopeWithIteration(argumentSourcePairs, STORE, info.elemStartLeafIndices[i], STORE, indexLeaf),
-          compId,
-          pathPrefix,
-          loopIndexBase,
-          stacks,
-        ).childNodes,
+        (
+          vm.buildIteration(
+            STORE,
+            indexLeaf,
+            bodyStart,
+            forEndPc,
+            newBranchIndex,
+            scopeWithIteration(argumentSourcePairs, STORE, info.elemStartLeafIndices[i], STORE, indexLeaf),
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            stacks,
+          ) as DocumentFragment
+        ).childNodes, // 이 해석기는 늘 fragment를 낸다
       );
       return newBranchIndex;
     };

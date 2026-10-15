@@ -535,37 +535,6 @@ export class ResumeInterpreter {
     return tops;
   };
 
-  // @for 회차 i의 몸체를 SSR 노드에 연결한다. 회차 인덱스를 공유 스택에 push -> 재귀 -> pop한다.
-  buildIteration = (
-    vm: VM,
-    indexKind: number,
-    indexRef: number,
-    bodyStart: number,
-    forEndPc: number,
-    targetBranchIndex: number,
-    argumentSourcePairs: TScope,
-    compId: number,
-    pathPrefix: string,
-    loopIndexBase: number,
-    walkStacks: TWalkStacks,
-  ): ChildNode[] => {
-    walkStacks.loopIndexStack.push(indexKind, indexRef);
-    const nodes = this.interpret(
-      vm,
-      argumentSourcePairs,
-      compId,
-      bodyStart,
-      forEndPc,
-      targetBranchIndex,
-      pathPrefix,
-      loopIndexBase,
-      walkStacks,
-    );
-    walkStacks.loopIndexStack.pop();
-    walkStacks.loopIndexStack.pop();
-    return nodes;
-  };
-
   // 안 변하는 @for - 각 회차를 지금 가지에 인라인한다. 회차 노드는 부모의 최상위(tops)로 모은다.
   inlineFor = (
     vm: VM,
@@ -581,8 +550,7 @@ export class ResumeInterpreter {
     walkStacks: TWalkStacks,
   ) => {
     for (let i = 0; i < count; i++) {
-      const nodes = this.buildIteration(
-        vm,
+      const nodes = vm.buildIteration(
         RAW,
         i,
         bodyStart,
@@ -593,7 +561,7 @@ export class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         walkStacks,
-      );
+      ) as ChildNode[]; // 이 해석기는 늘 배열을 낸다
       if (tops !== null) {
         for (const node of nodes) {
           tops.push(node);
@@ -626,8 +594,7 @@ export class ResumeInterpreter {
     // 처음 회차는 SSR 노드에서 연결한다.
     const resumeIteration = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
-      vm.branchPool.entries[newBranchIndex].nodes = this.buildIteration(
-        vm,
+      vm.branchPool.entries[newBranchIndex].nodes = vm.buildIteration(
         RAW,
         i,
         bodyStart,
@@ -638,7 +605,7 @@ export class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      );
+      ) as ChildNode[]; // 이 해석기는 늘 배열을 낸다
     };
     // count가 늘 때의 회차는 노드를 새로 짓는다.
     const growIteration = (i: number) => {
@@ -698,8 +665,7 @@ export class ResumeInterpreter {
     const resumeIteration = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
-      vm.branchPool.entries[newBranchIndex].nodes = this.buildIteration(
-        vm,
+      vm.branchPool.entries[newBranchIndex].nodes = vm.buildIteration(
         STORE,
         indexLeaf,
         bodyStart,
@@ -710,7 +676,7 @@ export class ResumeInterpreter {
         pathPrefix,
         loopIndexBase,
         stacks,
-      );
+      ) as ChildNode[]; // 이 해석기는 늘 배열을 낸다
     };
     const growIteration = (i: number) => {
       const newBranchIndex = appendBranchOfForRegion(vm.regionPool, vm.branchPool, forRegionIndex);

@@ -583,19 +583,6 @@ export type TInterpreter = {
     walkStacks: TWalkStacks,
     slotPlaceholderContents?: (TSlotPlaceholderContent | undefined)[],
   ): TBuiltNodes;
-  buildIteration(
-    vm: VM,
-    indexKind: number,
-    indexRef: number,
-    bodyStart: number,
-    forEndPc: number,
-    targetBranchIndex: number,
-    argumentSourcePairs: TScope,
-    compId: number,
-    pathPrefix: string,
-    loopIndexBase: number,
-    walkStacks: TWalkStacks,
-  ): TBuiltNodes;
 };
 
 // ── 한 인스턴스의 VM ─────────────────────────────────────────────────
@@ -706,19 +693,25 @@ export class VM {
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ): TBuiltNodes => {
-    return this.interpreter.buildIteration(
+    // 회차 인덱스를 공유 스택에 push -> 재귀 -> pop한다 - 매 회차 [...stack, i] 복사 대신 배열 하나를 재사용한다
+    // (10만 회차 x 깊이만큼의 할당 제거). 재귀는 동기라 push된 상태에서 완료되고, 발화 인덱스는 BIND_EVENT가
+    // 바인딩 시점에 loopIndices로 스냅샷하므로(공유 배열을 잡지 않음) 재사용이 안전하다.
+    // 인터리브 (kind, ref) - argumentSourcePairs와 동형. count-for는 (RAW, i), array-for는 (STORE, 인덱스 leaf).
+    walkStacks.loopIndexStack.push(indexKind, indexRef);
+    const built = this.interpreter.interpret(
       this,
-      indexKind,
-      indexRef,
+      argumentSourcePairs,
+      compId,
       bodyStart,
       forEndPc,
       targetBranchIndex,
-      argumentSourcePairs,
-      compId,
       pathPrefix,
       loopIndexBase,
       walkStacks,
-    );
+    ); // walkStacks.loopIndexStack에 방금 push된 회차 인덱스를 물려준다
+    walkStacks.loopIndexStack.pop(); // ref
+    walkStacks.loopIndexStack.pop(); // kind
+    return built;
   };
 
   // forBodyEnd의 캐시 통과 조회.
