@@ -146,7 +146,7 @@ ${preloads.join("\n")}
 <body>
   <div id="quble-app"></div>
   <script type="module">
-    import { mount } from "./quble-runtime.js";
+    import { mountFromUrl } from "./quble-runtime.js";
     // 초기 렌더 계측: mount 시작 -> 반환(디코드+인스턴스화+부착) -> rAF(페인트 후).
     // React/Svelte 데모와 같은 방식으로 재 나란히 비교한다.
     const t0 = performance.now();
@@ -154,7 +154,7 @@ ${preloads.join("\n")}
     const data = await fetch("./data.json").then((r) => r.json());
     // 디버깅용: mount 결과({ store, inst })를 window에 노출한다. inst.regionPool은 이 인스턴스의
     // 모든 Region(@if swap/@for 회차 경계)이라, 콘솔에서 __quble.inst.regionPool.length로 누수를 잰다.
-    window.__quble = await mount("./${stem}.qubb", document.getElementById("quble-app"), data);
+    window.__quble = await mountFromUrl("./${stem}.qubb", document.getElementById("quble-app"), data);
     const mounted = performance.now();
     requestAnimationFrame(() => {
       const painted = performance.now();
