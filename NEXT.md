@@ -8,11 +8,7 @@
 
 ## 하는 중
 
-진입점 이름과 층 맞추기 (브랜치 entry-rename)
-
-- `mount.ts` -> `runtime-entry.ts`, 새 `resume-entry.ts`(SSR용 `mount`) - 진입점끼리 서로 의존하지 않는다.
-- `loadHandlers`는 `load-handlers.ts`로 따로 뺀다.
-- `ssr-page.mjs`의 csr 모드는 `quble-runtime.js`의 `compile`을 직접 쓴다.
+없음
 
 ## 할 것
 
