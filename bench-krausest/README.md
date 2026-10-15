@@ -16,7 +16,7 @@
 ### 전체 비교 - `./bench-krausest.sh [runner 인자]`
 
 - krausest를 `bench-krausest/js-framework-benchmark/`에 받아 quble 구현을 non-keyed 부문에 넣고, 비교 대상
-  6개(non-keyed vanillajs, svelte-classic / keyed vanillajs, svelte, react-hooks, solid)와 함께 잰다.
+  6개(non-keyed vanillajs-3, svelte-classic / keyed vanillajs-lite, svelte, react-hooks, solid)와 함께 잰다.
 - 항목: 동작 9개의 클릭부터 paint 끝까지 시간, 메모리 3개, 번들 크기, 첫 paint.
 - Chrome 창을 화면에 띄우고 수십 분 걸린다. 창이 가려지면 paint 이벤트가 빠져 수치가 틀어지므로 측정 중에는
   창을 가리지 않는다. 화면 보호기와 디스플레이 꺼짐은 스크립트가 `caffeinate -d`로 막는다.
