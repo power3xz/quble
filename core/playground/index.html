@@ -75,9 +75,7 @@
     const handlers = await loadHandlers(manifest, base);
     const resources = manifest.resources.map((p) => new URL(p, base).href);
     const editor = document.getElementById("editor");
-    const inst = resume(bytes, resources)(0)(undefined, handlers, { resumeFrom: editor, snapshot });
-    editor.replaceChildren(...inst.nodes);
-    window.__quble = inst;
+    window.__quble = resume(bytes, editor, { snapshot, handlers, resources });
   </script>
 </body>
 </html>
