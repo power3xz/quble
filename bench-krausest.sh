@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR="$ROOT/bench-krausest"
 JFB="$DIR/js-framework-benchmark"
 QUBLE_OUT="$JFB/frameworks/non-keyed/quble"
-COMPARE=(non-keyed/vanillajs non-keyed/svelte-classic keyed/vanillajs keyed/svelte keyed/react-hooks keyed/solid)
+COMPARE=(non-keyed/vanillajs-3 non-keyed/svelte-classic keyed/vanillajs-lite keyed/svelte keyed/react-hooks keyed/solid)
 
 if [ ! -d "$JFB" ]; then
   echo "[bench-krausest] 1/7 krausest clone"

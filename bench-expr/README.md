@@ -1,6 +1,6 @@
 # bench-expr
 
-template 식의 갱신 비용을 quble, React, React + memo, Svelte 5에서 같은 앱으로 잰다. 식 평가 방식(부분
+template 식의 갱신 비용을 quble, React, React + memo, Svelte 5, Solid에서 같은 앱으로 잰다. 식 평가 방식(부분
 재평가, 인덱스 접근의 구독 다시 걸기)은 core/web/EXPR-EVAL.md에 있고, 측정 방법의 원칙은 그 문서 7절
 "잴 때"에 있다. 측정 수치는 런타임이 바뀌면 낡으므로 여기 적지 않는다.
 
@@ -33,6 +33,10 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
   아닌 행 수는 `.1k`, `.5k`가 붙는다(`<커밋>.expr.1k.json`). 커밋끼리는
   `BENCH_N=... node bench-compare.mjs <expr|expr-deep> <ref> <ref>`로 견준다.
 
+`TARGET=solid ./bench-expr-quick.sh`처럼 환경 변수 `TARGET`(기본 quble)으로 다른 대상을 같은 방식으로 잰다.
+이 기록은 커밋이 아니라 대상 이름으로 `bench-results/<대상>.expr.json`(`.expr-deep.json`)에 남고, 커밋 비교는
+하지 않는다. 대상의 코드는 커밋과 무관하게 지금 작업 트리 것이다.
+
 클릭은 하네스 그대로 누르므로 클릭마다 다음 프레임을 기다린다. 측정 시간 대부분이 여기서 든다.
 
 따로 잰 기록끼리 견주므로 잰 시각 사이의 기계 상태 차이가 섞인다. 견줄 커밋은 이어서 잰다.
@@ -43,10 +47,10 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 
 | 테스트 | 행 | 파일 |
 |---|---|---|
-| `orders` | 아래 "재는 앱"의 기본 행 | `quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte` |
-| `orders-deep` | 기본 행에 정적 하위 트리와 깊은 값 자리가 낀 행(노드 54개, 값 자리 13개). 값 자리 사이를 찾아가는 비용이 드러나게 만들었다 | `quble/orders-deep.qubc`, `src/react-deep.jsx`, `src/react-memo-deep.jsx`, `src/OrdersDeep.svelte` |
+| `orders` | 아래 "재는 앱"의 기본 행 | `quble/orders.qubc`, `src/react.jsx`, `src/react-memo.jsx`, `src/Orders.svelte`, `src/solid.tsx` |
+| `orders-deep` | 기본 행에 정적 하위 트리와 깊은 값 자리가 낀 행(노드 54개, 값 자리 13개). 값 자리 사이를 찾아가는 비용이 드러나게 만들었다 | `quble/orders-deep.qubc`, `src/react-deep.jsx`, `src/react-memo-deep.jsx`, `src/OrdersDeep.svelte`, `src/solid-deep.tsx` |
 
-두 테스트의 props, 이벤트, 툴바, 시나리오는 같다. 대상마다 DOM이 같은지(`orders-deep`은 네 구현 모두)를
+두 테스트의 props, 이벤트, 툴바, 시나리오는 같다. 대상마다 DOM이 같은지(`orders-deep`은 다섯 구현 모두)를
 맞춰 둔다.
 
 `tests.json`이 테스트별 버전을 가진다. 하네스가 결과와 기록에 이 버전을 적는다. **같은 테스트의 측정 조건을
@@ -66,7 +70,7 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 경고  row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold
 ```
 
-데이터(`gen-data.mjs`)는 시드가 고정이라 매번 같고, 네 대상이 같은 `data-<N>.json`을 받는다.
+데이터(`gen-data.mjs`)는 시드가 고정이라 매번 같고, 다섯 대상이 같은 `data-<N>.json`을 받는다.
 
 ## 재는 것
 
@@ -116,6 +120,9 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
   `memo`는 컴포넌트를 감싸므로 이 대상만 `Row` 컴포넌트를 둔다.
 - Svelte 5는 template 식마다 effect(읽은 값이 바뀌면 다시 도는 함수)를 하나씩 만든다. 식이 읽는 값 중
   하나라도 바뀌면 그 식을 처음부터 센다.
+- Solid는 값 자리마다 effect 하나를 만든다. 행은 `createStore`의 프록시라 읽은 필드가 바뀐 자리의 식만
+  처음부터 다시 센다. 한 핸들러에서 여러 값을 바꾸는 버튼은 `batch`로 묶는다. 전체 행 일괄 갱신은
+  `reconcile`로 두 데이터를 번갈아 넣는다.
 - quble은 식이 읽는 leaf가 바뀌면 바뀐 부분만 다시 센다(부분 재평가).
 
 **같은 대상을 여러 번 재면 값이 흔들린다.** 비교할 결과는 같은 브라우저, 같은 압축, 같은 행 수에서 이어서

@@ -12,6 +12,9 @@
 #
 # headless로 돌아 창이 뜨지 않는다. 다른 대상(React, Svelte)과의 비교는 ./bench-expr.sh로 본다.
 #
+# 환경 변수 TARGET(기본 quble)으로 quble 대신 solid 같은 다른 대상을 잰다. 그 기록은
+# bench-results/<대상>.expr.json처럼 커밋이 아니라 대상 이름으로 남는다.
+#
 # 행 수는 환경 변수 BENCH_N(1000, 5000, 10000, 기본 1000)으로 고른다. 10000이 아니면 기록 이름에 .1k, .5k가
 # 붙어 10000행 기록을 덮지 않는다(bench-compare.mjs도 같은 BENCH_N으로 그 기록을 읽는다).
 #
@@ -34,6 +37,9 @@ case "${2:-all}" in
     exit 1
     ;;
 esac
+# 재는 대상(quble, solid 등). quble이 아니면 대상의 코드가 커밋과 무관하므로 기록 이름에 커밋 대신 대상을 쓰고
+# 커밋 비교는 하지 않는다.
+export TARGET="${TARGET:-quble}"
 BENCH_N="${BENCH_N:-1000}"
 case "$BENCH_N" in
   10000) SUFFIX="" ;;
@@ -98,6 +104,10 @@ for TEST in $TESTS; do
     orders-deep) KIND="expr-deep" ;;
   esac
   echo "[bench-expr-quick] 테스트: $TEST"
-  node "$APP/quick.mjs" "http://localhost:$PORT" "$ROOT/bench-results/$SHA.$KIND$SUFFIX.json" "$TEST"
-  node "$ROOT/bench-compare.mjs" "$KIND" "$SHA"
+  if [ "$TARGET" = "quble" ]; then
+    node "$APP/quick.mjs" "http://localhost:$PORT" "$ROOT/bench-results/$SHA.$KIND$SUFFIX.json" "$TEST"
+    node "$ROOT/bench-compare.mjs" "$KIND" "$SHA"
+  else
+    node "$APP/quick.mjs" "http://localhost:$PORT" "$ROOT/bench-results/$TARGET.$KIND$SUFFIX.json" "$TEST"
+  fi
 done
