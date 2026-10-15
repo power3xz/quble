@@ -717,9 +717,16 @@ export class VM {
   // 같은 조립). 루트 슬롯 base는 rootScope의 [STORE, base] 쌍에 루트 props 필드 순서로 놓여 있다.
   instanceOf = (rootRegion: TRegion, nodes: ChildNode[]) => {
     const { module, store, regionPool, branchPool, arrayPool, rootScope } = this;
+    // 해체한 뒤에는 루트 region을 놓는다 - destroy 클로저가 붙들고 있으면 루트 anchor가 남는다. 이미 해체했으면
+    // 풀이 비어 있어 detach가 예외를 throw하므로 두 번째 호출은 건너뛴다.
+    let root: TRegion | null = rootRegion;
     const destroy = () => {
-      rootRegion.detach(store, regionPool, branchPool, rootRegion);
-      rootRegion.anchor.remove();
+      if (root === null) {
+        return;
+      }
+      root.detach(store, regionPool, branchPool, root);
+      root.anchor.remove();
+      root = null;
       this.removeDelegates();
       // 떼어진 노드, region/branch/배열 정보, store의 값, VM의 캐시를 인스턴스가 붙들지 않게 한다.
       // destroy 클로저가 VM을 붙들므로 호출자가 인스턴스를 들고 있으면 VM이 살아 있다.

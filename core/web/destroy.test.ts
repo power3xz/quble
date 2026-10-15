@@ -48,6 +48,13 @@ test("destroy 후 인스턴스는 떼어진 노드와 region/branch/배열 풀�
   assert.equal(inst.arrayPool.free.length, 0);
 });
 
+test("destroy를 두 번 불러도 예외를 throw하지 않는다", () => {
+  const { inst, host } = instantiate();
+  inst.destroy();
+  assert.doesNotThrow(() => inst.destroy());
+  assert.equal(host.childNodes.length, 0);
+});
+
 test("destroy가 인스턴스 DOM을 전부 뗀다(anchor 포함)", () => {
   const { inst, host } = instantiate();
   assert.notEqual(host.querySelector("button"), null, "destroy 전엔 DOM 존재");
