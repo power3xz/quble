@@ -1,9 +1,11 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import solid from "vite-plugin-solid";
 
 export default defineConfig({
-  plugins: [react(), svelte()],
+  // React와 Solid는 JSX 변환이 달라 각자 자기 파일만 변환한다.
+  plugins: [react({ include: /\/react[^/]*\.jsx$/ }), solid({ include: /\/solid[^/]*\.tsx$/ }), svelte()],
   // quble 페이지는 레포의 런타임을 그대로 싣는다.
   resolve: { alias: { "@quble-web": new URL("../core/web", import.meta.url).pathname } },
   build: {
@@ -17,6 +19,8 @@ export default defineConfig({
         "react-deep": "react-deep.html",
         "react-memo": "react-memo.html",
         "react-memo-deep": "react-memo-deep.html",
+        solid: "solid.html",
+        "solid-deep": "solid-deep.html",
         svelte: "svelte.html",
         "svelte-deep": "svelte-deep.html",
       },

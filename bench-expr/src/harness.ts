@@ -69,10 +69,12 @@ export const TARGETS = [
   { id: "react-memo", label: "React + memo", test: "orders" },
   { id: "react", label: "React", test: "orders" },
   { id: "svelte", label: "Svelte 5", test: "orders" },
+  { id: "solid", label: "Solid", test: "orders" },
   { id: "quble-deep", label: "quble (deep)", test: "orders-deep" },
   { id: "react-memo-deep", label: "React + memo (deep)", test: "orders-deep" },
   { id: "react-deep", label: "React (deep)", test: "orders-deep" },
   { id: "svelte-deep", label: "Svelte 5 (deep)", test: "orders-deep" },
+  { id: "solid-deep", label: "Solid (deep)", test: "orders-deep" },
 ];
 
 // 테스트의 지금 버전(tests.json). 행 모양, 데이터, 시나리오, 측정 방식이 바뀌면 그 테스트의 버전을 올린다 -
