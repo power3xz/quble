@@ -18,7 +18,7 @@ const gc = vm.runInNewContext("gc") as () => void;
 
 const qubb: Record<string, Uint8Array> = {};
 before(() => {
-  for (const name of ["for_array_edit", "single_if"]) {
+  for (const name of ["for_array_edit", "single_if", "for_with_context"]) {
     qubb[name] = buildFixture(name);
   }
 });
@@ -80,6 +80,30 @@ test("@if를 토글하기를 반복해도 힙이 늘지 않는다", async () => 
   const perCycle = await bytesPerCycle(() => {
     on = !on;
     inst.store.set(0, on);
+  });
+  assert.ok(perCycle < MAX_BYTES_PER_CYCLE, `사이클당 ${perCycle.toFixed(1)}B 늘었다`);
+});
+
+// ADD가 "x"를 items에 push하고 DEL이 맨 앞 요소를 removeAt한다. 회차마다 자식 컴포넌트가 @with를 연다.
+const itemsHandlers: THandlers = {
+  ADD: (_data, ctx) => {
+    const push = ctx.push as (arrayLeafIndex: number, elem: unknown) => void;
+    push((ctx.props as Record<string, number>).items, "x");
+  },
+  DEL: (_data, ctx) => {
+    const removeAt = ctx.removeAt as (arrayLeafIndex: number, index: number) => void;
+    removeAt((ctx.props as Record<string, number>).items, 0);
+  },
+};
+
+test("@for 회차 안의 @with 컨텍스트도 회차를 추가하고 제거하기를 반복해도 힙이 늘지 않는다", async () => {
+  const inst = compile(qubb.for_with_context)(0)({ items: ["a", "b"] }, itemsHandlers);
+  const host = mount(inst);
+  const add = host.querySelector(".add") as HTMLButtonElement;
+  const del = host.querySelector(".del") as HTMLButtonElement;
+  const perCycle = await bytesPerCycle(() => {
+    add.click();
+    del.click();
   });
   assert.ok(perCycle < MAX_BYTES_PER_CYCLE, `사이클당 ${perCycle.toFixed(1)}B 늘었다`);
 });

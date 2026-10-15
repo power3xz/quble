@@ -1,0 +1,26 @@
+component ContextList {
+  props { items: string[] }
+  events {
+    ADD({ items })
+    DEL({ items })
+  }
+  template {
+    div(class="contextlist") {
+      button(class="add" @click:ADD) { "+" }
+      button(class="del" @click:DEL) { "-" }
+      @for (item of items) {
+        Row: ContextRow(label={item} /)
+      }
+    }
+  }
+}
+
+component ContextRow {
+  props { label: string }
+  contexts { Area { who: label } }
+  template {
+    @with Area {
+      span(class="row") { ${label} }
+    }
+  }
+}

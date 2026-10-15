@@ -117,6 +117,13 @@
   tsconfig의 `plugins`는 language service 전용이라 `tsc`로는 안 되는 것을 확인했다. 손으로 적던
   타입은 없앴다 - `handlers` 리터럴이 주입된 표기를 문맥으로 받아 키마다 ctx가 추론된다.
 
+- **`@for` 회차 안의 `@with` 컨텍스트가 회차를 넣고 빼도 남아 쌓였다** - `ENTER_CONTEXT`마다 필드를 leafIndex로
+  풀어 `createdContexts`에 append하고 `EXIT_CONTEXT`는 활성 스택에서만 뺐다. 회차가 사라져도 항목이 남아,
+  자식 컴포넌트가 `@with`를 여는 `@for`에서 회차를 넣고 빼면 힙이 계속 늘었다. **해결:** `createdContexts`를
+  없앴다. 활성 컨텍스트는 정의와 스코프만 들고(`TActiveContext`), 필드는 `contextFieldsOf`가 처음 바인딩할
+  때 푼다. 발화는 바인딩이 복사해 둔 필드만 읽으므로 따로 회수할 것이 없고, 항목은 걸음 스택과 바인딩,
+  지연 실행 사본만 붙들어 GC가 거둔다(`churn-memory.test.ts`).
+
 ## 미해결
 
 - **확장이 클린 클론에서 `npm install`부터 못 한다** - `editors/vscode`의 `dependencies`에
@@ -147,12 +154,6 @@
 - **버블 차단 끄는 옵션 미정** - 위임 리스너는 `stopPropagation`을 디폴트로 호출해 버블을
   끊는다(vm.ts). 끄거나 캡처 단계로 거는 옵션(modifier 등)은 실수요가 안 잡혀 보류 -
   필요가 구체화되면 그 모양에 맞춰 설계한다.
-
-- **createdContexts 회수 - 지금 구현 불가** - 런타임은 EnterContext마다 컨텍스트를
-  createdContexts에 append하고 contextIndex로 참조한다. ExitContext는 활성 스택에서만 빼서,
-  `@for` 회차가 사라져도 그 안에서 만든 컨텍스트는 남는다(회차를 넣고 빼면 누적).
-  **막힌 이유:** 이벤트 핸들러가 그 컨텍스트를 언제 참조할지 런타임이 알 수 없어 회수 시점을
-  정할 수 없다. 핸들러가 컴파일 대상에 들어오면(참조 시점을 컴파일러가 봄) 풀 수 있다.
 
 - **같은 컨텍스트명 중첩** - 방향성: 맥락(컨텍스트)이라는 정보는 그 성격상 같은 이름이 중복으로
   쌓이지 않는 게 맞다. `@with Area`가 합성 경계를 넘어 중첩되면(`Outer`의 `@with Area` 안에 합성된

@@ -192,10 +192,21 @@ const exprStack: unknown[] = [];
 // (pathPrefix/loopIndexBase/argumentSourcePairs는 불변 값이라 여기 안 담고 파라미터로 흐른다 -
 //  클로저가 값을 캡처.)
 //   loopIndexStack: @for 회차 인덱스 소스 누적(인터리브 kind,ref). buildIteration이 push/pop.
-//   activeContexts: @with 컨텍스트 누적(createdContexts 인덱스). ENTER/EXIT_CONTEXT가 push/pop.
+//   activeContexts: 지금 열린 @with 컨텍스트. ENTER/EXIT_CONTEXT가 push/pop.
 export type TWalkStacks = {
   loopIndexStack: number[];
-  activeContexts: number[];
+  activeContexts: TActiveContext[];
+};
+
+// 열린 @with 컨텍스트 하나. 필드는 컴포넌트 props에서만 오므로 어느 def의 몇 번째 컨텍스트인지와 그 컴포넌트의
+// 스코프만 들고, 필드(leaf)는 contextFieldsOf로 푼다. fields는 처음 바인딩할 때 채워 같은 @with 아래의
+// 바인딩이 함께 쓴다.
+export type TActiveContext = {
+  name: string;
+  compId: number;
+  contextIndex: number;
+  scope: TScope;
+  fields: TAssembled[] | null;
 };
 
 // 템플릿 복제 계획 - 한 범위(startPc~endPc)의 정적 뼈대와 값 자리 목록(templatePlanOf).
@@ -543,8 +554,6 @@ export const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<T
 type TAssembled =
   | { name: string; typeRef: number; fieldSourcePairs: number[] }
   | { name: string; typeRef: number; expr: Uint8Array; pairs: TScope };
-// ENTER_CONTEXT가 만든 컨텍스트 인스턴스. createdContexts에 append된다.
-export type TCreatedContext = { name: string; fields: TAssembled[] };
 // 핸들러 맵(fullName -> 핸들러). 핸들러 인자 계약은 dispatchBinding이 조립해 넘긴다.
 export type THandlers = Record<
   string,
@@ -626,7 +635,6 @@ export class VM {
   arrayPool: Pool<TArrayInfo>;
   regionPool: Pool<TRegion>;
   branchPool: Pool<TBranch>;
-  createdContexts: TCreatedContext[];
   // 진입점 argumentSourcePairs(plantRoot의 rootFlat). store(루트부터의 절대 경로) 접근에 쓴다 -
   // 어느 핸들러든 같은 루트라 인스턴스 전역. props(발화 comp 상대)와 달리 store는 defs[0] 기준.
   rootScope: TScope;
@@ -673,7 +681,6 @@ export class VM {
     this.arrayPool = arrayPool;
     this.regionPool = new Pool();
     this.branchPool = new Pool();
-    this.createdContexts = [];
     this.rootScope = rootScope;
     this.interpreter = interpreter;
   }
@@ -755,7 +762,6 @@ export class VM {
       regionPool.clear();
       branchPool.clear();
       arrayPool.clear();
-      this.createdContexts.length = 0;
       this.forEndCache.clear();
       this.ifRangesCache.clear();
       this.slotContentEndCache.clear();
@@ -847,6 +853,11 @@ export class VM {
   componentContexts = (componentId: number): TEventEntry[] => {
     return this.module.defs[componentId].contexts;
   };
+
+  // 컴포넌트 compId의 contextIndex번째 컨텍스트 필드를 scope(그 컴포넌트가 받은 값의 주소)로 풀어 leaf를 정한다.
+  // 스칼라 field는 leaf 하나, 객체는 leaf 여럿이고 조립 방법(steps)은 조회 때 lazy로 만든다.
+  contextFieldsOf = (compId: number, contextIndex: number, scope: TScope): TAssembled[] =>
+    this.componentContexts(compId)[contextIndex].fields.map((field) => this.toAssembled(compId, field, scope));
 
   // 발화 comp의 props를 이름->leafIndex 중첩 객체로 편다(바인딩의 첫 발화 때 1회). props는 이 comp가
   // 받은 값의 주소라, scope 슬롯 i(=prop 선언 순서)의 (kind, base)를 argumentSourcePairs에서 읽는다.
@@ -1783,10 +1794,10 @@ export class VM {
     // 지금 활성인 컨텍스트들을 context명 -> (필드명 -> leafIndex)로 묶는다(바인딩 시점 고정).
     // 같은 이름은 뒤(안쪽)가 덮는다 - activeContexts 순서대로 돌아 안쪽이 마지막에 쓰인다.
     let contextLeaves: Record<string, TAssembled[]> | null = null;
-    for (const i of walkStacks.activeContexts) {
-      const created = this.createdContexts[i];
+    for (const active of walkStacks.activeContexts) {
+      active.fields ??= this.contextFieldsOf(active.compId, active.contextIndex, active.scope);
       contextLeaves ??= {};
-      contextLeaves[created.name] = created.fields;
+      contextLeaves[active.name] = active.fields;
     }
     // @for 회차 인덱스 소스를 바인딩 시점에 굳힌다($0=바깥, $1=안쪽...). loopIndexStack은 인터리브
     // (kind, ref)라 i번째 $는 [2i]=kind, [2i+1]=ref. 값을 지금 굳히지 않고 (kind, ref)로 들었다가

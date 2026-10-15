@@ -560,23 +560,21 @@ export class RuntimeInterpreter {
           break;
         }
         case OP_ENTER_CONTEXT: {
-          // @with 진입: 컨텍스트 def의 fields를 지금 argumentSourcePairs로 leafIndex로 풀어 createdContexts에
-          // 싣고, 그 인덱스를 activeContexts에 push. 발생 시점 BIND_EVENT가 이걸로 context를 짓는다.
-          const contextDef = vm.componentContexts(compId)[u16at()];
+          // @with 진입: 어느 컨텍스트인지와 지금 argumentSourcePairs를 activeContexts에 push. 필드는 발생 시점
+          // BIND_EVENT가 처음 바인딩할 때 leafIndex로 푼다(contextFieldsOf).
+          const contextIndex = u16at();
+          const contextDef = vm.componentContexts(compId)[contextIndex];
           const name = vm.module.constpool[contextDef.nameConstIndex as number] as string;
-          // payload와 같은 조립 준비 - leaf만 미리 풀고 steps는 조회 시 lazy. 발생 시 context 조립.
-          const fields = contextDef.fields.map((field) => vm.toAssembled(compId, field, argumentSourcePairs));
           // 맥락은 같은 이름이 중복으로 쌓이지 않는 게 맞다(ISSUES). 일어나면 알리고, 가장
           // 안쪽이 이기도록 그냥 쌓는다(context 조립이 뒤(=안쪽) 것으로 덮는다).
-          if (walkStacks.activeContexts.some((i) => vm.createdContexts[i].name === name)) {
+          if (walkStacks.activeContexts.some((active) => active.name === name)) {
             console.warn(`quble: 컨텍스트 '${name}'가 중복 활성화됐습니다(안쪽이 우선).`);
           }
-          walkStacks.activeContexts.push(vm.createdContexts.length);
-          vm.createdContexts.push({ name, fields });
+          walkStacks.activeContexts.push({ name, compId, contextIndex, scope: argumentSourcePairs, fields: null });
           break;
         }
         case OP_EXIT_CONTEXT: {
-          // @with 블록 끝. 활성 스택에서만 빼고 createdContexts는 둔다(회수는 @for 때 - ISSUES).
+          // @with 블록 끝. 활성 스택에서 뺀다.
           walkStacks.activeContexts.pop();
           break;
         }
