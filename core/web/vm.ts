@@ -721,6 +721,11 @@ export class VM {
       rootRegion.detach(store, regionPool, branchPool, rootRegion);
       rootRegion.anchor.remove();
       this.removeDelegates();
+      // 떼어진 노드와 region/branch/배열 정보를 인스턴스가 붙들지 않게 한다.
+      nodes.length = 0;
+      regionPool.clear();
+      branchPool.clear();
+      arrayPool.clear();
     };
     const snapshot = (): Record<string, unknown> => {
       const rootType = module.types[module.defs[0].propsTypeRef] as { fields: TField[] };

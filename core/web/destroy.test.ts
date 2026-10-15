@@ -31,6 +31,21 @@ test("destroy 후 클릭은 핸들러를 부르지 않는다(위임 리스너 �
   assert.equal(fired(), 1, "destroy 후엔 발화 없음");
 });
 
+test("destroy 후 인스턴스는 떼어진 노드와 region/branch/배열 풀을 붙들지 않는다", () => {
+  const { inst } = instantiate();
+  assert.notEqual(inst.nodes.length, 0, "destroy 전엔 루트 노드가 있다");
+  assert.notEqual(inst.regionPool.entries.length, 0, "destroy 전엔 region이 있다");
+  assert.notEqual(inst.branchPool.entries.length, 0, "destroy 전엔 branch가 있다");
+  inst.destroy();
+  assert.equal(inst.nodes.length, 0);
+  assert.equal(inst.regionPool.entries.length, 0);
+  assert.equal(inst.regionPool.free.length, 0);
+  assert.equal(inst.branchPool.entries.length, 0);
+  assert.equal(inst.branchPool.free.length, 0);
+  assert.equal(inst.arrayPool.entries.length, 0);
+  assert.equal(inst.arrayPool.free.length, 0);
+});
+
 test("destroy가 인스턴스 DOM을 전부 뗀다(anchor 포함)", () => {
   const { inst, host } = instantiate();
   assert.notEqual(host.querySelector("button"), null, "destroy 전엔 DOM 존재");
