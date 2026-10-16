@@ -8,19 +8,13 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { compile } from "../../../core/web/runtime.ts";
+import { evaluate } from "./test-helpers/bytecode.ts";
 import { compileToModule, quble } from "./vite-plugin.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // experiments/react/adapter
 const GREETING = join(HERE, "fixtures", "greeting.qubc");
 const TMP = join(HERE, "..", "dist", "adapter-test");
 mkdirSync(TMP, { recursive: true });
-
-// CSS import는 번들러 몫이라 떼고, 나머지 모듈 소스를 실제 ESM으로 import해 기본 export를 얻는다.
-const evaluate = async (code: string): Promise<Uint8Array> => {
-  const withoutCss = code.replace(/^import ".*";\n/gm, "");
-  const url = `data:text/javascript;base64,${Buffer.from(withoutCss).toString("base64")}`;
-  return (await import(url)).default;
-};
 
 test("바이트코드를 기본 export로 내고 mount할 수 있다", async () => {
   const { code } = await compileToModule(GREETING);
