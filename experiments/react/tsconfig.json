@@ -6,8 +6,10 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "types": ["node"],
+    "jsx": "react-jsx",
+    "paths": { "quble/react": ["./adapter/react.ts"] },
     "strict": true,
     "noEmit": true
   },
-  "include": ["runtime/**/*.ts", "adapter/**/*.ts"]
+  "include": ["runtime/**/*.ts", "adapter/**/*.ts", "adapter/**/*.tsx"]
 }
