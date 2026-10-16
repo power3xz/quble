@@ -56,12 +56,12 @@ if (compiled.status !== 0) {
   process.exit(compiled.status ?? 1);
 }
 
-// 2. 셸 핸들러 번들. wasm 래퍼는 인라인하되 런타임은 3번이 낸 quble-runtime.js를 쓴다 -
+// 2. 셸 핸들러 번들. wasm 래퍼는 인라인하되 런타임은 3번이 낸 quble-resume.js를 쓴다 -
 // 둘 다 인라인하면 런타임이 두 벌 실린다(핸들러 번들의 3분의 2가 런타임이었다).
 // 소스는 runtime.ts를 그대로 import하고(타입이 붙는다) 여기서 산출물 경로로 갈아끼운다.
 // playground는 배포물이라 minify한다(프리뷰는 로컬 디버깅용이라 그대로 둔다).
 const handlersTs = entry.replace(/\.qubc$/, ".qubc.handlers.ts");
-const runtimeUrl = "../quble-runtime.js"; // 핸들러는 res/ 아래라 한 단계 위
+const resumeUrl = "../quble-resume.js"; // 핸들러는 res/ 아래라 한 단계 위
 const handlerBundle = await build({
   entryPoints: [handlersTs],
   bundle: true,
@@ -72,7 +72,7 @@ const handlerBundle = await build({
   plugins: [
     {
       name: "runtime-external",
-      setup: (b) => b.onResolve({ filter: /web\/runtime\.ts$/ }, () => ({ path: runtimeUrl, external: true })),
+      setup: (b) => b.onResolve({ filter: /web\/runtime\.ts$/ }, () => ({ path: resumeUrl, external: true })),
     },
   ],
   write: false,
@@ -89,8 +89,8 @@ writeFileSync(manifestPath, JSON.stringify(manifest));
 
 // 3. 런타임 번들 - 셸과 핸들러 번들이 함께 쓴다. 셸은 SSR HTML을 이어받으므로 resume이 들어야 하고,
 // 핸들러 번들은 2번이 runtime.ts import를 이 파일로 바꿔 놓아 compile이 들어야 한다.
-const runtimeBundle = await build({
-  entryPoints: [join(coreDir, "playground", "runtime-entry.ts")],
+const resumeBundle = await build({
+  entryPoints: [join(coreDir, "web", "resume-entry.ts")],
   bundle: true,
   format: "esm",
   platform: "browser",
@@ -98,7 +98,7 @@ const runtimeBundle = await build({
   minify: true,
   write: false,
 });
-writeFileSync(join(distDir, "quble-runtime.js"), runtimeBundle.outputFiles[0].text);
+writeFileSync(join(distDir, "quble-resume.js"), resumeBundle.outputFiles[0].text);
 
 // 4. 정적 자산 - wasm, 전역 스타일.
 copyFileSync(wasm, join(distDir, "compiler_wasm.wasm"));

@@ -6,6 +6,8 @@ import type { THandlers } from "./runtime.ts";
 
 export { loadHandlers } from "./load-handlers.ts";
 export { loadManifest } from "./load-manifest.ts";
+// playground 핸들러가 runtime.ts에서 가져오는 compile은 빌드가 이 번들로 바꿔 놓는다.
+export { compile } from "./runtime.ts";
 
 type TMountOptions = {
   flatData?: TFlatData;
