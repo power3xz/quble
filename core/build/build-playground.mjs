@@ -140,12 +140,14 @@ const fill = (page, marker, value) => {
 };
 let page = readFileSync(join(playgroundDir, "index.html"), "utf8");
 page = fill(page, "<!--qb:styles-->", links.map((path) => inlineResource(distDir, (p) => `./${p}`, path)).join("\n"));
-// manifest는 요청 없이 심고(index.html의 loadManifest 키와 같은 URL), 핸들러는 미리 받게 건다.
+// manifest는 요청 없이 심고(index.html의 loadManifest 키와 같은 URL), 런타임, qubb, 핸들러는 미리 받게 건다.
 page = fill(
   page,
   "<!--qb:manifest-->",
   [
     `  ${manifestsTag({ "./playground.manifest.json": manifest })}`,
+    `  <link rel="modulepreload" href="./quble-resume.js">`,
+    `  <link rel="preload" href="./playground.qubb" as="fetch" crossorigin>`,
     `  <link rel="modulepreload" href="./${manifest.handlers}">`,
   ].join("\n"),
 );

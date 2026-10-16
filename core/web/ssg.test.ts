@@ -113,8 +113,35 @@ test("manifest에 핸들러가 있으면 modulepreload를 낸다", () => {
   );
 });
 
-test("핸들러가 없으면 modulepreload를 내지 않는다", () => {
-  assert.ok(!buildSsg("styled_res", {}, "").html.includes("modulepreload"));
+test("핸들러가 없으면 핸들러 modulepreload를 내지 않는다", () => {
+  const preloads = buildSsg("styled_res", {}, "").html.match(/<link rel="modulepreload"[^>]*>/g);
+  assert.deepEqual(preloads, ['<link rel="modulepreload" href="./quble-resume.js">']);
+});
+
+test("qubb를 fetch와 같은 주소로 preload한다", () => {
+  assert.ok(
+    buildSsg("styled_res", {}, "").html.includes(
+      '<link rel="preload" href="./styled_res.qubb" as="fetch" crossorigin>',
+    ),
+  );
+  assert.ok(
+    buildSsg("styled_res", {}, "", CDN).html.includes(
+      `<link rel="preload" href="${CDN}/styled_res.qubb" as="fetch" crossorigin>`,
+    ),
+  );
+});
+
+test("런타임 번들을 핸들러보다 앞서 modulepreload한다", () => {
+  const extra = { handlers: "res/styled_res.abc.handlers.js" };
+  const preloads = (html: string) => html.match(/<link rel="modulepreload"[^>]*>/g);
+  assert.deepEqual(preloads(buildSsg("styled_res", {}, "", undefined, extra).html), [
+    '<link rel="modulepreload" href="./quble-resume.js">',
+    '<link rel="modulepreload" href="./res/styled_res.abc.handlers.js">',
+  ]);
+  assert.deepEqual(preloads(buildSsg("styled_res", {}, "", CDN, extra).html), [
+    `<link rel="modulepreload" href="${CDN}/quble-resume.js">`,
+    `<link rel="modulepreload" href="${CDN}/res/styled_res.abc.handlers.js">`,
+  ]);
 });
 
 test("manifest 값의 <는 이스케이프해 script 태그가 일찍 닫히지 않는다", () => {
