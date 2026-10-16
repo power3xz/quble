@@ -77,5 +77,3 @@ const Orders = createComponent(OrdersBytecode);
 npm run adapter-demo --prefix experiments/react   # http://localhost:8153
 npm test --prefix experiments/react               # adapter/*.test.ts 포함
 ```
-
-`npm test`는 `runtime/parity.test.ts`의 SSR 케이스 28개가 어댑터와 무관하게 실패한다.
