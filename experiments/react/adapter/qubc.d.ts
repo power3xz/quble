@@ -4,3 +4,6 @@ declare module "*.qubc" {
   const bytecode: Uint8Array;
   export default bytecode;
 }
+
+// 데모가 번들러(Vite)에 맡기는 CSS import.
+declare module "*.css";
