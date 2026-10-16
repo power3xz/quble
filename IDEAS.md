@@ -403,6 +403,12 @@ const html = toHTML(document.body)
   이벤트 바인딩만 거는 길이 없으면 클라이언트가 같은 화면을 다시 지어야 한다.
 - 서버가 JS를 돌려야 한다(Node 등). Rust renderer는 JS 없이 돌았다.
 
+### 프레임워크 어댑터 (qubb 하나 + 프레임워크별 얇은 어댑터)
+
+프레임워크마다 코드를 생성하지 않고 qubb 바이트코드 하나를 내 어댑터가 mount한다. React는 시험했다
+(`experiments/react/adapter/README.md`). 남은 길: svelte/vue 어댑터, 비동기 로드(지연 import, 런타임 fetch),
+다른 프레임워크가 quble 안에 들어오는 방향. ROADMAP.md "마이크로프론트엔드"와 이어진다.
+
 ## 구현됨 (기록 보존)
 
 적용 완료해 확정 설계로 승격된 아이디어. 본문은 거부한 대안/근거를 남기기 위한 기록이다.
