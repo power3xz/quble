@@ -972,9 +972,88 @@ export class VM {
     return forRegionIndex;
   };
 
+  regionAt = (regionIndex: number): TRegion => this.regionPool.entries[regionIndex];
+
+  branchAt = (branchIndex: number): TBranch => this.branchPool.entries[branchIndex];
+
   // @for region에 빈 회차 가지를 더하고 그 branchIndex를 돌려준다. 노드와 구독은 호출자가 build해 담는다.
   appendIteration = (forRegionIndex: number): number =>
     appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
+
+  // 부모 가지 밑에 @if region을 열고 지금 보이는 가지까지 만든다. IF/IF_EXPR 두 해석기가 같은 순서를 밟는 부분이다 -
+  // region 등록, 조건 구독, 보이는 가지 build, 안 보이는 가지에 lazyBuild 설치(켜질 때 이것으로 만든다).
+  // 가지는 부른 시점의 해석기로 만든다 - resume 중에는 SSR 노드를 연결하고 runtime은 새로 만든다.
+  // anchor를 DOM 어디에 붙일지는 호출자 몫이다. 다음 pc(IF_END 다음)를 돌려준다.
+  openIfRegion = (
+    pc: number,
+    condLeafIndex: number,
+    condInitial: unknown,
+    ownsCondLeaf: boolean,
+    argumentSourcePairs: TScope,
+    compId: number,
+    pathPrefix: string,
+    loopIndexBase: number,
+    walkStacks: TWalkStacks,
+    branch: TBranch,
+    anchor: Comment,
+  ): number => {
+    const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, ownsCondLeaf, anchor);
+    branch.childRegionIndices.push(regionIndex);
+    const region = this.regionPool.entries[regionIndex];
+    const thenBranchIndex = region.branchIndices[THEN_INDEX];
+    const elseBranchIndex = region.branchIndices[ELSE_INDEX];
+    const thenBranch = this.branchPool.entries[thenBranchIndex];
+    const elseBranch = this.branchPool.entries[elseBranchIndex];
+
+    const { ifBodyEnd, elseBodyStart, ifEndPc } = this.cachedIfRanges(pc);
+
+    // 안 보이는 가지는 나중(조건 swap)에 만든다. 그 시점의 공유 walkStacks는 이 @if를 지나 이미 pop된 상태라,
+    // build 시점 상태를 딥카피해 캡처한다 - 카피 없이는 회차 인덱스($n)/컨텍스트를 잃는다. then/else 중 하나만
+    // 실행되니 스냅샷 하나를 공유한다.
+    const stacks = snapshotStacks(walkStacks);
+
+    const buildThen = () => {
+      thenBranch.nodes = nodesOf(
+        this.interpret(argumentSourcePairs, compId, pc, ifBodyEnd, thenBranchIndex, pathPrefix, loopIndexBase, stacks),
+      );
+    };
+    const buildElse = () => {
+      elseBranch.nodes =
+        elseBodyStart === -1
+          ? [] // else 없는 if - 빈 가지
+          : nodesOf(
+              this.interpret(
+                argumentSourcePairs,
+                compId,
+                elseBodyStart,
+                ifEndPc,
+                elseBranchIndex,
+                pathPrefix,
+                loopIndexBase,
+                stacks,
+              ),
+            );
+    };
+
+    this.subscribeIfCond(branch, condLeafIndex, regionIndex);
+
+    // build는 "생성만" 한다 - 보이는 가지의 노드를 만들어 branch.nodes에 담고 shownIndex만 정한다. DOM 부착과
+    // 구독 등록은 attachIf가 일괄한다. anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가
+    // 깨진다.
+    const shownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
+    if (shownIndex === THEN_INDEX) {
+      buildThen();
+      thenBranch.built = true;
+      elseBranch.lazyBuild = buildElse;
+    } else {
+      buildElse();
+      elseBranch.built = true;
+      thenBranch.lazyBuild = buildThen;
+    }
+    region.shownIndex = shownIndex;
+
+    return ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음 pc
+  };
 
   // @if 조건 칸 구독을 부모 가지에 실어, 조건이 바뀌면 then/else 가지를 켠다. 조건 칸이 없으면(-1, CONST 조건)
   // 안 변하니 구독을 걸지 않는다(초기 가지로 고정).

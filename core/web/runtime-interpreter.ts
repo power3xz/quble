@@ -32,7 +32,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
+import type { TBranch } from "./region.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import {
   CONST,
@@ -104,7 +104,7 @@ export class RuntimeInterpreter {
     walkStacks: TWalkStacks,
   ) => {
     const forRegionIndex = vm.openForRegion(branch, countLeafIndex);
-    const region = vm.regionPool.entries[forRegionIndex];
+    const region = vm.regionAt(forRegionIndex);
     parent.appendChild(region.anchor);
 
     // grow(onCount 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
@@ -119,7 +119,7 @@ export class RuntimeInterpreter {
     // props+바깥 회차변수 뒤.
     const addIterationBranch = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
-      vm.branchPool.entries[newBranchIndex].nodes = Array.from(
+      vm.branchAt(newBranchIndex).nodes = Array.from(
         (
           vm.buildIteration(
             RAW,
@@ -173,7 +173,7 @@ export class RuntimeInterpreter {
 
     const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex);
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
-    const region = vm.regionPool.entries[forRegionIndex];
+    const region = vm.regionAt(forRegionIndex);
     parent.appendChild(region.anchor);
 
     // grow(onSize 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
@@ -187,7 +187,7 @@ export class RuntimeInterpreter {
     const addIterationBranch = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
-      vm.branchPool.entries[newBranchIndex].nodes = Array.from(
+      vm.branchAt(newBranchIndex).nodes = Array.from(
         (
           vm.buildIteration(
             STORE,
@@ -387,7 +387,7 @@ export class RuntimeInterpreter {
   // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
   // @param compId           지금 해석 중인 def(자식 RENDER면 자식 def). events/contexts를 이 def에서 참조로 꺼낸다.
   // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
-  // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool.entries[startBranchIndex])
+  // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(vm.branchAt(startBranchIndex))
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다(불변 값).
   // @param loopIndexBase    자식 @for 세그먼트 인덱스의 base(누적 @for 깊이). RENDER가 늘린다(불변 값).
   // @param walkStacks               가변 walk 스택(loopIndexStack/activeContexts). @for/RENDER는 이어 쓰고, @if 비활성 가지는 카피본을 쓴다.
@@ -416,7 +416,7 @@ export class RuntimeInterpreter {
         pathPrefix,
         loopIndexBase,
         walkStacks,
-        vm.branchPool.entries[startBranchIndex],
+        vm.branchAt(startBranchIndex),
       );
     }
     const fragment = document.createDocumentFragment();
@@ -431,7 +431,7 @@ export class RuntimeInterpreter {
 
     // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
     // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
-    const branch = vm.branchPool.entries[startBranchIndex]; // startBranchIndex는 전역 branchIndex
+    const branch = vm.branchAt(startBranchIndex); // startBranchIndex는 전역 branchIndex
 
     const u16at = () => {
       const v = vm.code[pc] | (vm.code[pc + 1] << 8);
@@ -877,74 +877,21 @@ export class RuntimeInterpreter {
     branch: TBranch,
     parent: Node,
   ): number => {
-    const regionIndex = appendIfRegion(vm.regionPool, vm.branchPool, condLeafIndex, ownsCondLeaf);
-    const region = vm.regionPool.entries[regionIndex];
-    branch.childRegionIndices.push(regionIndex); // 부모(이 interpret의) 가지에 자식 등록
-    const thenBranchIndex = region.branchIndices[THEN_INDEX];
-    const elseBranchIndex = region.branchIndices[ELSE_INDEX];
-    const thenBranch = vm.branchPool.entries[thenBranchIndex];
-    const elseBranch = vm.branchPool.entries[elseBranchIndex];
-    // anchor(if 자리 고정용 주석)는 appendIfRegion이 만들었다. 여기서 DOM 트리에 붙인다.
-    parent.appendChild(region.anchor);
-
-    // if/else 몸체 코드 경계. ifBodyStart = IF operand 직후(현재 pc).
-    const ifBodyStart = pc;
-    const { ifBodyEnd, elseBodyStart, ifEndPc } = vm.cachedIfRanges(ifBodyStart);
-
-    // 비활성 가지는 lazyBuild로 심어만 뒀다 나중(조건 swap)에 실행된다. 그 지연 시점의 공유
-    // walkStacks는 이 @if를 지나 이미 pop된 상태라, build 시점 상태를 딥카피해 캡처한다 - 카피
-    // 없이는 회차 인덱스($n)/컨텍스트를 잃는다. then/else 중 하나만 실행되니 스냅샷 하나를 공유
-    // 캡처한다(reactive @for grow의 addIterationBranch와 같은 관례).
-    const stacks = snapshotStacks(walkStacks);
-
-    // 각 가지를 build하는 클로저. 활성 가지는 지금 호출하고, 비활성 가지는 심어만 둔다.
-    const buildThen = () => {
-      const f = this.interpret(
-        vm,
-        argumentSourcePairs,
-        compId,
-        ifBodyStart,
-        ifBodyEnd,
-        thenBranchIndex,
-        pathPrefix,
-        loopIndexBase,
-        stacks,
-      );
-      thenBranch.nodes = Array.from(f.childNodes);
-    };
-    const buildElse = () => {
-      const f =
-        elseBodyStart === -1
-          ? document.createDocumentFragment() // else 없는 if - 빈 가지
-          : this.interpret(
-              vm,
-              argumentSourcePairs,
-              compId,
-              elseBodyStart,
-              ifEndPc,
-              elseBranchIndex,
-              pathPrefix,
-              loopIndexBase,
-              stacks,
-            );
-      elseBranch.nodes = Array.from(f.childNodes);
-    };
-    thenBranch.lazyBuild = buildThen;
-    elseBranch.lazyBuild = buildElse;
-
-    // cond 변경 시 해당 가지를 활성화(swap). 첫 활성화면 activateIf가 lazyBuild 호출.
-    vm.subscribeIfCond(branch, condLeafIndex, regionIndex);
-    // build는 "생성만" 한다 - 활성 가지를 lazyBuild로 만들어 자식 branch.nodes에 담고
-    // shownIndex만 설정한다. DOM 부착/구독 등록은 하지 않는다(attachIf가 일괄).
-    // 그래야 부모 fragment엔 anchor만 남아, 부모 branch.nodes가 자손까지 머금지 않는다.
-    // (anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가 깨진다.)
-    const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
-    const initialBranch = vm.branchPool.entries[region.branchIndices[initialShownIndex]];
-    // biome-ignore lint/style/noNonNullAssertion: 방금 buildThen/buildElse로 lazyBuild를 심었으니 null 아님
-    initialBranch.lazyBuild!();
-    initialBranch.built = true;
-    region.shownIndex = initialShownIndex;
-
-    return ifEndPc + 1; // IF_END 마커 소비 - if 블록 다음 pc
+    // anchor(if 자리 고정용 주석)는 여기서 DOM 트리에 붙인다. 가지 build는 VM이 한다.
+    const anchor = document.createComment("");
+    parent.appendChild(anchor);
+    return vm.openIfRegion(
+      pc,
+      condLeafIndex,
+      condInitial,
+      ownsCondLeaf,
+      argumentSourcePairs,
+      compId,
+      pathPrefix,
+      loopIndexBase,
+      walkStacks,
+      branch,
+      anchor,
+    );
   };
 }
