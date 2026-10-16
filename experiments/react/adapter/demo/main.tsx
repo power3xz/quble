@@ -1,10 +1,9 @@
 import { createComponent } from "quble/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import OrdersBytecode from "../../../../bench-expr/quble/orders.qubc";
 import { mount } from "../../../../core/web/runtime-entry.ts";
+import OrdersBytecode from "./orders.qubc";
 import { makeOrdersData, type TOrdersData } from "./orders-data.ts";
-import "../../../../bench-expr/src/style.css";
 import { bulk, ordersHandlers } from "./orders-handlers.ts";
 
 // 모듈 최상위에서 한 번만 만든다.
