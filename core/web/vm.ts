@@ -972,6 +972,10 @@ export class VM {
     return forRegionIndex;
   };
 
+  regionAt = (regionIndex: number): TRegion => this.regionPool.entries[regionIndex];
+
+  branchAt = (branchIndex: number): TBranch => this.branchPool.entries[branchIndex];
+
   // @for region에 빈 회차 가지를 더하고 그 branchIndex를 돌려준다. 노드와 구독은 호출자가 build해 담는다.
   appendIteration = (forRegionIndex: number): number =>
     appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);

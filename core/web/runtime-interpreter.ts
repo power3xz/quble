@@ -104,7 +104,7 @@ export class RuntimeInterpreter {
     walkStacks: TWalkStacks,
   ) => {
     const forRegionIndex = vm.openForRegion(branch, countLeafIndex);
-    const region = vm.regionPool.entries[forRegionIndex];
+    const region = vm.regionAt(forRegionIndex);
     parent.appendChild(region.anchor);
 
     // grow(onCount 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
@@ -119,7 +119,7 @@ export class RuntimeInterpreter {
     // props+바깥 회차변수 뒤.
     const addIterationBranch = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
-      vm.branchPool.entries[newBranchIndex].nodes = Array.from(
+      vm.branchAt(newBranchIndex).nodes = Array.from(
         (
           vm.buildIteration(
             RAW,
@@ -173,7 +173,7 @@ export class RuntimeInterpreter {
 
     const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex);
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
-    const region = vm.regionPool.entries[forRegionIndex];
+    const region = vm.regionAt(forRegionIndex);
     parent.appendChild(region.anchor);
 
     // grow(onSize 발화)는 지연 실행이라 그 시점 공유 walkStacks는 이 @for 지점을 지나 이미 pop돼
@@ -187,7 +187,7 @@ export class RuntimeInterpreter {
     const addIterationBranch = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
-      vm.branchPool.entries[newBranchIndex].nodes = Array.from(
+      vm.branchAt(newBranchIndex).nodes = Array.from(
         (
           vm.buildIteration(
             STORE,
@@ -387,7 +387,7 @@ export class RuntimeInterpreter {
   // @param argumentSourcePairs            offset -> store 경로 매핑(자식은 자식 argumentSourcePairs)
   // @param compId           지금 해석 중인 def(자식 RENDER면 자식 def). events/contexts를 이 def에서 참조로 꺼낸다.
   // @param startPc, endPc   해석 범위(endPc는 IF_END 직전)
-  // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(branchPool.entries[startBranchIndex])
+  // @param startBranchIndex 구독을 쌓을 가지의 전역 branchIndex(vm.branchAt(startBranchIndex))
   // @param pathPrefix       이벤트 fullname의 누적 경로(루트 ""). RENDER가 자식 type-name을 잇는다(불변 값).
   // @param loopIndexBase    자식 @for 세그먼트 인덱스의 base(누적 @for 깊이). RENDER가 늘린다(불변 값).
   // @param walkStacks               가변 walk 스택(loopIndexStack/activeContexts). @for/RENDER는 이어 쓰고, @if 비활성 가지는 카피본을 쓴다.
@@ -416,7 +416,7 @@ export class RuntimeInterpreter {
         pathPrefix,
         loopIndexBase,
         walkStacks,
-        vm.branchPool.entries[startBranchIndex],
+        vm.branchAt(startBranchIndex),
       );
     }
     const fragment = document.createDocumentFragment();
@@ -431,7 +431,7 @@ export class RuntimeInterpreter {
 
     // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
     // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
-    const branch = vm.branchPool.entries[startBranchIndex]; // startBranchIndex는 전역 branchIndex
+    const branch = vm.branchAt(startBranchIndex); // startBranchIndex는 전역 branchIndex
 
     const u16at = () => {
       const v = vm.code[pc] | (vm.code[pc + 1] << 8);

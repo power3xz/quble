@@ -210,7 +210,7 @@ export class ResumeInterpreter {
     let segment: string | null = null; // 다음 RENDER/BIND_EVENT가 소비할 경로 세그먼트
     let pendingSlotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [];
     let pc = startPc;
-    const branch = vm.branchPool.entries[startBranchIndex];
+    const branch = vm.branchAt(startBranchIndex);
 
     const u16at = () => {
       const v = code[pc] | (code[pc + 1] << 8);
@@ -576,7 +576,7 @@ export class ResumeInterpreter {
     walkStacks: TWalkStacks,
   ) => {
     const forRegionIndex = vm.openForRegion(branch, countLeafIndex, this.anchor());
-    const region = vm.regionPool.entries[forRegionIndex];
+    const region = vm.regionAt(forRegionIndex);
     tops?.push(region.anchor);
 
     const stacks = snapshotStacks(walkStacks);
@@ -584,7 +584,7 @@ export class ResumeInterpreter {
     // 처음 회차는 SSR 노드에서 연결한다.
     const resumeIteration = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
-      vm.branchPool.entries[newBranchIndex].nodes = vm.buildIteration(
+      vm.branchAt(newBranchIndex).nodes = vm.buildIteration(
         RAW,
         i,
         bodyStart,
@@ -600,7 +600,7 @@ export class ResumeInterpreter {
     // count가 늘 때의 회차는 노드를 새로 짓는다.
     const growIteration = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
-      vm.branchPool.entries[newBranchIndex].nodes = nodesOf(
+      vm.branchAt(newBranchIndex).nodes = nodesOf(
         vm.buildIteration(
           RAW,
           i,
@@ -646,7 +646,7 @@ export class ResumeInterpreter {
 
     const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex, this.anchor());
     info.forRegionIndices.push(forRegionIndex);
-    const region = vm.regionPool.entries[forRegionIndex];
+    const region = vm.regionAt(forRegionIndex);
     tops?.push(region.anchor);
 
     const stacks = snapshotStacks(walkStacks);
@@ -654,7 +654,7 @@ export class ResumeInterpreter {
     const resumeIteration = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
-      vm.branchPool.entries[newBranchIndex].nodes = vm.buildIteration(
+      vm.branchAt(newBranchIndex).nodes = vm.buildIteration(
         STORE,
         indexLeaf,
         bodyStart,
@@ -670,7 +670,7 @@ export class ResumeInterpreter {
     const growIteration = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex);
       const indexLeaf = info.indexLeafIndices[i];
-      vm.branchPool.entries[newBranchIndex].nodes = nodesOf(
+      vm.branchAt(newBranchIndex).nodes = nodesOf(
         vm.buildIteration(
           STORE,
           indexLeaf,
