@@ -87,13 +87,35 @@ test("언마운트하면 인스턴스를 destroy한다", async () => {
   assert.ok(watch.removed.includes("click"), "mount가 단 위임 리스너를 destroy가 뗀다");
 });
 
-test("props 내용이 바뀌면 다시 mount한다", async () => {
+test("props 내용이 바뀌면 다시 mount하지 않고 update로 갱신한다", async () => {
   const C = makeGreeting();
   const { host, rerender } = await render(createElement(C, { name: "Ann" }));
   const before = host.querySelector("p span") as Element;
   await rerender(createElement(C, { name: "Bob" }));
-  assert.equal(host.querySelector("p span")?.textContent, "Bob");
-  assert.equal(before.isConnected, false);
+  assert.equal(host.querySelector("p span"), before, "DOM 노드가 그대로다");
+  assert.equal(before.textContent, "Bob");
+});
+
+test("바뀐 prop만 갱신하고 나머지는 그대로 둔다", async () => {
+  const C = makeCounter();
+  const { host, rerender } = await render(createElement(C, { label: "Go", count: 1 }));
+  const labelText = host.querySelector("button")?.firstChild;
+  await rerender(createElement(C, { label: "Go", count: 2 }));
+  assert.equal(host.querySelector("p")?.textContent, "2");
+  assert.equal(host.querySelector("button")?.firstChild, labelText, "안 바뀐 label의 텍스트 노드는 그대로다");
+});
+
+test("update한 뒤에도 언마운트하면 destroy한다", async () => {
+  const C = makeCounter();
+  const { root, rerender } = await render(createElement(C, { label: "Go", count: 1 }));
+  await rerender(createElement(C, { label: "Go", count: 2 }));
+  const watch = watchRemovals();
+  try {
+    await act(async () => root.unmount());
+  } finally {
+    watch.restore();
+  }
+  assert.ok(watch.removed.includes("click"));
 });
 
 test("내용이 같은 새 props 객체로는 다시 mount하지 않는다", async () => {
