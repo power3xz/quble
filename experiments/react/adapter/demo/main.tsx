@@ -8,7 +8,7 @@ import "../../../../bench-expr/src/style.css";
 import { bulk, ordersHandlers } from "./orders-handlers.ts";
 
 // 모듈 최상위에서 한 번만 만든다.
-const Orders = createComponent<TOrdersData>(OrdersBytecode);
+const Orders = createComponent(OrdersBytecode);
 
 // 같은 import를 React 없이 순수 mount로 그린다.
 const PlainMount = ({ data }: { data: TOrdersData }) => {

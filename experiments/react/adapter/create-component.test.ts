@@ -22,8 +22,8 @@ before(async () => {
 });
 
 // 컴포넌트 타입이 렌더마다 바뀌면 리마운트되므로 테스트마다 한 번만 만든다.
-const makeGreeting = () => createComponent<{ name: string }>(greeting);
-const makeCounter = () => createComponent<{ label: string; count: number }>(counter);
+const makeGreeting = () => createComponent(greeting);
+const makeCounter = () => createComponent(counter);
 
 const render = async (element: ReactElement) => {
   const host = document.createElement("div");
