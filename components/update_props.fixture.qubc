@@ -1,0 +1,15 @@
+component UpdateProps {
+  props { title: string, user: { name: string, age: number }, tags: string[] }
+  template {
+    div(class="update") {
+      h1(class="title") { ${title} }
+      p(class="name") { ${user.name} }
+      p(class="age") { ${user.age} }
+      ul() {
+        @for (tag of tags) {
+          li(class="tag") { ${tag} }
+        }
+      }
+    }
+  }
+}

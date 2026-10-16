@@ -1387,6 +1387,18 @@
   ],
   "res_clone": [{}],
   "typed_lit_arg": [{}],
+  "update_props": [
+    {
+      "title": "제목",
+      "user": { "name": "kim", "age": 30 },
+      "tags": ["a", "b"]
+    },
+    {
+      "title": "",
+      "user": { "name": "", "age": 0 },
+      "tags": []
+    }
+  ],
   "value_expr": [
     {
       "count": 3,
