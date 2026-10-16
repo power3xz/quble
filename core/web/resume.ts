@@ -2,7 +2,7 @@
 // 그 뒤의 lazy build와 @for grow는 runtime-interpreter.ts의 RuntimeInterpreter가 한다. 둘은 서로를
 // 모르고 VM의 interpreter 필드에 번갈아 끼워진다. CSR만 쓰는 번들은 이 파일을 싣지 않는다.
 
-import { decode, type TField, type TModule } from "./decode.ts";
+import { decode, type TField, type TModule, type TQubleBytecode } from "./decode.ts";
 import { Pool } from "./pool-allocator.ts";
 import { appendArrayInfo, type TArrayInfo, THEN_INDEX } from "./region.ts";
 import { ResumeInterpreter } from "./resume-interpreter.ts";
@@ -75,7 +75,7 @@ const instantiate = (
 // 새로 만들지 않고 resume한다. 반환한 nodes가 바로 그 노드들이다.
 // options.flatData - quble-ssr --flat-data가 낸 store. 주면 plantRoot 없이 그것으로 시작하고 rootValue는 안 본다.
 // 없으면 rootValue로 plantRoot를 하며, 그 값은 SSR에 넘긴 data와 같아야 한다.
-export const resume = (bytes: Uint8Array, resources: string[] = []) => {
+export const resume = (bytes: TQubleBytecode, resources: string[] = []) => {
   const module = decode(bytes);
   const loadedHrefs = new Set();
   return (compId: number) =>

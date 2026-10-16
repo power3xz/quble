@@ -1,9 +1,11 @@
 // Quble 앱 SSR 진입점 - SSR이 그린 DOM을 이어받는다. CSR 진입점(runtime-entry.ts)과 서로 의존하지 않는다.
 // 이 진입점은 SSR 프리뷰와 playground 번들에 실린다.
 
+import type { TQubleBytecode } from "./decode.ts";
 import { resume as resumeBlueprint, type TFlatData } from "./resume.ts";
 import type { THandlers } from "./runtime.ts";
 
+export type { TQubleBytecode } from "./decode.ts";
 export { loadHandlers } from "./load-handlers.ts";
 export { loadManifest } from "./load-manifest.ts";
 // playground 핸들러가 runtime.ts에서 가져오는 compile은 빌드가 이 번들로 바꿔 놓는다.
@@ -26,7 +28,7 @@ type TMountOptions = {
  * @returns           인스턴스({ nodes, store, destroy, ... }) - nodes가 바로 그 SSR 노드들이다.
  */
 export const resume = (
-  bytes: Uint8Array,
+  bytes: TQubleBytecode,
   resumeFrom: ParentNode & Node,
   { flatData, data, handlers = {}, resources = [] }: TMountOptions,
 ) => {

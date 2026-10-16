@@ -153,8 +153,11 @@ const readFields = (reader: Reader): TFieldEntry[] => {
   return fields;
 };
 
+// 컴파일된 qubb 바이트. 진입점(mount/resume)과 번들러 플러그인이 같은 타입으로 주고받는다.
+export type TQubleBytecode = Uint8Array;
+
 // qubb 바이트를 TModule로 디코드한다(core/BYTECODE.md 포맷).
-export const decode = (bytes: Uint8Array): TModule => {
+export const decode = (bytes: TQubleBytecode): TModule => {
   const r = new Reader(bytes);
   const magic = r.take(4);
   if (!(magic[0] === 0x51 && magic[1] === 0x42 && magic[2] === 0x4c && magic[3] === 0x00)) {
