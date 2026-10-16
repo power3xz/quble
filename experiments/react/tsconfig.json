@@ -7,7 +7,7 @@
     "allowImportingTsExtensions": true,
     "types": ["node"],
     "jsx": "react-jsx",
-    "paths": { "quble/react": ["./adapter/react.ts"] },
+    "paths": { "quble/react": ["./adapter/react-browser.ts"] },
     "strict": true,
     "noEmit": true
   },
