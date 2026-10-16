@@ -26,12 +26,21 @@ after(() => {
 
 // build-preview.mjs가 낸 것과 같은 모양의 dist(qubb, manifest, data.json, 전역 CSS, 리소스)를 만들고
 // build-ssg.mjs를 돌려 index.html을 돌려준다.
-const buildSsg = (name: string, data: unknown, css: string, assetsUrl?: string) => {
+const buildSsg = (
+  name: string,
+  data: unknown,
+  css: string,
+  assetsUrl?: string,
+  manifestExtra: Record<string, unknown> = {},
+) => {
   const { qubb, resmap } = buildFixtureWithResmap(name);
   const dist = mkdtempSync(join(tmpdir(), "quble-ssg-"));
   dirs.push(dist);
   writeFileSync(join(dist, `${name}.qubb`), qubb);
-  writeFileSync(join(dist, `${name}.manifest.json`), JSON.stringify({ resources: resmap, props: [] }));
+  writeFileSync(
+    join(dist, `${name}.manifest.json`),
+    JSON.stringify({ resources: resmap, props: [], ...manifestExtra }),
+  );
   writeFileSync(join(dist, "data.json"), JSON.stringify(data));
   writeFileSync(join(dist, "reset.css"), "");
   writeFileSync(join(dist, "global.css"), "");
@@ -69,4 +78,47 @@ test("--assets-url을 주면 자산이 그 주소 아래로 나간다", () => {
   assert.ok(html.includes(`from "${CDN}/quble-resume.js"`), "런타임 번들");
   assert.ok(html.includes(`fetch("${CDN}/styled_res.qubb")`), "qubb");
   assert.ok(html.includes(`loadManifest("${CDN}/styled_res.manifest.json")`), "manifest");
+});
+
+// 페이지가 __qubleManifests에 심은 값. 키는 loadManifest에 넘기는 URL과 글자 그대로 같아야 쓰인다.
+const inlinedManifests = (html: string): Record<string, unknown> => {
+  const tag = html.match(/<script>globalThis\.__qubleManifests = (.*?);<\/script>/s);
+  assert.ok(tag, "manifest 태그");
+  return JSON.parse(tag[1]);
+};
+
+test("manifest를 페이지에 심고 키가 loadManifest에 넘기는 URL과 같다", () => {
+  const { html, resmap } = buildSsg("styled_res", {}, ".box { color: red }");
+  assert.deepEqual(inlinedManifests(html), { "./styled_res.manifest.json": { resources: resmap, props: [] } });
+  assert.ok(html.includes('loadManifest("./styled_res.manifest.json")'));
+});
+
+test("--assets-url을 주면 manifest 키도 그 주소 아래다", () => {
+  const { html, resmap } = buildSsg("styled_res", {}, ".box { color: red }", CDN);
+  assert.deepEqual(inlinedManifests(html), { [`${CDN}/styled_res.manifest.json`]: { resources: resmap, props: [] } });
+  assert.ok(html.includes(`loadManifest("${CDN}/styled_res.manifest.json")`));
+});
+
+test("manifest에 핸들러가 있으면 modulepreload를 낸다", () => {
+  const extra = { handlers: "res/styled_res.abc.handlers.js" };
+  assert.ok(
+    buildSsg("styled_res", {}, "", undefined, extra).html.includes(
+      '<link rel="modulepreload" href="./res/styled_res.abc.handlers.js">',
+    ),
+  );
+  assert.ok(
+    buildSsg("styled_res", {}, "", CDN, extra).html.includes(
+      `<link rel="modulepreload" href="${CDN}/res/styled_res.abc.handlers.js">`,
+    ),
+  );
+});
+
+test("핸들러가 없으면 modulepreload를 내지 않는다", () => {
+  assert.ok(!buildSsg("styled_res", {}, "").html.includes("modulepreload"));
+});
+
+test("manifest 값의 <는 이스케이프해 script 태그가 일찍 닫히지 않는다", () => {
+  const { html } = buildSsg("styled_res", {}, "", undefined, { note: "</script><b>x" });
+  assert.ok(!html.includes("</script><b>x"));
+  assert.equal((inlinedManifests(html)["./styled_res.manifest.json"] as { note: string }).note, "</script><b>x");
 });

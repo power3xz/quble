@@ -13,7 +13,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { build } from "esbuild";
-import { flatDataJson, inlineResource, renderSsr } from "./ssr-page.mjs";
+import { flatDataJson, inlineResource, manifestsTag, renderSsr } from "./ssr-page.mjs";
 
 // FNV-1a 64bit - build-preview.mjs와 같은 규칙(Rust content_hash와 통일).
 const fnv1a = (bytes) => {
@@ -140,6 +140,15 @@ const fill = (page, marker, value) => {
 };
 let page = readFileSync(join(playgroundDir, "index.html"), "utf8");
 page = fill(page, "<!--qb:styles-->", links.map((path) => inlineResource(distDir, (p) => `./${p}`, path)).join("\n"));
+// manifest는 요청 없이 심고(index.html의 loadManifest 키와 같은 URL), 핸들러는 미리 받게 건다.
+page = fill(
+  page,
+  "<!--qb:manifest-->",
+  [
+    `  ${manifestsTag({ "./playground.manifest.json": manifest })}`,
+    `  <link rel="modulepreload" href="./${manifest.handlers}">`,
+  ].join("\n"),
+);
 page = fill(page, "<!--qb:editor-->", html);
 page = fill(page, "<!--qb:flat-data-->", `<script id="qb-flat-data" type="application/json">${flatData}</script>`);
 writeFileSync(join(distDir, "index.html"), page);

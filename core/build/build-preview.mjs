@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { build } from "esbuild";
+import { manifestsTag } from "./ssr-page.mjs";
 
 // FNV-1a 64bit. Rust content_hash와 알고리즘 통일(offset basis/prime/16자리 hex) - 자산 파일명/dedup용.
 const fnv1a = (bytes) => {
@@ -113,9 +114,9 @@ writeFileSync(join(distDir, "quble-resume.js"), resumeBundle.outputFiles[0].text
 
 // 4. 진입 페이지 - quble-runtime.js를 로드해 <stem>.qubb를 #quble-app에 마운트한다.
 //    초기 data는 --data 파일 내용을 인라인(없으면 {}). store/provided 구조가 정해지면 교체(DESIGN #5.1).
-//    구동 크리티컬 체인(runtime -> manifest -> qubb -> handlers)은 순차 발견이라 폭포수가 된다.
-//    빌드가 그 경로들을 알므로 preload로 심어 HTML 파싱 시점에 병렬로 받게 한다(CSS는 렌더 중
-//    LOAD_RES가 삽입하니 크리티컬 패스 아님 - 제외).
+//    구동 크리티컬 체인(runtime -> qubb -> handlers)은 순차 발견이라 폭포수가 된다. 빌드가 그 경로들을
+//    알므로 preload로 심어 HTML 파싱 시점에 병렬로 받게 한다(CSS는 렌더 중 LOAD_RES가 삽입하니
+//    크리티컬 패스 아님 - 제외). manifest는 요청 없이 HTML에 심는다(__qubleManifests).
 // 초기 data는 dist/data.json으로 떨구고 런타임이 HTTP로 fetch한다(인라인 아님) - 큰 data를
 // HTML에 박지 않고, 프리뷰 서버가 파일로 서빙한다. --data 없으면 빈 객체.
 const data = dataFile ? readFileSync(dataFile, "utf8") : "{}";
@@ -124,7 +125,7 @@ const finalManifest = JSON.parse(readFileSync(join(distDir, `${stem}.manifest.js
 const preloads = [
   `  <link rel="modulepreload" href="./quble-runtime.js">`,
   `  <link rel="preload" href="./${stem}.qubb" as="fetch" crossorigin>`,
-  `  <link rel="preload" href="./${stem}.manifest.json" as="fetch" crossorigin>`,
+  `  ${manifestsTag({ [`./${stem}.manifest.json`]: finalManifest })}`,
   `  <link rel="preload" href="./data.json" as="fetch" crossorigin>`,
 ];
 if (finalManifest.handlers) {
