@@ -143,19 +143,20 @@ export const html = (host: HTMLElement): string => host.innerHTML.replace(/<!--.
 
 // 어떤 fullname이 오든 (fullname, data, context, 회차 번호 $N)를 적어 두는 핸들러 표.
 // extra에 있는 fullname은 적은 뒤 그 핸들러도 부른다.
+//
+// 런타임이 핸들러를 Object.hasOwn으로 조회하므로(상속된 키를 막으려는 것) get만 가로채서는 안 된다 -
+// hasOwn은 getOwnPropertyDescriptor를 거쳐서, 그 트랩이 없으면 없는 이름으로 보여 핸들러가 불리지 않는다.
 export const recorder = (extra: TAnyHandlers = {}) => {
   const calls: { fullname: string; data: unknown; context: unknown; loops: Record<string, unknown> }[] = [];
+  const recording = (key: string) => (data: TValues, ctx: THandlerCtx) => {
+    const loops = Object.fromEntries(Object.entries(ctx).filter(([name]) => name.startsWith("$")));
+    calls.push({ fullname: key, data: structuredClone(data), context: structuredClone(ctx.context), loops });
+    extra[key]?.(data, ctx);
+  };
   const handlers = new Proxy(extra, {
-    get: (target, key) => {
-      if (typeof key !== "string") {
-        return undefined;
-      }
-      return (data: TValues, ctx: THandlerCtx) => {
-        const loops = Object.fromEntries(Object.entries(ctx).filter(([name]) => name.startsWith("$")));
-        calls.push({ fullname: key, data: structuredClone(data), context: structuredClone(ctx.context), loops });
-        target[key]?.(data, ctx);
-      };
-    },
+    get: (_target, key) => (typeof key === "string" ? recording(key) : undefined),
+    getOwnPropertyDescriptor: (_target, key) =>
+      typeof key === "string" ? { value: recording(key), enumerable: true, configurable: true } : undefined,
   });
   return { calls, handlers };
 };
