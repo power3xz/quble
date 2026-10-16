@@ -92,6 +92,7 @@ import {
   type TRegion,
   truncateFor,
 } from "./region.ts";
+import { type TUpdateMode, updateRoot } from "./update.ts";
 
 // 슬롯 해석방법. argumentSourcePairs는 (해석방법, 참조) 쌍을 인터리브로 담는다 - 슬롯 offset은
 // argumentSourcePairs[2*offset](해석방법) / argumentSourcePairs[2*offset+1](참조)로 읽는다. STORE는 참조가 store
@@ -743,6 +744,8 @@ export class VM {
   //
   // snapshot은 타입과 위치를 받아 store의 그 자리 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다
   // (핸들러 payload와 같은 조립). 인자를 생략하면 루트 props 전체다(snapshotOf).
+  //
+  // update는 루트 props를 이름으로 갱신한다(updateRoot). destroy가 이 클로저도 놓는다 - VM을 잡고 있다.
   instanceOf = (rootRegion: TRegion, nodes: ChildNode[]) => {
     const { module, store, regionPool, branchPool, arrayPool } = this;
     // 해체한 뒤에는 루트 region을 놓는다 - destroy 클로저가 붙들고 있으면 루트 anchor가 남는다. 이미 해체했으면
@@ -769,6 +772,7 @@ export class VM {
       this.storeTree = null;
       // 이 클로저는 VM을 잡고 있다. 호출자가 인스턴스를 들고 있어도 VM이 거둬지도록 VM을 안 잡는 함수로 바꾼다.
       inst.destroy = noop;
+      inst.update = noop;
     };
     const inst = {
       nodes,
@@ -778,6 +782,7 @@ export class VM {
       store,
       destroy,
       snapshot: snapshotOf(module, store, arrayPool),
+      update: (values: Record<string, unknown>, mode: TUpdateMode = "merge"): void => updateRoot(this, values, mode),
     };
     return inst;
   };
@@ -1146,6 +1151,7 @@ export class VM {
         get: this.store.get,
         setObject: this.setObject,
         setArray: this.setArrayElements,
+        update: (values: Record<string, unknown>, mode: TUpdateMode = "merge"): void => updateRoot(this, values, mode),
         push: this.pushArrayElement,
         removeAt: this.removeArrayElementAt,
         swapAt: this.swapArrayElementsAt,

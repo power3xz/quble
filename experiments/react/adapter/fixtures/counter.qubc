@@ -1,0 +1,10 @@
+component Counter {
+  props { label: string, count: number }
+  events { CLICK({ label }) }
+  template {
+    div() {
+      button(@click:CLICK) { ${label} }
+      p() { ${count} }
+    }
+  }
+}

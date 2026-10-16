@@ -1,0 +1,6 @@
+component Label {
+  props { text: string }
+  template {
+    span() { ${text} }
+  }
+}

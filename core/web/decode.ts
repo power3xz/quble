@@ -153,8 +153,13 @@ const readFields = (reader: Reader): TFieldEntry[] => {
   return fields;
 };
 
+// 컴파일된 qubb 바이트. 진입점(mount/resume)과 번들러 플러그인이 같은 타입으로 주고받는다.
+// THandlerMap은 값에 실리지 않는 타입 정보다 - 플러그인이 낸 x.qubc.d.ts가 그 컴포넌트의 핸들러 맵 타입
+// (THandlers)을 채워, 바이트코드를 받는 쪽이 핸들러 키와 컨텍스트 타입을 추론한다.
+export type TQubleBytecode<THandlerMap = unknown> = Uint8Array & { readonly __handlers?: THandlerMap };
+
 // qubb 바이트를 TModule로 디코드한다(core/BYTECODE.md 포맷).
-export const decode = (bytes: Uint8Array): TModule => {
+export const decode = (bytes: TQubleBytecode): TModule => {
   const r = new Reader(bytes);
   const magic = r.take(4);
   if (!(magic[0] === 0x51 && magic[1] === 0x42 && magic[2] === 0x4c && magic[3] === 0x00)) {

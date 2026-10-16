@@ -5,7 +5,7 @@
 //
 // 바이트코드를 훑어 DOM/구독을 짓는 VM은 vm.ts에 있다.
 
-import { decode, type TModule } from "./decode.ts";
+import { decode, type TModule, type TQubleBytecode } from "./decode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import { type TArrayInfo, THEN_INDEX } from "./region.ts";
@@ -25,7 +25,7 @@ export { leafCountOf, plantRoot, STORE, swapDeleteAt, type THandlers } from "./v
 // @param bytes  qubb 바이트
 // @param resources resId -> URL 매핑(LOAD_RES가 <link>로 삽입). manifest.resources. 없으면 로드 생략.
 // @returns      blueprintOf: (compId) => Blueprint
-export const compile = (bytes: Uint8Array, resources: string[] = []) => {
+export const compile = (bytes: TQubleBytecode, resources: string[] = []) => {
   const module = decode(bytes);
   // LOAD_RES dedup 집합은 compile 단위 - 이 compile에서 나온 모든 blueprint/인스턴스가 공유하되,
   // 다른 compile(다른 렌더 세션)은 깨끗한 Set으로 시작한다.

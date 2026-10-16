@@ -1,10 +1,12 @@
 // Quble 앱 CSR 진입점 - 배포된 산출물(qubb + manifest)을 fetch해 브라우저에 마운트한다.
 // qubc 컴파일은 빌드가 이미 끝났고, 여기선 qubb 디코드(runtime.compile) + 인스턴스화만 한다.
 
+import type { TQubleBytecode } from "./decode.ts";
 import { loadHandlers } from "./load-handlers.ts";
 import { loadManifest } from "./load-manifest.ts";
 import { compile, type THandlers } from "./runtime.ts";
 
+export type { TQubleBytecode } from "./decode.ts";
 export { loadHandlers } from "./load-handlers.ts";
 export { loadManifest } from "./load-manifest.ts";
 // 이 번들이 런타임을 통째로 담으므로 compile도 함께 내보낸다 - 바이트코드를 이미 손에 든 쪽은
@@ -27,7 +29,7 @@ type TMountOptions = {
  * @returns          인스턴스({ nodes, store, destroy, ... }) - store로 반응성을 건다.
  */
 export const mount = (
-  bytes: Uint8Array,
+  bytes: TQubleBytecode,
   container: Element,
   { data, handlers = {}, resources = [] }: TMountOptions,
 ) => {
