@@ -1151,6 +1151,7 @@ export class VM {
         get: this.store.get,
         setObject: this.setObject,
         setArray: this.setArrayElements,
+        update: (values: Record<string, unknown>, mode: TUpdateMode = "merge"): void => updateRoot(this, values, mode),
         push: this.pushArrayElement,
         removeAt: this.removeArrayElementAt,
         swapAt: this.swapArrayElementsAt,

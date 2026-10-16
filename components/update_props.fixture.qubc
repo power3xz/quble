@@ -1,7 +1,9 @@
 component UpdateProps {
   props { title: string, user: { name: string, age: number }, tags: string[] }
+  events { GO({ title }) }
   template {
     div(class="update") {
+      button(class="go" @click:GO) { "go" }
       h1(class="title") { ${title} }
       p(class="name") { ${user.name} }
       p(class="age") { ${user.age} }

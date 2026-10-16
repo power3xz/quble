@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { compile } from "./runtime.ts";
+import { compile, type THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
 
@@ -91,6 +91,45 @@ test("update 뒤 snapshot이 갱신된 값을 돌려준다", () => {
 test("루트 props에 없는 이름은 이름을 담은 예외를 throw한다", () => {
   const { inst } = instantiate();
   assert.throws(() => inst.update({ typo: 1 }), /typo/);
+});
+
+// 핸들러 컨텍스트의 update - 인스턴스의 update와 같은 동작이다.
+type TUpdate = (values: Record<string, unknown>, mode?: "replace" | "merge") => void;
+const instantiateWith = (run: (update: TUpdate) => void) => {
+  const handlers = { GO: (_data: unknown, ctx: { update: TUpdate }) => run(ctx.update) } as unknown as THandlers;
+  const inst = compile(qubb)(0)(structuredClone(DATA), handlers);
+  const host = mount(inst);
+  return { inst, host, click: () => (host.querySelector(".go") as HTMLButtonElement).click() };
+};
+
+test("핸들러 컨텍스트의 update가 스칼라, 객체, 배열을 함께 갱신한다", () => {
+  const { host, click } = instantiateWith((update) =>
+    update({ title: "N", user: { name: "lee" }, tags: ["x", "y", "z"] }),
+  );
+  click();
+  assert.equal(text(host, ".title"), "N");
+  assert.equal(text(host, ".name"), "lee");
+  assert.equal(text(host, ".age"), "30", "기본값은 병합");
+  assert.deepEqual(tags(host), ["x", "y", "z"]);
+});
+
+test("핸들러 컨텍스트의 update에 replace를 주면 안 준 필드가 비워진다", () => {
+  const { host, click } = instantiateWith((update) => update({ user: { name: "lee" } }, "replace"));
+  click();
+  assert.equal(text(host, ".age"), "");
+});
+
+test("핸들러 컨텍스트의 update가 없는 이름이면 이름을 담은 예외를 throw한다", () => {
+  let thrown: unknown;
+  const { click } = instantiateWith((update) => {
+    try {
+      update({ typo: 1 });
+    } catch (error) {
+      thrown = error;
+    }
+  });
+  click();
+  assert.match(String(thrown), /typo/);
 });
 
 test("destroy 뒤 update는 아무 일도 하지 않고 VM을 붙들지 않는다", () => {
