@@ -8,9 +8,7 @@
 
 ## 하는 중
 
-해석기가 `vm.regionPool`/`vm.branchPool`을 직접 읽고 쓰지 않게 정리 (브랜치 `vm-region-access`).
-`regionAt`/`branchAt` 접근자를 더하고, 두 해석기의 `buildIfRegion`에서 공통부를 VM의
-`openIfRegion`으로 옮긴다. 초기 가지를 만드는 부분만 해석기에 남는다.
+없음
 
 ## 할 것
 
