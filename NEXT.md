@@ -17,7 +17,7 @@ React 어댑터(`experiments/react/adapter`)의 `createComponent`를 Next.js의 
 3. Next.js에서 `.qubc` import를 처리한다(지금은 Vite 플러그인뿐).
 4. `experiments/react/next`에서 SSR 동작 확인, 스탠드얼론 Vite(`adapter-demo`)에서 CSR 동작 확인.
 
-미확인: 가짜 DOM으로 직렬화한 HTML을 `resume`이 이어받는지(Rust SSR HTML 기준으로 만든 기능).
+미확인: 가짜 DOM으로 직렬화한 HTML을 `resume`이 처리하는지(Rust SSR HTML 기준으로 만든 기능).
 
 ## 할 것
 
