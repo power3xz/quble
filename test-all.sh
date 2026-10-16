@@ -16,6 +16,8 @@ cd "$root"
 #   cargo test bytecode, compiler, compiler-wasm, quble 크레이트의 단위 테스트
 #   typecheck  루트 tsconfig와 ts-plugin(src/test), 그리고 핸들러 타입 검사
 #   npm test   quble-web, playground, wasm-compiler, ts-plugin 워크스페이스
+#   experiments/react  실험이라도 방치하지 않는다 - 타입 검사와 테스트(어댑터, parity)를 따로 돈다.
+#              자기 node_modules를 쓰는 워크스페이스라 루트 명령에 안 걸린다.
 
 echo "== npm run lint"
 if ! npm run lint; then
@@ -36,7 +38,13 @@ npm run build:wasm --prefix core/wasm-compiler
 echo "== npm run typecheck"
 npm run typecheck
 
+echo "== npm run typecheck (experiments/react)"
+npm run typecheck --prefix experiments/react
+
 echo "== npm test"
 npm test
+
+echo "== npm test (experiments/react)"
+npm test --prefix experiments/react
 
 echo "== 전부 통과"

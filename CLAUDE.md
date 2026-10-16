@@ -143,7 +143,7 @@ COMMENT-GUIDELINES.md를 읽고 따른다.
 ### 피처 브랜치를 main에 머지할 때
 
 머지 훅이 `npm run lint`, `cargo test --workspace`, `cargo build --bin quble`, `build:wasm`,
-`npm run typecheck`, `npm test`를 돌린다. 그중 포맷은 고치면 커밋이 생기므로 머지 전에
+`npm run typecheck`, `npm test`, 그리고 `experiments/react`의 typecheck와 test를 돌린다. 그중 포맷은 고치면 커밋이 생기므로 머지 전에
 브랜치에서 돌리고 커밋한다.
 
 - `.ts`/`.css`/`.json`을 만졌으면 `npm run format`.
