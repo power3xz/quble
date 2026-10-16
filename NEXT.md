@@ -8,7 +8,11 @@
 
 ## 하는 중
 
-없음
+manifest inline - `globalThis.__quble.manifests[manifestUrl]`에 값이 있으면 `fetch`를 건너뛰고 없으면
+`fetch`하는 `loadManifest`를 두고, manifest를 읽는 세 곳(`runtime-entry.ts`, `ssr-page.mjs`의 생성
+스크립트, `playground/index.html`)을 바꾼다(브랜치 `inline-manifest`).
+
+- 남은 것: `loadManifest`와 단위 테스트, 호출처 세 곳 교체, HTML을 만드는 빌더가 `__quble`을 내게 하기
 
 ## 할 것
 
