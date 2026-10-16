@@ -5,8 +5,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as entry from "./runtime-entry.ts";
 
-test("compile, resume, loadHandlers를 모두 내보낸다", () => {
+test("compile, resume, loadHandlers, loadManifest를 모두 내보낸다", () => {
   assert.equal(typeof entry.compile, "function");
   assert.equal(typeof entry.resume, "function");
   assert.equal(typeof entry.loadHandlers, "function");
+  assert.equal(typeof entry.loadManifest, "function");
 });

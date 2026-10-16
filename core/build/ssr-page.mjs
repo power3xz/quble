@@ -96,14 +96,14 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
       ? ""
       : `
   <script type="module">
-    import { loadHandlers, ${mode === "csr" ? "mount" : "resume"} } from "${asset(mode === "csr" ? "quble-runtime.js" : "quble-resume.js")}";
+    import { loadHandlers, loadManifest, ${mode === "csr" ? "mount" : "resume"} } from "${asset(mode === "csr" ? "quble-runtime.js" : "quble-resume.js")}";
     const app = document.getElementById("quble-app");
     const csr = ${mode === "csr"};
     const flatDataTag = document.getElementById("qb-flat-data");
     const flatData = flatDataTag ? JSON.parse(flatDataTag.textContent) : null;${statusInit}
     const base = new URL("${asset(`${stem}.qubb`)}", location.href);
     const [manifest, bytes, data] = await Promise.all([
-      fetch("${asset(`${stem}.manifest.json`)}").then((r) => r.json()),
+      loadManifest("${asset(`${stem}.manifest.json`)}"),
       fetch("${asset(`${stem}.qubb`)}").then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b)),
       flatData ? undefined : fetch("${asset("data.json")}").then((r) => r.json()),
     ]);

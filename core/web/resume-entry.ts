@@ -5,6 +5,7 @@ import { resume as resumeBlueprint, type TFlatData } from "./resume.ts";
 import type { THandlers } from "./runtime.ts";
 
 export { loadHandlers } from "./load-handlers.ts";
+export { loadManifest } from "./load-manifest.ts";
 
 type TMountOptions = {
   flatData?: TFlatData;

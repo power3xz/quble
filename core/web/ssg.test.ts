@@ -60,7 +60,7 @@ test("기본은 자산을 index.html 기준 상대 경로로 가리킨다", () =
   assert.ok(html.includes(`<style data-qb-href="./${resmap[0]}">.box { color: red }</style>`), "리소스 인라인");
   assert.ok(html.includes('from "./quble-resume.js"'), "런타임 번들");
   assert.ok(html.includes('fetch("./styled_res.qubb")'), "qubb");
-  assert.ok(html.includes('fetch("./styled_res.manifest.json")'), "manifest");
+  assert.ok(html.includes('loadManifest("./styled_res.manifest.json")'), "manifest");
 });
 
 test("--assets-url을 주면 자산이 그 주소 아래로 나간다", () => {
@@ -68,5 +68,5 @@ test("--assets-url을 주면 자산이 그 주소 아래로 나간다", () => {
   assert.ok(html.includes(`<style data-qb-href="${CDN}/${resmap[0]}">.box { color: red }</style>`), "리소스 인라인");
   assert.ok(html.includes(`from "${CDN}/quble-resume.js"`), "런타임 번들");
   assert.ok(html.includes(`fetch("${CDN}/styled_res.qubb")`), "qubb");
-  assert.ok(html.includes(`fetch("${CDN}/styled_res.manifest.json")`), "manifest");
+  assert.ok(html.includes(`loadManifest("${CDN}/styled_res.manifest.json")`), "manifest");
 });

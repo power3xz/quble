@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
 import type { THandlers } from "./runtime.ts";
-import { mount } from "./runtime-entry.ts";
+import { mount, mountFromUrl } from "./runtime-entry.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import "./test-helpers/dom.ts";
 
@@ -47,4 +47,43 @@ test("mount가 낸 인스턴스는 destroy로 컨테이너를 비운다", () => 
   const inst = mount(qubb, container, { data: { label: "t", on: "on" } });
   inst.destroy();
   assert.equal(container.childNodes.length, 0);
+});
+
+// 요청한 URL을 모으고 manifest(JSON)와 qubb(바이트)를 돌려주는 fetch로 바꾼 채 body를 돌린다.
+const withFetch = async (body: (asked: string[]) => Promise<void>) => {
+  const realFetch = globalThis.fetch;
+  const asked: string[] = [];
+  globalThis.fetch = (async (url: string) => {
+    asked.push(url);
+    return {
+      json: async () => ({ resources: [] }),
+      arrayBuffer: async () => qubb.buffer.slice(qubb.byteOffset, qubb.byteOffset + qubb.byteLength),
+    };
+  }) as unknown as typeof fetch;
+  (globalThis as { location?: unknown }).location = { href: "http://localhost/" };
+  try {
+    await body(asked);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete (globalThis as { __qubleManifests?: unknown }).__qubleManifests;
+  }
+};
+
+test("mountFromUrl은 manifest를 심어 두지 않았으면 manifest와 qubb를 fetch한다", async () => {
+  await withFetch(async (asked) => {
+    const container = containerOf();
+    await mountFromUrl("./app.qubb", container, { label: "t", on: "on" });
+    assert.deepEqual(asked, ["./app.manifest.json", "./app.qubb"]);
+    assert.notEqual(container.querySelector("button"), null);
+  });
+});
+
+test("mountFromUrl은 manifest를 심어 두었으면 manifest를 fetch하지 않는다", async () => {
+  await withFetch(async (asked) => {
+    (globalThis as { __qubleManifests?: unknown }).__qubleManifests = { "./app.manifest.json": { resources: [] } };
+    const container = containerOf();
+    await mountFromUrl("./app.qubb", container, { label: "t", on: "on" });
+    assert.deepEqual(asked, ["./app.qubb"]);
+    assert.notEqual(container.querySelector("button"), null);
+  });
 });
