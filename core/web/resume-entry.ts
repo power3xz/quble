@@ -1,4 +1,4 @@
-// Quble 앱 SSR 진입점 - SSR이 그린 DOM을 이어받는다. CSR 진입점(runtime-entry.ts)과 서로 의존하지 않는다.
+// Quble 앱 SSR 진입점 - SSR이 그린 DOM을 resume한다. CSR 진입점(runtime-entry.ts)과 서로 의존하지 않는다.
 // 이 진입점은 SSR 프리뷰와 playground 번들에 실린다.
 
 import type { TQubleBytecode } from "./decode.ts";
@@ -19,7 +19,7 @@ type TMountOptions = {
 };
 
 /**
- * resumeFrom 아래의 SSR 노드를 새로 만들지 않고 이어받는다. fetch 없이 동기로 돈다. 루트(comp 0)를
+ * resumeFrom 아래의 SSR 노드를 새로 만들지 않고 resume한다. fetch 없이 동기로 돈다. 루트(comp 0)를
  * 인스턴스화하며, 초기 상태는 flatData(quble-ssr --flat-data가 낸 store)가 있으면 그것으로, 없으면
  * data를 루트 props 타입 구조대로 store에 펴 심어(plant) 시작한다. data는 SSR에 넘긴 것과 같아야 한다.
  * @param bytes       qubb 바이트

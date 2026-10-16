@@ -3,7 +3,7 @@
 # dist 빌드 -> 고정 포트 정적 서버.
 #
 # quble 인스턴스가 둘이다:
-#   #editor  <- 셸(playground.qubc). 빌드 타임에 CLI가 컴파일하고 quble-ssr로 SSR해 둔다(브라우저는 이어받는다).
+#   #editor  <- 셸(playground.qubc). 빌드 타임에 CLI가 컴파일하고 quble-ssr로 SSR해 둔다(브라우저는 resume한다).
 #   #preview <- 사용자가 편집한 소스. 미리보기 버튼을 누르면 브라우저의 wasm이 컴파일한다.
 #
 # 셸 UI/핸들러와 진입 페이지는 모두 core/playground/에 있다(생성물 아님 - 손으로 편집한다).

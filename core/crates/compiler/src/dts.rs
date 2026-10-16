@@ -282,7 +282,7 @@ fn seg_index_suffix(pending: &[u16]) -> String {
 
 /// 합성 트리를 걷는다(disasm.js collectEventFullnames와 같은 규칙).
 /// path_prefix: alias/type-name 세그먼트 누적. context_stack: 활성 @with(바깥->안쪽).
-/// pending: 접미 대기 중인 @for 깊이(위 참고). 자식 컴포넌트 use-site의 @for 깊이를 이어받는다.
+/// pending: 접미 대기 중인 @for 깊이(위 참고). 자식 컴포넌트 use-site의 @for 깊이를 물려받는다.
 /// @if는 then/else 둘 다 순회(어느 가지든 발생 가능). 같은 fullname은 한 번만(의도된 공유).
 fn walk(
     comps: &[FlatComp],
@@ -1041,7 +1041,7 @@ mod tests {
     }
 
     /// 중첩 @for - 각 컴포넌트 세그먼트가 자기 @for 깊이를 접미(Row[$0].Cell[$1]).
-    /// @for가 서로 다른 컴포넌트에 있어도 use-site 깊이를 이어받는다(리셋 X).
+    /// @for가 서로 다른 컴포넌트에 있어도 use-site 깊이를 물려받는다(리셋 X).
     #[test]
     fn nested_for_depths_across_components() {
         let out = dts(r#"

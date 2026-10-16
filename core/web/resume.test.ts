@@ -1,12 +1,12 @@
-// resume - SSR이 그린 DOM을 노드를 새로 만들지 않고 이어받는다.
+// resume - SSR이 그린 DOM을 노드를 새로 만들지 않고 resume한다.
 //
 // blueprint에 { resumeFrom: host }를 주면 resume 해석기가 host 아래 SSR 노드를 앞순회로 꺼내 쓴다
 // (resume-interpreter.ts). store, region, 구독, 이벤트 바인딩은 처음 그릴 때와 같이 짓는다.
 //
 // 확인은 둘로 나뉜다.
-//   - 모든 SSR 일치 시드로: SSR 노드를 그대로 쓰는지(새로 만드는 것은 빈 텍스트 자리뿐), 이어받은
-//     DOM이 CSR DOM과 같은지, 이어받는 동안 SSR 노드를 DOM에서 떼었다 다시 붙이지 않는지
-//   - 픽스처 몇 개로: 이어받은 뒤의 set, 클릭, lazy build, push가 CSR처럼 동작하는지
+//   - 모든 SSR 일치 시드로: SSR 노드를 그대로 쓰는지(새로 만드는 것은 빈 텍스트 자리뿐), resume한
+//     DOM이 CSR DOM과 같은지, resume하는 동안 SSR 노드를 DOM에서 떼었다 다시 붙이지 않는지
+//   - 픽스처 몇 개로: resume한 뒤의 set, 클릭, lazy build, push가 CSR처럼 동작하는지
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -51,7 +51,7 @@ const csrHtml = (qubb: Uint8Array, resmap: string[], data: unknown): string => {
 
 for (const [name, list] of Object.entries(seeds)) {
   list.forEach((data, i) => {
-    test(`${name} 시드 ${i} - SSR 노드를 그대로 이어받는다`, () => {
+    test(`${name} 시드 ${i} - SSR 노드를 그대로 resume한다`, () => {
       const { qubb, resmap } = buildFixtureWithResmap(name);
       const host = ssrHost(name, resmap, data);
       const before = allNodes(host);
@@ -132,7 +132,7 @@ test("data-qb-href가 상대 경로여도 문서 주소 기준으로 같은 리�
   base.remove();
 });
 
-test("이어받은 뒤 클릭과 set이 CSR처럼 동작한다 - payload 식", () => {
+test("resume한 뒤 클릭과 set이 CSR처럼 동작한다 - payload 식", () => {
   const data = { n: 1, open: true, cursor: 0, rows: [{ title: "A", tags: ["a1"] }] };
   const { qubb, resmap } = buildFixtureWithResmap("payload_expr");
   const host = ssrHost("payload_expr", resmap, data);
@@ -148,7 +148,7 @@ test("이어받은 뒤 클릭과 set이 CSR처럼 동작한다 - payload 식", (
   inst.destroy();
 });
 
-test("이어받은 뒤 인덱스가 바뀌면 텍스트가 갱신된다", () => {
+test("resume한 뒤 인덱스가 바뀌면 텍스트가 갱신된다", () => {
   const data = {
     rows: [
       { title: "A", score: 10 },
@@ -170,7 +170,7 @@ test("이어받은 뒤 인덱스가 바뀌면 텍스트가 갱신된다", () => 
   inst.destroy();
 });
 
-test("이어받은 뒤 @if가 바뀌면 SSR이 안 그린 가지를 새로 짓는다", () => {
+test("resume한 뒤 @if가 바뀌면 SSR이 안 그린 가지를 새로 짓는다", () => {
   const data = { tags: ["a", "b"], flag: true };
   const { qubb, resmap } = buildFixtureWithResmap("for_if_lazy_slot");
   const host = ssrHost("for_if_lazy_slot", resmap, data);
@@ -188,7 +188,7 @@ test("이어받은 뒤 @if가 바뀌면 SSR이 안 그린 가지를 새로 짓�
   inst.destroy();
 });
 
-test("이어받은 뒤 push한 요소가 꼬리에 그려진다", () => {
+test("resume한 뒤 push한 요소가 꼬리에 그려진다", () => {
   const data = { tags: ["a"] };
   const { qubb, resmap } = buildFixtureWithResmap("for_array_push");
   const host = ssrHost("for_array_push", resmap, data);

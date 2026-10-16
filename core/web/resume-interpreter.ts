@@ -761,7 +761,7 @@ export class ResumeInterpreter {
   };
 
   // IF/IF_EXPR 공통 - then/else region을 만들고 지금 보이는 가지만 SSR 노드에 연결한다. 안 보이는 가지는
-  // VM이 lazyBuild를 심어 둔다(켜질 때 노드를 새로 만든다). 이어받는 동안 VM의 해석기가 이 해석기라, VM이
+  // VM이 lazyBuild를 심어 둔다(켜질 때 노드를 새로 만든다). resume하는 동안 VM의 해석기가 이 해석기라, VM이
   // 보이는 가지를 만들 때 SSR 노드를 연결한다.
   buildIfRegion = (
     vm: VM,
