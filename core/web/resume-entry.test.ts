@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import * as entry from "./resume-entry.ts";
 import { resume } from "./resume-entry.ts";
 import { compile } from "./runtime.ts";
 import { buildFixtureWithResmap } from "./test-helpers/build.ts";
@@ -56,4 +57,12 @@ test("flatData가 없으면 data로 시작해 SSR 노드를 이어받는다", ()
   assert.equal(host.firstElementChild, first);
   assert.equal(host.innerHTML, csrHtml(qubb, resmap));
   inst.destroy();
+});
+
+// playground는 이 번들 하나를 셸(resume, loadHandlers)과 핸들러(runtime.ts에서 가져오는 compile)가 함께 쓴다.
+test("compile, resume, loadHandlers, loadManifest를 모두 내보낸다", () => {
+  assert.equal(typeof entry.compile, "function");
+  assert.equal(typeof entry.resume, "function");
+  assert.equal(typeof entry.loadHandlers, "function");
+  assert.equal(typeof entry.loadManifest, "function");
 });

@@ -50,6 +50,12 @@ export const flatDataJson = (distDir, stem, ssrBin, dataFile = join(distDir, "da
   return run.stdout.replace(/</g, "\\u003c");
 };
 
+// 페이지에 심을 manifest 태그. 런타임의 loadManifest가 읽어 요청을 건너뛴다. 키는 페이지 스크립트가
+// loadManifest에 넘기는 URL과 글자 그대로 같아야 한다. `<`는 유니코드 이스케이프(u003c)로 바꿔 `</script`가
+// 본문에서 태그를 닫지 못하게 한다.
+export const manifestsTag = (manifests) =>
+  `<script>globalThis.__qubleManifests = ${JSON.stringify(manifests).replace(/</g, "\\u003c")};</script>`;
+
 // CSS를 <style>로 인라인한다 - 렌더를 막는 stylesheet 요청이 없어진다. `</style`이 본문에 있으면 태그가
 // 일찍 닫히므로 `<\/`로 바꾼다.
 const inlineCss = (css) => css.replace(/<\/(style)/gi, "<\\/$1");
@@ -69,6 +75,20 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
     .map((name) => `  <style>${inlineCss(readFileSync(join(distDir, name), "utf8"))}</style>`)
     .join("\n");
   const linkTags = links.map((path) => inlineResource(distDir, asset, path)).join("\n");
+  // 스크립트가 없는 페이지(nojs)는 manifest와 런타임을 읽을 곳이 없다. 런타임, qubb, 핸들러는 스크립트가
+  // 실행되기 전에 받기 시작하게 미리 건다(qubb의 preload는 fetch와 같은 주소여야 쓰인다).
+  const runtimeFile = mode === "csr" ? "quble-runtime.js" : "quble-resume.js";
+  const manifestFile = `${stem}.manifest.json`;
+  const manifest = JSON.parse(readFileSync(join(distDir, manifestFile), "utf8"));
+  const manifestTags =
+    mode === "nojs"
+      ? ""
+      : [
+          `  ${manifestsTag({ [asset(manifestFile)]: manifest })}`,
+          `  <link rel="modulepreload" href="${escapeHtml(asset(runtimeFile))}">`,
+          `  <link rel="preload" href="${escapeHtml(asset(`${stem}.qubb`))}" as="fetch" crossorigin>`,
+          ...(manifest.handlers ? [`  <link rel="modulepreload" href="${escapeHtml(asset(manifest.handlers))}">`] : []),
+        ].join("\n");
   const flatData = mode === "resume" ? flatDataJson(distDir, stem, ssrBin) : null;
   const flatDataTag =
     flatData === null ? "" : `\n  <script id="qb-flat-data" type="application/json">${flatData}</script>`;
@@ -96,14 +116,14 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
       ? ""
       : `
   <script type="module">
-    import { loadHandlers, ${mode === "csr" ? "mount" : "resume"} } from "${asset(mode === "csr" ? "quble-runtime.js" : "quble-resume.js")}";
+    import { loadHandlers, loadManifest, ${mode === "csr" ? "mount" : "resume"} } from "${asset(runtimeFile)}";
     const app = document.getElementById("quble-app");
     const csr = ${mode === "csr"};
     const flatDataTag = document.getElementById("qb-flat-data");
     const flatData = flatDataTag ? JSON.parse(flatDataTag.textContent) : null;${statusInit}
     const base = new URL("${asset(`${stem}.qubb`)}", location.href);
     const [manifest, bytes, data] = await Promise.all([
-      fetch("${asset(`${stem}.manifest.json`)}").then((r) => r.json()),
+      loadManifest("${asset(`${stem}.manifest.json`)}"),
       fetch("${asset(`${stem}.qubb`)}").then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b)),
       flatData ? undefined : fetch("${asset("data.json")}").then((r) => r.json()),
     ]);
@@ -136,6 +156,7 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
   <title>${stem} (SSR)</title>
 ${globalStyles}
 ${linkTags}${statusStyle}
+${manifestTags}
 </head>
 <body>
   <div id="quble-app">${html}</div>${statusLine}${flatDataTag}${script}
