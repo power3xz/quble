@@ -39,7 +39,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { appendIfRegion, ELSE_INDEX, type TBranch, THEN_INDEX } from "./region.ts";
+import type { TBranch } from "./region.ts";
 import { staticElementEnds } from "./static-spans.ts";
 import {
   CONST,
@@ -761,7 +761,8 @@ export class ResumeInterpreter {
   };
 
   // IF/IF_EXPR 공통 - then/else region을 만들고 지금 보이는 가지만 SSR 노드에 연결한다. 안 보이는 가지는
-  // VM으로 build하는 lazyBuild를 심어 둔다(켜질 때 노드를 새로 짓는다).
+  // VM이 lazyBuild를 심어 둔다(켜질 때 노드를 새로 만든다). 이어받는 동안 VM의 해석기가 이 해석기라, VM이
+  // 보이는 가지를 만들 때 SSR 노드를 연결한다.
   buildIfRegion = (
     vm: VM,
     pc: number,
@@ -776,86 +777,20 @@ export class ResumeInterpreter {
     branch: TBranch,
     tops: ChildNode[] | null,
   ): number => {
-    const regionIndex = appendIfRegion(vm.regionPool, vm.branchPool, condLeafIndex, ownsCondLeaf, this.anchor());
-    const region = vm.regionPool.entries[regionIndex];
-    branch.childRegionIndices.push(regionIndex);
-    tops?.push(region.anchor);
-    const thenBranchIndex = region.branchIndices[THEN_INDEX];
-    const elseBranchIndex = region.branchIndices[ELSE_INDEX];
-    const thenBranch = vm.branchPool.entries[thenBranchIndex];
-    const elseBranch = vm.branchPool.entries[elseBranchIndex];
-
-    const ifBodyStart = pc;
-    const { ifBodyEnd, elseBodyStart, ifEndPc } = vm.cachedIfRanges(ifBodyStart);
-    const stacks = snapshotStacks(walkStacks);
-
-    // 나중에 켜질 때(첫 활성화)는 VM이 노드를 새로 만든다.
-    thenBranch.lazyBuild = () => {
-      const f = vm.interpret(
-        argumentSourcePairs,
-        compId,
-        ifBodyStart,
-        ifBodyEnd,
-        thenBranchIndex,
-        pathPrefix,
-        loopIndexBase,
-        stacks,
-      );
-      thenBranch.nodes = nodesOf(f);
-    };
-    elseBranch.lazyBuild = () => {
-      const f =
-        elseBodyStart === -1
-          ? []
-          : vm.interpret(
-              argumentSourcePairs,
-              compId,
-              elseBodyStart,
-              ifEndPc,
-              elseBranchIndex,
-              pathPrefix,
-              loopIndexBase,
-              stacks,
-            );
-      elseBranch.nodes = nodesOf(f);
-    };
-
-    vm.subscribeIfCond(branch, condLeafIndex, regionIndex);
-
-    // 지금 보이는 가지는 SSR 노드에서 연결한다. 보이지 않는 가지는 SSR이 그리지 않았다.
-    const initialShownIndex = condInitial ? THEN_INDEX : ELSE_INDEX;
-    const initialBranch = vm.branchPool.entries[region.branchIndices[initialShownIndex]];
-    if (initialShownIndex === THEN_INDEX) {
-      initialBranch.nodes = this.interpret(
-        vm,
-        argumentSourcePairs,
-        compId,
-        ifBodyStart,
-        ifBodyEnd,
-        thenBranchIndex,
-        pathPrefix,
-        loopIndexBase,
-        stacks,
-      );
-    } else {
-      initialBranch.nodes =
-        elseBodyStart === -1
-          ? []
-          : this.interpret(
-              vm,
-              argumentSourcePairs,
-              compId,
-              elseBodyStart,
-              ifEndPc,
-              elseBranchIndex,
-              pathPrefix,
-              loopIndexBase,
-              stacks,
-            );
-    }
-    initialBranch.built = true;
-    region.shownIndex = initialShownIndex;
-
-    return ifEndPc + 1;
+    const anchor = this.anchor();
+    tops?.push(anchor);
+    return vm.openIfRegion(
+      pc,
+      condLeafIndex,
+      condInitial,
+      ownsCondLeaf,
+      argumentSourcePairs,
+      compId,
+      pathPrefix,
+      loopIndexBase,
+      walkStacks,
+      branch,
+      anchor,
+    );
   };
 }
