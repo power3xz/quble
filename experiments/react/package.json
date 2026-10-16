@@ -5,7 +5,7 @@
   "description": "React 산출 실험(README.md). 런타임, 비교 테스트, playground, bench가 이 의존을 함께 쓴다.",
   "exports": "./runtime/index.ts",
   "scripts": {
-    "test": "node --experimental-strip-types --test \"runtime/*.test.ts\"",
+    "test": "node --experimental-strip-types --test \"runtime/*.test.ts\" \"adapter/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

@@ -1,0 +1,9 @@
+use Label from "./label.qubc"
+use "./greeting.css"
+
+component Greeting {
+  props { name: string }
+  template {
+    p() { Label(text={name} /) }
+  }
+}
