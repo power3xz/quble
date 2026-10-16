@@ -3,7 +3,7 @@
 import "../runtime/test-helpers/dom.ts";
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -48,28 +48,91 @@ test("컴파일 오류는 진단 텍스트를 담은 예외가 된다", async ()
   await assert.rejects(compileToModule(bad), /bad\.qubc/);
 });
 
-test("dts가 TQubleBytecode<THandlers>를 기본 export로 선언한다", async () => {
-  const { dts } = await compileToModule(GREETING);
-  assert.match(dts, /^import type \{ TQubleBytecode \} from "[./]+.*core\/web\/decode";/);
-  assert.match(dts, /export interface THandlers \{/);
-  assert.match(dts, /declare const bytecode: TQubleBytecode<THandlers>;\nexport default bytecode;\n$/);
+const SOURCE = "component C { props { n: number } template { p() { ${n} } } }";
+
+type TWatcherHandler = (event: string, file: string) => Promise<void> | void;
+
+// configureServer가 받는 server의 필요한 부분만 흉내 낸다. 파일 변화는 emit으로 직접 낸다.
+const fakeServer = (root: string) => {
+  let onChange: TWatcherHandler | undefined;
+  const warnings: string[] = [];
+  const server = {
+    watcher: {
+      on: (_name: string, handler: TWatcherHandler) => {
+        onChange = handler;
+      },
+    },
+    config: { root, logger: { warn: (message: string) => warnings.push(message) } },
+  };
+  return { server, warnings, emit: (event: string, file: string) => onChange?.(event, file) };
+};
+
+const startDevServer = async (root: string, typesDir?: string) => {
+  const plugin = quble(typesDir === undefined ? {} : { typesDir });
+  const fake = fakeServer(root);
+  await (plugin.configureServer as unknown as (server: unknown) => Promise<void>)(fake.server);
+  return fake;
+};
+
+test("dev 서버를 시작하면 프로젝트의 .qubc 선언을 모두 쓴다", async () => {
+  const root = mkdtempSync(join(TMP, "dev-"));
+  writeFileSync(join(root, "c.qubc"), SOURCE);
+  await startDevServer(root);
+  assert.ok(existsSync(join(root, "c.qubc.d.ts")), "요청 없이도 서버 시작 때 만든다");
 });
 
-test("load 훅이 엔트리 옆에 x.qubc.d.ts를 쓰고 내용이 같으면 다시 쓰지 않는다", async () => {
-  const dir = mkdtempSync(join(TMP, "dts-"));
-  const entry = join(dir, "c.qubc");
-  writeFileSync(entry, "component C { props { n: number } template { p() { ${n} } } }");
+test("실패한 .qubc는 서버를 막지 않고 경고로 남긴다", async () => {
+  const root = mkdtempSync(join(TMP, "dev-"));
+  writeFileSync(join(root, "bad.qubc"), "component Bad {");
+  const { warnings } = await startDevServer(root);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /bad\.qubc/);
+});
+
+test(".qubc가 추가되거나 바뀌면 선언을 다시 쓰고 지워지면 선언도 지운다", async () => {
+  const root = mkdtempSync(join(TMP, "dev-"));
+  const { emit } = await startDevServer(root);
+
+  const added = join(root, "n.qubc");
+  writeFileSync(added, SOURCE);
+  await emit("add", added);
+  assert.ok(existsSync(`${added}.d.ts`), "추가");
+
+  writeFileSync(added, SOURCE.replace("n: number", "n: number, m: string"));
+  await emit("change", added);
+  assert.match(readFileSync(`${added}.d.ts`, "utf8"), /m: TLeafIndex<string>/, "변경");
+
+  rmSync(added);
+  await emit("unlink", added);
+  assert.equal(existsSync(`${added}.d.ts`), false, "삭제");
+});
+
+test(".qubc가 아닌 파일의 변화에는 선언을 쓰지 않는다", async () => {
+  const root = mkdtempSync(join(TMP, "dev-"));
+  const { emit } = await startDevServer(root);
+  writeFileSync(join(root, "n.qubc"), SOURCE);
+  await emit("change", join(root, "other.css"));
+  assert.equal(existsSync(join(root, "n.qubc.d.ts")), false);
+});
+
+test("typesDir 옵션을 주면 그곳에 쓴다", async () => {
+  const root = mkdtempSync(join(TMP, "dev-"));
+  writeFileSync(join(root, "c.qubc"), SOURCE);
+  await startDevServer(root, ".quble/types");
+  assert.ok(existsSync(join(root, ".quble", "types", "c.qubc.d.ts")));
+  assert.equal(existsSync(join(root, "c.qubc.d.ts")), false);
+});
+
+test("load 훅과 빌드 시작은 선언을 쓰지 않는다", async () => {
+  const root = mkdtempSync(join(TMP, "build-"));
+  const entry = join(root, "c.qubc");
+  writeFileSync(entry, SOURCE);
+  const plugin = quble();
   const context = { addWatchFile: () => {} };
-  const load = quble().load as unknown as (this: typeof context, id: string) => Promise<string | null>;
-
+  const load = plugin.load as unknown as (this: typeof context, id: string) => Promise<string | null>;
   await load.call(context, entry);
-  const written = readFileSync(`${entry}.d.ts`, "utf8");
-  assert.equal(written, (await compileToModule(entry)).dts);
-
-  const before = statSync(`${entry}.d.ts`).mtimeMs;
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  await load.call(context, entry);
-  assert.equal(statSync(`${entry}.d.ts`).mtimeMs, before, "같은 내용이면 파일을 건드리지 않는다");
+  assert.equal(existsSync(`${entry}.d.ts`), false);
+  assert.equal(plugin.buildStart, undefined, "빌드 시작에 거는 생성 훅이 없다");
 });
 
 test("플러그인 load 훅은 .qubc만 바꾸고 읽은 파일을 감시에 등록한다", async () => {

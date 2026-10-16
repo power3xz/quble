@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { compileToModule } from "./vite-plugin.ts";
+import { declarationOf } from "./declarations.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // experiments/react/adapter
 const COUNTER = join(HERE, "fixtures", "counter.qubc");
@@ -18,7 +18,7 @@ mkdirSync(TMP, { recursive: true });
 let work: string;
 before(async () => {
   // 플러그인의 load가 하는 것과 같다 - 엔트리 옆에 x.qubc.d.ts를 둔다.
-  writeFileSync(`${COUNTER}.d.ts`, (await compileToModule(COUNTER)).dts);
+  writeFileSync(`${COUNTER}.d.ts`, await declarationOf(COUNTER, `${COUNTER}.d.ts`));
   work = mkdtempSync(join(TMP, "types-"));
   writeFileSync(
     join(work, "tsconfig.json"),

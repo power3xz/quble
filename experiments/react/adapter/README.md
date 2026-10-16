@@ -52,7 +52,17 @@ const Orders = createComponent(OrdersBytecode);
 
 ## 타입
 
-플러그인이 `.qubc`를 불러올 때 그 옆에 `x.qubc.d.ts`를 쓴다(내용이 같으면 다시 쓰지 않는다. `.gitignore` 대상).
+`.qubc` 옆에 `x.qubc.d.ts`를 쓴다(내용이 같으면 다시 쓰지 않는다. `.gitignore` 대상). 만드는 때는 둘이다.
+
+- dev 서버를 시작할 때 플러그인이 프로젝트의 `.qubc`를 전부 쓰고, 서버가 도는 동안 `.qubc`의 추가, 변경, 삭제를
+  따라 다시 쓴다. `vite build`는 쓰지 않는다.
+- 서버 없이(`tsc` 단독 실행, CI, 새 클론) 필요하면 `node --experimental-strip-types adapter/gen-types.ts <루트> [typesDir]`
+  (`npm run gen-types --prefix experiments/react -- <루트>`)를 먼저 돌린다. 컴파일에 실패한 파일은 진단을 내고 실패
+  코드로 끝난다.
+
+선언을 소스 옆이 아니라 한곳에 모으려면 `quble({ typesDir: ".quble/types" })`(CLI는 둘째 인자)를 준다. 소비자의
+`tsconfig.json`에 `"rootDirs": [".", ".quble/types"]`가 있어야 import가 그곳을 찾는다.
+
 컴파일러가 낸 핸들러 맵 타입(`THandlers`)을 `TQubleBytecode<THandlers>`로 싣고, `createComponent`가 거기서
 다음을 추론한다.
 

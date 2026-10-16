@@ -7,7 +7,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --test \"runtime/*.test.ts\" \"adapter/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "adapter-demo": "vite --config adapter/demo/vite.config.ts --port 8153"
+    "adapter-demo": "vite --config adapter/demo/vite.config.ts --port 8153",
+    "gen-types": "node --experimental-strip-types --no-warnings adapter/gen-types.ts"
   },
   "dependencies": {
     "next": "^16.3.8",
