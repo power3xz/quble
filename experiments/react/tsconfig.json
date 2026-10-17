@@ -11,5 +11,7 @@
     "strict": true,
     "noEmit": true
   },
-  "include": ["runtime/**/*.ts", "adapter/**/*.ts", "adapter/**/*.tsx"]
+  "include": ["runtime/**/*.ts", "adapter/**/*.ts", "adapter/**/*.tsx"],
+  // demo-next는 자기 tsconfig를 갖고 next build가 직접 타입 검사한다(Next의 타입이 이 설정의 lib와 안 맞는다).
+  "exclude": ["adapter/demo-next"]
 }
