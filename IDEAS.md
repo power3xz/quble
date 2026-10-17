@@ -409,6 +409,15 @@ const html = toHTML(document.body)
 (`experiments/react/adapter/README.md`). 남은 길: svelte/vue 어댑터, 비동기 로드(지연 import, 런타임 fetch),
 다른 프레임워크가 quble 안에 들어오는 방향. ROADMAP.md "마이크로프론트엔드"와 이어진다.
 
+### 컴포넌트 정의부의 derived (파생 값)
+
+컴포넌트 정의부에 props에서 계산되는 값을 선언하는 `derived` 블록.
+
+파생 값을 다른 파생 값의 계산에 쓸 수 있다. 이 계산은 결국 표현식이고, 표현식은 컴포넌트 표현식 테이블에
+intern하고 있어(core/BYTECODE.md) 그 위에서 최적화할 여지가 있다.
+
+파생 값끼리 서로를 읽는 순환 참조는 컴파일 에러로 검사해야 한다.
+
 ## 구현됨 (기록 보존)
 
 적용 완료해 확정 설계로 승격된 아이디어. 본문은 거부한 대안/근거를 남기기 위한 기록이다.
