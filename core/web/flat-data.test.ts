@@ -39,7 +39,7 @@ const csrHtml = (qubb: Uint8Array, resmap: string[], data: unknown): string => {
   return out;
 };
 
-// SSR HTML을 펴진 데이터로 이어받은 DOM의 HTML(plantRoot 없이 시작한다).
+// SSR HTML을 펴진 데이터로 resume한 DOM의 HTML(plantRoot 없이 시작한다).
 const resumedHtml = (name: string, resmap: string[], qubb: Uint8Array, data: unknown): string => {
   const host = document.createElement("div");
   host.innerHTML = renderSsr(name, resmap, data).html;
@@ -103,7 +103,7 @@ test("펴진 데이터로 시작한 인스턴스에서 push가 동작한다", ()
   inst.destroy();
 });
 
-// SSR HTML을 펴진 데이터로 이어받은 인스턴스. 클릭이 위임 리스너에 닿도록 문서에 붙인다.
+// SSR HTML을 펴진 데이터로 resume한 인스턴스. 클릭이 위임 리스너에 닿도록 문서에 붙인다.
 const resumeFromFlatData = (
   name: string,
   qubb: Uint8Array,

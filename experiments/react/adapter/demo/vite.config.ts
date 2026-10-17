@@ -6,7 +6,7 @@ import { quble } from "../vite-plugin.ts";
 export default defineConfig({
   root: new URL(".", import.meta.url).pathname,
   plugins: [react(), quble()],
-  resolve: { alias: { "quble/react": new URL("../react.ts", import.meta.url).pathname } },
+  resolve: { alias: { "quble/react": new URL("../react-browser.ts", import.meta.url).pathname } },
   // core/web과 core/wasm-compiler는 이 디렉터리 밖이다.
   server: { fs: { allow: [new URL("../../../..", import.meta.url).pathname] } },
 });

@@ -1,4 +1,5 @@
 import { createElement, type FunctionComponent, useEffect, useRef } from "react";
+import { resume } from "../../../core/web/resume-entry.ts";
 import { mount, type THandlers, type TQubleBytecode } from "../../../core/web/runtime-entry.ts";
 import type { TComponentProps } from "./handler-types.ts";
 
@@ -26,7 +27,9 @@ export const createComponent = <THandlerMap = unknown>(
     // biome-ignore lint/correctness/useExhaustiveDependencies: 처음 한 번만 mount한다 - 이후 data 변화는 아래 이펙트가 update로 반영하고 handlers는 의도적으로 뺐다
     useEffect(() => {
       applied.current = JSON.parse(dataKey);
-      const inst = mount(bytecode, container.current as HTMLDivElement, { data: applied.current, handlers });
+      const host = container.current as HTMLDivElement;
+      // 서버가 그린 HTML이 들어 있으면 resume하고, 비어 있으면(브라우저에서 처음 그릴 때) mount한다.
+      const inst = (host.firstChild ? resume : mount)(bytecode, host, { data: applied.current, handlers });
       instance.current = inst;
       return () => {
         inst.destroy();
@@ -46,7 +49,12 @@ export const createComponent = <THandlerMap = unknown>(
         instance.current?.update(changed, "replace");
       }
     }, [dataKey]);
-    return createElement("div", { ref: container });
+    return createElement("div", {
+      ref: container,
+      suppressHydrationWarning: true,
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: 서버가 심은 HTML을 React가 hydrate 때 지우지 않도록 자식을 React 관리 밖(빈 innerHTML)으로 둔다
+      dangerouslySetInnerHTML: { __html: "" },
+    });
   };
   // 안쪽은 느슨한 모양(Record)으로 다루고, 밖으로는 바이트코드에서 추론한 props와 handlers 타입을 내보낸다.
   return Component as unknown as FunctionComponent<TComponentProps<THandlerMap>>;

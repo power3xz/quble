@@ -7,7 +7,7 @@
 //   data    SSR HTML + resume, data.json을 받아 plantRoot로 시작 - 펴진 데이터와 견주는 용도
 //   nojs    SSR HTML만(스크립트 없음)
 //   csr     SSR HTML 없이 클라이언트가 처음부터 그린다 - resume과 견주는 용도
-// showStatus  오른쪽 아래에 이어받은 결과를 알리는 줄을 둔다(개발자 확인용).
+// showStatus  오른쪽 아래에 resume한 결과를 알리는 줄을 둔다(개발자 확인용).
 // assetsUrl   자산(런타임 번들, qubb, manifest, data.json, 리소스 CSS)이 있는 주소. 없으면 이 페이지 기준
 //             상대 경로(`./`)다. 자산을 다른 출처(CDN)에 올릴 때 준다.
 
@@ -104,7 +104,7 @@ export const renderPage = ({ distDir, stem, ssrBin, assetsUrl, mode, showStatus 
       const ms = (performance.now() - t0).toFixed(1);
       status.textContent = csr
         ? "CSR: 처음부터 그림 " + ms + "ms"
-        : "resume(" + (flatData ? "펴진 데이터" : "data") + "): SSR 요소 " + ssrNodes + "개를 " + ms + "ms로 이어받음, 첫 요소 재사용 " + (app.firstElementChild === firstElement);`
+        : "resume(" + (flatData ? "펴진 데이터" : "data") + "): SSR 요소 " + ssrNodes + "개를 " + ms + "ms로 resume함, 첫 요소 재사용 " + (app.firstElementChild === firstElement);`
     : "";
   const statusFail = showStatus
     ? `

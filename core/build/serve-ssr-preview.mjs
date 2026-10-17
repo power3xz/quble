@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SSR + resume 프리뷰 서버. build-preview.mjs가 만든 dist/preview를 정적으로 서빙하고, `/`만
-// quble-ssr로 렌더한 HTML을 내준다. 페이지의 스크립트가 그 HTML을 노드를 새로 만들지 않고 이어받는다
+// quble-ssr로 렌더한 HTML을 내준다. 페이지의 스크립트가 그 HTML을 노드를 새로 만들지 않고 resume한다
 // (compile(...)(0)(data, handlers, { resumeFrom, flatData })). 페이지 조립은 ssr-page.mjs.
 //
 // 사용: node serve-ssr-preview.mjs <dist/preview> <stem> <port> <quble-ssr 바이너리>

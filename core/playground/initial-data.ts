@@ -1,5 +1,5 @@
 // 셸(playground.qubc)이 처음 그릴 때 받는 data. 브라우저(index.html)와 빌드 때 SSR(build-playground.mjs)이 같은
-// 함수를 부른다 - 둘이 다르면 SSR 화면과 이어받은 뒤 화면이 달라진다.
+// 함수를 부른다 - 둘이 다르면 SSR 화면과 resume한 뒤 화면이 달라진다.
 
 import { lineCountOf, tokenize } from "./tokenize.ts";
 

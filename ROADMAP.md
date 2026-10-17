@@ -13,7 +13,7 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. 각 피처의 상세
 - [x] SSR 렌더러 - 같은 qubb 계약을 Rust가 해석해 HTML을 낸다(`quble-ssr`). JS 런타임이 그린 DOM과
   같은 HTML이 나오는지 픽스처마다 비교한다.
 - [x] 실행 재개 (resume, ~=hydration) - 클라가 SSR이 만든 HTML을 새로 만들지 않고, 기존
-  노드에 구독/핸들러만 붙여 SSR이 멈춘 실행을 이어받는다. 인터프리터가 노드 공급자(`TNodeSource`)로
+  노드에 구독/핸들러만 붙여 SSR이 멈춘 실행을 resume한다. 인터프리터가 노드 공급자(`TNodeSource`)로
   SSR 노드를 받는다. 시작 상태는 data로 `plantRoot`를 하거나, SSR이 낸 펴진 데이터(flat data)로
   `plantRoot` 없이 시작한다.
 - [x] SSG - 빌드할 때 `quble-ssr`로 SSR HTML(펴진 데이터 포함)을 정적 파일로 낸다. 서버 없는 정적

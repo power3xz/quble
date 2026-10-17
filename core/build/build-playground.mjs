@@ -87,7 +87,7 @@ const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 manifest.handlers = handlerPath;
 writeFileSync(manifestPath, JSON.stringify(manifest));
 
-// 3. 런타임 번들 - 셸과 핸들러 번들이 함께 쓴다. 셸은 SSR HTML을 이어받으므로 resume이 들어야 하고,
+// 3. 런타임 번들 - 셸과 핸들러 번들이 함께 쓴다. 셸은 SSR HTML을 resume하므로 resume이 들어야 하고,
 // 핸들러 번들은 2번이 runtime.ts import를 이 파일로 바꿔 놓아 compile이 들어야 한다.
 const resumeBundle = await build({
   entryPoints: [join(coreDir, "web", "resume-entry.ts")],

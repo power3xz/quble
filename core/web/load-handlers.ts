@@ -17,6 +17,8 @@ export const loadHandlers = async <T>(manifest: TManifest, base: string | URL): 
     return {} as T;
   }
   const url = new URL(manifest.handlers, base).href;
-  const mod = await import(url);
+  // url은 배포된 핸들러 JS의 주소라 번들 대상이 아니고 런타임에 브라우저가 로드한다(예: "http://host/app.handlers.js").
+  // 번들러가 변수 주소를 따라가다 실패하지 않도록 무시를 표시한다(webpack, Turbopack).
+  const mod = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ url);
   return mod.handlers;
 };

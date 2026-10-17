@@ -75,6 +75,34 @@ const Orders = createComponent(OrdersBytecode);
 - 순수 `mount`의 `handlers`에는 이 추론이 붙지 않는다.
 - `update` 타입은 이 어댑터에만 있다. 컴파일러가 내는 d.ts에는 아직 없다.
 
+## 서버 렌더링 (Next.js)
+
+`quble/react`가 번들러의 `browser` 조건에 따라 서로 다른 진입점으로 풀린다. 쓰는 쪽 코드는 같다.
+
+- 서버: `react-server.ts` - 렌더 중에 props로 jsdom에서 mount한 HTML(`server-render.ts`)을 `<div>`에 심는다.
+- 브라우저: `react-browser.ts` - `<div>`에 서버 HTML이 있으면 `resume`하고, 비어 있으면(브라우저에서 처음 그릴
+  때, `next/dynamic`의 `ssr: false`) `mount`한다. React는 바깥 `<div>`만 hydrate하고 안쪽은 건드리지 않는다.
+
+Next.js(Turbopack) 설정은 `demo-next/next.config.mjs`다.
+
+```js
+turbopack: {
+  rules: { "*.qubc": { loaders: ["./qubc-loader.cjs"], as: "*.js" } },
+  resolveAlias: { "quble/react": { browser: "../react-browser.ts", default: "../react-server.ts" } },
+}
+```
+
+- 로더는 `compile-qubc.ts`를 자식 프로세스로 돌려 `.qubc`를 바이트코드 모듈로 바꾼다.
+- 서버에서 첫 렌더에 쓴 props와 브라우저의 첫 props가 같아야 한다.
+- 서버 렌더는 `handlers`를 쓰지 않는다. 이벤트는 브라우저가 `resume`한 뒤에 붙는다.
+- Node 런타임만 된다. jsdom이 Node 내장 모듈에 기대서 Edge 런타임에서는 못 쓴다.
+- jsdom은 서버 번들에만 들어가고 브라우저 번들에는 실리지 않는다(`next-build.test.ts`가 본다).
+
+```
+npx --prefix experiments/react next build experiments/react/adapter/demo-next
+npx --prefix experiments/react next start experiments/react/adapter/demo-next --port 8154
+```
+
 ## 정해지지 않음
 
 - 래퍼 `<div>` 없이 부모 바로 아래에 그리는 방법

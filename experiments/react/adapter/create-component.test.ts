@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { act, createElement, type ReactElement, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { mount, type THandlers, type TQubleBytecode } from "../../../core/web/runtime-entry.ts";
-import { createComponent } from "./react.ts";
+import { createComponent } from "./react-browser.ts";
 import { bytecodeOf } from "./test-helpers/bytecode.ts";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");

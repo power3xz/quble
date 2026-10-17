@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SSR + resume을 브라우저에서 확인한다: quble/quble-ssr 빌드 -> build-preview.mjs로 dist 빌드 -> 고정 포트 서버.
-# 서버가 `/`를 quble-ssr로 렌더한 HTML로 내주고, 페이지의 스크립트가 그 HTML을 노드를 새로 만들지 않고 이어받는다
-# (resume). 오른쪽 아래 표시가 이어받았는지, 첫 요소를 그대로 썼는지 알려 준다.
+# 서버가 `/`를 quble-ssr로 렌더한 HTML로 내주고, 페이지의 스크립트가 그 HTML을 노드를 새로 만들지 않고 resume한다.
+# 오른쪽 아래 표시가 resume했는지, 첫 요소를 그대로 썼는지 알려 준다.
 #
 #   /          SSR HTML + resume
 #   /?nojs     SSR HTML만(스크립트 없음) - 서버가 보낸 그대로
