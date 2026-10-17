@@ -107,6 +107,16 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
   접근의 구독 다시 걸기. LEAF-STORE-LAYOUT.md처럼 현재 구현 설명이다.
 - **docs/PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
+### 새 문서를 둘 자리
+
+- **코드 옆** - 구현이 바뀌면 같이 고치는 문서(`core/BYTECODE.md`, `core/web/*.md`). 가까이 있어야
+  고치는 걸 잊지 않는다.
+- **`docs/`** - 코드를 고쳐도 따라 고칠 일이 없는 문서. 작업 규칙(`docs/COMMIT-RULES.md` 등),
+  실행 모델 결정(`docs/PROCESS.md`), 구현이 끝난 아이디어의 기록(`docs/resolved-ideas/`, 항목당 파일
+  하나).
+- **루트** - 매번 열어 보는 현황 문서(NEXT, ROADMAP, ISSUES, IDEAS)와 여러 문서와 코드 주석이
+  자주 가리키는 설계 문서(DESIGN, DECISIONS, SYNTAX, REACTIVITY, WORKSPACES).
+
 ### 코드 작업에 착수할 때
 
 착수 전에 아래를 정한다. 브랜치 판단과 NEXT.md 교체 둘 다 내가(Claude) 먼저 챙긴다 -
