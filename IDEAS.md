@@ -417,3 +417,8 @@ const html = toHTML(document.body)
 intern하고 있어(core/BYTECODE.md) 그 위에서 최적화할 여지가 있다.
 
 파생 값끼리 서로를 읽는 순환 참조는 컴파일 에러로 검사해야 한다.
+
+### resume 불일치 복구
+
+resume 중 SSR DOM이 바이트코드와 어긋나거나(노드 종류, 남은 노드) 서버 data와 클라이언트 data가 다르면,
+클라이언트 상태를 기준으로 RuntimeInterpreter로 바꿔 처음부터 다시 그린다. 지금은 어긋나면 예외를 던진다.
