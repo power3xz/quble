@@ -94,18 +94,18 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
 - **NEXT.md** - what is in flight, what to do next, and what is still undecided
   ("하는 중 / 할 것 / 정할 것"). Entries are removed once done. See _코드 작업에 착수할 때_ below.
 - **WORKSPACES.md** - cargo/npm 워크스페이스 멤버와 의존, 빌드 산출물, 명령별 선행 조건.
-- **COMMIT-RULES.md** - 커밋 메시지 규칙(타이틀만, 명사형 종결, 대시 뒤) - O/X 예시 표.
+- **docs/COMMIT-RULES.md** - 커밋 메시지 규칙(타이틀만, 명사형 종결, 대시 뒤) - O/X 예시 표.
   커밋하기 전에 읽는다.
-- **WRITING-CODE-RULES.md** - 코드 작성 순서(시그니처 합의, 확인 후 작성, 테스트까지가
+- **docs/WRITING-CODE-RULES.md** - 코드 작성 순서(시그니처 합의, 확인 후 작성, 테스트까지가
   한 스텝). 코드를 쓰기 전에 읽는다.
-- **COMMENT-GUIDELINES.md** - 주석 작성 가이드라인. 주석을 쓰기 전에 읽는다.
+- **docs/COMMENT-GUIDELINES.md** - 주석 작성 가이드라인. 주석을 쓰기 전에 읽는다.
 - **core/BYTECODE.md** - bytecode (qubb) format and opcode contract.
 - **core/web/LEAF-STORE-LAYOUT.md** - 런타임 데이터 스토어 레이아웃 - 값이 store에 어떻게
   놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
   따라 고친다.
 - **core/web/EXPR-EVAL.md** - 표현식 평가 - 후위 바이트와 트리, 부분 재평가, 구독, 인덱스
   접근의 구독 다시 걸기. LEAF-STORE-LAYOUT.md처럼 현재 구현 설명이다.
-- **PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
+- **docs/PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
 ### 코드 작업에 착수할 때
 
@@ -129,7 +129,7 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
 
 ### 주석을 작성할 때
 
-COMMENT-GUIDELINES.md를 읽고 따른다.
+docs/COMMENT-GUIDELINES.md를 읽고 따른다.
 
 ### 사용자가 quble 변경점을 IDE나 브라우저에서 확인할 때
 
