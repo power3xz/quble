@@ -39,7 +39,9 @@ export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
 // 수만큼 곱해진다). 입력은 store.get으로 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이 결과 leaf에
 // write한다. 함수 하나를 여러 leaf에 걸 수 있고, flush마다 한 번만 불린다. 받은 Set은 모든 함수가 공유하므로
 // 고치거나 들고 있지 않는다.
-export type TDeriveSubscriber = (changedLeaves: ReadonlySet<LeafIndex>) => unknown;
+// resultLeafIndex는 store가 bindDeriveResult로 함수에 붙이는 속성이다 - 돌려준 값을 write할 결과 leaf. 값이 바뀐 식마다
+// 읽으므로 WeakMap(해시 조회) 대신 함수 객체의 속성(인라인 캐시)에 둔다. 호출자는 읽거나 쓰지 않는다.
+export type TDeriveSubscriber = ((changedLeaves: ReadonlySet<LeafIndex>) => unknown) & { resultLeafIndex?: LeafIndex };
 
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
@@ -100,7 +102,6 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const subscribers: Array<TSlot<TSubscriber>> = []; // leafIndex -> 그 leaf의 통지 구독들.
   // 입력 leafIndex -> 그 leaf에 걸린 파생 구독들. 함수 하나가 입력 leaf 여러 개의 슬롯에 들 수 있다.
   const deriveSubscribers: Array<TSlot<TDeriveSubscriber>> = [];
-  const resultLeafOf = new WeakMap<TDeriveSubscriber, LeafIndex>(); // 파생 구독 함수 -> 돌려준 값을 write할 결과 leaf.
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
   // 정적/유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합/split/정렬 없이 O(1) 재사용/반납.
   const freeBySize = new Map<number, LeafIndex[]>();
@@ -153,7 +154,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     const runDerive = (fn: TDeriveSubscriber): void => {
       try {
         const value = fn(changedLeaves);
-        const resultLeaf = resultLeafOf.get(fn);
+        const resultLeaf = fn.resultLeafIndex;
         if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
           write(resultLeaf, value);
           resultLeaves ??= [];
@@ -214,7 +215,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
       (called as Set<TDeriveSubscriber>).add(fn);
       try {
         const value = fn(changed);
-        const resultLeaf = resultLeafOf.get(fn);
+        const resultLeaf = fn.resultLeafIndex;
         if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
           write(resultLeaf, value);
           toNotify ??= new Set(changed);
@@ -329,13 +330,14 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   };
 
   const bindDeriveResult = (fn: TDeriveSubscriber, resultLeafIndex: LeafIndex): void => {
-    resultLeafOf.set(fn, resultLeafIndex);
+    fn.resultLeafIndex = resultLeafIndex;
   };
 
+  // 속성을 지우지(delete) 않고 undefined로 둔다 - delete는 함수 객체를 사전 모드로 바꿔 읽기가 느려진다.
   const freeDeriveResult = (fn: TDeriveSubscriber): void => {
-    const resultLeaf = resultLeafOf.get(fn);
+    const resultLeaf = fn.resultLeafIndex;
     if (resultLeaf !== undefined) {
-      resultLeafOf.delete(fn);
+      fn.resultLeafIndex = undefined;
       free(resultLeaf, 1);
     }
   };
@@ -348,7 +350,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     refreshedLeaf.clear();
     refreshedLeaf.add(leafIndex);
     const value = fn(refreshedLeaf);
-    const resultLeaf = resultLeafOf.get(fn);
+    const resultLeaf = fn.resultLeafIndex;
     if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
       write(resultLeaf, value);
       notify(resultLeaf);
