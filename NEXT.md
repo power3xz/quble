@@ -8,7 +8,8 @@
 
 ## 하는 중
 
-없음
+`region.ts` 리팩토링 - `branchTailNode`가 `shownIndex === -1`로 `@if`와 `@for`를 구별하던 것을 `TRegion.tail`
+함수 필드로 바꾼다(브랜치 `refactor-region-tail`).
 
 ## 할 것
 
