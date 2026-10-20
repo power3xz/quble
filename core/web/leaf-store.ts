@@ -34,9 +34,10 @@ const createLeafStore = (leaves: unknown[]) => {
 // 통지 구독 함수. leaf가 바뀌면 notify 단계에서 새 값과 어느 leaf가 바뀌었는지를 받아 불린다.
 export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
 
-// 파생 구독 함수. 등록한 leaf 중 이번 flush에서 바뀐 것만 받아 파생값을 돌려준다. 입력은 store.get으로
-// 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이 결과 leaf에 write한다. 함수 하나를 여러 leaf에
-// 걸 수 있고, flush마다 한 번만 불린다.
+// 파생 구독 함수. 이번 flush에서 바뀐 leaf 전체(등록하지 않은 leaf도 든다)를 받아 파생값을 돌려준다. 자기가
+// 읽는 leaf를 가려내는 것은 함수 몫이다. 입력은 store.get으로 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이
+// 결과 leaf에 write한다. 함수 하나를 여러 leaf에 걸 수 있고, flush마다 한 번만 불린다. 받은 배열은 모든
+// 함수가 공유하므로 고치거나 들고 있지 않는다.
 export type TDeriveSubscriber = (changedLeaves: readonly LeafIndex[]) => unknown;
 
 export type LeafStoreSubject = {
@@ -120,7 +121,8 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
         const resultLeaf = resultLeafOf.get(fn);
         if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
           write(resultLeaf, value);
-          (resultLeaves ??= []).push(resultLeaf);
+          resultLeaves ??= [];
+          resultLeaves.push(resultLeaf);
         }
       } catch (error) {
         if (!failed) {
@@ -154,43 +156,41 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     }
   };
 
-  // 바뀐 leaf들로 파생 구독을 함수당 한 번 부른다(등록한 leaf 중 바뀐 것만 넘긴다). 돌려준 값을 결과 leaf에
-  // write하고, 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 파생 구독이 던지면 onError로 넘기고
-  // 나머지는 계속 부른다.
+  // 바뀐 leaf들로 파생 구독을 함수당 한 번 부른다. 바뀐 leaf 전체를 담은 배열 하나를 모든 함수가 공유한다 -
+  // 함수마다 자기가 읽는 leaf를 가려내므로 함수별 배열과 Map을 만들 필요가 없다(1000행의 식이 함께 바뀌면
+  // 그 할당이 클릭 한 번의 시간을 늘렸다). 이미 부른 함수는 Set으로 건너뛴다. 돌려준 값을 결과 leaf에 write하고,
+  // 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 파생 구독이 던지면 onError로 넘기고 나머지는
+  // 계속 부른다.
   const runDerives = (changed: ReadonlySet<LeafIndex>, onError: (error: unknown) => void): ReadonlySet<LeafIndex> => {
-    let groups: Map<TDeriveSubscriber, LeafIndex[]> | undefined;
+    let called: Set<TDeriveSubscriber> | undefined;
+    let changedLeaves: LeafIndex[] | undefined;
+    let toNotify: Set<LeafIndex> | undefined;
     for (const leafIndex of changed) {
       const derives = deriveSubscribers[leafIndex];
       if (derives === undefined) {
         continue;
       }
-      groups ??= new Map();
+      called ??= new Set();
+      changedLeaves ??= [...changed];
       for (const fn of derives) {
-        const changedLeaves = groups.get(fn);
-        if (changedLeaves === undefined) {
-          groups.set(fn, [leafIndex]);
-        } else {
-          changedLeaves.push(leafIndex);
+        if (called.has(fn)) {
+          continue;
+        }
+        called.add(fn);
+        try {
+          const value = fn(changedLeaves);
+          const resultLeaf = resultLeafOf.get(fn);
+          if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
+            write(resultLeaf, value);
+            toNotify ??= new Set(changed);
+            toNotify.add(resultLeaf);
+          }
+        } catch (error) {
+          onError(error);
         }
       }
     }
-    if (groups === undefined) {
-      return changed;
-    }
-    const toNotify = new Set(changed);
-    for (const [fn, changedLeaves] of groups) {
-      try {
-        const value = fn(changedLeaves);
-        const resultLeaf = resultLeafOf.get(fn);
-        if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
-          write(resultLeaf, value);
-          toNotify.add(resultLeaf);
-        }
-      } catch (error) {
-        onError(error);
-      }
-    }
-    return toNotify;
+    return toNotify ?? changed;
   };
 
   // 파생 구독을 모두 부른 뒤 통지 구독을 부른다. 통지할 leaf는 바뀐 leaf와 값이 바뀐 결과 leaf다. 파생 구독이나

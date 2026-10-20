@@ -57,14 +57,10 @@ test("결과 leaf가 없으면 파생 구독은 불리지만 돌려준 값은 �
   store.set(0, 10);
 
   assert.equal(calls, 1);
-  assert.deepEqual(
-    [store.get(1), store.get(2), store.get(3), store.get(4)],
-    [2, 0, 3, 0],
-    "다른 leaf는 그대로다",
-  );
+  assert.deepEqual([store.get(1), store.get(2), store.get(3), store.get(4)], [2, 0, 3, 0], "다른 leaf는 그대로다");
 });
 
-test("batch에서 파생 구독은 함수당 한 번, 등록한 leaf 중 바뀐 것만 받아 불린다", () => {
+test("batch에서 파생 구독은 함수당 한 번, 이번 flush에서 바뀐 leaf 전체를 받아 불린다", () => {
   const { store } = setup();
   const received: Array<readonly number[]> = [];
   const derive = (changedLeaves: readonly number[]) => {
@@ -79,12 +75,16 @@ test("batch에서 파생 구독은 함수당 한 번, 등록한 leaf 중 바뀐 
     store.set(0, 10);
     store.set(3, 99);
   });
-  assert.deepEqual(received, [[1, 0]], "한 번, 처음 쓴 순서로, 등록하지 않은 leaf 3은 빠진다");
+  assert.deepEqual(
+    received,
+    [[1, 0, 3]],
+    "한 번, 처음 쓴 순서로, 등록하지 않은 leaf 3도 들어 있다(걸러내는 것은 함수 몫이다)",
+  );
 
   store.batch(() => {
     store.set(0, 11);
   });
-  assert.deepEqual(received, [[1, 0], [0]], "a만 바뀌면 a만 받는다");
+  assert.deepEqual(received, [[1, 0, 3], [0]], "a만 바뀌면 a만 받는다");
 });
 
 test("batch 밖 set과 notify는 바뀐 leaf 하나로 파생 구독을 바로 부른다", () => {
