@@ -636,6 +636,7 @@
       "nums": [0, 7]
     }
   ],
+  "for_expr_free": [{ "nums": [1, 2, 3] }, { "nums": [] }],
   "for_array_edit": [
     {
       "tags": ["a", "b", "c"]
