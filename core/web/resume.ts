@@ -2,9 +2,10 @@
 // 그 뒤의 lazy build와 @for grow는 runtime-interpreter.ts의 RuntimeInterpreter가 한다. 둘은 서로를
 // 모르고 VM의 interpreter 필드에 번갈아 끼워진다. CSR만 쓰는 번들은 이 파일을 싣지 않는다.
 
+import { appendArrayInfo, type TArrayInfo } from "./array-info.ts";
 import { decode, type TField, type TModule, type TQubleBytecode } from "./decode.ts";
 import { Pool } from "./pool-allocator.ts";
-import { appendArrayInfo, type TArrayInfo, THEN_INDEX } from "./region.ts";
+import { THEN_INDEX } from "./region.ts";
 import { ResumeInterpreter } from "./resume-interpreter.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import { leafCountOf, nodesOf, plantRoot, STORE, type THandlers, VM } from "./vm.ts";
