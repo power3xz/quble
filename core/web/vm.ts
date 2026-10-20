@@ -716,7 +716,7 @@ export class VM {
   // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰 attach가
   // 분기 없이 처리한다. 루트 then은 곧바로 build되므로 built로 둔다. anchor를 주지 않으면 새로 만든다.
   openRootRegion = (anchor?: Comment): TRegion => {
-    const rootRegion = this.regionPool.entries[appendIfRegion(this.regionPool, this.branchPool, -1, false, anchor)];
+    const rootRegion = this.regionPool.entries[appendIfRegion(this.regionPool, this.branchPool, -1, anchor)];
     this.branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true;
     rootRegion.shownIndex = THEN_INDEX;
     return rootRegion;
@@ -993,7 +993,6 @@ export class VM {
     pc: number,
     condLeafIndex: number,
     condInitial: unknown,
-    ownsCondLeaf: boolean,
     argumentSourcePairs: TScope,
     compId: number,
     pathPrefix: string,
@@ -1002,7 +1001,7 @@ export class VM {
     branch: TBranch,
     anchor: Comment,
   ): number => {
-    const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, ownsCondLeaf, anchor);
+    const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, anchor);
     branch.childRegionIndices.push(regionIndex);
     const region = this.regionPool.entries[regionIndex];
     const thenBranchIndex = region.branchIndices[THEN_INDEX];

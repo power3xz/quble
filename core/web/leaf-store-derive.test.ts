@@ -282,6 +282,44 @@ test("bindDeriveResult로 연결한 결과 leaf에 구독 등록 때 결과 leaf
   assert.deepEqual(log, ["notify 2 value=42"]);
 });
 
+test("freeDeriveResult는 결과 leaf를 반납해 다음 alloc이 그 자리를 다시 쓴다", () => {
+  const { store } = setup();
+  const derive = () => 1;
+  store.bindDeriveResult(derive, 2);
+
+  store.freeDeriveResult(derive);
+
+  assert.equal(store.alloc([9]), 2);
+});
+
+test("freeDeriveResult를 같은 함수로 여러 번 불러도 한 번만 반납한다", () => {
+  const { store } = setup();
+  const derive = () => 1;
+  store.bindDeriveResult(derive, 2);
+
+  store.freeDeriveResult(derive);
+  store.freeDeriveResult(derive);
+
+  assert.deepEqual([store.alloc([9]), store.alloc([9])], [2, 5], "2는 한 번만 재사용되고 다음은 끝에 붙는다");
+});
+
+test("freeDeriveResult는 결과 leaf가 없는 함수에는 아무것도 하지 않는다", () => {
+  const { store } = setup();
+  store.freeDeriveResult(() => 1);
+  assert.equal(store.alloc([9]), 5);
+});
+
+test("freeDeriveResult 뒤에 불린 파생 구독은 결과 leaf에 쓰지 않는다", () => {
+  const { store } = setup();
+  const derive = () => 42;
+  store.subscribeDerive(0, derive, 2);
+
+  store.freeDeriveResult(derive);
+  store.set(0, 10);
+
+  assert.equal(store.get(2), 0);
+});
+
 test("파생 구독이 던져도 나머지 파생 구독과 통지 구독은 모두 불리고 첫 예외가 올라간다", () => {
   const { store, log } = setup();
   store.subscribeDerive(

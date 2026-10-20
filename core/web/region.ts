@@ -28,6 +28,7 @@ export type Store = {
   subscribeDerive: (leafIndex: number, fn: TDeriveFn, resultLeafIndex?: number) => void;
   unsubscribeDerive: (leafIndex: number, fn: TDeriveFn) => void;
   refreshDerive: (fn: TDeriveFn, changedLeaves: ReadonlySet<number>) => void;
+  freeDeriveResult: (fn: TDeriveFn) => void;
 };
 
 // leaf-store.ts의 TDeriveSubscriber와 같은 계약(Store 타입과 같은 이유로 다시 정의한다).
@@ -53,9 +54,6 @@ export type TBranch = {
 export type TRegion = {
   branchIndices: number[];
   condLeafIndex: number;
-  // condLeafIndex가 이 region이 잡은 파생 칸인가. IF_EXPR만 true - 식의 결과를 담을 칸을
-  // 직접 alloc하므로 region이 없어질 때 반납해야 한다. IF는 부모 슬롯을 가리킬 뿐이라 false.
-  ownsCondLeaf: boolean;
   anchor: Comment;
   shownIndex: number;
   detach: (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion) => void;
@@ -230,13 +228,11 @@ export const appendIfRegion = (
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   condLeafIndex: number,
-  ownsCondLeaf = false,
   anchor: Comment = document.createComment(""),
 ): number => {
   const regionIndex = regionPool.alloc({
     branchIndices: [appendBranch(branchPool), appendBranch(branchPool)],
     condLeafIndex,
-    ownsCondLeaf,
     anchor,
     shownIndex: -1,
     detach: detachIf,
@@ -309,7 +305,6 @@ export const appendForRegion = (
   const regionIndex = regionPool.alloc({
     branchIndices: [],
     condLeafIndex: countLeafIndex,
-    ownsCondLeaf: false, // 횟수 칸은 배열/prop의 것 - @for가 만든 칸이 아니다
     anchor,
     shownIndex: -1,
     detach: detachFor,
@@ -380,20 +375,28 @@ export const attachGrownIterations = (
 // branch(branchIndex)와 그 자식 region들을 리프까지 재귀로 free해 칸을 반납한다. detach(DOM/구독
 // 떼기)와는 별개 - detach는 @if swap에서도 쓰여 free하면 안 되므로 안 섞는다. 호출 전 detach가
 // 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
+//
+// 가지가 든 파생 구독의 결과 leaf(보간 식, IF_EXPR 조건)도 여기서 store에 반납한다. 한 함수가 입력 leaf 여러
+// 개에 걸려 목록에 여러 번 나와도 store가 첫 번째만 반납한다.
 const freeBranchTree = (
   store: Store,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   branchIndex: number,
 ): void => {
-  for (const childRegionIndex of branchPool.entries[branchIndex].childRegionIndices) {
+  const branch = branchPool.entries[branchIndex];
+  for (const childRegionIndex of branch.childRegionIndices) {
     freeRegionTree(store, regionPool, branchPool, childRegionIndex);
+  }
+  if (branch.deriveFns !== null) {
+    for (const fn of branch.deriveFns) {
+      store.freeDeriveResult(fn);
+    }
   }
   branchPool.release(branchIndex);
 };
 
 // region(regionIndex)이 든 모든 branch를 재귀 free한 뒤 이 region 칸을 반납한다.
-// 자기가 잡은 파생 칸(IF_EXPR 조건)이 있으면 store에도 반납한다 - region이 소유한 유일한 칸이다.
 const freeRegionTree = (
   store: Store,
   regionPool: Pool<TRegion>,
@@ -403,9 +406,6 @@ const freeRegionTree = (
   const region = regionPool.entries[regionIndex];
   for (const branchIndex of region.branchIndices) {
     freeBranchTree(store, regionPool, branchPool, branchIndex);
-  }
-  if (region.ownsCondLeaf) {
-    store.free(region.condLeafIndex, 1);
   }
   regionPool.release(regionIndex);
 };

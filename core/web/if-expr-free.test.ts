@@ -1,8 +1,8 @@
-// IF_EXPR이 잡은 파생 칸의 회수 - region이 없어질 때 그 칸을 store에 반납하는지 본다.
+// IF_EXPR이 잡은 파생 칸의 회수 - 가지가 없어질 때 그 칸을 store에 반납하는지 본다.
 //
-// IF는 부모 슬롯을 조건으로 그대로 쓰므로 region이 칸을 소유하지 않는다. IF_EXPR만 식의 결과를
-// 담을 칸을 직접 alloc하고, 그래서 region이 free될 때 반납할 책임을 진다(region.ownsCondLeaf).
-// 안 반납하면 회차가 늘고 줄 때마다 leaves가 새 칸을 물고 계속 커진다.
+// IF는 부모 슬롯을 조건으로 그대로 쓰므로 칸을 만들지 않는다. IF_EXPR만 식의 결과를 담을 칸을 직접
+// alloc하고, 그 칸은 식의 파생 구독을 가진 부모 가지가 free될 때 반납된다(freeBranchTree가 store.freeDeriveResult를
+// 부른다). 안 반납하면 회차가 늘고 줄 때마다 leaves가 새 칸을 물고 계속 커진다.
 //
 // 검증은 for-array-remove.test.ts와 같은 축이다 - store는 leaves를 안 내놓으므로 "새 칸을
 // 안 늘렸는지"로 본다. 여기서는 region.condLeafIndex가 곧 파생 칸이라 그 번호를 직접 본다.

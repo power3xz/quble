@@ -8,7 +8,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
-import { activateIf, appendIfRegion, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
+import {
+  activateIf,
+  addDeriveToBranch,
+  appendBranchOfForRegion,
+  appendForRegion,
+  appendIfRegion,
+  removeBranchAt,
+  type TBranch,
+  THEN_INDEX,
+  type TRegion,
+} from "./region.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 
 void mount;
@@ -59,6 +69,25 @@ test("떼면 파생 구독이 해제된다", () => {
   store.set(1, 3);
 
   assert.deepEqual(received, [], "뗀 뒤에는 불리지 않는다");
+});
+
+test("가지를 지우면 가지가 든 파생 구독의 결과 leaf를 반납한다", () => {
+  const store = createLeafStoreSubject([1, 0, 0, 0]);
+  const regionPool: Pool<TRegion> = new Pool();
+  const branchPool: Pool<TBranch> = new Pool();
+  const regionIndex = appendForRegion(regionPool, 0);
+  document.createElement("div").append(regionPool.entries[regionIndex].anchor);
+  const branchIndex = appendBranchOfForRegion(regionPool, branchPool, regionIndex);
+  const branch = branchPool.entries[branchIndex];
+  // 한 파생 구독이 입력 leaf 둘(0, 1)에 걸리고 결과 leaf는 2다. 가지의 목록에는 그 함수가 두 번 나온다.
+  const derive = () => 1;
+  store.bindDeriveResult(derive, 2);
+  addDeriveToBranch(branch, 0, derive);
+  addDeriveToBranch(branch, 1, derive);
+
+  removeBranchAt(store, regionPool, branchPool, regionIndex, 0);
+
+  assert.deepEqual([store.alloc([9]), store.alloc([9])], [2, 4], "2는 한 번만 반납되어 재사용되고 다음은 끝에 붙는다");
 });
 
 test("다시 붙이면 떼어 둔 동안 바뀐 입력을 따라잡아 결과 leaf를 맞춘다", () => {

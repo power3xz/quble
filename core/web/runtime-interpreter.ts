@@ -801,7 +801,6 @@ export class RuntimeInterpreter {
       pc,
       condLeafIndex,
       condIsConst ? vm.module.constpool[condRef] : vm.store.get(condLeafIndex),
-      false, // 부모 슬롯을 가리킬 뿐 - 이 region이 만든 칸이 아니다
       argumentSourcePairs,
       compId,
       pathPrefix,
@@ -839,7 +838,6 @@ export class RuntimeInterpreter {
       pc,
       condLeafIndex,
       vm.store.get(condLeafIndex),
-      true, // 이 region이 잡은 파생 칸 - region이 없어질 때 반납한다
       argumentSourcePairs,
       compId,
       pathPrefix,
@@ -860,7 +858,6 @@ export class RuntimeInterpreter {
   // @param pc             가지 첫 op(조건 operand 직후)
   // @param condLeafIndex  조건을 담은 칸. CONST 조건이면 -1(구독 없음)
   // @param condInitial    초기 조건값 - CONST 조건은 store에 없어 따로 받는다
-  // @param ownsCondLeaf   region이 그 칸의 주인인가(IF_EXPR의 파생 칸). free 때 반납 여부
   // @param branch         구독을 실을 부모 가지 - 부모가 detach/free되면 조건 감시도 꺼진다
   // @param parent         anchor를 붙일 DOM 노드
   // @returns              IF_END 다음 pc
@@ -869,7 +866,6 @@ export class RuntimeInterpreter {
     pc: number,
     condLeafIndex: number,
     condInitial: unknown,
-    ownsCondLeaf: boolean,
     argumentSourcePairs: TScope,
     compId: number,
     pathPrefix: string,
@@ -885,7 +881,6 @@ export class RuntimeInterpreter {
       pc,
       condLeafIndex,
       condInitial,
-      ownsCondLeaf,
       argumentSourcePairs,
       compId,
       pathPrefix,
