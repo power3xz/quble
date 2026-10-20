@@ -8,7 +8,9 @@
 
 ## 하는 중
 
-없음
+구독 층 분리 - 구독을 연계 구독과 통지 후 구독으로 나누고, 식은 결과 칸을 잡아 DOM 바인딩이
+leafIndex만 구독하게 변경. 설계 초안은 `core/web/SUBSCRIPTION-LAYERS.md`. 브랜치
+`subscription-layers`.
 
 ## 할 것
 
