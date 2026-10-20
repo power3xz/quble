@@ -1790,11 +1790,13 @@ export class VM {
   ): void => {
     const code = this.code;
     const u16 = (at: number) => code[at] | (code[at + 1] << 8);
+    // 구독 함수가 직전에 쓴 값. 가지를 다시 켤 때 따라잡기가 칸마다 구독 함수를 부르므로, 꺼진 동안 바뀌지
+    // 않은 값은 쓰지 않는다. case 블록 안에 두면 클로저가 쓰는 블록 Context가 바인딩마다 따로 할당된다.
+    let lastValue: unknown;
     switch (op) {
       case OP_TEXT_VAR: {
         // operand: scope_index, offset
-        // 가지를 다시 켤 때 따라잡기가 칸마다 이 함수를 부르므로, 꺼진 동안 바뀌지 않은 값은 쓰지 않는다.
-        let lastValue: unknown = this.bindVar(
+        lastValue = this.bindVar(
           code[pc],
           code[pc + 1],
           (v) => {
@@ -1825,14 +1827,13 @@ export class VM {
     const nameIndex = u16(pc);
     const name =
       op === OP_ATTR_G_VAR || op === OP_ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
-    // 텍스트와 같이, 꺼진 동안 바뀌지 않은 값은 가지를 다시 켤 때 쓰지 않는다.
     const update = (v: unknown) => {
       if (v !== lastValue) {
         lastValue = v;
         setAttributeSafely(el, name, v);
       }
     };
-    let lastValue: unknown =
+    lastValue =
       op === OP_ATTR_G_VAR || op === OP_ATTR_L_VAR
         ? // 이어서 scope_index, offset
           this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
