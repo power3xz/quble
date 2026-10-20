@@ -8,8 +8,7 @@
 
 ## 하는 중
 
-중첩 `@for`에서 바깥 회차가 안쪽 `@for`로 끝나면 `push`가 `TypeError`로 실패하는 버그 수정
-(`branchTailNode`가 자식 region을 `@if`로만 가정, 브랜치 `fix-nested-for-tail`).
+없음
 
 ## 할 것
 
