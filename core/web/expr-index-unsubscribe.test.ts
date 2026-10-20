@@ -28,7 +28,7 @@ const handlers: THandlers = {
   },
 };
 
-type TDeriveFn = (changedLeaves: readonly number[]) => unknown;
+type TDeriveFn = (changedLeaves: ReadonlySet<number>) => unknown;
 type TSubscribeDeriveFn = (leafIndex: number, fn: TDeriveFn, resultLeafIndex?: number) => void;
 
 // 인스턴스를 만든 뒤부터 leaf마다 건 횟수 - 푼 횟수를 센다.

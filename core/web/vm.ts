@@ -1583,7 +1583,7 @@ export class VM {
   };
 
   // 건너뛸 부분식이 있는 식. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 함수는 불릴 때
-  // 받은 leafIndex로 그 칸의 건너뛰기 표를 고른다(skipPastOpsOfLeaf).
+  // 받은 바뀐 leaf 모음에서 자기가 읽는 변수를 모아 건너뛰기 표를 고른다.
   //
   // 인스턴스가 드는 것은 cache와 leafOfVar(변수마다 읽는 leafIndex) 둘이다. 건너뛰기 표는 식 정의가
   // 공유하고, 행마다 다른 것은 읽는 leafIndex뿐이다.
@@ -1603,59 +1603,34 @@ export class VM {
     // 비어 있지 않다.
     const hasIndexAccess = table.readLeafIndexOpsByVar.some((ops) => ops.length > 0);
     let lastValue = value;
-    // 한 flush에서 읽는 leaf 둘 이상이 바뀌면 구독 층이 함수를 한 번만 불러 바뀐 leaf 전체를 넘긴다. 바뀐
-    // 변수 전체로 만든 건너뛰기 표로 한꺼번에 센다. leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든
+    // 구독 층이 한 flush에서 함수를 한 번만 불러 바뀐 leaf 전체를 넘긴다. 그중 이 식이 읽는 변수를 모아 바뀐
+    // 변수 전체로 건너뛰기 표를 골라 한꺼번에 센다. leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든
     // 옛 값을 섞어 쓴다.
     const derive: TDeriveFn = (changedLeaves) => {
-      if (changedLeaves.length > 1) {
-        // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 번호의 비트로 모은다.
-        let changedVarMask = 0;
-        for (let n = 0; n < leafOfVar.length; n++) {
-          if (changedLeaves.includes(leafOfVar[n])) {
-            changedVarMask |= 1 << n;
-          }
-        }
-        if (changedVarMask === 0) {
-          return lastValue;
-        }
-        const v = this.reevalExpr(expr, pairs, table, cache, buildSkipPastOpsOfVars(table, expr, changedVarMask));
-        if (hasIndexAccess) {
-          for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
-            if (changedVarMask & (1 << varNumber)) {
-              this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, derive, varNumber);
-            }
-          }
-        }
-        if (v !== lastValue) {
-          lastValue = v;
-          onChange?.(v);
-        }
-        return v;
-      }
-      const leafIndex = changedLeaves[0];
-      const skipPastOps = this.skipPastOpsOfLeaf(expr, table, leafOfVar, leafIndex);
-      // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
-      // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
-      if (skipPastOps === null) {
-        return lastValue;
-      }
-      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOps);
-      // 다시 걸기가 leafOfVar를 고쳐, 바뀐 leaf를 읽는 변수가 여럿이면 먼저 모아 둔다.
+      // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 번호의 비트로 모은다.
       //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
       //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, leafOfVar로는 바깥이 안 보인다.
-      // 하나면 고쳐지기 전에 읽으므로 모으지 않는다.
+      let changedVarMask = 0;
+      for (let n = 0; n < leafOfVar.length; n++) {
+        if (changedLeaves.has(leafOfVar[n])) {
+          changedVarMask |= 1 << n;
+        }
+      }
+      // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
+      // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
+      if (changedVarMask === 0) {
+        return lastValue;
+      }
+      // 변수 하나만 바뀌면 식 정의가 공유하는 표를 쓴다. 둘 이상이면 그 변수들을 모두 품지 않은 부분식의
+      // 표를 만든다(부모가 같은 칸을 두 prop으로 넘긴 경우도 여기다).
+      const skipPastOps =
+        (changedVarMask & (changedVarMask - 1)) === 0
+          ? table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)]
+          : buildSkipPastOpsOfVars(table, expr, changedVarMask);
+      const v = this.reevalExpr(expr, pairs, table, cache, skipPastOps);
       if (hasIndexAccess) {
-        const first = leafOfVar.indexOf(leafIndex);
-        if (leafOfVar.indexOf(leafIndex, first + 1) < 0) {
-          this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, derive, first);
-        } else {
-          const changedVars: number[] = [];
-          for (let n = first; n < leafOfVar.length; n++) {
-            if (leafOfVar[n] === leafIndex) {
-              changedVars.push(n);
-            }
-          }
-          for (const varNumber of changedVars) {
+        for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
+          if (changedVarMask & (1 << varNumber)) {
             this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, derive, varNumber);
           }
         }
@@ -1674,33 +1649,6 @@ export class VM {
       }
     }
     return { value, derive };
-  };
-
-  // leafIndex를 읽는 변수들의 건너뛰기 표. 읽는 변수가
-  //   없으면   null이다. 구독을 다시 걸며 이미 뺀 leafIndex다.
-  //   하나면   식 정의가 공유하는 표(table.skipPastOpsByVar)다.
-  //   둘 이상  부모가 같은 칸을 두 prop으로 넘긴 경우다(자식의 `${x + y}`에서 x, y가 같은 칸).
-  //            그 칸이 바뀌면 두 변수가 함께 바뀌므로 두 변수를 모두 품지 않은 부분식의 표를 만든다.
-  skipPastOpsOfLeaf = (
-    expr: Uint8Array,
-    table: TExprSkipTable,
-    leafOfVar: number[],
-    leafIndex: number,
-  ): TSkipPastOps | null => {
-    const first = leafOfVar.indexOf(leafIndex);
-    if (first < 0) {
-      return null;
-    }
-    if (leafOfVar.indexOf(leafIndex, first + 1) < 0) {
-      return table.skipPastOpsByVar[first];
-    }
-    let changedVarMask = 0;
-    for (let n = first; n < leafOfVar.length; n++) {
-      if (leafOfVar[n] === leafIndex) {
-        changedVarMask |= 1 << n;
-      }
-    }
-    return buildSkipPastOpsOfVars(table, expr, changedVarMask);
   };
 
   // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.

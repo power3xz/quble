@@ -35,10 +35,11 @@ const createLeafStore = (leaves: unknown[]) => {
 export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
 
 // 파생 구독 함수. 이번 flush에서 바뀐 leaf 전체(등록하지 않은 leaf도 든다)를 받아 파생값을 돌려준다. 자기가
-// 읽는 leaf를 가려내는 것은 함수 몫이다. 입력은 store.get으로 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이
-// 결과 leaf에 write한다. 함수 하나를 여러 leaf에 걸 수 있고, flush마다 한 번만 불린다. 받은 배열은 모든
-// 함수가 공유하므로 고치거나 들고 있지 않는다.
-export type TDeriveSubscriber = (changedLeaves: readonly LeafIndex[]) => unknown;
+// 읽는 leaf를 가려내는 것은 함수 몫이고, has로 O(1)에 묻는다(바뀐 leaf가 수천 개인 batch에서 배열을 훑으면 함수
+// 수만큼 곱해진다). 입력은 store.get으로 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이 결과 leaf에
+// write한다. 함수 하나를 여러 leaf에 걸 수 있고, flush마다 한 번만 불린다. 받은 Set은 모든 함수가 공유하므로
+// 고치거나 들고 있지 않는다.
+export type TDeriveSubscriber = (changedLeaves: ReadonlySet<LeafIndex>) => unknown;
 
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
@@ -60,7 +61,7 @@ export type LeafStoreSubject = {
   bindDeriveResult: (fn: TDeriveSubscriber, resultLeafIndex: LeafIndex) => void;
   // set이 아닌 경로에서 파생 구독 fn 하나만 지금 한 번 부른다 - 가지를 다시 붙일 때 놓친 입력을 따라잡는다.
   // 돌려준 값을 결과 leaf에 write하고, 값이 바뀌었으면 그 leaf를 notify한다.
-  refreshDerive: (fn: TDeriveSubscriber, changedLeaves: readonly LeafIndex[]) => void;
+  refreshDerive: (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>) => void;
   clear: () => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
@@ -102,17 +103,21 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
       fire(leafIndex);
       return;
     }
-    propagateOne(leafIndex, derives);
+    propagateOne(leafIndex, derives, new Set([leafIndex]));
   };
 
-  // 바뀐 leaf가 하나인 flush(batch 밖의 set과 notify, 또는 batch가 끝날 때 하나만 모인 경우). 함수를 묶을 필요가
-  // 없어 Map 없이 차례로 부르고, 바뀐 leaf 하나를 담은 배열을 모든 함수가 공유한다. 한 leaf에 파생 구독이
-  // 수천 개 걸린 식(1000행의 같은 기준값을 읽는 식)에서 함수마다 배열을 만들고 Map을 채우는 비용이 클릭 한
-  // 번보다 컸다. 예외는 propagate와 같다 - 나머지를 모두 부르고 첫 예외를 마지막에 다시 던진다.
-  const propagateOne = (leafIndex: LeafIndex, derives: ReadonlySet<TDeriveSubscriber>): void => {
+  // 바뀐 leaf가 하나인 flush(batch 밖의 set과 notify, 또는 batch가 끝날 때 하나만 모인 경우). 같은 함수가 두 번
+  // 불릴 일이 없어 이미 부른 함수를 기억하지 않고 차례로 부른다. 바뀐 leaf 하나를 담은 Set(changedLeaves)을
+  // 모든 함수가 공유한다. 한 leaf에 파생 구독이 수천 개 걸린 식(1000행의 같은 기준값을 읽는 식)에서 함수마다
+  // 배열을 만들고 Map을 채우는 비용이 클릭 한 번보다 컸다. 예외는 propagate와 같다 - 나머지를 모두 부르고 첫
+  // 예외를 마지막에 다시 던진다.
+  const propagateOne = (
+    leafIndex: LeafIndex,
+    derives: ReadonlySet<TDeriveSubscriber>,
+    changedLeaves: ReadonlySet<LeafIndex>,
+  ): void => {
     let failed = false;
     let firstError: unknown;
-    const changedLeaves = [leafIndex];
     let resultLeaves: LeafIndex[] | undefined;
     // 스냅샷 순회 - 파생 구독이 읽는 leaf를 다시 걸며 이 Set을 고칠 수 있다.
     for (const fn of [...derives]) {
@@ -156,14 +161,13 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     }
   };
 
-  // 바뀐 leaf들로 파생 구독을 함수당 한 번 부른다. 바뀐 leaf 전체를 담은 배열 하나를 모든 함수가 공유한다 -
-  // 함수마다 자기가 읽는 leaf를 가려내므로 함수별 배열과 Map을 만들 필요가 없다(1000행의 식이 함께 바뀌면
-  // 그 할당이 클릭 한 번의 시간을 늘렸다). 이미 부른 함수는 Set으로 건너뛴다. 돌려준 값을 결과 leaf에 write하고,
-  // 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 파생 구독이 던지면 onError로 넘기고 나머지는
-  // 계속 부른다.
+  // 바뀐 leaf들로 파생 구독을 함수당 한 번 부른다. 바뀐 leaf 모음(changed)을 모든 함수가 그대로 공유한다 -
+  // 함수마다 자기가 읽는 leaf를 has로 가려내므로 함수별 배열과 Map을 만들 필요가 없다(1000행의 식이 함께
+  // 바뀌면 그 할당이 클릭 한 번의 시간을 늘렸다). 이미 부른 함수는 Set으로 건너뛴다. 돌려준 값을 결과 leaf에
+  // write하고, 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 파생 구독이 던지면 onError로 넘기고
+  // 나머지는 계속 부른다.
   const runDerives = (changed: ReadonlySet<LeafIndex>, onError: (error: unknown) => void): ReadonlySet<LeafIndex> => {
     let called: Set<TDeriveSubscriber> | undefined;
-    let changedLeaves: LeafIndex[] | undefined;
     let toNotify: Set<LeafIndex> | undefined;
     for (const leafIndex of changed) {
       const derives = deriveSubscribers[leafIndex];
@@ -171,14 +175,13 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
         continue;
       }
       called ??= new Set();
-      changedLeaves ??= [...changed];
       for (const fn of derives) {
         if (called.has(fn)) {
           continue;
         }
         called.add(fn);
         try {
-          const value = fn(changedLeaves);
+          const value = fn(changed);
           const resultLeaf = resultLeafOf.get(fn);
           if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
             write(resultLeaf, value);
@@ -281,7 +284,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     resultLeafOf.set(fn, resultLeafIndex);
   };
 
-  const refreshDerive = (fn: TDeriveSubscriber, changedLeaves: readonly LeafIndex[]): void => {
+  const refreshDerive = (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>): void => {
     const value = fn(changedLeaves);
     const resultLeaf = resultLeafOf.get(fn);
     if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
@@ -322,7 +325,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
       const leafIndex = flushLeaves.values().next().value as LeafIndex;
       const derives = deriveSubscribers[leafIndex];
       if (derives !== undefined) {
-        propagateOne(leafIndex, derives);
+        propagateOne(leafIndex, derives, flushLeaves);
         return;
       }
     }

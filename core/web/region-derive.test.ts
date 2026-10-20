@@ -24,7 +24,7 @@ const setup = () => {
   const thenBranch = branchPool.entries[region.branchIndices[THEN_INDEX]];
   thenBranch.built = true;
   const received: Array<readonly number[]> = [];
-  const derive = (changedLeaves: readonly number[]) => {
+  const derive = (changedLeaves: ReadonlySet<number>) => {
     received.push([...changedLeaves]);
     return (store.get(1) as number) * 10;
   };
