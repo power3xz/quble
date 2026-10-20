@@ -39,6 +39,11 @@ const createLeafStore = (leaves: unknown[]) => {
 // 같은 Set인지로 건너뛴다. 배치 밖의 통지에서는 오지 않는다.
 export type TSubscriber = (value: unknown, leafIndex: LeafIndex, flushLeaves?: ReadonlySet<LeafIndex>) => void;
 
+// 파생 구독 함수. 등록한 leaf 중 이번 flush에서 바뀐 것만 받아 파생값을 돌려준다. 입력은 store.get으로
+// 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이 결과 leaf에 write한다. 함수 하나를 여러 leaf에
+// 걸 수 있고, flush마다 한 번만 불린다.
+export type TDeriveSubscriber = (changedLeaves: readonly LeafIndex[]) => unknown;
+
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
@@ -50,11 +55,18 @@ export type LeafStoreSubject = {
   free: (start: LeafIndex, size: number) => void;
   subscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
   unsubscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
+  // resultLeafIndex는 fn이 돌려준 값이 write될 leaf다. 없으면 돌려준 값을 쓰지 않는다. 같은 fn은 같은
+  // 결과 leaf로만 등록한다.
+  subscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber, resultLeafIndex?: LeafIndex) => void;
+  unsubscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber) => void;
   clear: () => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
   const subscribers: Array<Set<TSubscriber> | undefined> = []; // leafIndex -> Set<TSubscriber>. Set이라 unsubscribe가 O(1).
+  // 입력 leafIndex -> 그 leaf에 걸린 파생 구독들. 함수 하나가 입력 leaf 여러 개의 Set에 들 수 있다.
+  const deriveSubscribers: Array<Set<TDeriveSubscriber> | undefined> = [];
+  const resultLeafOf = new WeakMap<TDeriveSubscriber, LeafIndex>(); // 파생 구독 함수 -> 돌려준 값을 write할 결과 leaf.
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
   // 정적/유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합/split/정렬 없이 O(1) 재사용/반납.
   const freeBySize = new Map<number, LeafIndex[]>();
@@ -83,7 +95,74 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
       pendingLeaves.add(leafIndex);
       return;
     }
-    fire(leafIndex);
+    if (deriveSubscribers[leafIndex] === undefined) {
+      fire(leafIndex);
+      return;
+    }
+    propagate(new Set([leafIndex]), undefined);
+  };
+
+  // 바뀐 leaf들로 파생 구독을 함수당 한 번 부른다(등록한 leaf 중 바뀐 것만 넘긴다). 돌려준 값을 결과 leaf에
+  // write하고, 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 파생 구독이 던지면 onError로 넘기고
+  // 나머지는 계속 부른다.
+  const runDerives = (changed: ReadonlySet<LeafIndex>, onError: (error: unknown) => void): ReadonlySet<LeafIndex> => {
+    let groups: Map<TDeriveSubscriber, LeafIndex[]> | undefined;
+    for (const leafIndex of changed) {
+      const derives = deriveSubscribers[leafIndex];
+      if (derives === undefined) {
+        continue;
+      }
+      groups ??= new Map();
+      for (const fn of derives) {
+        const changedLeaves = groups.get(fn);
+        if (changedLeaves === undefined) {
+          groups.set(fn, [leafIndex]);
+        } else {
+          changedLeaves.push(leafIndex);
+        }
+      }
+    }
+    if (groups === undefined) {
+      return changed;
+    }
+    const toNotify = new Set(changed);
+    for (const [fn, changedLeaves] of groups) {
+      try {
+        const value = fn(changedLeaves);
+        const resultLeaf = resultLeafOf.get(fn);
+        if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
+          write(resultLeaf, value);
+          toNotify.add(resultLeaf);
+        }
+      } catch (error) {
+        onError(error);
+      }
+    }
+    return toNotify;
+  };
+
+  // 파생 구독을 모두 부른 뒤 통지 구독을 부른다. 통지할 leaf는 바뀐 leaf와 값이 바뀐 결과 leaf다. 파생 구독이나
+  // 통지 구독이 던져도 나머지는 모두 부르고 첫 예외를 마지막에 다시 던진다 - 값은 이미 다 기록됐는데 통지만
+  // 건너뛰면 화면이 값을 따라오지 못한다. flushLeaves는 통지 구독에 그대로 넘긴다.
+  const propagate = (changed: ReadonlySet<LeafIndex>, flushLeaves: ReadonlySet<LeafIndex> | undefined): void => {
+    let failed = false;
+    let firstError: unknown;
+    const onError = (error: unknown): void => {
+      if (!failed) {
+        failed = true;
+        firstError = error;
+      }
+    };
+    for (const leafIndex of runDerives(changed, onError)) {
+      try {
+        fire(leafIndex, flushLeaves);
+      } catch (error) {
+        onError(error);
+      }
+    }
+    if (failed) {
+      throw firstError;
+    }
   };
 
   // 구독 함수들을 지금 호출한다. 모아 둔 칸을 비울 때는 그 칸의 현재 값(마지막으로 쓴 값)을 넘긴다.
@@ -135,10 +214,23 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     subscribers[leafIndex]?.delete(fn);
   };
 
+  const subscribeDerive = (leafIndex: LeafIndex, fn: TDeriveSubscriber, resultLeafIndex?: LeafIndex): void => {
+    deriveSubscribers[leafIndex] ??= new Set();
+    deriveSubscribers[leafIndex].add(fn);
+    if (resultLeafIndex !== undefined) {
+      resultLeafOf.set(fn, resultLeafIndex);
+    }
+  };
+
+  const unsubscribeDerive = (leafIndex: LeafIndex, fn: TDeriveSubscriber): void => {
+    deriveSubscribers[leafIndex]?.delete(fn);
+  };
+
   // 값, 구독, 빈 블록 기록, 미룬 통지를 모두 비운다 - 인스턴스를 해체할 때 store가 값과 구독 함수를 놓는다.
   const clear = (): void => {
     leaves.length = 0;
     subscribers.length = 0;
+    deriveSubscribers.length = 0;
     freeBySize.clear();
     pendingLeaves.clear();
   };
@@ -158,27 +250,11 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   };
 
   // 모은 칸을 처음 모은 순서대로 비운다. 구독자가 통지 중에 쓰는 값이 같은 집합을 건드리지 않게 모은
-  // 집합을 이번 flush의 것으로 넘기고 새 집합으로 바꾼 뒤 부른다. 구독자가 예외를 throw해도 나머지 칸은
-  // 모두 통지한다 - 값은 이미 다 기록됐는데 통지만 건너뛰면 화면이 값을 따라오지 못한다. 첫 예외는 모두
-  // 통지한 뒤 다시 throw한다.
+  // 집합을 이번 flush의 것으로 넘기고 새 집합으로 바꾼 뒤 부른다.
   const flushPending = (): void => {
     const flushLeaves = pendingLeaves;
     pendingLeaves = new Set();
-    let failed = false;
-    let firstError: unknown;
-    for (const leafIndex of flushLeaves) {
-      try {
-        fire(leafIndex, flushLeaves);
-      } catch (error) {
-        if (!failed) {
-          failed = true;
-          firstError = error;
-        }
-      }
-    }
-    if (failed) {
-      throw firstError;
-    }
+    propagate(flushLeaves, flushLeaves);
   };
 
   return {
@@ -191,6 +267,8 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     free,
     subscribe,
     unsubscribe,
+    subscribeDerive,
+    unsubscribeDerive,
     clear,
   };
 };
