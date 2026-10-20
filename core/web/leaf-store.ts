@@ -59,6 +59,9 @@ export type LeafStoreSubject = {
   // 결과 leaf로만 등록한다.
   subscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber, resultLeafIndex?: LeafIndex) => void;
   unsubscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber) => void;
+  // fn이 돌려준 값을 write할 결과 leaf를 연결한다. 구독 등록과 별개라, 가지가 붙기 전(build 중)에 먼저
+  // 연결해 두고 붙을 때 subscribeDerive(leafIndex, fn)만 해도 값이 결과 leaf로 간다.
+  bindDeriveResult: (fn: TDeriveSubscriber, resultLeafIndex: LeafIndex) => void;
   // set이 아닌 경로에서 파생 구독 fn 하나만 지금 한 번 부른다 - 가지를 다시 붙일 때 놓친 입력을 따라잡는다.
   // 돌려준 값을 결과 leaf에 write하고, 값이 바뀌었으면 그 leaf를 notify한다.
   refreshDerive: (fn: TDeriveSubscriber, changedLeaves: readonly LeafIndex[]) => void;
@@ -221,12 +224,16 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     deriveSubscribers[leafIndex] ??= new Set();
     deriveSubscribers[leafIndex].add(fn);
     if (resultLeafIndex !== undefined) {
-      resultLeafOf.set(fn, resultLeafIndex);
+      bindDeriveResult(fn, resultLeafIndex);
     }
   };
 
   const unsubscribeDerive = (leafIndex: LeafIndex, fn: TDeriveSubscriber): void => {
     deriveSubscribers[leafIndex]?.delete(fn);
+  };
+
+  const bindDeriveResult = (fn: TDeriveSubscriber, resultLeafIndex: LeafIndex): void => {
+    resultLeafOf.set(fn, resultLeafIndex);
   };
 
   const refreshDerive = (fn: TDeriveSubscriber, changedLeaves: readonly LeafIndex[]): void => {
@@ -281,6 +288,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     unsubscribe,
     subscribeDerive,
     unsubscribeDerive,
+    bindDeriveResult,
     refreshDerive,
     clear,
   };

@@ -28,8 +28,7 @@ const setup = () => {
     received.push([...changedLeaves]);
     return (store.get(1) as number) * 10;
   };
-  store.subscribeDerive(1, derive, 2);
-  store.unsubscribeDerive(1, derive); // 가지가 붙을 때까지는 구독이 없는 상태(build 직후)
+  store.bindDeriveResult(derive, 2); // 가지가 붙을 때까지는 구독이 없는 상태(build 직후)
   thenBranch.deriveLeafIndices = [1];
   thenBranch.deriveFns = [derive];
   const show = () => activateIf(store, regionPool, branchPool, regionIndex, THEN_INDEX);

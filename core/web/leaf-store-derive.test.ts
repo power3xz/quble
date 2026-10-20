@@ -192,6 +192,19 @@ test("refreshDerive는 결과 leaf가 없으면 파생 구독만 부르고 값�
   assert.deepEqual([store.get(2), store.get(4)], [0, 0]);
 });
 
+test("bindDeriveResult로 연결한 결과 leaf에 구독 등록 때 결과 leaf를 주지 않아도 값이 write된다", () => {
+  const { store, log } = setup();
+  const derive = () => 42;
+  store.bindDeriveResult(derive, 2);
+  store.subscribeDerive(0, derive);
+  store.subscribe(2, (value) => log.push(`notify 2 value=${value}`));
+
+  store.set(0, 10);
+
+  assert.equal(store.get(2), 42);
+  assert.deepEqual(log, ["notify 2 value=42"]);
+});
+
 test("파생 구독이 던져도 나머지 파생 구독과 통지 구독은 모두 불리고 첫 예외가 올라간다", () => {
   const { store, log } = setup();
   store.subscribeDerive(
