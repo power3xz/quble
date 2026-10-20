@@ -101,11 +101,62 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
       pendingLeaves.add(leafIndex);
       return;
     }
-    if (deriveSubscribers[leafIndex] === undefined) {
+    const derives = deriveSubscribers[leafIndex];
+    if (derives === undefined) {
       fire(leafIndex);
       return;
     }
-    propagate(new Set([leafIndex]), undefined);
+    propagateOne(leafIndex, derives);
+  };
+
+  // 바뀐 leaf가 하나인 flush(batch 밖의 set과 notify). 함수를 묶을 필요가 없어 Map 없이 차례로 부르고, 바뀐
+  // leaf 하나를 담은 배열을 모든 함수가 공유한다. 한 leaf에 파생 구독이 수천 개 걸린 식(1000행의 같은
+  // 기준값을 읽는 식)에서 함수마다 배열을 만들고 Map을 채우는 비용이 클릭 한 번보다 컸다. 예외는 propagate와
+  // 같다 - 나머지를 모두 부르고 첫 예외를 마지막에 다시 던진다.
+  const propagateOne = (leafIndex: LeafIndex, derives: ReadonlySet<TDeriveSubscriber>): void => {
+    let failed = false;
+    let firstError: unknown;
+    const changedLeaves = [leafIndex];
+    let resultLeaves: LeafIndex[] | undefined;
+    // 스냅샷 순회 - 파생 구독이 읽는 leaf를 다시 걸며 이 Set을 고칠 수 있다.
+    for (const fn of [...derives]) {
+      try {
+        const value = fn(changedLeaves);
+        const resultLeaf = resultLeafOf.get(fn);
+        if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
+          write(resultLeaf, value);
+          (resultLeaves ??= []).push(resultLeaf);
+        }
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstError = error;
+        }
+      }
+    }
+    try {
+      fire(leafIndex);
+    } catch (error) {
+      if (!failed) {
+        failed = true;
+        firstError = error;
+      }
+    }
+    if (resultLeaves !== undefined) {
+      for (const resultLeaf of resultLeaves) {
+        try {
+          fire(resultLeaf);
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            firstError = error;
+          }
+        }
+      }
+    }
+    if (failed) {
+      throw firstError;
+    }
   };
 
   // 바뀐 leaf들로 파생 구독을 함수당 한 번 부른다(등록한 leaf 중 바뀐 것만 넘긴다). 돌려준 값을 결과 leaf에
