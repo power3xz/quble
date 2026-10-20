@@ -15,6 +15,7 @@ export default defineConfig({
         index: "index.html",
         quble: "quble.html",
         "quble-deep": "quble-deep.html",
+        "quble-toggle": "quble-toggle.html",
         react: "react.html",
         "react-deep": "react-deep.html",
         "react-memo": "react-memo.html",

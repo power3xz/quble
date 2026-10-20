@@ -11,6 +11,10 @@ import testVersions from "../tests.json";
 export type TRow = { id: number; price: number; qty: number; discount: number; stock: number; url: string };
 export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number };
 
+// orders-toggle 테스트의 데이터. 켰다 끄는 두 목록(A 100행, B 10행)과 환율.
+export type TToggleRow = { id: number; price: number; qty: number; discount: number };
+export type TToggleData = { rowsA: TToggleRow[]; rowsB: TToggleRow[]; showA: boolean; showB: boolean; rate: number };
+
 // 버튼이 오가는 값. 환율은 매번 바꿔 모든 행 금액이 바뀌고, 기준은 1만 움직여 경고가 거의 안 바뀐다.
 export const nextRate = (rate: number) => (rate === 1300 ? 1350 : 1300);
 export const nextThreshold = (threshold: number) => (threshold === 30000 ? 30001 : 30000);// 기준 행은 매번 다음 행으로 옮겨, 모든 행의 비교 식(row.price - rows[pivot].price)이 다른 행을 읽게 한다.
@@ -20,12 +24,14 @@ export const nextPivot = (pivot: number, length: number) => (pivot + 1) % length
 // runTarget이 로드와 네트워크 집계를 마친 뒤 채우므로 로드 지표에 들어가지 않는다.
 export const bulk: { base: TRow[]; bumped: TRow[] } = { base: [], bumped: [] };
 
-type TTarget<P> = {
+type TTarget<P, D = TData> = {
   id: string;
   label: string;
+  // 데이터 주소. 없으면 행 수에 따른 data-<N>.json이고, 전체 행 일괄 갱신이 쓰는 bulk-<N>.json도 받는다.
+  dataUrl?: string;
   // 대상만의 자원(quble은 .qubb)을 data와 나란히 받는다.
   prepare?: () => Promise<P>;
-  mount: (root: HTMLElement, data: TData, prepared: P) => void;
+  mount: (root: HTMLElement, data: D, prepared: P) => void;
 };
 
 type TFile = { name: string; transfer: number; encoded: number; decoded: number };
@@ -47,6 +53,16 @@ export type TResult = {
   at: string;
 };
 
+// 시나리오 하나. 측정하는 것은 button 한 번의 클릭이다. button이 없으면 key로 고른다(BUTTON_OF).
+// before는 측정 전에 한 번씩 누를 버튼들이다 - 측정하지 않고, 한 프레임씩 쉬어 DOM이 가라앉은 뒤 이어간다.
+type TScenario = {
+  readonly key: string;
+  readonly label: string;
+  readonly desc: string;
+  readonly button?: string;
+  readonly before?: readonly string[];
+};
+
 export const SCENARIOS = [
   { key: "inc", label: "행 +1", desc: "행 하나의 수량을 올린다" },
   { key: "rate", label: "환율 변경", desc: "모든 행의 금액 식이 바뀐다" },
@@ -58,10 +74,23 @@ export const SCENARIOS = [
   { key: "bulk", label: "전체 행 일괄 갱신", desc: "한 핸들러가 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 한꺼번에 바꾼다" },
 ] as const;
 
+// orders-toggle 테스트의 시나리오. 켜는 클릭을 재고, 그 전에 끄는 버튼(과 환율 변경)은 재지 않는다.
+// 꺼진 동안 바뀌지 않았으면 다시 켤 때 가지가 따라잡을 새 값이 없다.
+export const TOGGLE_SCENARIOS = [
+  { key: "showA", label: "A 켜기 (100행)", desc: "꺼진 동안 아무것도 안 바뀐 100행 목록을 켠다", button: "#btn-show-a", before: ["#btn-hide-a"] },
+  { key: "showAChanged", label: "A 켜기, 환율 바뀜", desc: "꺼진 동안 환율이 바뀐 100행 목록을 켠다", button: "#btn-show-a", before: ["#btn-hide-a", "#btn-rate"] },
+  { key: "showB", label: "B 켜기 (10행)", desc: "꺼진 동안 아무것도 안 바뀐 10행 목록을 켠다", button: "#btn-show-b", before: ["#btn-hide-b"] },
+  { key: "showBChanged", label: "B 켜기, 환율 바뀜", desc: "꺼진 동안 환율이 바뀐 10행 목록을 켠다", button: "#btn-show-b", before: ["#btn-hide-b", "#btn-rate"] },
+] as const;
+
+// 테스트의 시나리오. 비교 표와 측정이 같은 목록을 쓴다.
+export const scenariosOf = (test: string): readonly TScenario[] => (test === "orders-toggle" ? TOGGLE_SCENARIOS : SCENARIOS);
+
 // 테스트마다 대상 페이지와 결과가 따로다. 테스트가 다르면 같은 표에서 비교하지 않는다.
 export const TESTS = [
   { key: "orders", label: "orders", desc: "기본 행" },
   { key: "orders-deep", label: "orders-deep", desc: "값 자리 사이에 정적 하위 트리, 깊은 값 자리, 정적 형제 줄이 낀 행" },
+  { key: "orders-toggle", label: "orders-toggle", desc: "켰다 끄는 두 목록(100행, 10행). quble만 잰다" },
 ] as const;
 
 export const TARGETS = [
@@ -75,6 +104,7 @@ export const TARGETS = [
   { id: "react-deep", label: "React (deep)", test: "orders-deep" },
   { id: "svelte-deep", label: "Svelte 5 (deep)", test: "orders-deep" },
   { id: "solid-deep", label: "Solid (deep)", test: "orders-deep" },
+  { id: "quble-toggle", label: "quble (toggle)", test: "orders-toggle" },
 ];
 
 // 테스트의 지금 버전(tests.json). 행 모양, 데이터, 시나리오, 측정 방식이 바뀌면 그 테스트의 버전을 올린다 -
@@ -207,12 +237,15 @@ const BUTTON_OF: Record<string, string> = {
   rateBurst: "#btn-rate-burst",
   bulk: "#btn-bulk",
 };
-const buttonFor = (root: HTMLElement, key: string, k: number): HTMLElement => {
-  if (key === "inc") {
+const buttonFor = (root: HTMLElement, scenario: TScenario, k: number): HTMLElement => {
+  if (scenario.button) {
+    return root.querySelector<HTMLElement>(scenario.button)!;
+  }
+  if (scenario.key === "inc") {
     const rows = root.querySelectorAll<HTMLElement>(".row__inc");
     return rows[(k * 7919) % rows.length];
   }
-  return root.querySelector<HTMLElement>(BUTTON_OF[key])!;
+  return root.querySelector<HTMLElement>(BUTTON_OF[scenario.key])!;
 };
 
 const collectFiles = (): TFile[] => {
@@ -288,7 +321,7 @@ const renderNet = (files: TFile[]) => {
   );
 };
 
-const renderClicks = (clicks: Record<string, TStat>) =>
+const renderClicks = (clicks: Record<string, TStat>, scenarios: readonly TScenario[]) =>
   el(
     "table",
     { class: "tbl" },
@@ -296,7 +329,7 @@ const renderClicks = (clicks: Record<string, TStat>) =>
     el(
       "tbody",
       {},
-      ...SCENARIOS.map((s) => {
+      ...scenarios.map((s) => {
         const c = clicks[s.key];
         return c
           ? el("tr", { title: s.desc }, el("td", {}, s.label), el("td", { class: "num" }, ms(c.dom)), el("td", { class: "num dim" }, ms(c.domP90)), el("td", { class: "num" }, ms(c.layout)), el("td", { class: "num dim" }, ms(c.layoutP90)), el("td", { class: "num" }, heapKb(c.heap)))
@@ -305,10 +338,12 @@ const renderClicks = (clicks: Record<string, TStat>) =>
     ),
   );
 
-export const runTarget = async <P>(target: TTarget<P>) => {
+export const runTarget = async <P, D = TData>(target: TTarget<P, D>) => {
   const n = currentN();
   const enc = currentEnc();
   const tag = currentTag();
+  const test = TARGETS.find((t) => t.id === target.id)!.test;
+  const scenarios = scenariosOf(test);
   const title = tag ? `${target.label} (${tag})` : target.label;
   document.title = `${title} - 식 벤치`;
 
@@ -316,7 +351,7 @@ export const runTarget = async <P>(target: TTarget<P>) => {
   const runButton = el("button", { class: "btn btn--primary", disabled: "" }, "측정") as HTMLButtonElement;
   const netBox = el("div", { class: "panel" }, el("h3", {}, "네트워크"), el("p", { class: "dim" }, "-"));
   const loadBox = el("div", { class: "panel" }, el("h3", {}, "로드"), el("p", { class: "dim" }, "-"));
-  const clickBox = el("div", { class: "panel panel--wide" }, el("h3", {}, `클릭 (예열 ${WARMUP}회 뒤 ${RUNS}회 중앙값)`), renderClicks({}));
+  const clickBox = el("div", { class: "panel panel--wide" }, el("h3", {}, `클릭 (예열 ${WARMUP}회 뒤 ${RUNS}회 중앙값)`), renderClicks({}, scenarios));
   const hud = document.getElementById("hud")!;
   hud.append(
     el(
@@ -333,7 +368,7 @@ export const runTarget = async <P>(target: TTarget<P>) => {
 
   const root = document.getElementById("app")!;
   const [data, prepared] = await Promise.all([
-    fetch(`./data-${n}.json`).then((r) => r.json() as Promise<TData>),
+    fetch(target.dataUrl ?? `./data-${n}.json`).then((r) => r.json() as Promise<D>),
     target.prepare ? target.prepare() : Promise.resolve(undefined as P),
   ]);
   const fetched = performance.now();
@@ -347,9 +382,10 @@ export const runTarget = async <P>(target: TTarget<P>) => {
     await new Promise((r) => addEventListener("load", r, { once: true }));
   }
   const files = collectFiles();
-  bulk.base = data.rows;
-  bulk.bumped = await fetch(`./bulk-${n}.json`).then((r) => r.json() as Promise<TRow[]>);
-  const test = TARGETS.find((t) => t.id === target.id)!.test;
+  if (!target.dataUrl) {
+    bulk.base = (data as TData).rows;
+    bulk.bumped = await fetch(`./bulk-${n}.json`).then((r) => r.json() as Promise<TRow[]>);
+  }
   const result: TResult = {
     id: target.id,
     label: target.label,
@@ -386,17 +422,21 @@ export const runTarget = async <P>(target: TTarget<P>) => {
 
   runButton.addEventListener("click", async () => {
     runButton.disabled = true;
-    for (const s of SCENARIOS) {
+    for (const s of scenarios) {
       const timings: TTiming[] = [];
       for (let k = 0; k < WARMUP + RUNS; k++) {
         status.textContent = `${s.label} ${k + 1}/${WARMUP + RUNS}`;
-        const t = await measureClick(root, buttonFor(root, s.key, k));
+        for (const selector of s.before ?? []) {
+          root.querySelector<HTMLElement>(selector)!.click();
+          await afterPaint();
+        }
+        const t = await measureClick(root, buttonFor(root, s, k));
         if (k >= WARMUP) {
           timings.push(t);
         }
       }
       result.clicks[s.key] = statOf(timings);
-      clickBox.replaceChildren(clickBox.firstChild!, renderClicks(result.clicks));
+      clickBox.replaceChildren(clickBox.firstChild!, renderClicks(result.clicks, scenarios));
     }
     result.at = new Date().toISOString();
     saveResult(result);

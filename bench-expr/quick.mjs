@@ -13,22 +13,29 @@ const ROUNDS = 5;
 // 행 수. 환경 변수 BENCH_N(1000, 5000, 10000, 기본 1000)으로 고른다. 기록 파일 이름에 행 수를 붙이는 것은
 // bench-expr-quick.sh다.
 const N = Number(process.env.BENCH_N ?? 1000);
-// 하네스 SCENARIOS와 같은 키와 순서. 표의 열을 padEnd로 맞추므로 라벨도 키 그대로 둔다(한글은 폭이 2칸).
-const SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk"];
+// 하네스 SCENARIOS, TOGGLE_SCENARIOS와 같은 키와 순서. 표의 열을 padEnd로 맞추므로 라벨도 키 그대로 둔다(한글은 폭이 2칸).
+const ORDERS_SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk"];
+const SCENARIOS_OF = {
+  orders: ORDERS_SCENARIOS,
+  "orders-deep": ORDERS_SCENARIOS,
+  "orders-toggle": ["showA", "showAChanged", "showB", "showBChanged"],
+};
 // 재는 대상. 환경 변수 TARGET(기본 quble)으로 고른다. 페이지 이름은 <대상>.html, orders-deep이면 <대상>-deep.html이다.
 const TARGET = process.env.TARGET ?? "quble";
 // 테스트마다 페이지와 하네스가 결과를 담는 id가 다르다 - 결과가 서로 섞이지 않는다.
 const TESTS = {
   orders: { page: `${TARGET}.html`, id: TARGET },
   "orders-deep": { page: `${TARGET}-deep.html`, id: `${TARGET}-deep` },
+  "orders-toggle": { page: `${TARGET}-toggle.html`, id: `${TARGET}-toggle` },
 };
 
 const [url, outPath, testName = "orders"] = process.argv.slice(2);
 if (!outPath || !TESTS[testName]) {
-  console.error("사용: node bench-expr/quick.mjs http://localhost:포트 기록.json [orders|orders-deep]");
+  console.error("사용: node bench-expr/quick.mjs http://localhost:포트 기록.json [orders|orders-deep|orders-toggle]");
   process.exit(1);
 }
 const { page: PAGE, id: TARGET_ID } = TESTS[testName];
+const SCENARIOS = SCENARIOS_OF[testName];
 const RESULT_KEY = `${TARGET_ID}|${N}|none`;
 const mount = [];
 const heap = [];

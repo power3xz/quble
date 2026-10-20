@@ -7,8 +7,8 @@ import {
   currentTest,
   ENCODINGS,
   loadResults,
-  SCENARIOS,
   STORAGE_KEY,
+  scenariosOf,
   TARGETS,
   TESTS,
   type TResult,
@@ -38,7 +38,7 @@ const columns = (metric: TMetric): TColumn[] => [
   },
   { label: "mount", hint: "데이터를 받은 뒤 N행을 그리기까지", value: (r) => r.load.mounted, format: ms },
   { label: "첫 페인트", hint: "페이지 요청 시작부터", value: (r) => r.load.painted, format: ms },
-  ...SCENARIOS.map((s) => ({ label: s.label, hint: s.desc, value: (r: TResult) => clickValue(r, s.key, metric), format: metric === "heap" ? kb : ms })),
+  ...scenariosOf(currentTest()).map((s) => ({ label: s.label, hint: s.desc, value: (r: TResult) => clickValue(r, s.key, metric), format: metric === "heap" ? kb : ms })),
 ];
 
 let metric: TMetric = "dom";

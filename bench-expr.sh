@@ -25,6 +25,7 @@ echo "[bench-expr] 2/4 orders.qubc 컴파일, 데이터 생성"
 cargo build --manifest-path "$ROOT/core/Cargo.toml" --bin quble
 "$ROOT/core/target/debug/quble" "$APP/quble/orders.qubc" --out-dir "$APP/public"
 "$ROOT/core/target/debug/quble" "$APP/quble/orders-deep.qubc" --out-dir "$APP/public"
+"$ROOT/core/target/debug/quble" "$APP/quble/orders-toggle.qubc" --out-dir "$APP/public"
 node "$APP/gen-data.mjs"
 
 echo "[bench-expr] 3/4 릴리즈 빌드"
