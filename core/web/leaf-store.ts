@@ -67,11 +67,39 @@ export type LeafStoreSubject = {
   refreshDerive: (fn: TDeriveSubscriber, leafIndex: LeafIndex) => void;
   clear: () => void;
 };
+// leaf마다 구독을 담는 슬롯. 구독이 하나뿐인 leaf가 대부분이라 하나면 Set 없이 함수를 그대로 담고, 둘째가
+// 들어올 때 Set으로 바꾼다 - leaf마다 Set을 두면 힙을 크게 차지하고, 가지를 껐다 켤 때 구독을 걸고 푸는 일이 Set의
+// 표를 다시 짓는 할당이 된다. 같은 함수를 두 번 걸어도 한 번만 든다.
+type TSubscriberFn = (...args: never[]) => unknown;
+type TSlot<T extends TSubscriberFn> = T | Set<T> | undefined;
+
+const addToSlot = <T extends TSubscriberFn>(slots: Array<TSlot<T>>, leafIndex: LeafIndex, fn: T): void => {
+  const current = slots[leafIndex];
+  if (current === undefined) {
+    slots[leafIndex] = fn;
+  } else if (typeof current === "function") {
+    if (current !== fn) {
+      slots[leafIndex] = new Set<T>([current, fn]);
+    }
+  } else {
+    current.add(fn);
+  }
+};
+
+const removeFromSlot = <T extends TSubscriberFn>(slots: Array<TSlot<T>>, leafIndex: LeafIndex, fn: T): void => {
+  const current = slots[leafIndex];
+  if (current === fn) {
+    slots[leafIndex] = undefined;
+  } else if (current !== undefined && typeof current !== "function") {
+    current.delete(fn);
+  }
+};
+
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
-  const subscribers: Array<Set<TSubscriber> | undefined> = []; // leafIndex -> Set<TSubscriber>. Set이라 unsubscribe가 O(1).
-  // 입력 leafIndex -> 그 leaf에 걸린 파생 구독들. 함수 하나가 입력 leaf 여러 개의 Set에 들 수 있다.
-  const deriveSubscribers: Array<Set<TDeriveSubscriber> | undefined> = [];
+  const subscribers: Array<TSlot<TSubscriber>> = []; // leafIndex -> 그 leaf의 통지 구독들.
+  // 입력 leafIndex -> 그 leaf에 걸린 파생 구독들. 함수 하나가 입력 leaf 여러 개의 슬롯에 들 수 있다.
+  const deriveSubscribers: Array<TSlot<TDeriveSubscriber>> = [];
   const resultLeafOf = new WeakMap<TDeriveSubscriber, LeafIndex>(); // 파생 구독 함수 -> 돌려준 값을 write할 결과 leaf.
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
   // 정적/유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합/split/정렬 없이 O(1) 재사용/반납.
@@ -116,14 +144,13 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   // 예외를 마지막에 다시 던진다.
   const propagateOne = (
     leafIndex: LeafIndex,
-    derives: ReadonlySet<TDeriveSubscriber>,
+    derives: TDeriveSubscriber | ReadonlySet<TDeriveSubscriber>,
     changedLeaves: ReadonlySet<LeafIndex>,
   ): void => {
     let failed = false;
     let firstError: unknown;
     let resultLeaves: LeafIndex[] | undefined;
-    // 스냅샷 순회 - 파생 구독이 읽는 leaf를 다시 걸며 이 Set을 고칠 수 있다.
-    for (const fn of [...derives]) {
+    const runDerive = (fn: TDeriveSubscriber): void => {
       try {
         const value = fn(changedLeaves);
         const resultLeaf = resultLeafOf.get(fn);
@@ -137,6 +164,14 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
           failed = true;
           firstError = error;
         }
+      }
+    };
+    if (typeof derives === "function") {
+      runDerive(derives);
+    } else {
+      // 스냅샷 순회 - 파생 구독이 읽는 leaf를 다시 걸며 이 Set을 고칠 수 있다.
+      for (const fn of [...derives]) {
+        runDerive(fn);
       }
     }
     try {
@@ -172,27 +207,34 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const runDerives = (changed: ReadonlySet<LeafIndex>, onError: (error: unknown) => void): ReadonlySet<LeafIndex> => {
     let called: Set<TDeriveSubscriber> | undefined;
     let toNotify: Set<LeafIndex> | undefined;
+    const runDerive = (fn: TDeriveSubscriber): void => {
+      if ((called as Set<TDeriveSubscriber>).has(fn)) {
+        return;
+      }
+      (called as Set<TDeriveSubscriber>).add(fn);
+      try {
+        const value = fn(changed);
+        const resultLeaf = resultLeafOf.get(fn);
+        if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
+          write(resultLeaf, value);
+          toNotify ??= new Set(changed);
+          toNotify.add(resultLeaf);
+        }
+      } catch (error) {
+        onError(error);
+      }
+    };
     for (const leafIndex of changed) {
       const derives = deriveSubscribers[leafIndex];
       if (derives === undefined) {
         continue;
       }
       called ??= new Set();
-      for (const fn of derives) {
-        if (called.has(fn)) {
-          continue;
-        }
-        called.add(fn);
-        try {
-          const value = fn(changed);
-          const resultLeaf = resultLeafOf.get(fn);
-          if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
-            write(resultLeaf, value);
-            toNotify ??= new Set(changed);
-            toNotify.add(resultLeaf);
-          }
-        } catch (error) {
-          onError(error);
+      if (typeof derives === "function") {
+        runDerive(derives);
+      } else {
+        for (const fn of derives) {
+          runDerive(fn);
         }
       }
     }
@@ -226,12 +268,17 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   // 통지 구독 함수들을 지금 호출한다. 그 칸의 현재 값(마지막으로 쓴 값)을 넘긴다.
   const fire = (leafIndex: LeafIndex): void => {
     const subs = subscribers[leafIndex];
-    if (subs) {
-      const value = leafStore.get(leafIndex);
-      // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
-      for (const fn of [...subs]) {
-        fn(value, leafIndex);
-      }
+    if (subs === undefined) {
+      return;
+    }
+    const value = leafStore.get(leafIndex);
+    if (typeof subs === "function") {
+      subs(value, leafIndex);
+      return;
+    }
+    // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
+    for (const fn of [...subs]) {
+      fn(value, leafIndex);
     }
   };
 
@@ -263,24 +310,22 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   };
 
   const subscribe = (leafIndex: LeafIndex, fn: TSubscriber): void => {
-    subscribers[leafIndex] ??= new Set();
-    subscribers[leafIndex].add(fn);
+    addToSlot(subscribers, leafIndex, fn);
   };
 
   const unsubscribe = (leafIndex: LeafIndex, fn: TSubscriber): void => {
-    subscribers[leafIndex]?.delete(fn);
+    removeFromSlot(subscribers, leafIndex, fn);
   };
 
   const subscribeDerive = (leafIndex: LeafIndex, fn: TDeriveSubscriber, resultLeafIndex?: LeafIndex): void => {
-    deriveSubscribers[leafIndex] ??= new Set();
-    deriveSubscribers[leafIndex].add(fn);
+    addToSlot(deriveSubscribers, leafIndex, fn);
     if (resultLeafIndex !== undefined) {
       bindDeriveResult(fn, resultLeafIndex);
     }
   };
 
   const unsubscribeDerive = (leafIndex: LeafIndex, fn: TDeriveSubscriber): void => {
-    deriveSubscribers[leafIndex]?.delete(fn);
+    removeFromSlot(deriveSubscribers, leafIndex, fn);
   };
 
   const bindDeriveResult = (fn: TDeriveSubscriber, resultLeafIndex: LeafIndex): void => {
