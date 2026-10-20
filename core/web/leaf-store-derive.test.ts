@@ -138,6 +138,29 @@ test("같은 leaf에 파생 구독이 여럿이면 batch 밖 set에서 각각 �
   assert.deepEqual(log, ["notify 0", "notify 2", "notify 4"]);
 });
 
+test("batch 끝에 바뀐 leaf가 하나여도 파생 구독을 한 번 부르고 입력 leaf와 결과 leaf에 통지한다", () => {
+  const { store, log } = setup();
+  const received: Array<readonly number[]> = [];
+  store.subscribeDerive(
+    0,
+    (changedLeaves) => {
+      received.push([...changedLeaves]);
+      return 5;
+    },
+    2,
+  );
+  store.subscribe(0, () => log.push("notify 0"));
+  store.subscribe(2, () => log.push("notify 2"));
+
+  store.batch(() => {
+    store.set(0, 10);
+    store.set(0, 11);
+  });
+
+  assert.deepEqual(received, [[0]]);
+  assert.deepEqual(log, ["notify 0", "notify 2"]);
+});
+
 test("값이 같은 set은 파생 구독을 부르지 않는다", () => {
   const { store } = setup();
   let calls = 0;

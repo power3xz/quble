@@ -31,13 +31,8 @@ const createLeafStore = (leaves: unknown[]) => {
 // leafStore를 감싸 구독/통지(subscribe/set 통지)와 동적 칸(alloc/free - 배열 요소 추가/제거)을
 // 얹는다(Subject - 값을 들고 변경을 구독자에게 통지하는 주체).
 
-// 칸이 바뀌면 불리는 함수. 새 값과 함께 어느 칸이 바뀌었는지 받는다 - 식 하나가 칸 a, b를 함께
-// 구독하면 두 칸에 같은 함수 하나를 걸고, 불릴 때 leafIndex로 a인지 b인지 가린다.
-//
-// 셋째 인자 flushLeaves는 batch가 끝날 때의 통지에서만 온다. 이번 flush에서 바뀐 leaf 전체(구독하지 않은
-// leaf 포함)이고, 한 flush 안에서는 같은 Set이다 - 식이 첫 호출에서 한꺼번에 다시 세고 나머지 호출은
-// 같은 Set인지로 건너뛴다. 배치 밖의 통지에서는 오지 않는다.
-export type TSubscriber = (value: unknown, leafIndex: LeafIndex, flushLeaves?: ReadonlySet<LeafIndex>) => void;
+// 통지 구독 함수. leaf가 바뀌면 notify 단계에서 새 값과 어느 leaf가 바뀌었는지를 받아 불린다.
+export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
 
 // 파생 구독 함수. 등록한 leaf 중 이번 flush에서 바뀐 것만 받아 파생값을 돌려준다. 입력은 store.get으로
 // 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이 결과 leaf에 write한다. 함수 하나를 여러 leaf에
@@ -109,10 +104,10 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     propagateOne(leafIndex, derives);
   };
 
-  // 바뀐 leaf가 하나인 flush(batch 밖의 set과 notify). 함수를 묶을 필요가 없어 Map 없이 차례로 부르고, 바뀐
-  // leaf 하나를 담은 배열을 모든 함수가 공유한다. 한 leaf에 파생 구독이 수천 개 걸린 식(1000행의 같은
-  // 기준값을 읽는 식)에서 함수마다 배열을 만들고 Map을 채우는 비용이 클릭 한 번보다 컸다. 예외는 propagate와
-  // 같다 - 나머지를 모두 부르고 첫 예외를 마지막에 다시 던진다.
+  // 바뀐 leaf가 하나인 flush(batch 밖의 set과 notify, 또는 batch가 끝날 때 하나만 모인 경우). 함수를 묶을 필요가
+  // 없어 Map 없이 차례로 부르고, 바뀐 leaf 하나를 담은 배열을 모든 함수가 공유한다. 한 leaf에 파생 구독이
+  // 수천 개 걸린 식(1000행의 같은 기준값을 읽는 식)에서 함수마다 배열을 만들고 Map을 채우는 비용이 클릭 한
+  // 번보다 컸다. 예외는 propagate와 같다 - 나머지를 모두 부르고 첫 예외를 마지막에 다시 던진다.
   const propagateOne = (leafIndex: LeafIndex, derives: ReadonlySet<TDeriveSubscriber>): void => {
     let failed = false;
     let firstError: unknown;
@@ -200,8 +195,8 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
 
   // 파생 구독을 모두 부른 뒤 통지 구독을 부른다. 통지할 leaf는 바뀐 leaf와 값이 바뀐 결과 leaf다. 파생 구독이나
   // 통지 구독이 던져도 나머지는 모두 부르고 첫 예외를 마지막에 다시 던진다 - 값은 이미 다 기록됐는데 통지만
-  // 건너뛰면 화면이 값을 따라오지 못한다. flushLeaves는 통지 구독에 그대로 넘긴다.
-  const propagate = (changed: ReadonlySet<LeafIndex>, flushLeaves: ReadonlySet<LeafIndex> | undefined): void => {
+  // 건너뛰면 화면이 값을 따라오지 못한다.
+  const propagate = (changed: ReadonlySet<LeafIndex>): void => {
     let failed = false;
     let firstError: unknown;
     const onError = (error: unknown): void => {
@@ -212,7 +207,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     };
     for (const leafIndex of runDerives(changed, onError)) {
       try {
-        fire(leafIndex, flushLeaves);
+        fire(leafIndex);
       } catch (error) {
         onError(error);
       }
@@ -222,15 +217,14 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     }
   };
 
-  // 구독 함수들을 지금 호출한다. 모아 둔 칸을 비울 때는 그 칸의 현재 값(마지막으로 쓴 값)을 넘긴다.
-  // flushLeaves는 모아 둔 칸을 비울 때만 넘어온다.
-  const fire = (leafIndex: LeafIndex, flushLeaves?: ReadonlySet<LeafIndex>): void => {
+  // 통지 구독 함수들을 지금 호출한다. 그 칸의 현재 값(마지막으로 쓴 값)을 넘긴다.
+  const fire = (leafIndex: LeafIndex): void => {
     const subs = subscribers[leafIndex];
     if (subs) {
       const value = leafStore.get(leafIndex);
       // 스냅샷 순회 - 콜백(cond)이 activateIf로 구독을 해제할 수 있어 원본 순회는 깨진다.
       for (const fn of [...subs]) {
-        fn(value, leafIndex, flushLeaves);
+        fn(value, leafIndex);
       }
     }
   };
@@ -324,7 +318,15 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const flushPending = (): void => {
     const flushLeaves = pendingLeaves;
     pendingLeaves = new Set();
-    propagate(flushLeaves, flushLeaves);
+    if (flushLeaves.size === 1) {
+      const leafIndex = flushLeaves.values().next().value as LeafIndex;
+      const derives = deriveSubscribers[leafIndex];
+      if (derives !== undefined) {
+        propagateOne(leafIndex, derives);
+        return;
+      }
+    }
+    propagate(flushLeaves);
   };
 
   return {
