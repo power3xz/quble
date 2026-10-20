@@ -324,8 +324,14 @@ const branchTailNode = (
   for (const childRegionIndex of branch.childRegionIndices) {
     const child = regionPool.entries[childRegionIndex];
     if (child.anchor === last) {
-      const childBranch = branchPool.entries[child.branchIndices[child.shownIndex]];
-      last = branchTailNode(regionPool, branchPool, childBranch, child.anchor);
+      // @if는 보이는 가지, @for(shownIndex -1)는 마지막 회차가 끝이다. 회차가 없으면 anchor가 끝이다.
+      const tailBranchIndex =
+        child.shownIndex === -1
+          ? child.branchIndices[child.branchIndices.length - 1]
+          : child.branchIndices[child.shownIndex];
+      if (tailBranchIndex !== undefined) {
+        last = branchTailNode(regionPool, branchPool, branchPool.entries[tailBranchIndex], child.anchor);
+      }
     }
   }
   return last;

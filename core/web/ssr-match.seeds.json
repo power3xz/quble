@@ -960,6 +960,7 @@
     }
   ],
   "for_nested_render": [{}],
+  "for_nested_tail_push": [{ "rows": [{ "cells": ["a", "b"] }, { "cells": [] }] }],
   "for_obj_field": [
     {
       "c": {

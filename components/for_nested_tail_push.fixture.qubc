@@ -1,0 +1,16 @@
+component NestedTailPush {
+  props { rows: { cells: string[] }[] }
+  events { ADD({ rows }) }
+  template {
+    div() {
+      button(class="add" @click:ADD) { "+" }
+      ul() {
+        @for (row of rows) {
+          @for (cell of row.cells) {
+            li() { ${cell} }
+          }
+        }
+      }
+    }
+  }
+}
