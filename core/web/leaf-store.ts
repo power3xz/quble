@@ -59,6 +59,9 @@ export type LeafStoreSubject = {
   // 결과 leaf로만 등록한다.
   subscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber, resultLeafIndex?: LeafIndex) => void;
   unsubscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber) => void;
+  // set이 아닌 경로에서 파생 구독 fn 하나만 지금 한 번 부른다 - 가지를 다시 붙일 때 놓친 입력을 따라잡는다.
+  // 돌려준 값을 결과 leaf에 write하고, 값이 바뀌었으면 그 leaf를 notify한다.
+  refreshDerive: (fn: TDeriveSubscriber, changedLeaves: readonly LeafIndex[]) => void;
   clear: () => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
@@ -226,6 +229,15 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     deriveSubscribers[leafIndex]?.delete(fn);
   };
 
+  const refreshDerive = (fn: TDeriveSubscriber, changedLeaves: readonly LeafIndex[]): void => {
+    const value = fn(changedLeaves);
+    const resultLeaf = resultLeafOf.get(fn);
+    if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
+      write(resultLeaf, value);
+      notify(resultLeaf);
+    }
+  };
+
   // 값, 구독, 빈 블록 기록, 미룬 통지를 모두 비운다 - 인스턴스를 해체할 때 store가 값과 구독 함수를 놓는다.
   const clear = (): void => {
     leaves.length = 0;
@@ -269,6 +281,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     unsubscribe,
     subscribeDerive,
     unsubscribeDerive,
+    refreshDerive,
     clear,
   };
 };

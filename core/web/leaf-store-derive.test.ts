@@ -130,6 +130,68 @@ test("unsubscribeDerive 뒤에는 파생 구독이 불리지 않는다", () => {
   assert.equal(calls, 1, "해제하지 않은 leaf는 그대로 부른다");
 });
 
+test("refreshDerive는 파생 구독을 주어진 leaf로 한 번 부르고 결과 leaf에 write한 뒤 통지한다", () => {
+  const { store, log } = setup();
+  const received: Array<readonly number[]> = [];
+  const derive = (changedLeaves: readonly number[]) => {
+    received.push([...changedLeaves]);
+    return (store.get(0) as number) + (store.get(1) as number);
+  };
+  store.subscribeDerive(0, derive, 2);
+  store.subscribe(2, (value) => log.push(`notify 2 value=${value}`));
+
+  store.write(0, 10);
+  store.refreshDerive(derive, [0]);
+
+  assert.deepEqual(received, [[0]]);
+  assert.equal(store.get(2), 12);
+  assert.deepEqual(log, ["notify 2 value=12"]);
+});
+
+test("refreshDerive는 값이 결과 leaf와 같으면 통지하지 않는다", () => {
+  const { store, log } = setup();
+  const derive = () => 5;
+  store.subscribeDerive(0, derive, 2);
+  store.subscribe(2, () => log.push("notify 2"));
+
+  store.refreshDerive(derive, [0]);
+  log.length = 0;
+  store.refreshDerive(derive, [0]);
+
+  assert.deepEqual(log, []);
+});
+
+test("refreshDerive는 같은 leaf의 다른 구독 함수를 부르지 않는다", () => {
+  const { store, log } = setup();
+  const target = () => 1;
+  const other = () => {
+    log.push("other derive");
+    return 2;
+  };
+  store.subscribeDerive(0, target, 2);
+  store.subscribeDerive(0, other, 4);
+  store.subscribe(0, () => log.push("notify 0"));
+
+  store.refreshDerive(target, [0]);
+
+  assert.deepEqual(log, [], "target만 불리고 다른 파생 구독과 통지 구독은 불리지 않는다");
+});
+
+test("refreshDerive는 결과 leaf가 없으면 파생 구독만 부르고 값을 쓰지 않는다", () => {
+  const { store } = setup();
+  let calls = 0;
+  const derive = () => {
+    calls++;
+    return 99;
+  };
+  store.subscribeDerive(0, derive);
+
+  store.refreshDerive(derive, [0]);
+
+  assert.equal(calls, 1);
+  assert.deepEqual([store.get(2), store.get(4)], [0, 0]);
+});
+
 test("파생 구독이 던져도 나머지 파생 구독과 통지 구독은 모두 불리고 첫 예외가 올라간다", () => {
   const { store, log } = setup();
   store.subscribeDerive(
