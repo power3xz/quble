@@ -152,11 +152,12 @@ test("식 하나가 칸을 여럿 읽어도 구독 함수는 하나다", () => {
   const { inst } = instantiate();
   // (a + b) * (c - d)는 루트 가지에 있고, a~d 네 칸을 구독한다. 칸마다 함수를 따로 만들면 1만 행에서
   // 함수가 수만 개 늘어 메모리가 CPU 캐시를 넘친다.
-  const root = inst.branchPool.entries.find((b: { deriveLeafIndices: number[] | null }) =>
-    b.deriveLeafIndices?.includes(A),
+  const root = inst.branchPool.entries.find((b: { deriveInputLeafIndices: number[] | null }) =>
+    b.deriveInputLeafIndices?.includes(A),
   );
-  assert.ok(root?.deriveLeafIndices && root.deriveFns);
-  const subscriberOf = (leafIndex: number) => root.deriveFns?.[root.deriveLeafIndices?.indexOf(leafIndex) as number];
+  assert.ok(root?.deriveInputLeafIndices && root.deriveFns);
+  const subscriberOf = (leafIndex: number) =>
+    root.deriveFns?.[root.deriveInputLeafIndices?.indexOf(leafIndex) as number];
   assert.equal(new Set([A, B, C, D].map(subscriberOf)).size, 1);
 });
 

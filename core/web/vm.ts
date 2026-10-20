@@ -1708,16 +1708,16 @@ export class VM {
     }
 
     // 가지 목록. 옛 것을 빼고 새 것을 더할 때는 같은 자리를 덮어쓴다. 식 구독은 파생 구독 목록에 있다.
-    const deriveLeafIndices = branch.deriveLeafIndices as number[];
+    const deriveInputLeafIndices = branch.deriveInputLeafIndices as number[];
     const deriveFns = branch.deriveFns as TDeriveFn[];
     if (oldDropped) {
-      for (let i = 0; i < deriveLeafIndices.length; i++) {
-        if (deriveLeafIndices[i] === oldLeafIndex && deriveFns[i] === subscriber) {
+      for (let i = 0; i < deriveInputLeafIndices.length; i++) {
+        if (deriveInputLeafIndices[i] === oldLeafIndex && deriveFns[i] === subscriber) {
           if (newAlreadyRead) {
-            swapDeleteAt(deriveLeafIndices, i);
+            swapDeleteAt(deriveInputLeafIndices, i);
             swapDeleteAt(deriveFns, i);
           } else {
-            deriveLeafIndices[i] = newLeafIndex;
+            deriveInputLeafIndices[i] = newLeafIndex;
           }
           return;
         }

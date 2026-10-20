@@ -37,11 +37,13 @@ export type TDeriveFn = (changedLeaves: ReadonlySet<number>) => unknown;
 export type TBranch = {
   nodes: ChildNode[];
   leafIndices: number[];
-  // updateFns[i]는 leafIndices[i]를 구독한다. 식 하나가 칸 여럿을 읽으면 그 칸들 자리에 같은 함수가 든다.
+  // updateFns[i]는 leafIndices[i]를 구독하는 통지 구독이다. 변수 leaf와 식의 결과 leaf가 든다.
   updateFns: Array<(v: unknown, leafIndex: number) => void>;
-  // 파생 구독(식 구독 함수). deriveFns[i]는 deriveLeafIndices[i]에 걸린다. 값을 돌려주는 함수라 updateFns와
-  // 호출 방식이 달라 따로 둔다. 파생 구독이 없는 가지는 null이라 배열을 잡지 않는다.
-  deriveLeafIndices: number[] | null;
+  // 파생 구독(식 구독 함수). deriveFns[i]는 입력 leaf deriveInputLeafIndices[i]를 구독한다. 식 하나가 leaf 여럿을
+  // 읽으면 그 leaf들 자리에 같은 함수가 든다. 결과 leaf는 이 목록에 없다 - store가 함수에 연결해 두었다가 가지가
+  // 없어질 때 반납한다(freeBranchTree). 값을 돌려주는 함수라 updateFns와 호출 방식이 달라 따로 둔다. 파생 구독이
+  // 없는 가지는 null이라 배열을 잡지 않는다.
+  deriveInputLeafIndices: number[] | null;
   deriveFns: TDeriveFn[] | null;
   childRegionIndices: number[];
   built: boolean;
@@ -73,7 +75,7 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     nodes: [],
     leafIndices: [],
     updateFns: [],
-    deriveLeafIndices: null,
+    deriveInputLeafIndices: null,
     deriveFns: null,
     childRegionIndices: [],
     built: false,
@@ -83,21 +85,21 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
 
 // 파생 구독을 가지의 목록에 더한다. 목록은 처음 더할 때 만든다 - 파생 구독이 없는 가지는 배열을 잡지 않는다.
 export const addDeriveToBranch = (branch: TBranch, leafIndex: number, fn: TDeriveFn): void => {
-  branch.deriveLeafIndices ??= [];
-  branch.deriveLeafIndices.push(leafIndex);
+  branch.deriveInputLeafIndices ??= [];
+  branch.deriveInputLeafIndices.push(leafIndex);
   branch.deriveFns ??= [];
   branch.deriveFns.push(fn);
 };
 
 // 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detach 함수가 전담.
 const teardownBranchSubs = (store: Store, branch: TBranch): void => {
-  const { leafIndices, updateFns, deriveLeafIndices, deriveFns } = branch;
+  const { leafIndices, updateFns, deriveInputLeafIndices, deriveFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
     store.unsubscribe(leafIndices[i], updateFns[i]);
   }
-  if (deriveLeafIndices !== null && deriveFns !== null) {
-    for (let i = 0; i < deriveLeafIndices.length; i++) {
-      store.unsubscribeDerive(deriveLeafIndices[i], deriveFns[i]);
+  if (deriveInputLeafIndices !== null && deriveFns !== null) {
+    for (let i = 0; i < deriveInputLeafIndices.length; i++) {
+      store.unsubscribeDerive(deriveInputLeafIndices[i], deriveFns[i]);
     }
   }
 };
@@ -112,13 +114,13 @@ const teardownBranchSubs = (store: Store, branch: TBranch): void => {
 // 구독 함수가 READ_LEAF가 읽는 leafIndex가 바뀐 것을 보고 구독을 풀고 다시 건다 - 그 leafIndex들이 이미
 // 구독된 상태여야 맞게 풀린다. 다시 걸면서 branch의 두 배열도 고치므로 따라잡기는 사본으로 돈다.
 const restoreBranchSubs = (store: Store, branch: TBranch): void => {
-  const { leafIndices, updateFns, deriveLeafIndices, deriveFns } = branch;
+  const { leafIndices, updateFns, deriveInputLeafIndices, deriveFns } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
     store.subscribe(leafIndices[i], updateFns[i]);
   }
-  if (deriveLeafIndices !== null && deriveFns !== null) {
-    for (let i = 0; i < deriveLeafIndices.length; i++) {
-      store.subscribeDerive(deriveLeafIndices[i], deriveFns[i]);
+  if (deriveInputLeafIndices !== null && deriveFns !== null) {
+    for (let i = 0; i < deriveInputLeafIndices.length; i++) {
+      store.subscribeDerive(deriveInputLeafIndices[i], deriveFns[i]);
     }
   }
   if (!branch.everAttached) {
@@ -131,8 +133,8 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
     branch.leafIndices = leafIndices.slice();
     branch.updateFns = updateFns.slice();
     // 파생 구독 목록도 push로 용량이 커져 있어 같은 이유로 길이만큼의 사본으로 바꾼다.
-    if (deriveLeafIndices !== null && deriveFns !== null) {
-      branch.deriveLeafIndices = deriveLeafIndices.slice();
+    if (deriveInputLeafIndices !== null && deriveFns !== null) {
+      branch.deriveInputLeafIndices = deriveInputLeafIndices.slice();
       branch.deriveFns = deriveFns.slice();
     }
   }
@@ -142,12 +144,12 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
     for (let i = 0; i < leaves.length; i++) {
       fns[i](store.get(leaves[i]), leaves[i]); // 비활성 동안 놓친 값 따라잡기
     }
-    if (deriveLeafIndices !== null && deriveFns !== null) {
+    if (deriveInputLeafIndices !== null && deriveFns !== null) {
       // 따라잡기는 leaf 하나씩 부르므로 Set 하나를 비우고 채우며 재사용한다.
       const changedLeaf = new Set<number>();
-      for (let i = 0; i < deriveLeafIndices.length; i++) {
+      for (let i = 0; i < deriveInputLeafIndices.length; i++) {
         changedLeaf.clear();
-        changedLeaf.add(deriveLeafIndices[i]);
+        changedLeaf.add(deriveInputLeafIndices[i]);
         store.refreshDerive(deriveFns[i], changedLeaf);
       }
     }
