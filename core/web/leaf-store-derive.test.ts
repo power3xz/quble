@@ -218,7 +218,7 @@ test("refreshDerive는 파생 구독을 주어진 leaf로 한 번 부르고 결�
   store.subscribe(2, (value) => log.push(`notify 2 value=${value}`));
 
   store.write(0, 10);
-  store.refreshDerive(derive, new Set([0]));
+  store.refreshDerive(derive, 0);
 
   assert.deepEqual(received, [[0]]);
   assert.equal(store.get(2), 12);
@@ -231,9 +231,9 @@ test("refreshDerive는 값이 결과 leaf와 같으면 통지하지 않는다", 
   store.subscribeDerive(0, derive, 2);
   store.subscribe(2, () => log.push("notify 2"));
 
-  store.refreshDerive(derive, new Set([0]));
+  store.refreshDerive(derive, 0);
   log.length = 0;
-  store.refreshDerive(derive, new Set([0]));
+  store.refreshDerive(derive, 0);
 
   assert.deepEqual(log, []);
 });
@@ -249,7 +249,7 @@ test("refreshDerive는 같은 leaf의 다른 구독 함수를 부르지 않는�
   store.subscribeDerive(0, other, 4);
   store.subscribe(0, () => log.push("notify 0"));
 
-  store.refreshDerive(target, new Set([0]));
+  store.refreshDerive(target, 0);
 
   assert.deepEqual(log, [], "target만 불리고 다른 파생 구독과 통지 구독은 불리지 않는다");
 });
@@ -263,7 +263,7 @@ test("refreshDerive는 결과 leaf가 없으면 파생 구독만 부르고 값�
   };
   store.subscribeDerive(0, derive);
 
-  store.refreshDerive(derive, new Set([0]));
+  store.refreshDerive(derive, 0);
 
   assert.equal(calls, 1);
   assert.deepEqual([store.get(2), store.get(4)], [0, 0]);

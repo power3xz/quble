@@ -27,7 +27,7 @@ export type Store = {
   unsubscribe: (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
   subscribeDerive: (leafIndex: number, fn: TDeriveFn, resultLeafIndex?: number) => void;
   unsubscribeDerive: (leafIndex: number, fn: TDeriveFn) => void;
-  refreshDerive: (fn: TDeriveFn, changedLeaves: ReadonlySet<number>) => void;
+  refreshDerive: (fn: TDeriveFn, leafIndex: number) => void;
   freeDeriveResult: (fn: TDeriveFn) => void;
 };
 
@@ -145,12 +145,8 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
       fns[i](store.get(leaves[i]), leaves[i]); // 비활성 동안 놓친 값 따라잡기
     }
     if (deriveInputLeafIndices !== null && deriveFns !== null) {
-      // 따라잡기는 leaf 하나씩 부르므로 Set 하나를 비우고 채우며 재사용한다.
-      const changedLeaf = new Set<number>();
       for (let i = 0; i < deriveInputLeafIndices.length; i++) {
-        changedLeaf.clear();
-        changedLeaf.add(deriveInputLeafIndices[i]);
-        store.refreshDerive(deriveFns[i], changedLeaf);
+        store.refreshDerive(deriveFns[i], deriveInputLeafIndices[i]);
       }
     }
   }

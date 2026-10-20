@@ -64,7 +64,7 @@ export type LeafStoreSubject = {
   freeDeriveResult: (fn: TDeriveSubscriber) => void;
   // set이 아닌 경로에서 파생 구독 fn 하나만 지금 한 번 부른다 - 가지를 다시 붙일 때 놓친 입력을 따라잡는다.
   // 돌려준 값을 결과 leaf에 write하고, 값이 바뀌었으면 그 leaf를 notify한다.
-  refreshDerive: (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>) => void;
+  refreshDerive: (fn: TDeriveSubscriber, leafIndex: LeafIndex) => void;
   clear: () => void;
 };
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
@@ -295,8 +295,14 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     }
   };
 
-  const refreshDerive = (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>): void => {
-    const value = fn(changedLeaves);
+  // 따라잡기는 leaf 하나씩 부르므로 바뀐 leaf를 담는 Set 하나를 비우고 채우며 재사용한다. 가지를 켤 때 행마다
+  // Set을 만들면 그 할당이 GC로 드러났다. fn이 끝난 뒤에는 쓰지 않으므로 통지가 이어서 따라잡기를 다시 불러도
+  // 안전하다.
+  const refreshedLeaf = new Set<LeafIndex>();
+  const refreshDerive = (fn: TDeriveSubscriber, leafIndex: LeafIndex): void => {
+    refreshedLeaf.clear();
+    refreshedLeaf.add(leafIndex);
+    const value = fn(refreshedLeaf);
     const resultLeaf = resultLeafOf.get(fn);
     if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
       write(resultLeaf, value);
