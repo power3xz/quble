@@ -831,8 +831,7 @@ export class RuntimeInterpreter {
     // 때문이다. 파생 구독은 부모 가지에 실어 생애를 함께 한다. 결과 leaf는 식의 첫 값으로 잡으므로 식을 센
     // 뒤에 만들어 연결한다.
     const { value, derive } = vm.subscribeExpr(expr, argumentSourcePairs, branch);
-    const condLeafIndex = vm.store.alloc([value]);
-    vm.store.bindDeriveResult(derive, condLeafIndex);
+    const condLeafIndex = vm.allocResultLeaf(derive, value);
     return this.buildIfRegion(
       vm,
       pc,

@@ -1508,19 +1508,35 @@ export class VM {
     // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
     const leafIndex = ref + offset;
     const initial = this.store.get(leafIndex) ?? "";
-    branch.leafIndices.push(leafIndex);
-    branch.updateFns.push(update);
+    this.bindLeaf(leafIndex, update, branch);
     return initial;
   };
 
+  // leaf를 가지에 실어 통지 구독한다. 구독은 가지가 붙을 때 걸리고 떼질 때 풀린다(restoreBranchSubs,
+  // teardownBranchSubs). bindVar의 변수 leaf와 bindExpr의 결과 leaf가 함께 쓴다.
+  bindLeaf = (leafIndex: number, update: (v: unknown) => void, branch: TBranch): void => {
+    branch.leafIndices.push(leafIndex);
+    branch.updateFns.push(update);
+  };
+
+  // 식의 결과를 담을 leaf를 잡아 첫 값을 넣고, derive가 돌려준 값이 그 leaf에 쓰이도록 연결한다. 결과 leaf는
+  // derive를 가진 가지가 없어질 때 반납된다(freeBranchTree). 보간 식과 IF_EXPR 조건이 함께 쓴다.
+  allocResultLeaf = (derive: TDeriveFn, value: unknown): number => {
+    const resultLeafIndex = this.store.alloc([value]);
+    this.store.bindDeriveResult(derive, resultLeafIndex);
+    return resultLeafIndex;
+  };
+
   // bindVar의 식 버전 - 연산자가 붙은 값(TEXT_EXPR/ATTR_*_EXPR)을 세어 현재 값을 주고, 식이
-  // 읽는 칸이 바뀌면 다시 세어 update에 넘긴다.
+  // 읽는 칸이 바뀌면 다시 센 값을 update에 넘긴다.
   //
-  // IF_EXPR과 달리 결과 leaf를 안 잡는다 - 값을 받아 DOM에 바로 쓰므로 중간에 담을 자리가
-  // 필요 없다(IF_EXPR은 분기가 조건 leaf 하나를 구독하는 구조라 잡는다). 보간 식도 결과 leaf로 옮기면
-  // onChange 없이 쓴다.
+  // 식의 결과를 담을 leaf를 잡아 그 leaf를 통지 구독한다 - 식이 바뀌면 파생 구독이 그 leaf에 쓰고, 값이
+  // 달라졌을 때만 통지 구독인 update가 DOM을 쓴다. 결과 leaf는 파생 구독을 가진 가지가 없어질 때
+  // 반납된다(freeBranchTree).
   bindExpr = (expr: Uint8Array, update: (v: unknown) => void, argumentSourcePairs: TScope, branch: TBranch) => {
-    return this.subscribeExpr(expr, argumentSourcePairs, branch, update).value;
+    const { value, derive } = this.subscribeExpr(expr, argumentSourcePairs, branch);
+    this.bindLeaf(this.allocResultLeaf(derive, value), update, branch);
+    return value;
   };
 
   // 식을 처음 세고, 식이 읽은 leaf마다 파생 구독을 가지에 싣는다. 처음 센 값과 파생 구독 함수를 돌려준다.
@@ -1528,35 +1544,22 @@ export class VM {
   // leaf에 write하는 것은 구독 층이다(결과 leaf는 호출자가 store.bindDeriveResult로 연결한다). 구독은
   // branch에 실어 가지와 생애를 함께 한다.
   //
-  // onChange는 결과 leaf 없이 값이 바뀔 때 DOM을 쓰는 보간 식이 쓰는 임시 인자다. 다시 센 값이 지난번과
-  // 다를 때만 부른다.
-  //
   // 파생 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 leaf에 같은 함수를 건다. leaf마다
   // 함수를 만들면 1만 행 목록에서 함수가 수만 개 늘어, 메모리가 CPU 캐시를 넘쳐 다시 세기가 오히려
   // 느려진다.
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 메서드로 나눈다. 한 메서드 안에서 나누면 구독 함수가 잡는
   // 컨텍스트에 다른 쪽 변수의 자리까지 생긴다.
-  subscribeExpr = (
-    expr: Uint8Array,
-    pairs: TScope,
-    branch: TBranch,
-    onChange?: (v: unknown) => void,
-  ): { value: unknown; derive: TDeriveFn } => {
+  subscribeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch): { value: unknown; derive: TDeriveFn } => {
     const table = this.skipTable(expr);
     return table === null
-      ? this.subscribeWholeExpr(expr, pairs, branch, onChange)
-      : this.subscribePartialExpr(expr, pairs, table, branch, onChange);
+      ? this.subscribeWholeExpr(expr, pairs, branch)
+      : this.subscribePartialExpr(expr, pairs, table, branch);
   };
 
   // 건너뛸 부분식이 없는 식. cache도 건너뛰기 표도 두지 않고, leaf가 바뀌면 처음부터 센다. 같은 flush에서
   // 읽는 leaf 여럿이 바뀌어도 구독 층이 함수당 한 번만 부르므로 한 번이면 된다.
-  subscribeWholeExpr = (
-    expr: Uint8Array,
-    pairs: TScope,
-    branch: TBranch,
-    onChange?: (v: unknown) => void,
-  ): { value: unknown; derive: TDeriveFn } => {
+  subscribeWholeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch): { value: unknown; derive: TDeriveFn } => {
     const reads: number[] = [];
     const value = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
     const readLeaves: number[] = [];
@@ -1565,16 +1568,8 @@ export class VM {
         readLeaves.push(reads[i]);
       }
     }
-    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 onChange를 부르지 않는다.
-    let lastValue = value;
-    const derive: TDeriveFn = () => {
-      const v = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, null);
-      if (v !== lastValue) {
-        lastValue = v;
-        onChange?.(v);
-      }
-      return v;
-    };
+    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 구독 층이 쓰지 않는다.
+    const derive: TDeriveFn = () => this.runExpr(expr, pairs, null, null, SKIP_NOTHING, null);
     for (const leafIndex of readLeaves) {
       addDeriveToBranch(branch, leafIndex, derive);
     }
@@ -1594,7 +1589,6 @@ export class VM {
     pairs: TScope,
     table: TExprSkipTable,
     branch: TBranch,
-    onChange?: (v: unknown) => void,
   ): { value: unknown; derive: TDeriveFn } => {
     const cache: unknown[] = new Array(table.opCount);
     const { value, leafOfVar } = this.evalExpr(expr, pairs, table, cache);
@@ -1646,10 +1640,7 @@ export class VM {
           }
         }
       }
-      if (v !== lastValue) {
-        lastValue = v;
-        onChange?.(v);
-      }
+      lastValue = v;
       return v;
     };
     // 같은 leaf를 읽는 변수가 여럿이면 한 번만 건다 - 두 번 걸면 한 번 바뀔 때 식을 두 번 다시 센다.

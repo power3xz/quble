@@ -742,8 +742,7 @@ export class ResumeInterpreter {
   ): number => {
     const expr = vm.module.defs[compId].exprs[this.code[pc++]];
     const { value, derive } = vm.subscribeExpr(expr, argumentSourcePairs, branch);
-    const condLeafIndex = vm.store.alloc([value]);
-    vm.store.bindDeriveResult(derive, condLeafIndex);
+    const condLeafIndex = vm.allocResultLeaf(derive, value);
     return this.buildIfRegion(
       vm,
       pc,
