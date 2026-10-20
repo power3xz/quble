@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
-import { activateIf, appendIfRegion, THEN_INDEX, type TBranch, type TRegion } from "./region.ts";
+import { activateIf, appendIfRegion, type TBranch, THEN_INDEX, type TRegion } from "./region.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 
 void mount;

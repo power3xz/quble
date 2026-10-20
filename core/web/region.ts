@@ -85,8 +85,10 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
 
 // 파생 구독을 가지의 목록에 더한다. 목록은 처음 더할 때 만든다 - 파생 구독이 없는 가지는 배열을 잡지 않는다.
 export const addDeriveToBranch = (branch: TBranch, leafIndex: number, fn: TDeriveFn): void => {
-  (branch.deriveLeafIndices ??= []).push(leafIndex);
-  (branch.deriveFns ??= []).push(fn);
+  branch.deriveLeafIndices ??= [];
+  branch.deriveLeafIndices.push(leafIndex);
+  branch.deriveFns ??= [];
+  branch.deriveFns.push(fn);
 };
 
 // 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detach 함수가 전담.

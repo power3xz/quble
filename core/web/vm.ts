@@ -65,7 +65,7 @@ import {
   instrSize,
 } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, buildSkipTable, type TExprSkipTable, type TSkipPastOps } from "./expr-skip-table.ts";
-import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject, type TSubscriber } from "./leaf-store.ts";
+import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
 import {
   forBodyEnd,
   ifBranchRanges,
