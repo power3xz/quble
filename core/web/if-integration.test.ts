@@ -23,6 +23,7 @@ before(() => {
     "composed_triple",
     "if_with_context",
     "lit_bool_if",
+    "if_attr_var",
   ]) {
     qubb[name] = buildFixture(name);
   }
@@ -113,6 +114,80 @@ test("단일 if: 꺼져 있던 가지를 처음 켤 때도 한 번만 쓴다", (
     ["A"],
   );
   assert.deepEqual(texts(host), ["A"]);
+});
+
+test("단일 if: 꺼진 동안 바뀌지 않은 값은 다시 켤 때 쓰지 않는다", () => {
+  const { host, set } = instantiate("single_if", ["cond", "a", "b"], { cond: true, a: "A", b: "B" });
+  set("cond", false);
+  const writes = textWritesDuring(() => set("cond", true));
+  assert.deepEqual(
+    writes.filter((v) => v === "A"),
+    [],
+  );
+  assert.deepEqual(texts(host), ["A"]);
+});
+
+test("단일 if: 꺼진 동안 바뀐 값은 다시 켤 때 한 번 쓴다", () => {
+  const { host, set } = instantiate("single_if", ["cond", "a", "b"], { cond: true, a: "A", b: "B" });
+  set("cond", false);
+  set("a", "A2");
+  const writes = textWritesDuring(() => set("cond", true));
+  assert.deepEqual(
+    writes.filter((v) => v === "A2"),
+    ["A2"],
+  );
+  assert.deepEqual(texts(host), ["A2"]);
+});
+
+test("단일 if: 꺼진 동안 바뀌었다 되돌아온 값은 다시 켤 때 쓰지 않는다", () => {
+  const { host, set } = instantiate("single_if", ["cond", "a", "b"], { cond: true, a: "A", b: "B" });
+  set("cond", false);
+  set("a", "A2");
+  set("a", "A");
+  const writes = textWritesDuring(() => set("cond", true));
+  assert.deepEqual(
+    writes.filter((v) => v === "A"),
+    [],
+  );
+  assert.deepEqual(texts(host), ["A"]);
+});
+
+// action 동안 속성에 쓴 값들. 런타임은 속성 칸을 setAttribute로 쓴다.
+const attributeWritesDuring = (name: string, action: () => void) => {
+  const elementProto = (document.defaultView as unknown as typeof globalThis).Element.prototype;
+  const original = elementProto.setAttribute;
+  const writes: unknown[] = [];
+  elementProto.setAttribute = function (attributeName: string, value: string) {
+    if (attributeName === name) {
+      writes.push(value);
+    }
+    original.call(this, attributeName, value);
+  };
+  try {
+    action();
+  } finally {
+    elementProto.setAttribute = original;
+  }
+  return writes;
+};
+
+test("속성 변수 바인딩: 꺼진 동안 바뀌지 않은 값은 다시 켤 때 쓰지 않고, 바뀐 값은 한 번 쓴다", () => {
+  const { host, set } = instantiate("if_attr_var", ["cond", "tip"], { cond: true, tip: "t" });
+  const title = () => host.querySelector("p")?.getAttribute("title");
+  set("cond", false);
+  assert.deepEqual(
+    attributeWritesDuring("title", () => set("cond", true)),
+    [],
+  );
+  assert.equal(title(), "t");
+
+  set("cond", false);
+  set("tip", "t2");
+  assert.deepEqual(
+    attributeWritesDuring("title", () => set("cond", true)),
+    ["t2"],
+  );
+  assert.equal(title(), "t2");
 });
 
 test("단일 if: 활성 가지 set은 즉시 반영", () => {
