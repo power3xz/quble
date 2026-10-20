@@ -1769,12 +1769,18 @@ export class VM {
       }
       case OP_TEXT_EXPR: {
         // operand: expr_index
-        node.textContent = this.bindExpr(
+        lastValue = this.bindExpr(
           this.module.defs[compId].exprs[code[pc]],
-          (v) => (node.textContent = v as string),
+          (v) => {
+            if (v !== lastValue) {
+              lastValue = v;
+              node.textContent = v as string;
+            }
+          },
           argumentSourcePairs,
           branch,
-        ) as string;
+        );
+        node.textContent = lastValue as string;
         return;
       }
     }

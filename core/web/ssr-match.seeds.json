@@ -637,6 +637,7 @@
     }
   ],
   "for_expr_free": [{ "nums": [1, 2, 3] }, { "nums": [] }],
+  "if_text_expr": [{ "cond": true, "a": 1 }, { "cond": false, "a": 1 }],
   "for_array_edit": [
     {
       "tags": ["a", "b", "c"]

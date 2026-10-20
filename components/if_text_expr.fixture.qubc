@@ -1,0 +1,10 @@
+component IfTextExpr {
+  props { cond: bool, a: number }
+  template {
+    div() {
+      @if (cond) {
+        p() { ${a + 1} }
+      }
+    }
+  }
+}
