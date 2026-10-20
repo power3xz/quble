@@ -42,6 +42,8 @@ export type TSubscriber = (value: unknown, leafIndex: LeafIndex, flushLeaves?: R
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
   set: (leafIndex: LeafIndex, value: unknown) => void;
+  // leaf에 값만 쓴다 - 파생 구독도 통지 구독도 트리거하지 않는다.
+  write: (leafIndex: LeafIndex, value: unknown) => void;
   notify: (leafIndex: LeafIndex) => void;
   batch: (fn: () => void) => void;
   alloc: (values: unknown[]) => LeafIndex;
@@ -64,8 +66,13 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     if (leafStore.get(leafIndex) === value) {
       return;
     }
-    leafStore.set(leafIndex, value);
+    write(leafIndex, value);
     notify(leafIndex);
+  };
+
+  // leaf에 값만 쓴다. 구독을 트리거하지 않아, 부른 쪽이 통지할 leaf를 직접 모아야 한다.
+  const write = (leafIndex: LeafIndex, value: unknown): void => {
+    leafStore.set(leafIndex, value);
   };
 
   // leaf의 값은 바꾸지 않고, 그 leaf에 걸린 구독 함수들을 호출한다. set은 값이 같으면 구독 함수를
@@ -177,6 +184,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   return {
     get: leafStore.get,
     set,
+    write,
     notify,
     batch,
     alloc,
