@@ -1611,9 +1611,21 @@ export class VM {
       //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
       //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, leafOfVar로는 바깥이 안 보인다.
       let changedVarMask = 0;
-      for (let n = 0; n < leafOfVar.length; n++) {
-        if (changedLeaves.has(leafOfVar[n])) {
-          changedVarMask |= 1 << n;
+      if (changedLeaves.size < leafOfVar.length) {
+        // 바뀐 leaf가 변수보다 적으면 바뀐 leaf를 훑어 정수로 비교한다(1000행이 읽는 기준값 하나가 바뀐 경우).
+        for (const leafIndex of changedLeaves) {
+          for (let n = 0; n < leafOfVar.length; n++) {
+            if (leafOfVar[n] === leafIndex) {
+              changedVarMask |= 1 << n;
+            }
+          }
+        }
+      } else {
+        // 바뀐 leaf가 많으면 변수를 훑어 Set에 묻는다(바뀐 leaf가 수천 개인 batch).
+        for (let n = 0; n < leafOfVar.length; n++) {
+          if (changedLeaves.has(leafOfVar[n])) {
+            changedVarMask |= 1 << n;
+          }
         }
       }
       // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
