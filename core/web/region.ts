@@ -83,6 +83,12 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     lazyBuild: null, // runtime.ts가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
   });
 
+// 파생 구독을 가지의 목록에 더한다. 목록은 처음 더할 때 만든다 - 파생 구독이 없는 가지는 배열을 잡지 않는다.
+export const addDeriveToBranch = (branch: TBranch, leafIndex: number, fn: TDeriveFn): void => {
+  (branch.deriveLeafIndices ??= []).push(leafIndex);
+  (branch.deriveFns ??= []).push(fn);
+};
+
 // 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detach 함수가 전담.
 const teardownBranchSubs = (store: Store, branch: TBranch): void => {
   const { leafIndices, updateFns, deriveLeafIndices, deriveFns } = branch;
@@ -124,6 +130,11 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
     // https://chromium.googlesource.com/v8/v8/+/4b215c76384844d8ec20114bf116ced0088047b3/src/objects/js-objects.h#687
     branch.leafIndices = leafIndices.slice();
     branch.updateFns = updateFns.slice();
+    // 파생 구독 목록도 push로 용량이 커져 있어 같은 이유로 길이만큼의 사본으로 바꾼다.
+    if (deriveLeafIndices !== null && deriveFns !== null) {
+      branch.deriveLeafIndices = deriveLeafIndices.slice();
+      branch.deriveFns = deriveFns.slice();
+    }
   }
   if (branch.everAttached) {
     const leaves = [...leafIndices];

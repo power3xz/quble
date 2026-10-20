@@ -1,7 +1,7 @@
 // 인덱스 접근 식이 더 이상 읽지 않는 leaf의 구독을 실제로 푸는지.
 //
 // 화면으로는 가릴 수 없다 - 구독 함수는 자기가 읽지 않는 leafIndex로 호출되면 바로 끝나므로, 풀지 않고
-// 남겨도 화면은 같다. 그래서 store의 subscribe/unsubscribe를 감싸 leaf마다 건 횟수에서 푼 횟수를 뺀다.
+// 남겨도 화면은 같다. 그래서 store의 subscribeDerive/unsubscribeDerive를 감싸 leaf마다 건 횟수에서 푼 횟수를 뺀다.
 // 식이 `${rows[cursor].title}` 하나뿐이라 그 증감이 곧 이 식의 구독이다.
 
 import assert from "node:assert/strict";
@@ -28,7 +28,8 @@ const handlers: THandlers = {
   },
 };
 
-type TSubscribeFn = (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
+type TDeriveFn = (changedLeaves: readonly number[]) => unknown;
+type TSubscribeDeriveFn = (leafIndex: number, fn: TDeriveFn, resultLeafIndex?: number) => void;
 
 // 인스턴스를 만든 뒤부터 leaf마다 건 횟수 - 푼 횟수를 센다.
 const instantiate = () => {
@@ -37,17 +38,17 @@ const instantiate = () => {
     handlers,
   );
   const host = mount(inst);
-  const store = inst.store as unknown as { subscribe: TSubscribeFn; unsubscribe: TSubscribeFn };
+  const store = inst.store as unknown as { subscribeDerive: TSubscribeDeriveFn; unsubscribeDerive: TSubscribeDeriveFn };
   const net = new Map<number, number>();
   const count = (leafIndex: number, d: number) => net.set(leafIndex, (net.get(leafIndex) ?? 0) + d);
-  const { subscribe, unsubscribe } = store;
-  store.subscribe = (leafIndex, fn) => {
+  const { subscribeDerive, unsubscribeDerive } = store;
+  store.subscribeDerive = (leafIndex, fn, resultLeafIndex) => {
     count(leafIndex, 1);
-    subscribe(leafIndex, fn);
+    subscribeDerive(leafIndex, fn, resultLeafIndex);
   };
-  store.unsubscribe = (leafIndex, fn) => {
+  store.unsubscribeDerive = (leafIndex, fn) => {
     count(leafIndex, -1);
-    unsubscribe(leafIndex, fn);
+    unsubscribeDerive(leafIndex, fn);
   };
   return {
     netOf: (leafIndex: number) => net.get(leafIndex) ?? 0,

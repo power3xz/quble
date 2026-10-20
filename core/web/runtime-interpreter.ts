@@ -827,12 +827,13 @@ export class RuntimeInterpreter {
     parent: Node,
   ): number => {
     const expr = vm.module.defs[compId].exprs[vm.code[pc++]];
-    // 식이 읽는 칸이 바뀌면 식을 다시 세어 파생 칸(condLeafIndex)에 넣는다. 그 set이 아래
-    // buildIfRegion이 건 구독을 깨워 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
-    // 때문이다. 구독은 부모 가지에 실어 생애를 함께 한다(파생 칸 구독과 같은 관례). 구독 함수는
-    // 칸이 바뀔 때 불리므로, 그때는 아래에서 파생 칸을 이미 잡아 두었다.
-    const value = vm.subscribeExpr(expr, argumentSourcePairs, branch, (v) => vm.store.set(condLeafIndex, v));
+    // 식이 읽는 칸이 바뀌면 식을 다시 센 값을 구독 층이 결과 leaf(condLeafIndex)에 write한다. 그 값이 바뀌면
+    // 아래 buildIfRegion이 건 통지 구독이 불려 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
+    // 때문이다. 파생 구독은 부모 가지에 실어 생애를 함께 한다. 결과 leaf는 식의 첫 값으로 잡으므로 식을 센
+    // 뒤에 만들어 연결한다.
+    const { value, derive } = vm.subscribeExpr(expr, argumentSourcePairs, branch);
     const condLeafIndex = vm.store.alloc([value]);
+    vm.store.bindDeriveResult(derive, condLeafIndex);
     return this.buildIfRegion(
       vm,
       pc,
