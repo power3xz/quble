@@ -1,0 +1,10 @@
+component IfAttrVar {
+  props { cond: bool, tip: string }
+  template {
+    div() {
+      @if (cond) {
+        p(title={tip}) { "x" }
+      }
+    }
+  }
+}

@@ -23,3 +23,12 @@ for (const n of [1000, 5000, 10000]) {
   const bumped = rows.map((r) => ({ ...r, price: r.price + 1, qty: r.qty + 1, discount: r.discount + 1, stock: r.stock + 1, url: `${r.url}?v=1` }));
   writeFileSync(new URL(`./public/bulk-${n}.json`, import.meta.url), JSON.stringify(bumped));
 }
+
+// orders-toggle 테스트의 데이터 - 켰다 끄는 두 목록(A 100행, B 10행). 행 수와 무관해 한 파일뿐이다. 앞의 orders
+// 데이터가 같은 난수열에서 나오므로 그 뒤에 만들어야 기존 데이터가 달라지지 않는다.
+const toggleRows = (count) =>
+  Array.from({ length: count }, (_, i) => ({ id: i + 1, price: int(100, 10000), qty: int(0, 10), discount: int(0, 500) }));
+writeFileSync(
+  new URL("./public/data-toggle.json", import.meta.url),
+  JSON.stringify({ rowsA: toggleRows(100), rowsB: toggleRows(10), showA: true, showB: true, rate: 1300 }),
+);

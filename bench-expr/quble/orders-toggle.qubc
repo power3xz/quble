@@ -1,0 +1,56 @@
+component OrdersToggle {
+  props {
+    rowsA: { id: number, price: number, qty: number, discount: number }[],
+    rowsB: { id: number, price: number, qty: number, discount: number }[],
+    showA: bool,
+    showB: bool,
+    rate: number
+  }
+  events {
+    SHOW_A({})
+    HIDE_A({})
+    SHOW_B({})
+    HIDE_B({})
+    RATE({ nextRate: 2650 - rate })
+  }
+  template {
+    div(class="orders") {
+      div(class="orders__bar") {
+        button(id="btn-show-a" @click:SHOW_A) { "A 켜기" }
+        button(id="btn-hide-a" @click:HIDE_A) { "A 끄기" }
+        button(id="btn-show-b" @click:SHOW_B) { "B 켜기" }
+        button(id="btn-hide-b" @click:HIDE_B) { "B 끄기" }
+        button(id="btn-rate" @click:RATE) { "환율 변경" }
+        span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } }
+      }
+      @if (showA) {
+        div(class="orders__list orders__list--a") {
+          @for (row of rowsA) {
+            div(class="row") {
+              span(class="row__id") { ${row.id} }
+              span(class="row__price") { ${row.price} }
+              span(class="row__qty") { ${row.qty} }
+              span(class="row__amount") { ${(row.price * row.qty - row.discount) * rate} }
+              span(class="row__total") { ${row.price * row.qty} }
+              span(class="row__tag" data-id={row.id} data-warn={row.qty > 0 && row.price * row.qty > 30000}) { "!" }
+            }
+          }
+        }
+      }
+      @if (showB) {
+        div(class="orders__list orders__list--b") {
+          @for (row of rowsB) {
+            div(class="row") {
+              span(class="row__id") { ${row.id} }
+              span(class="row__price") { ${row.price} }
+              span(class="row__qty") { ${row.qty} }
+              span(class="row__amount") { ${(row.price * row.qty - row.discount) * rate} }
+              span(class="row__total") { ${row.price * row.qty} }
+              span(class="row__tag" data-id={row.id} data-warn={row.qty > 0 && row.price * row.qty > 30000}) { "!" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

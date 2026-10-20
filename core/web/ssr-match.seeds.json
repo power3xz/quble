@@ -978,6 +978,7 @@
       "tags": ["t0", "t1", "t2"]
     }
   ],
+  "if_attr_var": [{ "cond": true, "tip": "t" }, { "cond": false, "tip": "t" }],
   "if_expr": [
     {
       "count": 0,

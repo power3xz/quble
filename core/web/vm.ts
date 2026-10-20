@@ -1790,16 +1790,25 @@ export class VM {
   ): void => {
     const code = this.code;
     const u16 = (at: number) => code[at] | (code[at + 1] << 8);
+    // 구독 함수가 직전에 쓴 값. 가지를 다시 켤 때 따라잡기가 칸마다 구독 함수를 부르므로, 꺼진 동안 바뀌지
+    // 않은 값은 쓰지 않는다. case 블록 안에 두면 클로저가 쓰는 블록 Context가 바인딩마다 따로 할당된다.
+    let lastValue: unknown;
     switch (op) {
       case OP_TEXT_VAR: {
         // operand: scope_index, offset
-        node.textContent = this.bindVar(
+        lastValue = this.bindVar(
           code[pc],
           code[pc + 1],
-          (v) => (node.textContent = v as string),
+          (v) => {
+            if (v !== lastValue) {
+              lastValue = v;
+              node.textContent = v as string;
+            }
+          },
           argumentSourcePairs,
           branch,
-        ) as string;
+        );
+        node.textContent = lastValue as string;
         return;
       }
       case OP_TEXT_EXPR: {
@@ -1818,14 +1827,19 @@ export class VM {
     const nameIndex = u16(pc);
     const name =
       op === OP_ATTR_G_VAR || op === OP_ATTR_G_EXPR ? ATTRS[nameIndex] : (this.module.constpool[nameIndex] as string);
-    const update = (v: unknown) => setAttributeSafely(el, name, v);
-    const v =
+    const update = (v: unknown) => {
+      if (v !== lastValue) {
+        lastValue = v;
+        setAttributeSafely(el, name, v);
+      }
+    };
+    lastValue =
       op === OP_ATTR_G_VAR || op === OP_ATTR_L_VAR
         ? // 이어서 scope_index, offset
           this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
         : // 이어서 expr_index
           this.bindExpr(this.module.defs[compId].exprs[code[pc + 2]], update, argumentSourcePairs, branch);
-    setAttributeSafely(el, name, v);
+    setAttributeSafely(el, name, lastValue);
   };
 
   // 리소스 로드 - resId의 URL로 <link>를 document.head에 삽입. 이미 삽입한 href는
