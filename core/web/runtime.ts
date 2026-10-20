@@ -5,10 +5,11 @@
 //
 // 바이트코드를 훑어 DOM/구독을 짓는 VM은 vm.ts에 있다.
 
+import type { TArrayInfo } from "./array-info.ts";
 import { decode, type TModule, type TQubleBytecode } from "./decode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
-import { type TArrayInfo, THEN_INDEX } from "./region.ts";
+import { THEN_INDEX } from "./region.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import { nodesOf, plantRoot, type THandlers, VM } from "./vm.ts";
 

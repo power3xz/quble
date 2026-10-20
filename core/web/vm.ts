@@ -22,6 +22,7 @@ type TDigitString = `${TDigit}` | `${TDigit}${TDigit}`;
 
 type TIndexSymbol = `$${TDigitString}`;
 
+import { appendArrayInfo, freeArrayInfo, type TArrayInfo } from "./array-info.ts";
 import {
   FV_CONST,
   FV_EXPR,
@@ -78,15 +79,12 @@ import {
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
-  appendArrayInfo,
   appendBranchOfForRegion,
   appendForRegion,
   appendIfRegion,
   attachGrownIterations,
   ELSE_INDEX,
-  freeArrayInfo,
   removeBranchAt,
-  type TArrayInfo,
   type TBranch,
   THEN_INDEX,
   type TRegion,

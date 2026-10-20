@@ -51,38 +51,13 @@ export type TRegion = {
   detach: (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion) => void;
   // 실제로 삽입한 마지막 DOM 노드를 돌려준다 - @for가 다음 회차를 이 노드 뒤에 이어 붙일 때 쓴다.
   attach: (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion) => ChildNode;
-};
-
-// @for가 순회하는 배열 하나의 요소 위치. elemSize = 요소 하나가 차지하는 leaf 수(스칼라 1, 객체는
-// 필드 수) - 요소 안은 시작에서 이만큼 연속. elemStartLeafIndices[i] = i번째 요소의 시작 leafIndex -
-// 요소가 흩어져 할당돼 연속을 못 믿으므로 회차마다 시작을 명시로 든다(요소 사이는 리스트, 요소
-// 안은 elemSize 산술). 요소 추가/제거 시 이 목록으로 유지/회수 대상을 가른다.
-export type TArrayInfo = {
-  elemSize: number;
-  elemTypeRef: number; // 요소 하나의 타입 - 요소 추가(push)가 값을 이 타입대로 store에 펴 심는다.
-  elemStartLeafIndices: number[];
-  indexLeafIndices: number[]; // elemStartLeafIndices와 나란한 요소별 인덱스 leaf - [i]=i번째 요소의 회차 번호를 담은 store 칸. 몸체 ${i}/$0가 이 leaf를 읽어, 중간 제거(removeAt) 시 뒤 칸을 set으로 당기면 자동 갱신된다(값 고정/위치 이동 설계의 인덱스 반응성). @for 순회될 때만 lazy로 채운다(sizeLeafIndex와 같은 결). count-for는 중간 제거가 없어(꼬리만) 이걸 안 쓴다.
-  sizeLeafIndex: number | null; // 이 배열이 @for 순회 대상이 되면(그때만) 요소 수를 담는 store 칸을 lazy 확보 - 그 칸 구독이 grow/shrink 발화. @for에 안 쓰이면 null(길이 칸 낭비 없음).
-  forRegionIndices: number[]; // 이 배열을 순회하는 @for region들. 요소 중간 제거(removeAt)가 이들 각각의 i번째 회차 DOM을 뗀다 - 하나만 들면 나중 @for가 앞의 것을 덮어써 한쪽만 정확히 떨어지고 나머지는 길이 칸 구독이 꼬리를 잘라 다른 요소가 사라진다. @for에 안 쓰이면 빈 배열(뗄 DOM 없음). 인덱스 칸(indexLeafIndices)은 자리 번호라 @for가 여럿이어도 같은 값이므로 배열이 그대로 소유하고 회차들이 함께 구독한다.
+  // 이 region이 DOM에 남긴 끝 노드를 든 가지의 branchIndex. @if는 보이는 가지, @for는 마지막 회차다.
+  // 가지가 없으면(@for 회차 0개) undefined - 이때 끝은 region의 anchor다.
+  tail: (region: TRegion) => number | undefined;
 };
 
 export const THEN_INDEX = 0;
 export const ELSE_INDEX = 1;
-
-// arrayPool에 빈 배열정보를 alloc하고 그 arrayInfoIndex를 돌려준다.
-export const appendArrayInfo = (arrayPool: Pool<TArrayInfo>, elemSize: number, elemTypeRef: number): number =>
-  arrayPool.alloc({
-    elemSize,
-    elemTypeRef,
-    elemStartLeafIndices: [],
-    indexLeafIndices: [],
-    sizeLeafIndex: null,
-    forRegionIndices: [],
-  });
-
-// arrayPool의 arrayInfo 칸을 반납한다 - 요소 제거(removeAt)가 중첩 배열을 재귀 회수할 때 그 배열의 arrayInfo를 반납.
-export const freeArrayInfo = (arrayPool: Pool<TArrayInfo>, arrayInfoIndex: number): void =>
-  arrayPool.release(arrayInfoIndex);
 
 // branchPool에 빈 Branch를 alloc(빈 칸 재사용 or append)하고 그 branchIndex를 돌려준다.
 const appendBranch = (branchPool: Pool<TBranch>): number =>
@@ -201,6 +176,8 @@ const attachIf = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBra
   return attachOneBranch(store, regionPool, branchPool, region.anchor, region.branchIndices[region.shownIndex]);
 };
 
+const tailIf = (region: TRegion): number | undefined => region.branchIndices[region.shownIndex];
+
 // regionPool에 @if Region을 스폰한다 - anchor(주석 노드) 생성 + 빈 then/else Branch까지 갖춰 alloc하고
 // 그 인덱스를 돌려준다. anchor를 DOM 트리 어디에 붙일지는 호출자 몫(IF는 nodeTop, 루트는 fragment).
 // 인덱스는 alloc이 정한다(빈 칸 재사용 시 length와 다름) - 그래서 anchor 라벨은 alloc 후 채운다.
@@ -220,6 +197,7 @@ export const appendIfRegion = (
     shownIndex: -1,
     detach: detachIf,
     attach: attachIf,
+    tail: tailIf,
   });
   anchor.data = `qb:region#${regionIndex}`;
   return regionIndex;
@@ -275,6 +253,8 @@ const attachFor = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBr
   return after;
 };
 
+const tailFor = (region: TRegion): number | undefined => region.branchIndices[region.branchIndices.length - 1];
+
 // regionPool에 @for Region을 스폰한다 - anchor만 만들고 회차는 0개(회차는 appendBranchOfForRegion이
 // 하나씩 더한다). countLeafIndex = 반복 횟수를 읽는 leaf(구독 대상). anchor는 appendIfRegion과 같다.
 export const appendForRegion = (
@@ -290,6 +270,7 @@ export const appendForRegion = (
     shownIndex: -1,
     detach: detachFor,
     attach: attachFor,
+    tail: tailFor,
   });
   anchor.data = `qb:region#${regionIndex}`;
   return regionIndex;
@@ -324,11 +305,7 @@ const branchTailNode = (
   for (const childRegionIndex of branch.childRegionIndices) {
     const child = regionPool.entries[childRegionIndex];
     if (child.anchor === last) {
-      // @if는 보이는 가지, @for(shownIndex -1)는 마지막 회차가 끝이다. 회차가 없으면 anchor가 끝이다.
-      const tailBranchIndex =
-        child.shownIndex === -1
-          ? child.branchIndices[child.branchIndices.length - 1]
-          : child.branchIndices[child.shownIndex];
+      const tailBranchIndex = child.tail(child);
       if (tailBranchIndex !== undefined) {
         last = branchTailNode(regionPool, branchPool, branchPool.entries[tailBranchIndex], child.anchor);
       }
