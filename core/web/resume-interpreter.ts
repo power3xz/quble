@@ -39,21 +39,9 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
+import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
 import { staticElementEnds } from "./static-spans.ts";
-import {
-  CONST,
-  nodesOf,
-  RAW,
-  STORE,
-  scopeWithIteration,
-  slotKind,
-  slotRef,
-  snapshotStacks,
-  type TScope,
-  type TSlotPlaceholderContent,
-  type TWalkStacks,
-  type VM,
-} from "./vm.ts";
+import { nodesOf, snapshotStacks, type TSlotPlaceholderContent, type TWalkStacks, type VM } from "./vm.ts";
 
 // SSR이 텍스트 경계를 주석으로 남긴다(crates/renderer).
 //   <!---->          이웃한 두 텍스트 노드 사이의 경계 - 지운다

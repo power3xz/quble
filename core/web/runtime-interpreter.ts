@@ -32,21 +32,9 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
+import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
-import {
-  CONST,
-  RAW,
-  STORE,
-  scopeWithIteration,
-  slotKind,
-  slotRef,
-  snapshotStacks,
-  type TScope,
-  type TSlotPlaceholderContent,
-  type TTemplatePlan,
-  type TWalkStacks,
-  type VM,
-} from "./vm.ts";
+import { snapshotStacks, type TSlotPlaceholderContent, type TTemplatePlan, type TWalkStacks, type VM } from "./vm.ts";
 
 export class RuntimeInterpreter {
   // 안 변하는 @for(FOR_RAW/CONST) - 각 회차를 지금 가지(startRegion/Branch)에 fragment로

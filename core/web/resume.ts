@@ -8,7 +8,8 @@ import { Pool } from "./pool-allocator.ts";
 import { THEN_INDEX } from "./region.ts";
 import { ResumeInterpreter } from "./resume-interpreter.ts";
 import { RuntimeInterpreter } from "./runtime-interpreter.ts";
-import { leafCountOf, nodesOf, plantRoot, STORE, type THandlers, VM } from "./vm.ts";
+import { STORE } from "./scope.ts";
+import { leafCountOf, nodesOf, plantRoot, type THandlers, VM } from "./vm.ts";
 
 // quble-ssr --flat-data(Rust plant_root의 직렬화)이 낸 store. plantRoot가 만드는 leaves와 같다.
 //   leaves  store 배열. JSON에 undefined가 없어 그 자리는 null이고 undef에 인덱스가 적혀 있다.

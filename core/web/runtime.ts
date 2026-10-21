@@ -14,7 +14,8 @@ import { RuntimeInterpreter } from "./runtime-interpreter.ts";
 import { nodesOf, plantRoot, type THandlers, VM } from "./vm.ts";
 
 // 다른 파일이 runtime.ts에서 가져다 쓰는 이름들.
-export { leafCountOf, plantRoot, STORE, swapDeleteAt, type THandlers } from "./vm.ts";
+export { STORE } from "./scope.ts";
+export { leafCountOf, plantRoot, swapDeleteAt, type THandlers } from "./vm.ts";
 
 // ── 공개 API ─────────────────────────────────────────────────────────
 // qubb 바이트를 디코드해 blueprintOf(compId)를 돌려준다.
