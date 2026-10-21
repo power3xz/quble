@@ -8,9 +8,9 @@
 
 ## 하는 중
 
-구독 층 분리 - 구독을 연계 구독과 통지 후 구독으로 나누고, 식은 결과 칸을 잡아 DOM 바인딩이
-leafIndex만 구독하게 변경. 설계 초안은 `core/web/SUBSCRIPTION-LAYERS.md`. 브랜치
-`subscription-layers`.
+표현식 층 재설계 - 식 구독을 구독 층(`subscription-layers`에서 이어받음) 위에 다시 쌓고, main 대비
+성능 저하(클릭 +2~26%, 힙 +4~7%)를 줄이는 구조를 정한다. 구독 층 설계 초안은
+`core/web/SUBSCRIPTION-LAYERS.md`. 브랜치 `expr-layer`.
 
 ## 할 것
 
