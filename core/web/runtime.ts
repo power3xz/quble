@@ -56,7 +56,7 @@ export const instantiate = (
 ) => {
   // rootFlat은 plantRoot가 준 [STORE, base, ...] - 루트 슬롯은 정의상 전부 외부 데이터 바인딩이라 STORE.
   const vm = new VM(module, handlers, resources, loadedHrefs, leaves, arrayPool, rootFlat, new RuntimeInterpreter());
-  const { store, regionPool, branchPool } = vm;
+  const { store, exprInstancePool, regionPool, branchPool } = vm;
   // 루트 anchor 주석은 인스턴스 노드의 맨 앞에 선다.
   const rootRegion = vm.openRootRegion();
 
@@ -69,7 +69,7 @@ export const instantiate = (
   // anchor를 루트 노드 앞에 - attach가 anchor.after로 채운다
   const fragment = document.createDocumentFragment();
   fragment.append(rootRegion.anchor, ...rootNodes);
-  rootRegion.attach(store, regionPool, branchPool, rootRegion);
+  rootRegion.attach(store, exprInstancePool, regionPool, branchPool, rootRegion);
   // fragment 자식 전체(anchor + 붙은 트리)가 이 인스턴스의 루트 노드들(append 시 비워지므로 배열로).
   const nodes = Array.from(fragment.childNodes);
   return vm.instanceOf(rootRegion, nodes);

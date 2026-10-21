@@ -25,26 +25,23 @@ export type Store = {
   free: (start: number, size: number) => void;
   subscribe: (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
   unsubscribe: (leafIndex: number, fn: (v: unknown, leafIndex: number) => void) => void;
-  subscribeDerive: (leafIndex: number, fn: TDeriveFn, resultLeafIndex?: number) => void;
-  unsubscribeDerive: (leafIndex: number, fn: TDeriveFn) => void;
-  refreshDerive: (fn: TDeriveFn, leafIndex: number) => void;
-  freeDeriveResult: (fn: TDeriveFn) => void;
 };
 
-// leaf-store.ts의 TDeriveSubscriber와 같은 계약(Store 타입과 같은 이유로 다시 정의한다).
-export type TDeriveFn = (changedLeaves: ReadonlySet<number>) => unknown;
+// expr-layer.ts의 ExprInstancePool 중 가지가 부르는 부분(Store 타입과 같은 이유로 다시 정의한다).
+export type TExprInstanceLayer = {
+  attach: (exprInstanceIndex: number, catchUp: boolean) => void;
+  detach: (exprInstanceIndex: number) => void;
+  release: (exprInstanceIndex: number) => void;
+};
 
 export type TBranch = {
   nodes: ChildNode[];
   leafIndices: number[];
   // updateFns[i]는 leafIndices[i]를 구독하는 통지 구독이다. 변수 leaf와 식의 결과 leaf가 든다.
   updateFns: Array<(v: unknown, leafIndex: number) => void>;
-  // 파생 구독(식 구독 함수). deriveFns[i]는 입력 leaf deriveInputLeafIndices[i]를 구독한다. 식 하나가 leaf 여럿을
-  // 읽으면 그 leaf들 자리에 같은 함수가 든다. 결과 leaf는 이 목록에 없다 - store가 함수에 연결해 두었다가 가지가
-  // 없어질 때 반납한다(freeBranchTree). 값을 돌려주는 함수라 updateFns와 호출 방식이 달라 따로 둔다. 파생 구독이
-  // 없는 가지는 null이라 배열을 잡지 않는다.
-  deriveInputLeafIndices: number[] | null;
-  deriveFns: TDeriveFn[] | null;
+  // 이 가지가 든 식 인스턴스 번호(표현식 층의 풀). 가지가 붙고 떼지고 없어질 때 그 인스턴스의 파생 구독을 걸고 풀고
+  // 반납한다. 식이 없는 가지는 null이라 배열을 잡지 않는다.
+  exprInstanceIndices: number[] | null;
   childRegionIndices: number[];
   built: boolean;
   // 한 번이라도 DOM에 붙었나. 처음 붙을 때는 build가 방금 현재 값으로 노드를 채웠으므로 놓친 값을
@@ -58,9 +55,21 @@ export type TRegion = {
   condLeafIndex: number;
   anchor: Comment;
   shownIndex: number;
-  detach: (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion) => void;
+  detach: (
+    store: Store,
+    exprs: TExprInstanceLayer,
+    regionPool: Pool<TRegion>,
+    branchPool: Pool<TBranch>,
+    region: TRegion,
+  ) => void;
   // 실제로 삽입한 마지막 DOM 노드를 돌려준다 - @for가 다음 회차를 이 노드 뒤에 이어 붙일 때 쓴다.
-  attach: (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion) => ChildNode;
+  attach: (
+    store: Store,
+    exprs: TExprInstanceLayer,
+    regionPool: Pool<TRegion>,
+    branchPool: Pool<TBranch>,
+    region: TRegion,
+  ) => ChildNode;
   // 이 region이 DOM에 남긴 끝 노드를 든 가지의 branchIndex. @if는 보이는 가지, @for는 마지막 회차다.
   // 가지가 없으면(@for 회차 0개) undefined - 이때 끝은 region의 anchor다.
   tail: (region: TRegion) => number | undefined;
@@ -75,31 +84,28 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     nodes: [],
     leafIndices: [],
     updateFns: [],
-    deriveInputLeafIndices: null,
-    deriveFns: null,
+    exprInstanceIndices: null,
     childRegionIndices: [],
     built: false,
     everAttached: false,
     lazyBuild: null, // runtime.ts가 비활성 가지에 심는다. 첫 활성화 때 1회 호출.
   });
 
-// 파생 구독을 가지의 목록에 더한다. 목록은 처음 더할 때 만든다 - 파생 구독이 없는 가지는 배열을 잡지 않는다.
-export const addDeriveToBranch = (branch: TBranch, leafIndex: number, fn: TDeriveFn): void => {
-  branch.deriveInputLeafIndices ??= [];
-  branch.deriveInputLeafIndices.push(leafIndex);
-  branch.deriveFns ??= [];
-  branch.deriveFns.push(fn);
+// 식 인스턴스를 가지의 목록에 더한다. 목록은 처음 더할 때 만든다 - 식이 없는 가지는 배열을 잡지 않는다.
+export const addExprInstanceToBranch = (branch: TBranch, exprInstanceIndex: number): void => {
+  branch.exprInstanceIndices ??= [];
+  branch.exprInstanceIndices.push(exprInstanceIndex);
 };
 
 // 한 가지의 직속 구독만 끊는다(잎 작업). 자식 Region 재귀는 detach 함수가 전담.
-const teardownBranchSubs = (store: Store, branch: TBranch): void => {
-  const { leafIndices, updateFns, deriveInputLeafIndices, deriveFns } = branch;
+const teardownBranchSubs = (store: Store, exprs: TExprInstanceLayer, branch: TBranch): void => {
+  const { leafIndices, updateFns, exprInstanceIndices } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
     store.unsubscribe(leafIndices[i], updateFns[i]);
   }
-  if (deriveInputLeafIndices !== null && deriveFns !== null) {
-    for (let i = 0; i < deriveInputLeafIndices.length; i++) {
-      store.unsubscribeDerive(deriveInputLeafIndices[i], deriveFns[i]);
+  if (exprInstanceIndices !== null) {
+    for (let i = 0; i < exprInstanceIndices.length; i++) {
+      exprs.detach(exprInstanceIndices[i]);
     }
   }
 };
@@ -110,18 +116,13 @@ const teardownBranchSubs = (store: Store, branch: TBranch): void => {
 // 1 -> 5로 바뀌면 떼어 둔 <p>에는 1이 남아 있어, 다시 붙일 때 구독 함수를 5로 불러 고친다. 처음
 // 붙을 때는 build가 방금 현재 값으로 채웠으니 부르지 않는다 - 부르면 같은 값을 두 번 쓴다.
 //
-// 모두 구독한 뒤에 따라잡는다. `${rows[cursor].title}`에서 꺼진 동안 cursor가 바뀌었으면 따라잡는
-// 구독 함수가 READ_LEAF가 읽는 leafIndex가 바뀐 것을 보고 구독을 풀고 다시 건다 - 그 leafIndex들이 이미
-// 구독된 상태여야 맞게 풀린다. 다시 걸면서 branch의 두 배열도 고치므로 따라잡기는 사본으로 돈다.
-const restoreBranchSubs = (store: Store, branch: TBranch): void => {
-  const { leafIndices, updateFns, deriveInputLeafIndices, deriveFns } = branch;
+// 통지 구독을 걸고 놓친 값을 따라잡은 뒤에 식 인스턴스를 붙인다(exprs.attach). 식 인스턴스는 입력 leaf에 파생
+// 구독을 걸고, 다시 붙을 때는 놓친 입력을 따라잡아 결과 leaf를 맞춘다. `${rows[cursor].title}`에서 꺼진 동안
+// cursor가 바뀌었으면 따라잡는 파생 구독이 READ_LEAF가 읽는 leafIndex가 바뀐 것을 보고 구독을 풀고 다시 건다.
+const restoreBranchSubs = (store: Store, exprs: TExprInstanceLayer, branch: TBranch): void => {
+  const { leafIndices, updateFns, exprInstanceIndices } = branch;
   for (let i = 0; i < leafIndices.length; i++) {
     store.subscribe(leafIndices[i], updateFns[i]);
-  }
-  if (deriveInputLeafIndices !== null && deriveFns !== null) {
-    for (let i = 0; i < deriveInputLeafIndices.length; i++) {
-      store.subscribeDerive(deriveInputLeafIndices[i], deriveFns[i]);
-    }
   }
   if (!branch.everAttached) {
     // build 중 push로 커진 배열은 V8이 늘어날 몫까지 잡아 둔다. 용량이 모자라면 원소 n + n/2 + 16개
@@ -132,10 +133,9 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
     // https://chromium.googlesource.com/v8/v8/+/4b215c76384844d8ec20114bf116ced0088047b3/src/objects/js-objects.h#687
     branch.leafIndices = leafIndices.slice();
     branch.updateFns = updateFns.slice();
-    // 파생 구독 목록도 push로 용량이 커져 있어 같은 이유로 길이만큼의 사본으로 바꾼다.
-    if (deriveInputLeafIndices !== null && deriveFns !== null) {
-      branch.deriveInputLeafIndices = deriveInputLeafIndices.slice();
-      branch.deriveFns = deriveFns.slice();
+    // 식 인스턴스 목록도 push로 용량이 커져 있어 같은 이유로 길이만큼의 사본으로 바꾼다.
+    if (exprInstanceIndices !== null) {
+      branch.exprInstanceIndices = exprInstanceIndices.slice();
     }
   }
   if (branch.everAttached) {
@@ -144,10 +144,10 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
     for (let i = 0; i < leaves.length; i++) {
       fns[i](store.get(leaves[i]), leaves[i]); // 비활성 동안 놓친 값 따라잡기
     }
-    if (deriveInputLeafIndices !== null && deriveFns !== null) {
-      for (let i = 0; i < deriveInputLeafIndices.length; i++) {
-        store.refreshDerive(deriveFns[i], deriveInputLeafIndices[i]);
-      }
+  }
+  if (exprInstanceIndices !== null) {
+    for (let i = 0; i < exprInstanceIndices.length; i++) {
+      exprs.attach(exprInstanceIndices[i], branch.everAttached);
     }
   }
   branch.everAttached = true;
@@ -156,6 +156,7 @@ const restoreBranchSubs = (store: Store, branch: TBranch): void => {
 // 한 가지를 떼어낸다. anchor가 평평한 형제라 자식 swap 노드가 잔류하므로 자식 Region까지 재귀로 뗀다.
 const detachOneBranch = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   branchIndex: number,
@@ -164,10 +165,10 @@ const detachOneBranch = (
   for (const node of branch.nodes) {
     node.remove();
   }
-  teardownBranchSubs(store, branch);
+  teardownBranchSubs(store, exprs, branch);
   for (const childRegionIndex of branch.childRegionIndices) {
     const child = regionPool.entries[childRegionIndex];
-    child.detach(store, regionPool, branchPool, child);
+    child.detach(store, exprs, regionPool, branchPool, child);
   }
 };
 
@@ -178,6 +179,7 @@ const detachOneBranch = (
 // 컨텐츠 앞에 끼어들어 역순이 된다(회차 안 @if 버그).
 const attachOneBranch = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   anchor: ChildNode,
@@ -188,13 +190,13 @@ const attachOneBranch = (
   if (branch.nodes.length === 0 || anchor.nextSibling !== branch.nodes[0]) {
     anchor.after(...branch.nodes);
   }
-  restoreBranchSubs(store, branch);
+  restoreBranchSubs(store, exprs, branch);
   // branch.nodes 마지막 노드(없으면 anchor 자신)가 이 가지의 끝 - 단 그게 자식 region anchor면
   // 그 자식이 붙인 노드가 진짜 끝이다.
   let last: ChildNode = branch.nodes.length ? (branch.nodes[branch.nodes.length - 1] as ChildNode) : anchor;
   for (const childRegionIndex of branch.childRegionIndices) {
     const child = regionPool.entries[childRegionIndex];
-    const childLast = child.attach(store, regionPool, branchPool, child);
+    const childLast = child.attach(store, exprs, regionPool, branchPool, child);
     if (child.anchor === last) {
       last = childLast; // 마지막 노드가 이 자식 anchor였으면 자식 끝으로 확장
     }
@@ -205,15 +207,27 @@ const attachOneBranch = (
 // ── @if: then/else 둘 중 shownIndex 하나만 보인다 ──────────────────────────────
 
 // region을 받아 그 활성(shownIndex) 가지를 끈다.
-const detachIf = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion): void => {
-  detachOneBranch(store, regionPool, branchPool, region.branchIndices[region.shownIndex]);
+const detachIf = (
+  store: Store,
+  exprs: TExprInstanceLayer,
+  regionPool: Pool<TRegion>,
+  branchPool: Pool<TBranch>,
+  region: TRegion,
+): void => {
+  detachOneBranch(store, exprs, regionPool, branchPool, region.branchIndices[region.shownIndex]);
 };
 
 // region을 받아 그 활성(shownIndex) 가지를 켠다. 최초 인스턴스화의 부착도 이 함수로 한다
 // (runtime.ts가 build로 트리만 만든 뒤 루트 Region부터 호출). 루트도 anchor를 가져 자식과
 // 균일 처리된다(분기 없음).
-const attachIf = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion): ChildNode => {
-  return attachOneBranch(store, regionPool, branchPool, region.anchor, region.branchIndices[region.shownIndex]);
+const attachIf = (
+  store: Store,
+  exprs: TExprInstanceLayer,
+  regionPool: Pool<TRegion>,
+  branchPool: Pool<TBranch>,
+  region: TRegion,
+): ChildNode => {
+  return attachOneBranch(store, exprs, regionPool, branchPool, region.anchor, region.branchIndices[region.shownIndex]);
 };
 
 const tailIf = (region: TRegion): number | undefined => region.branchIndices[region.shownIndex];
@@ -247,6 +261,7 @@ export const appendIfRegion = (
 // 전역 branchIndex는 region.branchIndices[shownIndex]로 한 번 더 푼다.
 export const activateIf = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
@@ -257,7 +272,7 @@ export const activateIf = (
     return;
   }
   if (region.shownIndex !== -1) {
-    detachIf(store, regionPool, branchPool, region); // 이전 shownIndex 기준으로 끈다
+    detachIf(store, exprs, regionPool, branchPool, region); // 이전 shownIndex 기준으로 끈다
   }
   const nextBranch = branchPool.entries[region.branchIndices[shownIndex]];
   if (!nextBranch.built) {
@@ -267,15 +282,21 @@ export const activateIf = (
     // 방금 build하며 구독은 현재 가지에 모인 채다(즉시 구독 안 함, attachIf가 켠다).
   }
   region.shownIndex = shownIndex; // attach가 shownIndex로 가지를 찾으므로 먼저 갱신
-  attachIf(store, regionPool, branchPool, region);
+  attachIf(store, exprs, regionPool, branchPool, region);
 };
 
 // ── @for: 가지가 회차 리스트, 전부 동시에 보인다 ──────────────────────────
 
 // region을 받아 회차 전부를 떼어낸다.
-const detachFor = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion): void => {
+const detachFor = (
+  store: Store,
+  exprs: TExprInstanceLayer,
+  regionPool: Pool<TRegion>,
+  branchPool: Pool<TBranch>,
+  region: TRegion,
+): void => {
   for (const branchIndex of region.branchIndices) {
-    detachOneBranch(store, regionPool, branchPool, branchIndex);
+    detachOneBranch(store, exprs, regionPool, branchPool, branchIndex);
   }
 };
 
@@ -283,10 +304,16 @@ const detachFor = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBr
 // (전부 anchor 바로 뒤에 넣으면 나중 회차가 앞서 들어가 역순이 된다). 첫 회차는 anchor 뒤. 회차 안
 // @if가 있으면 그 실제 끝(자식 컨텐츠)이 attachOneBranch 반환값이라, branch.nodes만 보던 옛 방식의
 // 역순 버그가 없다.
-const attachFor = (store: Store, regionPool: Pool<TRegion>, branchPool: Pool<TBranch>, region: TRegion): ChildNode => {
+const attachFor = (
+  store: Store,
+  exprs: TExprInstanceLayer,
+  regionPool: Pool<TRegion>,
+  branchPool: Pool<TBranch>,
+  region: TRegion,
+): ChildNode => {
   let after: ChildNode = region.anchor;
   for (const branchIndex of region.branchIndices) {
-    after = attachOneBranch(store, regionPool, branchPool, after, branchIndex);
+    after = attachOneBranch(store, exprs, regionPool, branchPool, after, branchIndex);
   }
   return after;
 };
@@ -357,6 +384,7 @@ const branchTailNode = (
 // attachFor처럼 직전 회차가 실제로 남긴 끝 뒤에 잇는다(회차 안 @if 컨텐츠까지 - branch.nodes만 보면 역순).
 export const attachGrownIterations = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
@@ -366,7 +394,7 @@ export const attachGrownIterations = (
   const prev = alreadyAttachedCount > 0 ? branchPool.entries[region.branchIndices[alreadyAttachedCount - 1]] : null;
   let tail = prev ? branchTailNode(regionPool, branchPool, prev, region.anchor) : region.anchor;
   for (let i = alreadyAttachedCount; i < region.branchIndices.length; i++) {
-    tail = attachOneBranch(store, regionPool, branchPool, tail, region.branchIndices[i]);
+    tail = attachOneBranch(store, exprs, regionPool, branchPool, tail, region.branchIndices[i]);
   }
 };
 
@@ -374,21 +402,22 @@ export const attachGrownIterations = (
 // 떼기)와는 별개 - detach는 @if swap에서도 쓰여 free하면 안 되므로 안 섞는다. 호출 전 detach가
 // 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
 //
-// 가지가 든 파생 구독의 결과 leaf(보간 식, IF_EXPR 조건)도 여기서 store에 반납한다. 한 함수가 입력 leaf 여러
-// 개에 걸려 목록에 여러 번 나와도 store가 첫 번째만 반납한다.
+// 가지가 든 식 인스턴스(보간 식, IF_EXPR 조건)도 여기서 반납한다(exprs.release). 인스턴스의 참조 수가 0이 되면
+// 결과 leaf까지 store에 돌려준다.
 const freeBranchTree = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   branchIndex: number,
 ): void => {
   const branch = branchPool.entries[branchIndex];
   for (const childRegionIndex of branch.childRegionIndices) {
-    freeRegionTree(store, regionPool, branchPool, childRegionIndex);
+    freeRegionTree(store, exprs, regionPool, branchPool, childRegionIndex);
   }
-  if (branch.deriveFns !== null) {
-    for (const fn of branch.deriveFns) {
-      store.freeDeriveResult(fn);
+  if (branch.exprInstanceIndices !== null) {
+    for (const exprInstanceIndex of branch.exprInstanceIndices) {
+      exprs.release(exprInstanceIndex);
     }
   }
   branchPool.release(branchIndex);
@@ -397,13 +426,14 @@ const freeBranchTree = (
 // region(regionIndex)이 든 모든 branch를 재귀 free한 뒤 이 region 칸을 반납한다.
 const freeRegionTree = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
 ): void => {
   const region = regionPool.entries[regionIndex];
   for (const branchIndex of region.branchIndices) {
-    freeBranchTree(store, regionPool, branchPool, branchIndex);
+    freeBranchTree(store, exprs, regionPool, branchPool, branchIndex);
   }
   regionPool.release(regionIndex);
 };
@@ -412,6 +442,7 @@ const freeRegionTree = (
 // freeBranchTree(칸 반납)를 부른다 - 둘이 별개인 이유는 freeBranchTree 주석 참고.
 export const truncateFor = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
@@ -419,8 +450,8 @@ export const truncateFor = (
 ): void => {
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   for (let i = branchIndices.length - 1; i >= count; i--) {
-    detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-    freeBranchTree(store, regionPool, branchPool, branchIndices[i]);
+    detachOneBranch(store, exprs, regionPool, branchPool, branchIndices[i]);
+    freeBranchTree(store, exprs, regionPool, branchPool, branchIndices[i]);
   }
   branchIndices.length = count;
 };
@@ -430,13 +461,14 @@ export const truncateFor = (
 // 보므로 무손상이다(요소는 store에서 안 움직이고 목록만 당겨진다) - 재빌드/재바인딩 없음.
 export const removeBranchAt = (
   store: Store,
+  exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
   i: number,
 ): void => {
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
-  detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-  freeBranchTree(store, regionPool, branchPool, branchIndices[i]);
+  detachOneBranch(store, exprs, regionPool, branchPool, branchIndices[i]);
+  freeBranchTree(store, exprs, regionPool, branchPool, branchIndices[i]);
   branchIndices.splice(i, 1);
 };

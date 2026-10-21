@@ -37,8 +37,7 @@ import {
 } from "./decode.ts";
 import { ATTRS, DOM_EVENTS, setAttributeSafely } from "./dom-tables.ts";
 import { ExprEvaluator, SKIP_NOTHING } from "./expr-eval.ts";
-import { instrSize } from "./expr-opcode.ts";
-import { buildSkipPastOpsOfVars, type TExprSkipTable } from "./expr-skip-table.ts";
+import { ExprInstancePool } from "./expr-layer.ts";
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
 import {
   forBodyEnd,
@@ -53,7 +52,7 @@ import {
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
-  addDeriveToBranch,
+  addExprInstanceToBranch,
   appendBranchOfForRegion,
   appendForRegion,
   appendIfRegion,
@@ -61,14 +60,12 @@ import {
   ELSE_INDEX,
   removeBranchAt,
   type TBranch,
-  type TDeriveFn,
   THEN_INDEX,
   type TRegion,
   truncateFor,
 } from "./region.ts";
 import { CONST, RAW, STORE, slotKind, slotRef, type TScope } from "./scope.ts";
 import { type TUpdateMode, updateRoot } from "./update.ts";
-import { swapDeleteAt } from "./utils.ts";
 
 // 바이트코드를 훑어(walk) 내려가며 누적되는 가변 스택 묶음 - interpret 재진입마다 함께 흐른다.
 // @for 회차/RENDER 재진입은 같은 walkStacks를 이어 쓰고(push/pop 공유), 지연 실행(@if lazyBuild/@for grow)만
@@ -519,6 +516,7 @@ export class VM {
   store: TLeafStoreSubject;
   arrayPool: Pool<TArrayInfo>;
   evaluator: ExprEvaluator;
+  exprInstancePool: ExprInstancePool;
   regionPool: Pool<TRegion>;
   branchPool: Pool<TBranch>;
   // 진입점 argumentSourcePairs(plantRoot의 rootFlat). store(루트부터의 절대 경로) 접근에 쓴다 -
@@ -566,6 +564,7 @@ export class VM {
     this.store = createLeafStoreSubject(leaves);
     this.arrayPool = arrayPool;
     this.evaluator = new ExprEvaluator(module.constpool, this.store, arrayPool);
+    this.exprInstancePool = new ExprInstancePool(this.evaluator, this.store);
     this.regionPool = new Pool();
     this.branchPool = new Pool();
     this.rootScope = rootScope;
@@ -633,7 +632,7 @@ export class VM {
   //
   // update는 루트 props를 이름으로 갱신한다(updateRoot). destroy가 이 클로저도 놓는다 - VM을 잡고 있다.
   instanceOf = (rootRegion: TRegion, nodes: ChildNode[]) => {
-    const { module, store, regionPool, branchPool, arrayPool } = this;
+    const { module, store, exprInstancePool, regionPool, branchPool, arrayPool } = this;
     // 해체한 뒤에는 루트 region을 놓는다 - destroy 클로저가 붙들고 있으면 루트 anchor가 남는다. 이미 해체했으면
     // 풀이 비어 있어 detach가 예외를 throw하므로 두 번째 호출은 건너뛴다.
     let root: TRegion | null = rootRegion;
@@ -641,13 +640,14 @@ export class VM {
       if (root === null) {
         return;
       }
-      root.detach(store, regionPool, branchPool, root);
+      root.detach(store, exprInstancePool, regionPool, branchPool, root);
       root.anchor.remove();
       root = null;
       this.removeDelegates();
       // 떼어진 노드, region/branch/배열 정보, store의 값, VM의 캐시를 인스턴스가 붙들지 않게 한다.
       nodes.length = 0;
       store.clear();
+      exprInstancePool.clear();
       regionPool.clear();
       branchPool.clear();
       arrayPool.clear();
@@ -665,6 +665,7 @@ export class VM {
       regionPool,
       branchPool,
       arrayPool,
+      exprInstances: exprInstancePool.pool,
       store,
       destroy,
       snapshot: snapshotOf(module, store, arrayPool),
@@ -848,10 +849,10 @@ export class VM {
       buildIteration(i);
     }
     if (next > cur) {
-      attachGrownIterations(this.store, this.regionPool, this.branchPool, forRegionIndex, cur);
+      attachGrownIterations(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, cur);
     }
     if (next < cur) {
-      truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, next);
+      truncateFor(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, next);
     }
   };
 
@@ -952,7 +953,14 @@ export class VM {
       return;
     }
     this.subscribeOnBranch(branchIndex, condLeafIndex, (condValue) => {
-      activateIf(this.store, this.regionPool, this.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
+      activateIf(
+        this.store,
+        this.exprInstancePool,
+        this.regionPool,
+        this.branchPool,
+        regionIndex,
+        condValue ? THEN_INDEX : ELSE_INDEX,
+      );
     });
   };
 
@@ -1128,7 +1136,7 @@ export class VM {
   removeArrayElementAt = (array: TLeafObject, i: number): void => {
     const info = this.arrayInfoOf(array[NODE_BASE]);
     for (const forRegionIndex of info.forRegionIndices) {
-      removeBranchAt(this.store, this.regionPool, this.branchPool, forRegionIndex, i);
+      removeBranchAt(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, i);
     }
     this.freeArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef);
     info.elemStartLeafIndices.splice(i, 1);
@@ -1267,7 +1275,7 @@ export class VM {
     if (shrunk) {
       if (info.forRegionIndices.length > 0) {
         for (const forRegionIndex of info.forRegionIndices) {
-          truncateFor(this.store, this.regionPool, this.branchPool, forRegionIndex, kept);
+          truncateFor(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, kept);
         }
         for (const indexLeafIndex of info.indexLeafIndices.splice(kept)) {
           this.store.free(indexLeafIndex, 1);
@@ -1407,11 +1415,24 @@ export class VM {
     branch.updateFns.push(update);
   };
 
-  // 식의 결과를 담을 leaf를 잡아 첫 값을 넣고, derive가 돌려준 값이 그 leaf에 쓰이도록 연결한다. 결과 leaf는
-  // derive를 가진 가지가 없어질 때 반납된다(freeBranchTree). 보간 식과 IF_EXPR 조건이 함께 쓴다.
-  allocResultLeaf = (derive: TDeriveFn, value: unknown): number => {
+  // 식 인스턴스를 짓고 처음 세어 가지에 싣는다. 처음 센 값과 인스턴스 번호를 돌려준다. 구독은 가지가 붙을 때 건다
+  // (restoreBranchSubs) - 안 보이는 가지는 구독 0이다.
+  addExprInstance = (
+    expr: Uint8Array,
+    pairs: TScope,
+    branchIndex: number,
+  ): { exprInstanceIndex: number; value: unknown } => {
+    const exprInstanceIndex = this.exprInstancePool.create(expr, pairs);
+    const value = this.exprInstancePool.evaluate(exprInstanceIndex);
+    addExprInstanceToBranch(this.branchAt(branchIndex), exprInstanceIndex);
+    return { exprInstanceIndex, value };
+  };
+
+  // 식 인스턴스의 결과를 담을 leaf를 잡아 첫 값을 넣고, 인스턴스가 돌려준 값이 그 leaf에 쓰이도록 연결한다. 결과
+  // leaf는 인스턴스를 든 가지가 없어질 때 반납된다(freeBranchTree). 보간 식과 IF_EXPR 조건이 함께 쓴다.
+  allocResultLeaf = (exprInstanceIndex: number, value: unknown): number => {
     const resultLeafIndex = this.store.alloc([value]);
-    this.store.bindDeriveResult(derive, resultLeafIndex);
+    this.exprInstancePool.bindResultLeaf(exprInstanceIndex, resultLeafIndex);
     return resultLeafIndex;
   };
 
@@ -1419,201 +1440,12 @@ export class VM {
   // 읽는 칸이 바뀌면 다시 센 값을 update에 넘긴다.
   //
   // 식의 결과를 담을 leaf를 잡아 그 leaf를 통지 구독한다 - 식이 바뀌면 파생 구독이 그 leaf에 쓰고, 값이
-  // 달라졌을 때만 통지 구독인 update가 DOM을 쓴다. 결과 leaf는 파생 구독을 가진 가지가 없어질 때
+  // 달라졌을 때만 통지 구독인 update가 DOM을 쓴다. 결과 leaf는 식 인스턴스를 든 가지가 없어질 때
   // 반납된다(freeBranchTree).
   bindExpr = (expr: Uint8Array, update: (v: unknown) => void, argumentSourcePairs: TScope, branchIndex: number) => {
-    const { value, derive } = this.subscribeExpr(expr, argumentSourcePairs, branchIndex);
-    this.bindLeaf(this.allocResultLeaf(derive, value), update, branchIndex);
+    const { exprInstanceIndex, value } = this.addExprInstance(expr, argumentSourcePairs, branchIndex);
+    this.bindLeaf(this.allocResultLeaf(exprInstanceIndex, value), update, branchIndex);
     return value;
-  };
-
-  // 식을 처음 세고, 식이 읽은 leaf마다 파생 구독을 가지에 싣는다. 처음 센 값과 파생 구독 함수를 돌려준다.
-  // 파생 구독 함수는 바뀐 leaf를 받아 식을 다시 세어 값을 돌려주고 store에 쓰지 않는다 - 돌려준 값을 결과
-  // leaf에 write하는 것은 구독 층이다(결과 leaf는 호출자가 store.bindDeriveResult로 연결한다). 구독은
-  // branch에 실어 가지와 생애를 함께 한다.
-  //
-  // 파생 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 leaf에 같은 함수를 건다. leaf마다
-  // 함수를 만들면 1만 행 목록에서 함수가 수만 개 늘어, 메모리가 CPU 캐시를 넘쳐 다시 세기가 오히려
-  // 느려진다.
-  //
-  // 건너뛸 부분식이 있는 식과 없는 식을 메서드로 나눈다. 한 메서드 안에서 나누면 구독 함수가 잡는
-  // 컨텍스트에 다른 쪽 변수의 자리까지 생긴다.
-  subscribeExpr = (expr: Uint8Array, pairs: TScope, branchIndex: number): { value: unknown; derive: TDeriveFn } => {
-    const table = this.evaluator.skipTable(expr);
-    return table === null
-      ? this.subscribeWholeExpr(expr, pairs, branchIndex)
-      : this.subscribePartialExpr(expr, pairs, table, branchIndex);
-  };
-
-  // 건너뛸 부분식이 없는 식. cache도 건너뛰기 표도 두지 않고, leaf가 바뀌면 처음부터 센다. 같은 flush에서
-  // 읽는 leaf 여럿이 바뀌어도 구독 층이 함수당 한 번만 부르므로 한 번이면 된다.
-  subscribeWholeExpr = (
-    expr: Uint8Array,
-    pairs: TScope,
-    branchIndex: number,
-  ): { value: unknown; derive: TDeriveFn } => {
-    const branch = this.branchAt(branchIndex);
-    const reads: number[] = [];
-    const value = this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
-    const readLeaves: number[] = [];
-    for (let i = 0; i < reads.length; i += 2) {
-      if (!readLeaves.includes(reads[i])) {
-        readLeaves.push(reads[i]);
-      }
-    }
-    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 구독 층이 쓰지 않는다.
-    const { evaluator } = this;
-    const derive: TDeriveFn = () => evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, null);
-    for (const leafIndex of readLeaves) {
-      addDeriveToBranch(branch, leafIndex, derive);
-    }
-    return { value, derive };
-  };
-
-  // 건너뛸 부분식이 있는 식. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 함수는 불릴 때
-  // 받은 바뀐 leaf 모음에서 자기가 읽는 변수를 모아 건너뛰기 표를 고른다.
-  //
-  // 인스턴스가 드는 것은 cache와 leafOfVar(변수마다 읽는 leafIndex) 둘이다. 건너뛰기 표는 식 정의가
-  // 공유하고, 행마다 다른 것은 읽는 leafIndex뿐이다.
-  //
-  // `${rows[cursor].title}`에서 cursor가 바뀌면 READ_LEAF가 읽는 leafIndex가 바뀐다. 다시 센 뒤 구독을
-  // 그 READ_LEAF가 방금 읽은 leafIndex에 다시 건다(resubscribeReadLeaf).
-  subscribePartialExpr = (
-    expr: Uint8Array,
-    pairs: TScope,
-    table: TExprSkipTable,
-    branchIndex: number,
-  ): { value: unknown; derive: TDeriveFn } => {
-    const cache: unknown[] = new Array(table.opCount);
-    const { evaluator } = this;
-    const { value, leafOfVar } = evaluator.evalExpr(expr, pairs, table, cache);
-    // 인덱스 접근이 있으면 배열 변수가 READ_LEAF가 읽을 leafIndex를 정하므로 readLeafIndexOpsByVar 어딘가가
-    // 비어 있지 않다.
-    const hasIndexAccess = table.readLeafIndexOpsByVar.some((ops) => ops.length > 0);
-    let lastValue = value;
-    // 구독 층이 한 flush에서 함수를 한 번만 불러 바뀐 leaf 전체를 넘긴다. 그중 이 식이 읽는 변수를 모아 바뀐
-    // 변수 전체로 건너뛰기 표를 골라 한꺼번에 센다. leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든
-    // 옛 값을 섞어 쓴다.
-    const derive: TDeriveFn = (changedLeaves) => {
-      // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 번호의 비트로 모은다.
-      //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
-      //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, leafOfVar로는 바깥이 안 보인다.
-      let changedVarMask = 0;
-      if (changedLeaves.size < leafOfVar.length) {
-        // 바뀐 leaf가 변수보다 적으면 바뀐 leaf를 훑어 정수로 비교한다(1000행이 읽는 기준값 하나가 바뀐 경우).
-        for (const leafIndex of changedLeaves) {
-          for (let n = 0; n < leafOfVar.length; n++) {
-            if (leafOfVar[n] === leafIndex) {
-              changedVarMask |= 1 << n;
-            }
-          }
-        }
-      } else {
-        // 바뀐 leaf가 많으면 변수를 훑어 Set에 묻는다(바뀐 leaf가 수천 개인 batch).
-        for (let n = 0; n < leafOfVar.length; n++) {
-          if (changedLeaves.has(leafOfVar[n])) {
-            changedVarMask |= 1 << n;
-          }
-        }
-      }
-      // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
-      // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
-      if (changedVarMask === 0) {
-        return lastValue;
-      }
-      // 변수 하나만 바뀌면 식 정의가 공유하는 표를 쓴다. 둘 이상이면 그 변수들을 모두 품지 않은 부분식의
-      // 표를 만든다(부모가 같은 칸을 두 prop으로 넘긴 경우도 여기다).
-      const skipPastOps =
-        (changedVarMask & (changedVarMask - 1)) === 0
-          ? table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)]
-          : buildSkipPastOpsOfVars(table, expr, changedVarMask);
-      const v = evaluator.reevalExpr(expr, pairs, table, cache, skipPastOps);
-      if (hasIndexAccess) {
-        for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
-          if (changedVarMask & (1 << varNumber)) {
-            this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branchIndex, derive, varNumber);
-          }
-        }
-      }
-      lastValue = v;
-      return v;
-    };
-    // 같은 leaf를 읽는 변수가 여럿이면 한 번만 건다 - 두 번 걸면 한 번 바뀔 때 식을 두 번 다시 센다.
-    const branch = this.branchAt(branchIndex);
-    for (let n = 0; n < leafOfVar.length; n++) {
-      const leafIndex = leafOfVar[n];
-      if (leafIndex >= 0 && leafOfVar.indexOf(leafIndex) === n) {
-        addDeriveToBranch(branch, leafIndex, derive);
-      }
-    }
-    return { value, derive };
-  };
-
-  // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.
-  // READ_LEAF에 leafIndex를 넘긴 연산의 cache 값이 방금 읽은 leafIndex다.
-  resubscribeReadLeavesDependingOn = (
-    expr: Uint8Array,
-    table: TExprSkipTable,
-    cache: unknown[],
-    leafOfVar: number[],
-    branchIndex: number,
-    subscriber: TDeriveFn,
-    varNumber: number,
-  ): void => {
-    for (const op of table.readLeafIndexOpsByVar[varNumber]) {
-      const readLeafVar = table.varAt[op + instrSize(expr[op])];
-      const newLeafIndex = cache[table.cacheIndex[op]] as number;
-      this.resubscribeReadLeaf(leafOfVar, branchIndex, subscriber, readLeafVar, newLeafIndex);
-    }
-  };
-
-  // READ_LEAF 변수(varNumber) 하나가 읽는 leafIndex를 newLeafIndex로 옮긴다. 옛 leafIndex를 읽는 변수가
-  // 더 없으면 구독을 풀어 branch에서 빼고, 새 leafIndex를 읽던 변수가 없었으면 구독해 branch에 더한다.
-  // leafIndex가 그대로면 아무것도 하지 않는다.
-  //
-  // `${rows[cursor].score + rows[0].score}`에서 cursor가 1 -> 0이면 두 변수가 rows[0].score를 읽게 돼
-  // 구독은 그대로 하나다.
-  resubscribeReadLeaf = (
-    leafOfVar: number[],
-    branchIndex: number,
-    subscriber: TDeriveFn,
-    varNumber: number,
-    newLeafIndex: number,
-  ): void => {
-    const oldLeafIndex = leafOfVar[varNumber];
-    if (oldLeafIndex === newLeafIndex) {
-      return;
-    }
-    const newAlreadyRead = leafOfVar.includes(newLeafIndex);
-    leafOfVar[varNumber] = newLeafIndex;
-    const oldDropped = oldLeafIndex >= 0 && !leafOfVar.includes(oldLeafIndex);
-    if (oldDropped) {
-      this.store.unsubscribeDerive(oldLeafIndex, subscriber);
-    }
-    if (!newAlreadyRead) {
-      this.store.subscribeDerive(newLeafIndex, subscriber);
-    }
-
-    // 가지 목록. 옛 것을 빼고 새 것을 더할 때는 같은 자리를 덮어쓴다. 식 구독은 파생 구독 목록에 있다.
-    const branch = this.branchAt(branchIndex);
-    const deriveInputLeafIndices = branch.deriveInputLeafIndices as number[];
-    const deriveFns = branch.deriveFns as TDeriveFn[];
-    if (oldDropped) {
-      for (let i = 0; i < deriveInputLeafIndices.length; i++) {
-        if (deriveInputLeafIndices[i] === oldLeafIndex && deriveFns[i] === subscriber) {
-          if (newAlreadyRead) {
-            swapDeleteAt(deriveInputLeafIndices, i);
-            swapDeleteAt(deriveFns, i);
-          } else {
-            deriveInputLeafIndices[i] = newLeafIndex;
-          }
-          return;
-        }
-      }
-    }
-    if (!newAlreadyRead) {
-      addDeriveToBranch(branch, newLeafIndex, subscriber);
-    }
   };
 
   // 값 자리 명령 하나(TEXT_VAR, TEXT_EXPR, ATTR_G_VAR, ATTR_L_VAR, ATTR_G_EXPR, ATTR_L_EXPR)를 node에

@@ -816,8 +816,8 @@ export class RuntimeInterpreter {
     // 아래 buildIfRegion이 건 통지 구독이 불려 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
     // 때문이다. 파생 구독은 부모 가지에 실어 생애를 함께 한다. 결과 leaf는 식의 첫 값으로 잡으므로 식을 센
     // 뒤에 만들어 연결한다.
-    const { value, derive } = vm.subscribeExpr(expr, argumentSourcePairs, branchIndex);
-    const condLeafIndex = vm.allocResultLeaf(derive, value);
+    const { exprInstanceIndex, value } = vm.addExprInstance(expr, argumentSourcePairs, branchIndex);
+    const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(
       vm,
       pc,
