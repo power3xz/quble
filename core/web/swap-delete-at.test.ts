@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { swapDeleteAt } from "./runtime.ts";
+import { swapDeleteAt } from "./utils.ts";
 
 test("처음을 빼면 마지막 원소가 그 자리로 온다", () => {
   const items = ["a", "b", "c"];
