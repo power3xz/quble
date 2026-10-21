@@ -82,12 +82,12 @@ export const SKIP_NOTHING: TSkipPastOps = {};
 const exprStack: unknown[] = [];
 
 export class ExprEvaluator {
-  module: TModule;
+  constpool: TModule["constpool"];
   store: LeafStoreSubject;
   arrayPool: Pool<TArrayInfo>;
 
-  constructor(module: TModule, store: LeafStoreSubject, arrayPool: Pool<TArrayInfo>) {
-    this.module = module;
+  constructor(constpool: TModule["constpool"], store: LeafStoreSubject, arrayPool: Pool<TArrayInfo>) {
+    this.constpool = constpool;
     this.store = store;
     this.arrayPool = arrayPool;
   }
@@ -202,7 +202,7 @@ export class ExprEvaluator {
           continue;
         }
         case EXPR_LOAD_CONST: {
-          exprStack[sp++] = this.module.constpool[expr[pc] | (expr[pc + 1] << 8)];
+          exprStack[sp++] = this.constpool[expr[pc] | (expr[pc + 1] << 8)];
           pc += 2;
           continue;
         }
@@ -266,7 +266,7 @@ export class ExprEvaluator {
     const ref = slotRef(pairs, scopeIndex);
     const kind = slotKind(pairs, scopeIndex);
     if (kind === CONST) {
-      return this.module.constpool[ref];
+      return this.constpool[ref];
     }
     if (kind === RAW) {
       return ref;

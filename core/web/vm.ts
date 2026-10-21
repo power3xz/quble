@@ -579,7 +579,7 @@ export class VM {
     this.loadedHrefs = loadedHrefs;
     this.store = createLeafStoreSubject(leaves);
     this.arrayPool = arrayPool;
-    this.evaluator = new ExprEvaluator(module, this.store, arrayPool);
+    this.evaluator = new ExprEvaluator(module.constpool, this.store, arrayPool);
     this.regionPool = new Pool();
     this.branchPool = new Pool();
     this.rootScope = rootScope;
