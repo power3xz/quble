@@ -971,9 +971,9 @@ export class VM {
 
   // 부모 가지 밑에 @for region을 열고 그 regionIndex를 돌려준다. 부모 가지에 자식으로 등록해 부모가 detach될 때
   // 따라 떼어지게 한다. anchor는 resume이 SSR DOM의 앵커를 넘길 때만 받는다. 앵커를 DOM 어디에 붙일지는 호출자 몫.
-  openForRegion = (branch: TBranch, countLeafIndex: number, anchor?: Comment): number => {
+  openForRegion = (branchIndex: number, countLeafIndex: number, anchor?: Comment): number => {
     const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex, anchor);
-    branch.childRegionIndices.push(forRegionIndex);
+    this.branchAt(branchIndex).childRegionIndices.push(forRegionIndex);
     return forRegionIndex;
   };
 
@@ -998,11 +998,11 @@ export class VM {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
     anchor: Comment,
   ): number => {
     const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, anchor);
-    branch.childRegionIndices.push(regionIndex);
+    this.branchAt(branchIndex).childRegionIndices.push(regionIndex);
     const region = this.regionPool.entries[regionIndex];
     const thenBranchIndex = region.branchIndices[THEN_INDEX];
     const elseBranchIndex = region.branchIndices[ELSE_INDEX];
@@ -1039,7 +1039,7 @@ export class VM {
             );
     };
 
-    this.subscribeIfCond(branch, condLeafIndex, regionIndex);
+    this.subscribeIfCond(branchIndex, condLeafIndex, regionIndex);
 
     // build는 "생성만" 한다 - 보이는 가지의 노드를 만들어 branch.nodes에 담고 shownIndex만 정한다. DOM 부착과
     // 구독 등록은 attachIf가 일괄한다. anchor는 평평한 형제라, 여기서 자식 노드를 붙이면 부모 nodes에 섞여 detach가
@@ -1061,17 +1061,18 @@ export class VM {
 
   // @if 조건 칸 구독을 부모 가지에 실어, 조건이 바뀌면 then/else 가지를 켠다. 조건 칸이 없으면(-1, CONST 조건)
   // 안 변하니 구독을 걸지 않는다(초기 가지로 고정).
-  subscribeIfCond = (branch: TBranch, condLeafIndex: number, regionIndex: number): void => {
+  subscribeIfCond = (branchIndex: number, condLeafIndex: number, regionIndex: number): void => {
     if (condLeafIndex === -1) {
       return;
     }
-    this.subscribeOnBranch(branch, condLeafIndex, (condValue) => {
+    this.subscribeOnBranch(branchIndex, condLeafIndex, (condValue) => {
       activateIf(this.store, this.regionPool, this.branchPool, regionIndex, condValue ? THEN_INDEX : ELSE_INDEX);
     });
   };
 
   // leafIndex 구독을 가지에 실어 가지와 생애를 함께 한다 - 가지가 detach/free되면 감시도 꺼진다.
-  subscribeOnBranch = (branch: TBranch, leafIndex: number, onChange: (v: unknown) => void): void => {
+  subscribeOnBranch = (branchIndex: number, leafIndex: number, onChange: (v: unknown) => void): void => {
+    const branch = this.branchAt(branchIndex);
     branch.leafIndices.push(leafIndex);
     branch.updateFns.push(onChange);
     this.store.subscribe(leafIndex, onChange);
@@ -1493,7 +1494,7 @@ export class VM {
     offset: number,
     update: (v: unknown) => void,
     argumentSourcePairs: TScope,
-    branch: TBranch,
+    branchIndex: number,
   ) => {
     const ref = slotRef(argumentSourcePairs, scopeIndex);
     const kind = slotKind(argumentSourcePairs, scopeIndex);
@@ -1508,13 +1509,14 @@ export class VM {
     // STORE 슬롯의 ref는 base leafIndex. 객체 필드면 base+offset이 그 leaf.
     const leafIndex = ref + offset;
     const initial = this.store.get(leafIndex) ?? "";
-    this.bindLeaf(leafIndex, update, branch);
+    this.bindLeaf(leafIndex, update, branchIndex);
     return initial;
   };
 
   // leaf를 가지에 실어 통지 구독한다. 구독은 가지가 붙을 때 걸리고 떼질 때 풀린다(restoreBranchSubs,
   // teardownBranchSubs). bindVar의 변수 leaf와 bindExpr의 결과 leaf가 함께 쓴다.
-  bindLeaf = (leafIndex: number, update: (v: unknown) => void, branch: TBranch): void => {
+  bindLeaf = (leafIndex: number, update: (v: unknown) => void, branchIndex: number): void => {
+    const branch = this.branchAt(branchIndex);
     branch.leafIndices.push(leafIndex);
     branch.updateFns.push(update);
   };
@@ -1533,9 +1535,9 @@ export class VM {
   // 식의 결과를 담을 leaf를 잡아 그 leaf를 통지 구독한다 - 식이 바뀌면 파생 구독이 그 leaf에 쓰고, 값이
   // 달라졌을 때만 통지 구독인 update가 DOM을 쓴다. 결과 leaf는 파생 구독을 가진 가지가 없어질 때
   // 반납된다(freeBranchTree).
-  bindExpr = (expr: Uint8Array, update: (v: unknown) => void, argumentSourcePairs: TScope, branch: TBranch) => {
-    const { value, derive } = this.subscribeExpr(expr, argumentSourcePairs, branch);
-    this.bindLeaf(this.allocResultLeaf(derive, value), update, branch);
+  bindExpr = (expr: Uint8Array, update: (v: unknown) => void, argumentSourcePairs: TScope, branchIndex: number) => {
+    const { value, derive } = this.subscribeExpr(expr, argumentSourcePairs, branchIndex);
+    this.bindLeaf(this.allocResultLeaf(derive, value), update, branchIndex);
     return value;
   };
 
@@ -1550,16 +1552,21 @@ export class VM {
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 메서드로 나눈다. 한 메서드 안에서 나누면 구독 함수가 잡는
   // 컨텍스트에 다른 쪽 변수의 자리까지 생긴다.
-  subscribeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch): { value: unknown; derive: TDeriveFn } => {
+  subscribeExpr = (expr: Uint8Array, pairs: TScope, branchIndex: number): { value: unknown; derive: TDeriveFn } => {
     const table = this.skipTable(expr);
     return table === null
-      ? this.subscribeWholeExpr(expr, pairs, branch)
-      : this.subscribePartialExpr(expr, pairs, table, branch);
+      ? this.subscribeWholeExpr(expr, pairs, branchIndex)
+      : this.subscribePartialExpr(expr, pairs, table, branchIndex);
   };
 
   // 건너뛸 부분식이 없는 식. cache도 건너뛰기 표도 두지 않고, leaf가 바뀌면 처음부터 센다. 같은 flush에서
   // 읽는 leaf 여럿이 바뀌어도 구독 층이 함수당 한 번만 부르므로 한 번이면 된다.
-  subscribeWholeExpr = (expr: Uint8Array, pairs: TScope, branch: TBranch): { value: unknown; derive: TDeriveFn } => {
+  subscribeWholeExpr = (
+    expr: Uint8Array,
+    pairs: TScope,
+    branchIndex: number,
+  ): { value: unknown; derive: TDeriveFn } => {
+    const branch = this.branchAt(branchIndex);
     const reads: number[] = [];
     const value = this.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
     const readLeaves: number[] = [];
@@ -1588,7 +1595,7 @@ export class VM {
     expr: Uint8Array,
     pairs: TScope,
     table: TExprSkipTable,
-    branch: TBranch,
+    branchIndex: number,
   ): { value: unknown; derive: TDeriveFn } => {
     const cache: unknown[] = new Array(table.opCount);
     const { value, leafOfVar } = this.evalExpr(expr, pairs, table, cache);
@@ -1636,7 +1643,7 @@ export class VM {
       if (hasIndexAccess) {
         for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
           if (changedVarMask & (1 << varNumber)) {
-            this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branch, derive, varNumber);
+            this.resubscribeReadLeavesDependingOn(expr, table, cache, leafOfVar, branchIndex, derive, varNumber);
           }
         }
       }
@@ -1644,6 +1651,7 @@ export class VM {
       return v;
     };
     // 같은 leaf를 읽는 변수가 여럿이면 한 번만 건다 - 두 번 걸면 한 번 바뀔 때 식을 두 번 다시 센다.
+    const branch = this.branchAt(branchIndex);
     for (let n = 0; n < leafOfVar.length; n++) {
       const leafIndex = leafOfVar[n];
       if (leafIndex >= 0 && leafOfVar.indexOf(leafIndex) === n) {
@@ -1660,14 +1668,14 @@ export class VM {
     table: TExprSkipTable,
     cache: unknown[],
     leafOfVar: number[],
-    branch: TBranch,
+    branchIndex: number,
     subscriber: TDeriveFn,
     varNumber: number,
   ): void => {
     for (const op of table.readLeafIndexOpsByVar[varNumber]) {
       const readLeafVar = table.varAt[op + instrSize(expr[op])];
       const newLeafIndex = cache[table.cacheIndex[op]] as number;
-      this.resubscribeReadLeaf(leafOfVar, branch, subscriber, readLeafVar, newLeafIndex);
+      this.resubscribeReadLeaf(leafOfVar, branchIndex, subscriber, readLeafVar, newLeafIndex);
     }
   };
 
@@ -1679,7 +1687,7 @@ export class VM {
   // 구독은 그대로 하나다.
   resubscribeReadLeaf = (
     leafOfVar: number[],
-    branch: TBranch,
+    branchIndex: number,
     subscriber: TDeriveFn,
     varNumber: number,
     newLeafIndex: number,
@@ -1699,6 +1707,7 @@ export class VM {
     }
 
     // 가지 목록. 옛 것을 빼고 새 것을 더할 때는 같은 자리를 덮어쓴다. 식 구독은 파생 구독 목록에 있다.
+    const branch = this.branchAt(branchIndex);
     const deriveInputLeafIndices = branch.deriveInputLeafIndices as number[];
     const deriveFns = branch.deriveFns as TDeriveFn[];
     if (oldDropped) {
@@ -1742,7 +1751,7 @@ export class VM {
     node: Node,
     compId: number,
     argumentSourcePairs: TScope,
-    branch: TBranch,
+    branchIndex: number,
   ): void => {
     const code = this.code;
     const u16 = (at: number) => code[at] | (code[at + 1] << 8);
@@ -1762,7 +1771,7 @@ export class VM {
             }
           },
           argumentSourcePairs,
-          branch,
+          branchIndex,
         );
         node.textContent = lastValue as string;
         return;
@@ -1778,7 +1787,7 @@ export class VM {
             }
           },
           argumentSourcePairs,
-          branch,
+          branchIndex,
         );
         node.textContent = lastValue as string;
         return;
@@ -1798,9 +1807,9 @@ export class VM {
     lastValue =
       op === OP_ATTR_G_VAR || op === OP_ATTR_L_VAR
         ? // 이어서 scope_index, offset
-          this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branch)
+          this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branchIndex)
         : // 이어서 expr_index
-          this.bindExpr(this.module.defs[compId].exprs[code[pc + 2]], update, argumentSourcePairs, branch);
+          this.bindExpr(this.module.defs[compId].exprs[code[pc + 2]], update, argumentSourcePairs, branchIndex);
     setAttributeSafely(el, name, lastValue);
   };
 

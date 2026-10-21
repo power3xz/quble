@@ -32,7 +32,6 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import type { TBranch } from "./region.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import {
   CONST,
@@ -96,14 +95,14 @@ export class RuntimeInterpreter {
     bodyStart: number,
     forEndPc: number,
     parent: Node,
-    branch: TBranch,
+    branchIndex: number,
     argumentSourcePairs: TScope,
     compId: number,
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const forRegionIndex = vm.openForRegion(branch, countLeafIndex);
+    const forRegionIndex = vm.openForRegion(branchIndex, countLeafIndex);
     const region = vm.regionAt(forRegionIndex);
     parent.appendChild(region.anchor);
 
@@ -146,7 +145,7 @@ export class RuntimeInterpreter {
     const onCount = (v: unknown) => {
       vm.resizeFor(forRegionIndex, Number(v) || 0, addIterationBranch);
     };
-    vm.subscribeOnBranch(branch, countLeafIndex, onCount); // 부모 가지와 생애를 함께 한다
+    vm.subscribeOnBranch(branchIndex, countLeafIndex, onCount); // 부모 가지와 생애를 함께 한다
   };
 
   // 배열 반응 @for - reactiveCountFor와 같은 구조(전용 region + 회차 branch + 길이 구독으로 grow/shrink)로,
@@ -161,7 +160,7 @@ export class RuntimeInterpreter {
     bodyStart: number,
     forEndPc: number,
     parent: Node,
-    branch: TBranch,
+    branchIndex: number,
     argumentSourcePairs: TScope,
     compId: number,
     pathPrefix: string,
@@ -171,7 +170,7 @@ export class RuntimeInterpreter {
     const info = vm.arrayInfoOf(arrayLeafIndex);
     const sizeLeafIndex = vm.ensureIterationLeaves(info);
 
-    const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex);
+    const forRegionIndex = vm.openForRegion(branchIndex, sizeLeafIndex);
     info.forRegionIndices.push(forRegionIndex); // removeAt이 이 region들의 회차 DOM을 뗀다(같은 배열을 여러 @for가 순회할 수 있다)
     const region = vm.regionAt(forRegionIndex);
     parent.appendChild(region.anchor);
@@ -214,7 +213,7 @@ export class RuntimeInterpreter {
       // store 값이 아니라 요소 목록 길이가 진실
       vm.resizeFor(forRegionIndex, info.elemStartLeafIndices.length, addIterationBranch);
     };
-    vm.subscribeOnBranch(branch, sizeLeafIndex, onSize);
+    vm.subscribeOnBranch(branchIndex, sizeLeafIndex, onSize);
   };
 
   // 범위(startPc~endPc)의 템플릿 복제 계획. 범위마다 처음 한 번 만들어 둔다.
@@ -330,7 +329,7 @@ export class RuntimeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
   ): DocumentFragment => {
     const fragment = plan.template.cloneNode(true) as DocumentFragment;
 
@@ -370,7 +369,7 @@ export class RuntimeInterpreter {
         );
         segment = null;
       } else {
-        vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
+        vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branchIndex);
       }
     }
     return fragment;
@@ -416,7 +415,7 @@ export class RuntimeInterpreter {
         pathPrefix,
         loopIndexBase,
         walkStacks,
-        vm.branchAt(startBranchIndex),
+        startBranchIndex,
       );
     }
     const fragment = document.createDocumentFragment();
@@ -429,9 +428,8 @@ export class RuntimeInterpreter {
     let pendingSlotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [];
     let pc = startPc;
 
-    // 이 interpret이 채우는 가지. 한 호출 = 한 가지라 불변(중첩 if는 재귀 호출이 자식 가지를
-    // 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
-    const branch = vm.branchAt(startBranchIndex); // startBranchIndex는 전역 branchIndex
+    // 이 interpret이 채우는 가지는 startBranchIndex(전역 branchIndex)다. 한 호출 = 한 가지라 불변(중첩 if는
+    // 재귀 호출이 자식 가지를 새 컨텍스트로 받는다 - JS 호출 스택이 옛 region/branch 스택 역할을 대신한다).
 
     const u16at = () => {
       const v = vm.code[pc] | (vm.code[pc + 1] << 8);
@@ -474,7 +472,7 @@ export class RuntimeInterpreter {
         case OP_ATTR_G_EXPR:
         case OP_ATTR_L_EXPR: {
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          vm.bindValueSlot(op, pc, pending!, compId, argumentSourcePairs, branch);
+          vm.bindValueSlot(op, pc, pending!, compId, argumentSourcePairs, startBranchIndex);
           pc += operandLen(op);
           break;
         }
@@ -514,7 +512,7 @@ export class RuntimeInterpreter {
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR: {
           const node = document.createTextNode("");
-          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
+          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, startBranchIndex);
           pc += operandLen(op);
           nodeTop().appendChild(node);
           break;
@@ -661,7 +659,7 @@ export class RuntimeInterpreter {
             pathPrefix,
             loopIndexBase,
             walkStacks,
-            branch,
+            startBranchIndex,
             nodeTop(),
           );
           break;
@@ -675,7 +673,7 @@ export class RuntimeInterpreter {
             pathPrefix,
             loopIndexBase,
             walkStacks,
-            branch,
+            startBranchIndex,
             nodeTop(),
           );
           break;
@@ -732,7 +730,7 @@ export class RuntimeInterpreter {
               bodyStart,
               forEndPc,
               nodeTop(),
-              branch,
+              startBranchIndex,
               argumentSourcePairs,
               compId,
               pathPrefix,
@@ -758,7 +756,7 @@ export class RuntimeInterpreter {
             bodyStart,
             forEndPc,
             nodeTop(),
-            branch,
+            startBranchIndex,
             argumentSourcePairs,
             compId,
             pathPrefix,
@@ -786,7 +784,7 @@ export class RuntimeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
     parent: Node,
   ): number => {
     const condScopeIndex = vm.code[pc++];
@@ -806,7 +804,7 @@ export class RuntimeInterpreter {
       pathPrefix,
       loopIndexBase,
       walkStacks,
-      branch,
+      branchIndex,
       parent,
     );
   };
@@ -822,7 +820,7 @@ export class RuntimeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
     parent: Node,
   ): number => {
     const expr = vm.module.defs[compId].exprs[vm.code[pc++]];
@@ -830,7 +828,7 @@ export class RuntimeInterpreter {
     // 아래 buildIfRegion이 건 통지 구독이 불려 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
     // 때문이다. 파생 구독은 부모 가지에 실어 생애를 함께 한다. 결과 leaf는 식의 첫 값으로 잡으므로 식을 센
     // 뒤에 만들어 연결한다.
-    const { value, derive } = vm.subscribeExpr(expr, argumentSourcePairs, branch);
+    const { value, derive } = vm.subscribeExpr(expr, argumentSourcePairs, branchIndex);
     const condLeafIndex = vm.allocResultLeaf(derive, value);
     return this.buildIfRegion(
       vm,
@@ -842,7 +840,7 @@ export class RuntimeInterpreter {
       pathPrefix,
       loopIndexBase,
       walkStacks,
-      branch,
+      branchIndex,
       parent,
     );
   };
@@ -870,7 +868,7 @@ export class RuntimeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
     parent: Node,
   ): number => {
     // anchor(if 자리 고정용 주석)는 여기서 DOM 트리에 붙인다. 가지 build는 VM이 한다.
@@ -885,7 +883,7 @@ export class RuntimeInterpreter {
       pathPrefix,
       loopIndexBase,
       walkStacks,
-      branch,
+      branchIndex,
       anchor,
     );
   };
