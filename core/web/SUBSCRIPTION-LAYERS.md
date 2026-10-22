@@ -82,14 +82,30 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 ## 4. 공유
 
 같은 컴포넌트 안의 같은 식(`exprIndex`)이 여러 `@for` 행에 나오고 행마다 읽는 값이 같으면, 행들이 식 인스턴스
-하나를 사용한다.
+하나를 사용한다. 값 자리를 만들 때 `[vm]`이 아래 순서로 공유할지, 어느 인스턴스를 사용할지 정한다.
 
-- `level`: 식이 읽는 변수 중 가장 깊은 변수가 정의된 스코프의 깊이다(컴포넌트 0, 첫 `@for` 1).
-  `expr-level.ts`가 구한다.
-- 식이 놓인 자리의 `@for` 깊이(`forDepth`)보다 `level`이 작을 때만 공유한다. 같으면 행마다 값이 다르다.
-- 공유 키는 `(exprIndex, scopeUid)`다. `scopeUid`는 `level`이 가리키는 스코프(컴포넌트 `RENDER` 한 번 또는
-  `@for` 행 하나)의 번호다. `[vm]`이 열린 스코프의 번호를 `scopeUidStack`에 쌓아 두고 거기서 고른다
-  (`vm.ts`의 `sharedScopeUidOf`).
+```
+  level 구하기 -> forDepth와 비교 -> scopeUid 고르기 -> 공유 맵 조회 -> 있으면 retain, 없으면 create + markShared
+```
+
+### level
+
+식이 읽는 변수 중 가장 깊은 변수가 정의된 스코프의 깊이다(컴포넌트 0, 첫 `@for` 1). `expr-level.ts`가 슬롯
+배치와 식이 읽는 가장 큰 `scope_index`로 구한다. 슬롯은 props 뒤에 `@for`마다 item, index 둘이 붙는다.
+
+```
+  props a, b, rows    scope_index 0~2    level 0
+  첫 @for             3, 4               level 1
+  안쪽 @for           5, 6               level 2
+```
+
+컴포넌트마다 처음 필요할 때 한 번 구해 둔다.
+
+### forDepth
+
+값 자리가 이 컴포넌트 안에서 든 `@for` 깊이다. `loopIndexStack`(열린 `@for` 행마다 둘씩 쌓인다) 길이의 절반에서,
+이 컴포넌트에 들어올 때까지 쌓인 깊이(`loopIndexBase`)를 뺀다. `level`이 `forDepth`보다 작을 때만 공유한다.
+같으면 행마다 값이 다르다.
 
 | 식 | 읽는 변수 | `level` | 자리의 `forDepth` | 동작 |
 |---|---|---|---|---|
@@ -98,8 +114,37 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 | `${row.x * a}` | `@for` 변수, props | 1 | 1 | 행마다 새로 만든다 |
 | `${outer.age * 2}` | 바깥 `@for` 변수 | 1 | 2 (안쪽 `@for` 행 안) | 같은 바깥 행 아래의 안쪽 행들이 하나를 사용한다 |
 
-두 번째 가지가 공유 인스턴스를 들 때는 `retain`으로 `refCount`만 올리고, 같은 결과 leaf에 통지 구독을 건다.
-식은 다시 세지 않고 결과 leaf의 값을 읽는다. 그 값이 낡았으면 가지가 붙을 때 `attach`가 따라잡는다.
+### scopeUid
+
+스코프(컴포넌트 RENDER 한 번 또는 `@for` 행 하나)가 열릴 때마다 받는 번호다. `ScopeUidCounter`가 하나씩 올려
+주고 다시 사용하지 않는다. RENDER와 `@for` 행(`buildIteration`)이 열릴 때 `scopeUidStack`에 쌓고 닫힐 때 꺼낸다.
+나중에 만드는 가지(`@if`의 `lazyBuild`, `@for`가 늘 때)는 만든 시점의 스택을 복사해 두므로 같은 번호를 본다.
+
+공유 키의 `scopeUid`는 `level`이 가리키는 스코프의 번호다. 스택은 컴포넌트를 가로질러 쌓이므로 이 컴포넌트의
+루트 스코프는 맨 위에서 `forDepth`만큼 내려간 자리고, 거기서 `level`만큼 올라간 자리를 고른다
+(`vm.ts`의 `sharedScopeUidOf`).
+
+```
+  scopeUidStack[length - 1 - forDepth + level]
+
+  Page RENDER > Page의 @for 행 > Card RENDER > Card의 @for 행
+  scopeUidStack    [ 0 ,  1 ,  2 ,  3 ]
+  Card 안 forDepth 1에서   level 0 -> [2] (Card RENDER)   level 1 -> [3] (Card의 행)
+```
+
+### 공유 맵
+
+`ExprInstancePool.shared[exprIndex].get(scopeUid)`가 인스턴스 번호다.
+
+- `findShared`: 키로 찾는다. 없으면 `NOT_SHARED`.
+- `markShared`: 새로 만든 인스턴스를 키로 올린다.
+- `release`: `refCount`가 0이 되면 키를 지운다. `scopeUid`를 다시 사용하지 않으므로, 없어진 스코프의 키에 새 스코프가
+  걸리지 않는다.
+
+### 재사용
+
+찾은 인스턴스는 `retain`으로 `refCount`만 올리고, 같은 결과 leaf에 통지 구독을 건다. 식은 다시 세지 않고 결과
+leaf의 값을 읽는다. 그 값이 낡았으면 가지가 붙을 때 `attach`가 따라잡는다.
 
 ## 5. 구독을 다시 걸 때 따라잡기
 
