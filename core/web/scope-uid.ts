@@ -5,19 +5,19 @@
 export const SCOPE_UID_WARN_LIMIT = 2 ** 30;
 
 export class ScopeUidCounter {
-  private limit: number;
-  private issued = 0;
-  private warned = false;
+  private warnLimit: number;
+  private issuedCount = 0;
+  private hasWarned = false;
 
-  constructor(limit: number = SCOPE_UID_WARN_LIMIT) {
-    this.limit = limit;
+  constructor(warnLimit: number = SCOPE_UID_WARN_LIMIT) {
+    this.warnLimit = warnLimit;
   }
 
   next = (): number => {
-    const scopeUid = this.issued++;
-    if (scopeUid >= this.limit && !this.warned) {
-      this.warned = true;
-      console.warn(`quble: scopeUid가 ${this.limit}을 넘었습니다. 식 공유 조회가 조금 느려질 수 있습니다.`);
+    const scopeUid = this.issuedCount++;
+    if (scopeUid >= this.warnLimit && !this.hasWarned) {
+      this.hasWarned = true;
+      console.warn(`quble: scopeUid가 ${this.warnLimit}을 넘었습니다. 식 공유 조회가 조금 느려질 수 있습니다.`);
     }
     return scopeUid;
   };
