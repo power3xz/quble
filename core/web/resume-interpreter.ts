@@ -124,7 +124,7 @@ export class ResumeInterpreter {
   };
 
   text = (): Text => {
-    for (;;) {
+    for (; ;) {
       const node = this.next();
       if (node.nodeType === node.TEXT_NODE) {
         return node as Text;
@@ -726,7 +726,7 @@ export class ResumeInterpreter {
     branchIndex: number,
     tops: ChildNode[] | null,
   ): number => {
-    const expr = vm.module.defs[compId].exprs[this.code[pc++]];
+    const expr = vm.module.defs[compId].exprBytecodes[this.code[pc++]];
     const { exprInstanceIndex, value } = vm.addExprInstance(expr, argumentSourcePairs, branchIndex);
     const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(

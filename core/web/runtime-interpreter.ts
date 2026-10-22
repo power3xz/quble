@@ -232,7 +232,7 @@ export class RuntimeInterpreter {
     let pending: HTMLElement | null = null;
     let nodeCount = 0;
     let plannable = true;
-    for (let pc = startPc; pc < endPc && plannable; ) {
+    for (let pc = startPc; pc < endPc && plannable;) {
       const at = pc;
       const op = code[pc++];
       switch (op) {
@@ -811,7 +811,7 @@ export class RuntimeInterpreter {
     branchIndex: number,
     parent: Node,
   ): number => {
-    const expr = vm.module.defs[compId].exprs[vm.code[pc++]];
+    const expr = vm.module.defs[compId].exprBytecodes[vm.code[pc++]];
     // 식이 읽는 칸이 바뀌면 식을 다시 센 값을 구독 층이 결과 leaf(condLeafIndex)에 write한다. 그 값이 바뀌면
     // 아래 buildIfRegion이 건 통지 구독이 불려 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
     // 때문이다. 파생 구독은 부모 가지에 실어 생애를 함께 한다. 결과 leaf는 식의 첫 값으로 잡으므로 식을 센
