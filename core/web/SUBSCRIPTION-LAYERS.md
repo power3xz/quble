@@ -14,15 +14,21 @@ store에 놓이는 모양은 `LEAF-STORE-LAYOUT.md`가 맡는다.
   [region]  region.ts                     [expr]  expr-layer.ts 외
               |                                   |
               |  (인자로 받는다)                    |  (import한다)
-              +-------------------------> [store]  leaf-store.ts
+              +-------------------------> [subscription]  leaf-store.ts의 createLeafStoreSubject
+                                                  |
+                                                  v
+                                          [store]  leaf-store.ts의 leafStore
 ```
 
 - `[vm]`: 바이트코드를 해석하며 값 자리를 DOM에 걸고, 식 인스턴스를 요청한다.
 - `[region]`: `@if`/`@for` 가지를 붙이고 떼고 반납하면서, 가지가 든 통지 구독과 식 인스턴스를 같이 다룬다.
   순환 `import`를 피하려고 store와 식 인스턴스 풀을 `import`하지 않고 함수 인자로 받는다.
 - `[expr]`: 식 인스턴스를 풀에 두고, 입력 leaf에 파생 구독을 걸고 푼다. 같은 식을 공유한다(4절).
-- `[store]`: leaf 값을 읽고 기록하고, 구독을 순서대로 호출한다. 구독 층은 별도 파일이 아니라
-  `leaf-store.ts`의 구독 부분이다.
+- `[subscription]`: 구독 층. 통지 구독과 파생 구독을 들고, `set`, `write`, `notify`, batch로 구독을 순서대로
+  호출한다. 값은 `[store]`에 기록한다.
+- `[store]`: leaf 값을 읽고 기록하기만 한다. 구독을 모른다.
+
+`[subscription]`과 `[store]`는 둘 다 `leaf-store.ts`에 있다.
 
 ## 2. 값이 바뀔 때
 
@@ -44,13 +50,13 @@ store에 놓이는 모양은 `LEAF-STORE-LAYOUT.md`가 맡는다.
 `set(0, 3000)`이 호출되면 이렇게 진행된다.
 
 ```
-  1. [store]  leaf 0에 3000을 기록한다            값이 같으면 여기서 끝
-  2. [expr]   파생 구독이 `rate * 2`를 다시 세어 6000을 돌려준다
-  3. [store]  결과 leaf 7에 6000을 기록한다       값이 같으면 기록도 통지도 하지 않는다
-  4. [store]  통지 구독을 호출한다                툴바에 3000, 두 행에 6000
+  1. [subscription]  [store]의 leaf 0에 3000을 기록한다      값이 같으면 여기서 끝
+  2. [expr]          파생 구독이 `rate * 2`를 다시 세어 6000을 돌려준다
+  3. [subscription]  [store]의 결과 leaf 7에 6000을 기록한다  값이 같으면 기록도 통지도 하지 않는다
+  4. [subscription]  통지 구독을 호출한다                    툴바에 3000, 두 행에 6000
 ```
 
-- 파생 구독은 값을 돌려주기만 한다. 결과 leaf에 기록하는 것은 `[store]`다.
+- 파생 구독은 값을 돌려주기만 한다. 결과 leaf에 기록하는 것은 `[subscription]`이다.
 - 통지 구독은 파생 구독이 모두 끝난 뒤에 호출되므로 중간 값이 DOM에 닿지 않는다.
 
 batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바깥 batch가 끝날 때 위 2~4가 한 번 진행되고, 파생 구독
