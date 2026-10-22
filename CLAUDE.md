@@ -125,7 +125,9 @@ remembered claim (a past summary once mislabeled a DESIGN section - verify, don'
   놓이고 요소가 늘고 줄 때 어떻게 변하는지. 계약이 아니라 현재 구현 설명이라 코드가 바뀌면
   따라 고친다.
 - **core/web/EXPR-EVAL.md** - 표현식 평가 - 후위 바이트와 트리, 부분 재평가, 구독, 인덱스
-  접근의 구독 다시 걸기. LEAF-STORE-LAYOUT.md처럼 현재 구현 설명이다.
+  접근의 구독 다시 걸기. 현재 구현 설명이다.
+- **core/web/SUBSCRIPTION-LAYERS.md** - 구독 층과 표현식 층 - 식 보간의 값이 입력 leaf에서 DOM까지 가는 길,
+  식 인스턴스의 생애와 공유. 현재 구현 설명이다.
 - **docs/PROCESS.md / IDEAS.md** - execution-model decisions / explored-and-parked ideas.
 
 ### 새 문서를 둘 자리
