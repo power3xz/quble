@@ -29,7 +29,7 @@ export type Store = {
 
 // expr-layer.ts의 ExprInstancePool 중 가지가 부르는 부분(Store 타입과 같은 이유로 다시 정의한다).
 export type TExprInstanceLayer = {
-  attach: (exprInstanceIndex: number, catchUp: boolean) => void;
+  attach: (exprInstanceIndex: number) => void;
   detach: (exprInstanceIndex: number) => void;
   release: (exprInstanceIndex: number) => void;
 };
@@ -117,7 +117,8 @@ const teardownBranchSubs = (store: Store, exprs: TExprInstanceLayer, branch: TBr
 // 붙을 때는 build가 방금 현재 값으로 채웠으니 부르지 않는다 - 부르면 같은 값을 두 번 쓴다.
 //
 // 통지 구독을 걸고 놓친 값을 따라잡은 뒤에 식 인스턴스를 붙인다(exprs.attach). 식 인스턴스는 입력 leaf에 파생
-// 구독을 걸고, 다시 붙을 때는 놓친 입력을 따라잡아 결과 leaf를 맞춘다. `${rows[cursor].title}`에서 꺼진 동안
+// 구독을 걸고, 구독이 풀렸던 적이 있으면 놓친 입력을 따라잡아 결과 leaf를 맞춘다. 따라잡을지는 가지가 아니라 식
+// 인스턴스가 정한다 - 공유한 인스턴스는 처음 붙는 가지에도 낡은 결과 leaf를 줄 수 있다. `${rows[cursor].title}`에서 꺼진 동안
 // cursor가 바뀌었으면 따라잡는 파생 구독이 READ_LEAF가 읽는 leafIndex가 바뀐 것을 보고 구독을 풀고 다시 건다.
 const restoreBranchSubs = (store: Store, exprs: TExprInstanceLayer, branch: TBranch): void => {
   const { leafIndices, updateFns, exprInstanceIndices } = branch;
@@ -147,7 +148,7 @@ const restoreBranchSubs = (store: Store, exprs: TExprInstanceLayer, branch: TBra
   }
   if (exprInstanceIndices !== null) {
     for (let i = 0; i < exprInstanceIndices.length; i++) {
-      exprs.attach(exprInstanceIndices[i], branch.everAttached);
+      exprs.attach(exprInstanceIndices[i]);
     }
   }
   branch.everAttached = true;

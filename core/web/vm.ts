@@ -1453,9 +1453,12 @@ export class VM {
     return scopeUidStack[scopeUidStack.length - 1 - forDepth + level];
   };
 
-  // 식 인스턴스를 가지에 싣고 처음 센 값과 인스턴스 번호를 돌려준다. sharedScopeUid가 있으면 같은 (exprIndex,
-  // scopeUid)로 공유 중인 인스턴스를 재사용하고, 없으면 새로 만든다. 구독은 가지가 붙을 때 건다(restoreBranchSubs) -
-  // 안 보이는 가지는 구독 0이다.
+  // 식 인스턴스를 가지에 싣고 그 값과 인스턴스 번호를 돌려준다. sharedScopeUid가 있으면 같은 (exprIndex, scopeUid)로
+  // 공유 중인 인스턴스를 재사용하고, 없으면 새로 만든다. 구독은 가지가 붙을 때 건다(restoreBranchSubs) - 안 보이는
+  // 가지는 구독 0이다.
+  //
+  // 재사용하면 식을 세지 않고 결과 leaf를 읽는다. 구독이 풀린 동안 입력이 바뀌어 낡았으면 이 가지가 붙을 때 attach가
+  // 따라잡는다.
   addExprInstance = (
     expr: Uint8Array,
     pairs: TScope,
@@ -1466,26 +1469,26 @@ export class VM {
     const { exprInstancePool } = this;
     let exprInstanceIndex =
       sharedScopeUid === NOT_SHARED ? NOT_SHARED : exprInstancePool.findShared(exprIndex, sharedScopeUid);
+    let value: unknown;
     if (exprInstanceIndex === NOT_SHARED) {
       exprInstanceIndex = exprInstancePool.create(expr, pairs);
       if (sharedScopeUid !== NOT_SHARED) {
         exprInstancePool.markShared(exprInstanceIndex, exprIndex, sharedScopeUid);
       }
+      value = exprInstancePool.evaluate(exprInstanceIndex);
     } else {
       exprInstancePool.retain(exprInstanceIndex);
+      value = this.store.get(exprInstancePool.resultLeafOf(exprInstanceIndex) as number);
     }
-    const value = exprInstancePool.evaluate(exprInstanceIndex);
     addExprInstanceToBranch(this.branchAt(branchIndex), exprInstanceIndex);
     return { exprInstanceIndex, value };
   };
 
   // 식 인스턴스의 결과를 담을 leaf를 돌려준다. 처음이면 잡아 첫 값을 넣고, 인스턴스가 돌려준 값이 그 leaf에 쓰이도록
-  // 연결한다. 이미 있으면(공유한 인스턴스) 그 leaf에 방금 센 값을 맞춘다 - 안 보이는 동안 놓친 입력이 있으면 leaf가
-  // 낡았다. 결과 leaf는 인스턴스를 든 가지가 모두 없어질 때 반납된다(freeBranchTree). 보간 식과 IF_EXPR 조건이 함께 쓴다.
+  // 연결한다. 이미 있으면(공유한 인스턴스) 그 leaf를 그대로 돌려준다. 결과 leaf는 인스턴스를 든 가지가 모두 없어질 때 반납된다(freeBranchTree). 보간 식과 IF_EXPR 조건이 함께 쓴다.
   allocResultLeaf = (exprInstanceIndex: number, value: unknown): number => {
     const sharedResultLeafIndex = this.exprInstancePool.resultLeafOf(exprInstanceIndex);
     if (sharedResultLeafIndex !== undefined) {
-      this.store.set(sharedResultLeafIndex, value);
       return sharedResultLeafIndex;
     }
     const resultLeafIndex = this.store.alloc([value]);

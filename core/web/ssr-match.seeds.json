@@ -6,6 +6,13 @@
       "rows": [{ "base": 10, "cells": [1, 2] }, { "base": 20, "cells": [] }]
     }
   ],
+  "expr_share_hidden": [
+    {
+      "rate": 100,
+      "limit": 5,
+      "rows": [3, 6, 9]
+    }
+  ],
   "array_payload": [
     {
       "items": [

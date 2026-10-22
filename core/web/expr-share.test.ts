@@ -129,3 +129,25 @@ test("행을 제거하면 그 행이 쓰던 식 인스턴스를 반납하고 다
   // 마지막 안쪽 행이 사라지면 a + 1도 반납되어 a * b만 남는다.
   assert.equal(liveExprInstances(), 1);
 });
+
+// 픽스처(expr_share_hidden): 행마다 `@if (row > limit) { ${rate * 2} }`. rate * 2는 컴포넌트 전체가 공유한다.
+test("공유한 식을 든 가지가 모두 꺼진 동안 입력이 바뀌면 새로 붙는 행이 따라잡는다", () => {
+  const addQueue = [20];
+  const handlers: THandlers = {
+    ADD: (_d, ctx) => {
+      const push = ctx.push as (array: number, element: unknown) => void;
+      const props = ctx.props as Record<string, number>;
+      push(props.rows, addQueue.shift());
+    },
+  };
+  const inst = compile(buildFixture("expr_share_hidden"))(0)({ rate: 100, limit: 0, rows: [5, 6] }, handlers);
+  const host = mount(inst);
+  const doubles = () => [...host.querySelectorAll(".double")].map((node) => node.textContent);
+  assert.deepEqual(doubles(), ["200", "200"]);
+
+  inst.update({ limit: 10 });
+  inst.update({ rate: 150 });
+  (host.querySelector(".add") as HTMLButtonElement).click();
+
+  assert.deepEqual(doubles(), ["300"], "꺼진 동안 구독이 없어 결과 leaf가 200으로 낡았다");
+});

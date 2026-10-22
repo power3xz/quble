@@ -29,6 +29,9 @@ export type TExprInstance = {
   // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
   refCount: number;
   attachedCount: number;
+  // 입력 leaf에 파생 구독을 한 번이라도 걸었나. 참인데 attachedCount가 0이면 구독이 풀린 동안 입력이 바뀌어 결과
+  // leaf가 낡았을 수 있다.
+  everAttached: boolean;
   // 공유 맵에 올린 키(식 표 번호와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
   sharedExprIndex: number;
   sharedScopeUid: number;
@@ -70,6 +73,7 @@ export class ExprInstancePool {
       derive: noopDerive,
       refCount: 1,
       attachedCount: 0,
+      everAttached: false,
       sharedExprIndex: NOT_SHARED,
       sharedScopeUid: NOT_SHARED,
     };
@@ -152,9 +156,10 @@ export class ExprInstancePool {
     this.pool.release(exprInstanceIndex);
   };
 
-  // 붙은 가지를 하나 더한다. 처음 붙으면 입력 leaf마다 파생 구독을 건다. catchUp이면 입력 leaf마다 지금 한 번 불러
-  // 놓친 입력을 따라잡는다.
-  attach = (exprInstanceIndex: number, catchUp: boolean): void => {
+  // 붙은 가지를 하나 더한다. 붙은 가지가 0에서 1이 되면 입력 leaf마다 파생 구독을 건다. 구독이 풀렸던 적이 있으면
+  // 입력 leaf마다 지금 한 번 불러 놓친 입력을 따라잡는다. 처음 걸 때는 evaluate가 방금 센 값이 최신이라 따라잡지
+  // 않는다.
+  attach = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.attachedCount++;
     if (instance.attachedCount > 1) {
@@ -166,7 +171,7 @@ export class ExprInstancePool {
         this.store.subscribeDerive(readLeaves[readLeafPosition], derive);
       }
     }
-    if (catchUp) {
+    if (instance.everAttached) {
       // 건너뛸 부분식이 없는 식은 바뀐 leaf를 보지 않고 처음부터 세므로 입력 leaf 하나로 한 번만 부르면 된다.
       const refreshOnce = instance.table === null;
       // 따라잡는 호출이 READ_LEAF 구독을 다시 걸면 readLeaves가 바뀌므로 길이를 매번 다시 읽는다.
@@ -179,6 +184,7 @@ export class ExprInstancePool {
         }
       }
     }
+    instance.everAttached = true;
   };
 
   // 붙은 가지를 하나 줄인다. 마지막 가지가 떼지면 파생 구독을 푼다.
