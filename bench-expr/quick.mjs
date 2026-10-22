@@ -19,6 +19,7 @@ const SCENARIOS_OF = {
   orders: ORDERS_SCENARIOS,
   "orders-deep": ORDERS_SCENARIOS,
   "orders-toggle": ["showA", "showAChanged", "showB", "showBChanged"],
+  "orders-shared": ORDERS_SCENARIOS,
 };
 // 재는 대상. 환경 변수 TARGET(기본 quble)으로 고른다. 페이지 이름은 <대상>.html, orders-deep이면 <대상>-deep.html이다.
 const TARGET = process.env.TARGET ?? "quble";
@@ -27,11 +28,12 @@ const TESTS = {
   orders: { page: `${TARGET}.html`, id: TARGET },
   "orders-deep": { page: `${TARGET}-deep.html`, id: `${TARGET}-deep` },
   "orders-toggle": { page: `${TARGET}-toggle.html`, id: `${TARGET}-toggle` },
+  "orders-shared": { page: `${TARGET}-shared.html`, id: `${TARGET}-shared` },
 };
 
 const [url, outPath, testName = "orders"] = process.argv.slice(2);
 if (!outPath || !TESTS[testName]) {
-  console.error("사용: node bench-expr/quick.mjs http://localhost:포트 기록.json [orders|orders-deep|orders-toggle]");
+  console.error("사용: node bench-expr/quick.mjs http://localhost:포트 기록.json [orders|orders-deep|orders-toggle|orders-shared]");
   process.exit(1);
 }
 const { page: PAGE, id: TARGET_ID } = TESTS[testName];

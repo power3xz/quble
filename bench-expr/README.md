@@ -6,10 +6,10 @@ template 식의 갱신 비용을 quble, React, React + memo, Svelte 5, Solid에�
 
 ## 실행
 
-레포 루트에서 `./bench-expr.sh`. 의존 설치, `orders.qubc`, `orders-deep.qubc`, `orders-toggle.qubc` 컴파일, 데이터 생성, vite 빌드를 하고
+레포 루트에서 `./bench-expr.sh`. 의존 설치, `quble/` 아래 `.qubc` 컴파일, 데이터 생성, vite 빌드를 하고
 http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런타임과 quble 바이너리를 그대로 쓴다.
 
-1. 첫 화면(비교 표)에서 테스트(orders, orders-deep, orders-toggle), 행 수(1k, 5k, 10k), 압축(없음, gzip, brotli)을 고른다.
+1. 첫 화면(비교 표)에서 테스트(orders, orders-deep, orders-toggle, orders-shared), 행 수(1k, 5k, 10k), 압축(없음, gzip, brotli)을 고른다.
 2. 대상 이름을 누르면 새 탭에 그 대상만 뜬다. 그 탭에서 **측정**을 누른다.
 3. 측정을 마치면 로드와 클릭 결과가 함께 브라우저 localStorage에 저장되어 비교 표에 들어온다. 새로고침만
    해서는 저장된 결과가 바뀌지 않는다. 다른 브라우저나 기기에는 공유되지 않는다.
@@ -17,23 +17,23 @@ http://localhost:8143 에 서버를 띄운다. quble은 레포의 `core/web` 런
 같은 대상을 구현만 바꿔 잴 때는 URL에 `tag`를 붙여 결과를 나눠 담는다(`quble.html?n=10000&tag=before`).
 비교 표가 같은 대상의 tag별 결과를 나란히 보여 준다.
 
-### 빠른 측정 - `./bench-expr-quick.sh [git ref] [orders|orders-deep|orders-toggle]`
+### 빠른 측정 - `./bench-expr-quick.sh [git ref] [orders|orders-deep|orders-toggle|orders-shared]`
 
 커밋 하나(기본 HEAD)의 quble 런타임을 headless Chromium으로 재고 기록으로 남긴다. 테스트를 생략하면 orders와
-orders-deep을 잰다(orders-toggle은 이름을 줘야 잰다). 1분 안쪽에 끝나고 창이 뜨지 않는다.
+orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 1분 안쪽에 끝나고 창이 뜨지 않는다.
 
 - 런타임(`core/web`)만 커밋 것이다. 커밋을 임시 worktree로 꺼내 빌드해 서버(8144)에 띄운다. 작업 트리의
   커밋 안 한 런타임 변경은 재지 않는다.
 - 벤치 앱(페이지, 행 템플릿, 시나리오, `tests.json`)은 지금 작업 트리 것으로 덮는다. 어떤 커밋이든 같은 벤치
   앱으로 재므로 서로 견줄 수 있다. `.qubb`와 데이터도 지금 컴파일러로 만든다.
 - `bench-expr/quick.mjs`가 `quble.html`(orders-deep이면 `quble-deep.html`, orders-toggle이면
-  `quble-toggle.html`)을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 여덟(orders-toggle은 넷)의 DOM
+  `quble-toggle.html`, orders-shared면 `quble-shared.html`)을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 여덟(orders-toggle은 넷)의 DOM
   반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
 - 행 수는 환경 변수 `BENCH_N`(1000, 5000, 10000, 기본 1000)으로 고른다.
 - 기록은 `bench-results/<커밋>.expr.json`(orders), `<커밋>.expr-deep.json`(orders-deep),
-  `<커밋>.expr-toggle.json`(orders-toggle)에 남는다. 10000이 아닌 행 수는 `.1k`, `.5k`가 붙는다
+  `<커밋>.expr-toggle.json`(orders-toggle), `<커밋>.expr-shared.json`(orders-shared)에 남는다. 10000이 아닌 행 수는 `.1k`, `.5k`가 붙는다
   (`<커밋>.expr.1k.json`). orders-toggle은 행 수와 무관한 고정 데이터라 `BENCH_N`을 정해도 같은 앱을 잰다. 커밋끼리는
-  `BENCH_N=... node bench-compare.mjs <expr|expr-deep|expr-toggle> <ref> <ref>`로 견준다.
+  `BENCH_N=... node bench-compare.mjs <expr|expr-deep|expr-toggle|expr-shared> <ref> <ref>`로 견준다.
 
 `TARGET=solid ./bench-expr-quick.sh`처럼 환경 변수 `TARGET`(기본 quble)으로 다른 대상을 같은 방식으로 잰다.
 이 기록은 커밋이 아니라 대상 이름으로 `bench-results/<대상>.expr.json`(`.expr-deep.json`)에 남고, 커밋 비교는
@@ -60,6 +60,10 @@ orders-deep을 잰다(orders-toggle은 이름을 줘야 잰다). 1분 안쪽에 
 시나리오는 `A 켜기`, `A 켜기, 환율 바뀜`, `B 켜기`, `B 켜기, 환율 바뀜`의 넷이고, 켜기 전에 끄는 클릭(과 환율
 변경)을 한 번 하되 그 시간은 재지 않는다. 파일은 `quble/orders-toggle.qubc`, `src/quble-toggle.ts`,
 `src/quble-toggle-handlers.ts`다.
+
+`orders-shared`도 quble만 잰다. 기본 행에 props만 읽는 식(`rate * 2`, `rate + tax`, `(100 + tax) * rate / 100`)을
+더해, 같은 식을 모든 행이 식 인스턴스 하나로 공유하는 비용과 이득을 잰다. props, 이벤트, 툴바, 시나리오는
+`orders`와 같다. 파일은 `quble/orders-shared.qubc`, `src/quble-shared.ts`다.
 
 `tests.json`이 테스트별 버전을 가진다. 하네스가 결과와 기록에 이 버전을 적는다. **같은 테스트의 측정 조건을
 바꾸면(행 템플릿, 데이터, 시나리오, 하네스의 재는 방식) 그 테스트의 버전을 올린다.** 버전이 다른 결과는

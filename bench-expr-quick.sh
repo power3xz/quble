@@ -6,11 +6,11 @@
 # 작업 트리 것이다 - 어떤 커밋이든 같은 벤치 앱으로 재서 서로 견줄 수 있다. 커밋은 임시 worktree로 꺼내
 # 빌드하므로 작업 트리의 커밋 안 한 런타임 변경은 재지 않는다. .qubb와 데이터는 지금 컴파일러로 만든다.
 #
-# 테스트는 셋이다. orders는 기본 행, orders-deep은 값 자리 사이에 정적 하위 트리와 깊은 값 자리가 낀 행이다.
-# orders-toggle은 켰다 끄는 두 목록(100행, 10행)을 다시 켤 때의 시간이며 quble만 잰다. 테스트를 생략하면 앞의
-# 둘만 잰다.
+# orders는 기본 행, orders-deep은 값 자리 사이에 정적 하위 트리와 깊은 값 자리가 낀 행이다.
+# orders-toggle은 켰다 끄는 두 목록(100행, 10행)을 다시 켤 때의 시간이며 quble만 잰다. orders-shared는 행마다
+# props만 읽는 식이 든 행이며 quble만 잰다. 테스트를 생략하면 orders와 orders-deep만 잰다.
 # 기록은 bench-results/<커밋>.expr.json(orders), <커밋>.expr-deep.json(orders-deep),
-# <커밋>.expr-toggle.json(orders-toggle)에 남고, 같은 커밋을
+# <커밋>.expr-toggle.json(orders-toggle), <커밋>.expr-shared.json(orders-shared)에 남고, 같은 커밋을
 # 다시 재면 덮어쓴다. 커밋끼리 비교는 node bench-compare.mjs <expr|expr-deep> <ref> <ref>로 본다.
 #
 # headless로 돌아 창이 뜨지 않는다. 다른 대상(React, Svelte)과의 비교는 ./bench-expr.sh로 본다.
@@ -21,7 +21,7 @@
 # 행 수는 환경 변수 BENCH_N(1000, 5000, 10000, 기본 1000)으로 고른다. 10000이 아니면 기록 이름에 .1k, .5k가
 # 붙어 10000행 기록을 덮지 않는다(bench-compare.mjs도 같은 BENCH_N으로 그 기록을 읽는다).
 #
-# 사용: ./bench-expr-quick.sh [git ref] [orders|orders-deep|orders-toggle]
+# 사용: ./bench-expr-quick.sh [git ref] [orders|orders-deep|orders-toggle|orders-shared]
 #   테스트를 생략하면 orders와 orders-deep을 잰다.   예: ./bench-expr-quick.sh main~3   BENCH_N=10000 ./bench-expr-quick.sh HEAD orders-deep
 set -euo pipefail
 
@@ -34,9 +34,9 @@ REF="${1:-HEAD}"
 SHA="$(git -C "$ROOT" rev-parse --short=7 "$REF")"
 case "${2:-all}" in
   all) TESTS="orders orders-deep" ;;
-  orders | orders-deep | orders-toggle) TESTS="$2" ;;
+  orders | orders-deep | orders-toggle | orders-shared) TESTS="$2" ;;
   *)
-    echo "사용: ./bench-expr-quick.sh [git ref] [orders|orders-deep|orders-toggle]" >&2
+    echo "사용: ./bench-expr-quick.sh [git ref] [orders|orders-deep|orders-toggle|orders-shared]" >&2
     exit 1
     ;;
 esac
@@ -62,11 +62,12 @@ fi
 # 이미 받았으면 바로 끝난다.
 npx --prefix "$APP" playwright install chromium
 
-echo "[bench-expr-quick] 2/5 orders.qubc, orders-deep.qubc 컴파일, 데이터 생성"
+echo "[bench-expr-quick] 2/5 bench-expr/quble/*.qubc 컴파일, 데이터 생성"
 cargo build --manifest-path "$ROOT/core/Cargo.toml" --bin quble
 "$ROOT/core/target/debug/quble" "$APP/quble/orders.qubc" --out-dir "$APP/public"
 "$ROOT/core/target/debug/quble" "$APP/quble/orders-deep.qubc" --out-dir "$APP/public"
 "$ROOT/core/target/debug/quble" "$APP/quble/orders-toggle.qubc" --out-dir "$APP/public"
+"$ROOT/core/target/debug/quble" "$APP/quble/orders-shared.qubc" --out-dir "$APP/public"
 node "$APP/gen-data.mjs"
 
 echo "[bench-expr-quick] 3/5 빌드: $REF($SHA)"
@@ -107,6 +108,7 @@ for TEST in $TESTS; do
     orders) KIND="expr" ;;
     orders-deep) KIND="expr-deep" ;;
     orders-toggle) KIND="expr-toggle" ;;
+    orders-shared) KIND="expr-shared" ;;
   esac
   echo "[bench-expr-quick] 테스트: $TEST"
   if [ "$TARGET" = "quble" ]; then

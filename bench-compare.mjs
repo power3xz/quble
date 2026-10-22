@@ -6,18 +6,20 @@
 // expr 계열은 환경 변수 BENCH_N(1000, 5000, 10000, 기본 1000)으로 행 수를 골라 그 행 수의 기록을 읽는다 -
 // ./bench-expr-quick.sh를 같은 BENCH_N으로 돌린 기록이다. 10000이 아니면 기록 이름에 .1k, .5k가 붙는다.
 //
-// 사용: node bench-compare.mjs <krausest|expr|expr-deep|expr-toggle> <ref> [ref ...]   예: node bench-compare.mjs expr HEAD~1 HEAD
+// 사용: node bench-compare.mjs <krausest|expr|expr-deep|expr-toggle|expr-shared> <ref> [ref ...]   예: node bench-compare.mjs expr HEAD~1 HEAD
 //       BENCH_N=10000 node bench-compare.mjs expr HEAD~1 HEAD
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 const ROOT = new URL(".", import.meta.url).pathname;
 const [bench, ...refs] = process.argv.slice(2);
-if (!["krausest", "expr", "expr-deep", "expr-toggle"].includes(bench) || refs.length === 0) {
-  console.error("사용: node bench-compare.mjs <krausest|expr|expr-deep|expr-toggle> <ref> [ref ...]");
+if (!["krausest", "expr", "expr-deep", "expr-toggle", "expr-shared"].includes(bench) || refs.length === 0) {
+  console.error("사용: node bench-compare.mjs <krausest|expr|expr-deep|expr-toggle|expr-shared> <ref> [ref ...]");
   process.exit(1);
 }
 const BENCH_N = Number(process.env.BENCH_N ?? 1000);
+// ./bench-expr-quick.sh에 넘길 테스트 이름. 없는 종류(expr)는 테스트를 생략한 기본이다.
+const ORDERS_TEST_OF = { "expr-deep": "orders-deep", "expr-toggle": "orders-toggle", "expr-shared": "orders-shared" };
 if (![1000, 5000, 10000].includes(BENCH_N)) {
   console.error(`BENCH_N은 1000, 5000, 10000 중 하나다: ${BENCH_N}`);
   process.exit(1);
@@ -29,7 +31,7 @@ const records = refs.map((ref) => {
   const sha = git("rev-parse", "--short=7", ref);
   const path = `${ROOT}bench-results/${sha}.${bench}${suffix}.json`;
   if (!existsSync(path)) {
-    const test = bench === "expr-deep" ? " orders-deep" : bench === "expr-toggle" ? " orders-toggle" : "";
+    const test = ORDERS_TEST_OF[bench] ? ` ${ORDERS_TEST_OF[bench]}` : "";
     const quick = bench === "krausest" ? `./bench-krausest-quick.sh ${ref}` : `${BENCH_N === 1000 ? "" : `BENCH_N=${BENCH_N} `}./bench-expr-quick.sh ${ref}${test}`;
     console.error(`${ref}(${sha})의 ${bench}${suffix} 기록이 없다 - ${quick}로 잰다`);
     process.exit(1);
