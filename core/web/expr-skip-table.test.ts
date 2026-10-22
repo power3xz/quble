@@ -137,6 +137,13 @@ test("배열 인덱스 접근이 없는 식은 READ_LEAF가 읽을 leafIndex를 
   );
 });
 
+test("hasIndexAccess는 READ_LEAF가 읽을 leafIndex를 바꾸는 변수가 있을 때만 참이다", () => {
+  // a[i].b + x
+  const indexed = tableOf(bytes(v(0), v(1), EXPR_ELEM_AT, EXPR_FIELD_AT, 0, EXPR_READ_LEAF, v(2), EXPR_ADD));
+  assert.equal(indexed.hasIndexAccess, true);
+  assert.equal(tableOf(MIXED).hasIndexAccess, false);
+});
+
 test("operand가 붙은 FIELD_AT에서 끝나는 부분식을 건너뛰면 그 operand 다음 명령부터 이어 본다", () => {
   // a[i].b + (c + d), b는 요소의 둘째 필드라 FIELD_AT 1
   //   위치  0          3          6       7          9         10         13         16   17

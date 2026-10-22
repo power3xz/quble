@@ -39,22 +39,9 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import type { TBranch } from "./region.ts";
+import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
 import { staticElementEnds } from "./static-spans.ts";
-import {
-  CONST,
-  nodesOf,
-  RAW,
-  STORE,
-  scopeWithIteration,
-  slotKind,
-  slotRef,
-  snapshotStacks,
-  type TScope,
-  type TSlotPlaceholderContent,
-  type TWalkStacks,
-  type VM,
-} from "./vm.ts";
+import { nodesOf, snapshotStacks, type TSlotPlaceholderContent, type TWalkStacks, type VM } from "./vm.ts";
 
 // SSR이 텍스트 경계를 주석으로 남긴다(crates/renderer).
 //   <!---->          이웃한 두 텍스트 노드 사이의 경계 - 지운다
@@ -210,7 +197,6 @@ export class ResumeInterpreter {
     let segment: string | null = null; // 다음 RENDER/BIND_EVENT가 소비할 경로 세그먼트
     let pendingSlotPlaceholderContents: (TSlotPlaceholderContent | undefined)[] = [];
     let pc = startPc;
-    const branch = vm.branchAt(startBranchIndex);
 
     const u16at = () => {
       const v = code[pc] | (code[pc + 1] << 8);
@@ -265,7 +251,16 @@ export class ResumeInterpreter {
         case OP_ATTR_L_VAR:
         case OP_ATTR_G_EXPR:
         case OP_ATTR_L_EXPR: {
-          vm.bindValueSlot(op, pc, pending as HTMLElement, compId, argumentSourcePairs, branch);
+          vm.bindValueSlot(
+            op,
+            pc,
+            pending as HTMLElement,
+            compId,
+            argumentSourcePairs,
+            startBranchIndex,
+            walkStacks,
+            loopIndexBase,
+          );
           pc += operandLen(op);
           break;
         }
@@ -299,7 +294,7 @@ export class ResumeInterpreter {
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR: {
           const node = this.text();
-          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branch);
+          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, startBranchIndex, walkStacks, loopIndexBase);
           pc += operandLen(op);
           addTop(node);
           break;
@@ -392,21 +387,22 @@ export class ResumeInterpreter {
           const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
           segment = null;
           const childDef = vm.module.defs[childCompId];
-          addTops(
-            this.interpret(
-              vm,
-              childArgumentSourcePairs,
-              childCompId,
-              childDef.codeOff,
-              childDef.codeOff + childDef.codeLen,
-              startBranchIndex,
-              // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
-              childPrefix!,
-              walkStacks.loopIndexStack.length / 2,
-              walkStacks,
-              childSlotPlaceholderContents,
-            ),
+          walkStacks.scopeUidStack.push(vm.nextScopeUid());
+          const childTops = this.interpret(
+            vm,
+            childArgumentSourcePairs,
+            childCompId,
+            childDef.codeOff,
+            childDef.codeOff + childDef.codeLen,
+            startBranchIndex,
+            // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
+            childPrefix!,
+            walkStacks.loopIndexStack.length / 2,
+            walkStacks,
+            childSlotPlaceholderContents,
           );
+          walkStacks.scopeUidStack.pop();
+          addTops(childTops);
           break;
         }
         case OP_IF: {
@@ -418,7 +414,7 @@ export class ResumeInterpreter {
             pathPrefix,
             loopIndexBase,
             walkStacks,
-            branch,
+            startBranchIndex,
             topsIfTop(),
           );
           break;
@@ -432,7 +428,7 @@ export class ResumeInterpreter {
             pathPrefix,
             loopIndexBase,
             walkStacks,
-            branch,
+            startBranchIndex,
             topsIfTop(),
           );
           break;
@@ -485,7 +481,7 @@ export class ResumeInterpreter {
               bodyStart,
               forEndPc,
               topsIfTop(),
-              branch,
+              startBranchIndex,
               argumentSourcePairs,
               compId,
               pathPrefix,
@@ -508,7 +504,7 @@ export class ResumeInterpreter {
             bodyStart,
             forEndPc,
             topsIfTop(),
-            branch,
+            startBranchIndex,
             argumentSourcePairs,
             compId,
             pathPrefix,
@@ -568,14 +564,14 @@ export class ResumeInterpreter {
     bodyStart: number,
     forEndPc: number,
     tops: ChildNode[] | null,
-    branch: TBranch,
+    branchIndex: number,
     argumentSourcePairs: TScope,
     compId: number,
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
   ) => {
-    const forRegionIndex = vm.openForRegion(branch, countLeafIndex, this.anchor());
+    const forRegionIndex = vm.openForRegion(branchIndex, countLeafIndex, this.anchor());
     const region = vm.regionAt(forRegionIndex);
     tops?.push(region.anchor);
 
@@ -624,7 +620,7 @@ export class ResumeInterpreter {
     const onCount = (v: unknown) => {
       vm.resizeFor(forRegionIndex, Number(v) || 0, growIteration);
     };
-    vm.subscribeOnBranch(branch, countLeafIndex, onCount);
+    vm.subscribeOnBranch(branchIndex, countLeafIndex, onCount);
   };
 
   // 배열 반응 @for - reactiveCountFor와 같은 구조에서 회차변수 slot이 그 요소 leaf에 붙는다.
@@ -634,7 +630,7 @@ export class ResumeInterpreter {
     bodyStart: number,
     forEndPc: number,
     tops: ChildNode[] | null,
-    branch: TBranch,
+    branchIndex: number,
     argumentSourcePairs: TScope,
     compId: number,
     pathPrefix: string,
@@ -644,7 +640,7 @@ export class ResumeInterpreter {
     const info = vm.arrayInfoOf(arrayLeafIndex);
     const sizeLeafIndex = vm.ensureIterationLeaves(info);
 
-    const forRegionIndex = vm.openForRegion(branch, sizeLeafIndex, this.anchor());
+    const forRegionIndex = vm.openForRegion(branchIndex, sizeLeafIndex, this.anchor());
     info.forRegionIndices.push(forRegionIndex);
     const region = vm.regionAt(forRegionIndex);
     tops?.push(region.anchor);
@@ -693,7 +689,7 @@ export class ResumeInterpreter {
     const onSize = () => {
       vm.resizeFor(forRegionIndex, info.elemStartLeafIndices.length, growIteration);
     };
-    vm.subscribeOnBranch(branch, sizeLeafIndex, onSize);
+    vm.subscribeOnBranch(branchIndex, sizeLeafIndex, onSize);
   };
 
   // IF - 조건 슬롯을 그대로 조건 칸으로 쓴다. pc는 IF operand 직후이고 IF_END 다음 pc를 돌려준다.
@@ -705,7 +701,7 @@ export class ResumeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
     tops: ChildNode[] | null,
   ): number => {
     const condScopeIndex = this.code[pc++];
@@ -718,13 +714,12 @@ export class ResumeInterpreter {
       pc,
       condLeafIndex,
       condIsConst ? vm.module.constpool[condRef] : vm.store.get(condLeafIndex),
-      false,
       argumentSourcePairs,
       compId,
       pathPrefix,
       loopIndexBase,
       walkStacks,
-      branch,
+      branchIndex,
       tops,
     );
   };
@@ -738,24 +733,30 @@ export class ResumeInterpreter {
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
     tops: ChildNode[] | null,
   ): number => {
-    const expr = vm.module.defs[compId].exprs[this.code[pc++]];
-    const value = vm.subscribeExpr(expr, argumentSourcePairs, branch, (v) => vm.store.set(condLeafIndex, v));
-    const condLeafIndex = vm.store.alloc([value]);
+    const exprIndex = this.code[pc++];
+    const expr = vm.module.defs[compId].exprBytecodes[exprIndex];
+    const { exprInstanceIndex, value } = vm.addExprInstance(
+      expr,
+      argumentSourcePairs,
+      branchIndex,
+      exprIndex,
+      vm.sharedScopeUidOf(compId, exprIndex, walkStacks, loopIndexBase),
+    );
+    const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(
       vm,
       pc,
       condLeafIndex,
       vm.store.get(condLeafIndex),
-      true,
       argumentSourcePairs,
       compId,
       pathPrefix,
       loopIndexBase,
       walkStacks,
-      branch,
+      branchIndex,
       tops,
     );
   };
@@ -768,13 +769,12 @@ export class ResumeInterpreter {
     pc: number,
     condLeafIndex: number,
     condInitial: unknown,
-    ownsCondLeaf: boolean,
     argumentSourcePairs: TScope,
     compId: number,
     pathPrefix: string,
     loopIndexBase: number,
     walkStacks: TWalkStacks,
-    branch: TBranch,
+    branchIndex: number,
     tops: ChildNode[] | null,
   ): number => {
     const anchor = this.anchor();
@@ -783,13 +783,12 @@ export class ResumeInterpreter {
       pc,
       condLeafIndex,
       condInitial,
-      ownsCondLeaf,
       argumentSourcePairs,
       compId,
       pathPrefix,
       loopIndexBase,
       walkStacks,
-      branch,
+      branchIndex,
       anchor,
     );
   };

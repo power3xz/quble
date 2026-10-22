@@ -148,14 +148,17 @@ test("두 변수가 같은 칸을 가리켜도 그 칸이 바뀌면 맞게 센�
   assert.equal(textOf("pair"), "24", "4 + 4 * 5");
 });
 
-test("식 하나가 칸을 여럿 읽어도 구독 함수는 하나다", () => {
+test("식 하나가 칸을 여럿 읽어도 식 인스턴스와 구독 함수는 하나다", () => {
   const { inst } = instantiate();
-  // (a + b) * (c - d)는 루트 가지에 있고, a~d 네 칸을 구독한다. 칸마다 함수를 따로 만들면 1만 행에서
-  // 함수가 수만 개 늘어 메모리가 CPU 캐시를 넘친다.
-  const root = inst.branchPool.entries.find((b: { leafIndices: number[] }) => b.leafIndices.includes(A));
-  assert.ok(root);
-  const subscriberOf = (leafIndex: number) => root.updateFns[root.leafIndices.indexOf(leafIndex)];
-  assert.equal(new Set([A, B, C, D].map(subscriberOf)).size, 1);
+  // (a + b) * (c - d)는 식 인스턴스 하나이고, a~d 네 칸을 그 인스턴스의 함수 하나로 구독한다. 칸마다 함수를 따로
+  // 만들면 1만 행에서 함수가 수만 개 늘어 메모리가 CPU 캐시를 넘친다.
+  const instances = inst.exprInstances.entries.filter((e: { readLeaves: number[] }) => e.readLeaves.includes(A));
+  assert.equal(instances.length, 1, "a를 읽는 식 인스턴스는 하나다");
+  assert.deepEqual(
+    [A, B, C, D].filter((leafIndex) => instances[0].readLeaves.includes(leafIndex)),
+    [A, B, C, D],
+    "그 인스턴스가 a~d를 모두 읽는다",
+  );
 });
 
 test("다시 센 값이 지난번과 같으면 DOM에 쓰지 않는다", () => {

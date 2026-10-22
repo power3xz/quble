@@ -94,6 +94,28 @@ test("식이 여러 칸을 읽으면 어느 쪽이 바뀌어도 다시 센다", 
   assert.ok(shown(host).includes("eq"), "count가 따라와 다시 참");
 });
 
+test("식이 읽는 칸 둘이 한 batch에서 함께 바뀌면 중간 값으로 가지를 바꾸지 않는다", () => {
+  const { host, inst } = instantiate(BASE);
+  const eq = host.querySelector(".eq");
+  assert.ok(eq, "0 == 0");
+  const observer = new (host.ownerDocument.defaultView as unknown as typeof globalThis).MutationObserver(() => {});
+  observer.observe(host, { subtree: true, childList: true });
+
+  // count만 5가 된 중간 상태는 5 == 0 거짓이라 가지가 꺼졌다 켜진다. 식이 한 번만 세어지면 true 그대로다.
+  inst.store.batch(() => {
+    inst.store.set(LEAF.count, 5);
+    inst.store.set(LEAF.limit, 5);
+  });
+
+  // count > 0 같은 다른 @if는 정당하게 바뀌므로 eq 가지의 노드를 건드린 기록만 본다.
+  const touchedEq = observer
+    .takeRecords()
+    .filter((record) => [...record.addedNodes, ...record.removedNodes].includes(eq as Node));
+  assert.deepEqual(touchedEq, [], "eq 가지를 떼거나 붙인 DOM 변경이 없다");
+  assert.ok(host.querySelector(".eq"));
+  observer.disconnect();
+});
+
 test("문자열 칸이 바뀌면 길이를 다시 잰다", () => {
   const { host, set } = instantiate(BASE);
   assert.ok(!shown(host).includes("strlen"), "빈 문자열");

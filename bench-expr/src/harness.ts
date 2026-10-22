@@ -91,6 +91,7 @@ export const TESTS = [
   { key: "orders", label: "orders", desc: "기본 행" },
   { key: "orders-deep", label: "orders-deep", desc: "값 자리 사이에 정적 하위 트리, 깊은 값 자리, 정적 형제 줄이 낀 행" },
   { key: "orders-toggle", label: "orders-toggle", desc: "켰다 끄는 두 목록(100행, 10행). quble만 잰다" },
+  { key: "orders-shared", label: "orders-shared", desc: "행마다 props만 읽는 식 셋이 든 행. quble만 잰다" },
 ] as const;
 
 export const TARGETS = [
@@ -105,6 +106,7 @@ export const TARGETS = [
   { id: "svelte-deep", label: "Svelte 5 (deep)", test: "orders-deep" },
   { id: "solid-deep", label: "Solid (deep)", test: "orders-deep" },
   { id: "quble-toggle", label: "quble (toggle)", test: "orders-toggle" },
+  { id: "quble-shared", label: "quble (shared)", test: "orders-shared" },
 ];
 
 // 테스트의 지금 버전(tests.json). 행 모양, 데이터, 시나리오, 측정 방식이 바뀌면 그 테스트의 버전을 올린다 -

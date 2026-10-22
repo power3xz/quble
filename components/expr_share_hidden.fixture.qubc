@@ -1,0 +1,14 @@
+component ExprShareHidden {
+  props { rate: number, limit: number, rows: number[] }
+  events { ADD({ rows }) }
+  template {
+    div() {
+      button(class="add" @click:ADD) { "+" }
+      @for (row of rows) {
+        @if (row > limit) {
+          span(class="double") { ${rate * 2} }
+        }
+      }
+    }
+  }
+}

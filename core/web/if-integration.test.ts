@@ -24,6 +24,7 @@ before(() => {
     "if_with_context",
     "lit_bool_if",
     "if_attr_var",
+    "if_text_expr",
   ]) {
     qubb[name] = buildFixture(name);
   }
@@ -150,6 +151,25 @@ test("단일 if: 꺼진 동안 바뀌었다 되돌아온 값은 다시 켤 때 �
     [],
   );
   assert.deepEqual(texts(host), ["A"]);
+});
+
+test("텍스트 식 보간: 꺼진 동안 바뀌지 않은 값은 다시 켤 때 쓰지 않고, 바뀐 값은 한 번 쓴다", () => {
+  const { host, set } = instantiate("if_text_expr", ["cond", "a"], { cond: true, a: 1 });
+  const text = () => host.querySelector("p")?.textContent;
+  set("cond", false);
+  assert.deepEqual(
+    textWritesDuring(() => set("cond", true)),
+    [],
+  );
+  assert.equal(text(), "2");
+
+  set("cond", false);
+  set("a", 5);
+  assert.deepEqual(
+    textWritesDuring(() => set("cond", true)),
+    [6],
+  );
+  assert.equal(text(), "6");
 });
 
 // action 동안 속성에 쓴 값들. 런타임은 속성 칸을 setAttribute로 쓴다.

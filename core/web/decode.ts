@@ -19,15 +19,15 @@ export type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef }
 export type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
 // 조립 step 하나 - [STEP_*, key, elemSteps?]. STEP_* 상수와 의미는 vm.ts.
 export type TStep = [number, string | null, TStep[]?];
-type TDef = {
+type TComponentDef = {
   nameConstIndex: number;
   propsTypeRef: number;
   codeOff: number;
   codeLen: number;
   events: TEventEntry[];
   contexts: TEventEntry[];
-  // 이 def가 쓰는 표현식들(후위 표기 바이트). IF_EXPR의 expr_index가 이 배열의 인덱스.
-  exprs: Uint8Array[];
+  // 이 컴포넌트가 쓰는 표현식들(후위 표기 바이트). IF_EXPR의 expr_index가 이 배열의 인덱스.
+  exprBytecodes: Uint8Array[];
 };
 export type TModule = {
   code: Uint8Array;
@@ -35,7 +35,7 @@ export type TModule = {
   types: TType[];
   compiledSteps: TStep[][];
   leafCounts: number[];
-  defs: TDef[];
+  defs: TComponentDef[];
 };
 
 class Reader {
@@ -205,11 +205,11 @@ export const decode = (bytes: TQubleBytecode): TModule => {
     }
     // 표현식 테이블 - expr_count:u8, [(len:u8, code)]. IF_EXPR의 expr_index가 이 배열의 인덱스.
     const exprCount = r.u8();
-    const exprs = [];
+    const exprBytecodes = [];
     for (let i = 0; i < exprCount; i++) {
-      exprs.push(r.take(r.u8()));
+      exprBytecodes.push(r.take(r.u8()));
     }
-    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprs });
+    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprBytecodes });
   }
 
   const codeLen = r.u32();

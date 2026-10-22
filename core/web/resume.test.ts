@@ -208,3 +208,30 @@ test("resume한 뒤 push한 요소가 꼬리에 그려진다", () => {
   assert.equal(host.querySelector(".tag"), ssrTag, "SSR이 그린 요소는 그대로 남고 새 요소만 붙는다");
   inst.destroy();
 });
+
+// 행마다 `@if (row > limit) { ${rate * 2} }`. rate * 2는 컴포넌트 전체가 공유한다.
+test("resume한 뒤 공유한 식이 갱신되고, 모두 꺼진 동안 입력이 바뀌면 새 행이 따라잡는다", () => {
+  const data = { rate: 100, limit: 0, rows: [5, 6] };
+  const { qubb, resmap } = buildFixtureWithResmap("expr_share_hidden");
+  const host = ssrHost("expr_share_hidden", resmap, data);
+  const handlers: THandlers = {
+    ADD: (_d, ctx) => {
+      const push = ctx.push as (arrayLeafIndex: number, elem: unknown) => void;
+      push((ctx.props as Record<string, number>).rows, 20);
+    },
+  };
+  const inst = resume(qubb, resmap, host, data, handlers);
+  const doubles = () => [...host.querySelectorAll(".double")].map((node) => node.textContent);
+  assert.deepEqual(doubles(), ["200", "200"]);
+  // 행마다 row > limit 2 + 공유한 rate * 2 1
+  assert.equal(inst.exprInstances.entries.length - inst.exprInstances.free.length, 3);
+
+  inst.update({ rate: 120 });
+  assert.deepEqual(doubles(), ["240", "240"], "SSR 노드를 resume한 두 행이 한 인스턴스의 결과를 함께 받는다");
+
+  inst.update({ limit: 10 });
+  inst.update({ rate: 150 });
+  (host.querySelector(".add") as HTMLButtonElement).click();
+  assert.deepEqual(doubles(), ["300"]);
+  inst.destroy();
+});

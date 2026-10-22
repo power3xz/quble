@@ -1,0 +1,22 @@
+component ExprLevel {
+  props { a: number, b: number, rows: { base: number, cells: number[] }[] }
+  events {
+    ADD({ rows })
+    DEL({ rows })
+  }
+  template {
+    div() {
+      button(class="add" @click:ADD) { "+" }
+      button(class="del" @click:DEL) { "-" }
+      p(class="top") { ${a * b} }
+      @for (row of rows) {
+        p(class="row") { ${row.base + a} }
+        @for (cell of row.cells) {
+          span(class="cell") { ${cell * a} }
+          span(class="outer") { ${row.base * 2} }
+          span(class="props") { ${a + 1} }
+        }
+      }
+    }
+  }
+}
