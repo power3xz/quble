@@ -49,6 +49,9 @@ export class ExprInstancePool {
   store: LeafStoreSubject;
   // 공유 중인 식 인스턴스. shared[exprIndex].get(scopeUid)가 식 인스턴스 번호다.
   private shared: Array<Map<number, number>> = [];
+  // 따라잡을 때 입력 leaf를 모아 파생 구독에 넘기는 Set. 가지를 켤 때 행마다 Set을 만들면 그 할당이 GC로 드러나
+  // 비우고 채우며 재사용한다. 함수가 끝난 뒤에는 쓰지 않으므로 통지가 이어서 다른 인스턴스를 붙여도 안전하다.
+  private catchUpLeaves = new Set<number>();
 
   constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
     this.evaluator = evaluator;
@@ -157,7 +160,8 @@ export class ExprInstancePool {
   };
 
   // 붙은 가지를 하나 더한다. 붙은 가지가 0에서 1이 되면 입력 leaf마다 파생 구독을 건다. 구독이 풀렸던 적이 있으면
-  // 입력 leaf마다 지금 한 번 불러 놓친 입력을 따라잡는다. 처음 걸 때는 evaluate가 방금 센 값이 최신이라 따라잡지
+  // 입력 leaf 전체를 바뀐 leaf로 넘겨 한 번 불러 놓친 입력을 따라잡는다. leaf마다 부르면 식을 입력 leaf 수만큼
+  // 세고, 나머지 입력이 낡은 채 센 중간 값까지 통지한다. 처음 걸 때는 evaluate가 방금 센 값이 최신이라 따라잡지
   // 않는다.
   attach = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
@@ -172,17 +176,14 @@ export class ExprInstancePool {
       }
     }
     if (instance.everAttached) {
-      // 건너뛸 부분식이 없는 식은 바뀐 leaf를 보지 않고 처음부터 세므로 입력 leaf 하나로 한 번만 부르면 된다.
-      const refreshOnce = instance.table === null;
-      // 따라잡는 호출이 READ_LEAF 구독을 다시 걸면 readLeaves가 바뀌므로 길이를 매번 다시 읽는다.
+      const { catchUpLeaves } = this;
+      catchUpLeaves.clear();
       for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
         if (this.isInputLeaf(instance, readLeafPosition)) {
-          this.store.refreshDerive(derive, readLeaves[readLeafPosition]);
-          if (refreshOnce) {
-            break;
-          }
+          catchUpLeaves.add(readLeaves[readLeafPosition]);
         }
       }
+      this.store.refreshDerive(derive, catchUpLeaves);
     }
     instance.everAttached = true;
   };
@@ -248,8 +249,7 @@ export class ExprInstancePool {
         }
       }
     }
-    // 구독을 다시 걸며 이미 뺀 leafIndex다. 가지를 다시 붙일 때 다시 걸기 전 사본으로 따라잡으면 온다 -
-    // 다시 건 그 호출이 이미 다시 셌으므로 할 일이 없다.
+    // 바뀐 leaf 중 이 식이 읽는 것이 없다(구독을 다시 걸며 이미 뺀 leafIndex). 다시 셀 것이 없다.
     if (changedVarMask === 0) {
       return instance.lastValue;
     }

@@ -242,6 +242,27 @@ test("resultLeafOf는 결과 leaf를 연결하기 전에는 undefined, 연결한
   assert.equal(pool.resultLeafOf(first), 2);
 });
 
+test("떼어 둔 동안 입력 여럿이 바뀌면 따라잡을 때 식을 한 번 세고 맞는 값만 통지한다", () => {
+  const { pool, exprInstanceIndex, store } = build(product());
+  pool.attach(exprInstanceIndex);
+  pool.detach(exprInstanceIndex);
+  store.set(0, 4);
+  store.set(2, 7);
+  const { reevalExpr } = pool.evaluator;
+  let runs = 0;
+  pool.evaluator.reevalExpr = (...args) => {
+    runs++;
+    return reevalExpr(...args);
+  };
+  const notified: unknown[] = [];
+  store.subscribe(4, (value) => notified.push(value));
+
+  pool.attach(exprInstanceIndex);
+
+  assert.equal(runs, 1, "a와 c를 함께 바뀐 변수로 넘겨 한 번에 센다");
+  assert.deepEqual(notified, [24], "(4 + 2) * (7 - 3)만 통지한다 - a만 반영한 중간 값이 나가지 않는다");
+});
+
 test("건너뛸 부분식이 있는 식도 같은 규칙으로 구독하고 따라잡는다", () => {
   const fixture = product();
   const { pool, exprInstanceIndex, value, store } = build(fixture);

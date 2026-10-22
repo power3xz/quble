@@ -3,7 +3,9 @@
 // - store는 타입을 모르는 순수 저장소다(leafIndex가 유일한 접근 축).
 //
 //   createLeafStore(leaves)        -> { get, set }                                 (데이터만)
-//   createLeafStoreSubject(leaves) -> 위 + { notify, subscribe, unsubscribe, alloc, free }  (반응성 + 동적 칸)
+//   createLeafStoreSubject(leaves) -> 위 + { write, notify, batch, subscribe, unsubscribe, subscribeDerive,
+//                                     unsubscribeDerive, bindDeriveResult, freeDeriveResult, refreshDerive,
+//                                     alloc, free, clear }                         (반응성 + 동적 칸)
 //
 // runtime.ts의 blueprint가 만들어 인스턴스에 싣는 store가 곧 createLeafStoreSubject의 반환물이다.
 
@@ -64,9 +66,9 @@ export type LeafStoreSubject = {
   // fn의 결과 leaf를 반납하고 연결을 푼다 - 파생 구독을 가진 가지가 없어질 때 부른다. fn이 입력 leaf 여러 개에
   // 걸려 같은 fn으로 여러 번 불려도 첫 번째만 반납한다.
   freeDeriveResult: (fn: TDeriveSubscriber) => void;
-  // set이 아닌 경로에서 파생 구독 fn 하나만 지금 한 번 부른다 - 가지를 다시 붙일 때 놓친 입력을 따라잡는다.
-  // 돌려준 값을 결과 leaf에 write하고, 값이 바뀌었으면 그 leaf를 notify한다.
-  refreshDerive: (fn: TDeriveSubscriber, leafIndex: LeafIndex) => void;
+  // set이 아닌 경로에서 파생 구독 fn 하나만 changedLeaves로 지금 한 번 부른다 - 식 인스턴스의 구독을 다시 걸 때
+  // 놓친 입력을 따라잡는다. 돌려준 값을 결과 leaf에 write하고, 값이 바뀌었으면 그 leaf를 notify한다.
+  refreshDerive: (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>) => void;
   clear: () => void;
 };
 // leaf마다 구독을 담는 슬롯. 구독이 하나뿐인 leaf가 대부분이라 하나면 Set 없이 함수를 그대로 담고, 둘째가
@@ -342,14 +344,8 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     }
   };
 
-  // 따라잡기는 leaf 하나씩 부르므로 바뀐 leaf를 담는 Set 하나를 비우고 채우며 재사용한다. 가지를 켤 때 행마다
-  // Set을 만들면 그 할당이 GC로 드러났다. fn이 끝난 뒤에는 쓰지 않으므로 통지가 이어서 따라잡기를 다시 불러도
-  // 안전하다.
-  const refreshedLeaf = new Set<LeafIndex>();
-  const refreshDerive = (fn: TDeriveSubscriber, leafIndex: LeafIndex): void => {
-    refreshedLeaf.clear();
-    refreshedLeaf.add(leafIndex);
-    const value = fn(refreshedLeaf);
+  const refreshDerive = (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>): void => {
+    const value = fn(changedLeaves);
     const resultLeaf = fn.resultLeafIndex;
     if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
       write(resultLeaf, value);
