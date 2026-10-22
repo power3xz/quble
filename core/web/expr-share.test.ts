@@ -131,23 +131,52 @@ test("행을 제거하면 그 행이 쓰던 식 인스턴스를 반납하고 다
 });
 
 // 픽스처(expr_share_hidden): 행마다 `@if (row > limit) { ${rate * 2} }`. rate * 2는 컴포넌트 전체가 공유한다.
-test("공유한 식을 든 가지가 모두 꺼진 동안 입력이 바뀌면 새로 붙는 행이 따라잡는다", () => {
-  const addQueue = [20];
+// ADD는 행 20(row > limit이면 켜진다)을 더한다. rateReads는 add 뒤로 식이 rate leaf를 읽은 횟수다 - 식을 세면 읽는다.
+const instantiateHidden = (limit: number) => {
+  let rateLeafIndex: number | undefined;
   const handlers: THandlers = {
     ADD: (_d, ctx) => {
       const push = ctx.push as (array: number, element: unknown) => void;
       const props = ctx.props as Record<string, number>;
-      push(props.rows, addQueue.shift());
+      rateLeafIndex = props.rate;
+      push(props.rows, 20);
     },
   };
-  const inst = compile(buildFixture("expr_share_hidden"))(0)({ rate: 100, limit: 0, rows: [5, 6] }, handlers);
+  const inst = compile(buildFixture("expr_share_hidden"))(0)({ rate: 100, limit, rows: [5, 6] }, handlers);
   const host = mount(inst);
-  const doubles = () => [...host.querySelectorAll(".double")].map((node) => node.textContent);
+  let rateReads = 0;
+  const { get } = inst.store;
+  inst.store.get = (leafIndex) => {
+    if (leafIndex === rateLeafIndex) {
+      rateReads++;
+    }
+    return get(leafIndex);
+  };
+  return {
+    inst,
+    add: () => (host.querySelector(".add") as HTMLButtonElement).click(),
+    rateReads: () => rateReads,
+    doubles: () => [...host.querySelectorAll(".double")].map((node) => node.textContent),
+  };
+};
+
+test("공유한 식이 붙어 있으면 새 행은 식을 세지 않고 결과 leaf를 읽는다", () => {
+  const { add, rateReads, doubles } = instantiateHidden(0);
   assert.deepEqual(doubles(), ["200", "200"]);
 
+  add();
+
+  assert.deepEqual(doubles(), ["200", "200", "200"]);
+  assert.equal(rateReads(), 0, "구독 중이라 결과 leaf가 최신이다");
+});
+
+test("공유한 식을 든 가지가 모두 꺼진 동안 입력이 바뀌면 새로 붙는 행이 따라잡는다", () => {
+  const { inst, add, rateReads, doubles } = instantiateHidden(0);
   inst.update({ limit: 10 });
   inst.update({ rate: 150 });
-  (host.querySelector(".add") as HTMLButtonElement).click();
+
+  add();
 
   assert.deepEqual(doubles(), ["300"], "꺼진 동안 구독이 없어 결과 leaf가 200으로 낡았다");
+  assert.equal(rateReads(), 1, "새 행이 붙을 때 한 번 따라잡는다");
 });
