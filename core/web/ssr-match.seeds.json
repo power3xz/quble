@@ -1,4 +1,11 @@
 {
+  "expr_level": [
+    {
+      "a": 2,
+      "b": 3,
+      "rows": [{ "base": 10, "cells": [1, 2] }, { "base": 20, "cells": [] }]
+    }
+  ],
   "array_payload": [
     {
       "items": [
