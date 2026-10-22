@@ -128,6 +128,11 @@ export class ExprInstancePool {
     this.shared[exprIndex] = byScopeUid;
   };
 
+  // 식 인스턴스의 결과를 쓰는 leaf. bindResultLeaf 전에는 undefined다. 공유한 인스턴스를 두 번째로 든 자리가 같은
+  // 결과 leaf를 구독하려고 읽는다.
+  resultLeafOf = (exprInstanceIndex: number): number | undefined =>
+    this.pool.entries[exprInstanceIndex].derive.resultLeafIndex;
+
   retain = (exprInstanceIndex: number): void => {
     this.pool.entries[exprInstanceIndex].refCount++;
   };

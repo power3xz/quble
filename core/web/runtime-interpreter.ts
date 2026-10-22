@@ -357,7 +357,7 @@ export class RuntimeInterpreter {
         );
         segment = null;
       } else {
-        vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branchIndex);
+        vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, branchIndex, walkStacks, loopIndexBase);
       }
     }
     return fragment;
@@ -460,7 +460,7 @@ export class RuntimeInterpreter {
         case OP_ATTR_G_EXPR:
         case OP_ATTR_L_EXPR: {
           // biome-ignore lint/style/noNonNullAssertion: ATTR은 ELEM_OPEN 다음에만 오므로 pending은 non-null(바이트코드 순서 보장)
-          vm.bindValueSlot(op, pc, pending!, compId, argumentSourcePairs, startBranchIndex);
+          vm.bindValueSlot(op, pc, pending!, compId, argumentSourcePairs, startBranchIndex, walkStacks, loopIndexBase);
           pc += operandLen(op);
           break;
         }
@@ -500,7 +500,7 @@ export class RuntimeInterpreter {
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR: {
           const node = document.createTextNode("");
-          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, startBranchIndex);
+          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, startBranchIndex, walkStacks, loopIndexBase);
           pc += operandLen(op);
           nodeTop().appendChild(node);
           break;
@@ -619,6 +619,7 @@ export class RuntimeInterpreter {
           // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
           // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
           const childDef = vm.module.defs[childCompId];
+          walkStacks.scopeUidStack.push(vm.nextScopeUid());
           const childFragment = this.interpret(
             vm,
             childArgumentSourcePairs,
@@ -632,6 +633,7 @@ export class RuntimeInterpreter {
             walkStacks, // 회차 인덱스/컨텍스트 스택을 공유로 물려준다 - @for/@with 경계가 push/pop으로 원복(복사 없음)
             childSlotPlaceholderContents, // 자식 @slot 자리가 꺼내 쓸 콘텐츠(부모 컨텍스트를 이미 캡처해 둠)
           );
+          walkStacks.scopeUidStack.pop();
           // fragment를 통째로 붙인다 - appendChild(fragment)는 내용 전체를 한 번에 옮기고
           // fragment를 비운다(노드별 재입양 대신 1회). 노드 하나씩 옮기면 안 된다: childNodes는
           // 라이브라 순회 중 인덱스가 밀려 건너뛴다.
@@ -811,12 +813,19 @@ export class RuntimeInterpreter {
     branchIndex: number,
     parent: Node,
   ): number => {
-    const expr = vm.module.defs[compId].exprBytecodes[vm.code[pc++]];
+    const exprIndex = vm.code[pc++];
+    const expr = vm.module.defs[compId].exprBytecodes[exprIndex];
     // 식이 읽는 칸이 바뀌면 식을 다시 센 값을 구독 층이 결과 leaf(condLeafIndex)에 write한다. 그 값이 바뀌면
     // 아래 buildIfRegion이 건 통지 구독이 불려 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
     // 때문이다. 파생 구독은 부모 가지에 실어 생애를 함께 한다. 결과 leaf는 식의 첫 값으로 잡으므로 식을 센
     // 뒤에 만들어 연결한다.
-    const { exprInstanceIndex, value } = vm.addExprInstance(expr, argumentSourcePairs, branchIndex);
+    const { exprInstanceIndex, value } = vm.addExprInstance(
+      expr,
+      argumentSourcePairs,
+      branchIndex,
+      exprIndex,
+      vm.sharedScopeUidOf(compId, exprIndex, walkStacks, loopIndexBase),
+    );
     const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(
       vm,

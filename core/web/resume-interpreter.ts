@@ -251,7 +251,16 @@ export class ResumeInterpreter {
         case OP_ATTR_L_VAR:
         case OP_ATTR_G_EXPR:
         case OP_ATTR_L_EXPR: {
-          vm.bindValueSlot(op, pc, pending as HTMLElement, compId, argumentSourcePairs, startBranchIndex);
+          vm.bindValueSlot(
+            op,
+            pc,
+            pending as HTMLElement,
+            compId,
+            argumentSourcePairs,
+            startBranchIndex,
+            walkStacks,
+            loopIndexBase,
+          );
           pc += operandLen(op);
           break;
         }
@@ -285,7 +294,7 @@ export class ResumeInterpreter {
         case OP_TEXT_VAR:
         case OP_TEXT_EXPR: {
           const node = this.text();
-          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, startBranchIndex);
+          vm.bindValueSlot(op, pc, node, compId, argumentSourcePairs, startBranchIndex, walkStacks, loopIndexBase);
           pc += operandLen(op);
           addTop(node);
           break;
@@ -378,21 +387,22 @@ export class ResumeInterpreter {
           const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
           segment = null;
           const childDef = vm.module.defs[childCompId];
-          addTops(
-            this.interpret(
-              vm,
-              childArgumentSourcePairs,
-              childCompId,
-              childDef.codeOff,
-              childDef.codeOff + childDef.codeLen,
-              startBranchIndex,
-              // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
-              childPrefix!,
-              walkStacks.loopIndexStack.length / 2,
-              walkStacks,
-              childSlotPlaceholderContents,
-            ),
+          walkStacks.scopeUidStack.push(vm.nextScopeUid());
+          const childTops = this.interpret(
+            vm,
+            childArgumentSourcePairs,
+            childCompId,
+            childDef.codeOff,
+            childDef.codeOff + childDef.codeLen,
+            startBranchIndex,
+            // biome-ignore lint/style/noNonNullAssertion: RENDER 지점엔 PUSH_PATH_SEGMENT가 깐 segment가 있어 childPrefix는 non-null(바이트코드 순서 보장)
+            childPrefix!,
+            walkStacks.loopIndexStack.length / 2,
+            walkStacks,
+            childSlotPlaceholderContents,
           );
+          walkStacks.scopeUidStack.pop();
+          addTops(childTops);
           break;
         }
         case OP_IF: {
@@ -726,8 +736,15 @@ export class ResumeInterpreter {
     branchIndex: number,
     tops: ChildNode[] | null,
   ): number => {
-    const expr = vm.module.defs[compId].exprBytecodes[this.code[pc++]];
-    const { exprInstanceIndex, value } = vm.addExprInstance(expr, argumentSourcePairs, branchIndex);
+    const exprIndex = this.code[pc++];
+    const expr = vm.module.defs[compId].exprBytecodes[exprIndex];
+    const { exprInstanceIndex, value } = vm.addExprInstance(
+      expr,
+      argumentSourcePairs,
+      branchIndex,
+      exprIndex,
+      vm.sharedScopeUidOf(compId, exprIndex, walkStacks, loopIndexBase),
+    );
     const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(
       vm,

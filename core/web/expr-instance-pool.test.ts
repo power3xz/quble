@@ -193,6 +193,15 @@ test("clear하면 공유 맵도 비운다", () => {
   assert.equal(pool.findShared(3, 7), NOT_SHARED);
 });
 
+test("resultLeafOf는 결과 leaf를 연결하기 전에는 undefined, 연결한 뒤에는 그 leaf를 돌려준다", () => {
+  const { pool, first } = buildTwo();
+  assert.equal(pool.resultLeafOf(first), undefined);
+
+  pool.bindResultLeaf(first, 2);
+
+  assert.equal(pool.resultLeafOf(first), 2);
+});
+
 test("건너뛸 부분식이 있는 식도 같은 규칙으로 구독하고 따라잡는다", () => {
   const fixture = product();
   const { pool, exprInstanceIndex, value, store } = build(fixture);
