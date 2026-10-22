@@ -8,8 +8,9 @@
 |---|---|
 | expr-opcode.ts | opcode와 명령 크기 |
 | expr-skip-table.ts | 식 정의마다 한 번 만드는 표(`buildSkipTable`) |
-| vm.ts | 평가(`runExpr`), 구독(`subscribeExpr`), 구독 다시 걸기(`resubscribeReadLeaf`) |
-| region.ts | 가지를 떼고 붙일 때 구독 풀기와 다시 걸기(`restoreBranchSubs`) |
+| expr-eval.ts | 평가(`runExpr`, `evalExpr`, `reevalExpr`) |
+| expr-layer.ts | 식 인스턴스와 파생 구독(`ExprInstancePool`), 구독 다시 걸기(`resubscribeReadLeaf`) |
+| region.ts | 가지를 떼고 붙일 때 식 인스턴스를 떼고 붙이기(`teardownBranchSubs`, `restoreBranchSubs`) |
 
 ## 1. 식의 모양 - 트리와 후위 바이트
 
@@ -206,33 +207,35 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 | cache | 연산 수 |
 | 구독 함수 | 하나(4절) |
 | `leafOfVar` | 변수 수. 변수마다 읽는 leafIndex |
-| 지난번 결과 | 값 하나. 다시 센 값이 같으면 DOM에 반영하지 않는다 |
+| 지난번 결과 | 값 하나. 바뀐 leaf를 읽는 변수가 없을 때 그대로 돌려준다 |
 
 인스턴스는 leaf 기준(leaf마다 읽는 변수 목록과 건너뛸 표)이 아니라 변수 기준으로 든다. 변수 수는 식
 정의가 정해 배열을 처음부터 맞는 크기로 잡고, 건너뛸 표는 정의의 것을 그대로 쓴다. 행마다 다른 것은
 읽는 leafIndex뿐이다. leaf 기준으로 들면 leaf마다 작은 배열이 생기고, 빈 배열에 push로 채운 배열은
 V8이 늘어날 몫까지 잡아 많은 행에서 쓰지 않는 용량이 크게 남는다.
 
-어느 변수가 바뀌어도 건너뛸 부분식이 없으면(`a - b`, `big > 50`) 표가 null이다. 이런 식은
-`subscribeWholeExpr`로 가서 cache도 leaf마다 표도 없이, leaf가 바뀌면 처음부터 센다.
+어느 변수가 바뀌어도 건너뛸 부분식이 없으면(`a - b`, `big > 50`) 표가 null이다. 이런 식의 파생 구독
+함수는 cache도 건너뛸 표도 없이, leaf가 바뀌면 처음부터 센다.
 
 ## 4. 구독
 
-**식 인스턴스마다 구독 함수는 하나다.** 식이 읽는 leaf마다 같은 함수를 걸고, 함수는 호출될 때 받은
-leafIndex로 그 leaf의 건너뛸 표를 고른다.
+**식 인스턴스마다 파생 구독 함수는 하나다.** 식이 읽는 leaf마다 같은 함수를 건다. 구독 층이 flush마다
+이 함수를 한 번 호출하며 이번 flush에서 바뀐 leaf 전체(`changedLeaves`)를 넘기고, 함수는 그중 식이 읽는
+변수를 골라 건너뛸 표를 정한다. 함수가 돌려준 값을 결과 leaf에 기록하고 통지하는 것은 구독 층이다
+(SUBSCRIPTION-LAYERS.md 2절).
 
 ```
 leaf 0 (rows)    --\
-leaf 1 (cursor)  ---+--> reevalOnChange(value, leafIndex)
-leaf 3 (score)   --/       v = leafOfVar.indexOf(leafIndex)
-                           reeval with skipPastOpsByVar[v]
+leaf 1 (cursor)  ---+--> runPartial(changedLeaves)
+leaf 3 (score)   --/       changedVarMask = changedLeaves를 읽는 변수의 비트
+                           reeval with 그 변수들의 건너뛸 표
 ```
 
-다시 센 값이 지난번과 같으면 DOM에 반영하지 않는다.
+다시 센 값이 결과 leaf의 값과 같으면 구독 층이 기록도 통지도 하지 않는다.
 
 leaf마다 함수를 따로 두면 많은 행에서 함수가 수만 개 늘어, 명령 수가 아니라 메모리가 CPU 캐시를
-넘쳐 다시 세기가 처음부터 세기보다 느려졌다. 같은 이유로 구독 함수가 잡는 변수도 줄인다 - 건너뛸
-것이 있는 식과 없는 식을 메서드로 나눈다.
+넘쳐 다시 세기가 처음부터 세기보다 느려졌다. 같은 이유로 함수가 잡는 변수도 줄인다 - 건너뛸 부분식이
+없는 식에는 cache도 표도 잡지 않고 처음부터 세는 함수를 따로 만든다(`ExprInstancePool.create`).
 
 **`runExpr`는 런타임이 가진 스택 하나를 다시 쓴다.** 호출마다 스택 배열과 클로저를 만들면 모든 행이
 다시 세는 갱신에서 행 수만큼 객체가 생겼다 버려진다. 없애도 클릭 시간은 그대로였고 할당량만 줄었다.
@@ -248,10 +251,9 @@ leafOfVar   [23, 23]    x, y
 leaf 23은 한 번만 구독한다. leaf 23이 바뀌면 x, y가 함께 바뀌므로, 두 변수를 하나도 품지 않은 부분식의
 표를 쓴다(아래 "한 flush에서 읽는 leaf 여럿이 바뀔 때"와 같은 표다).
 
-**한 flush에서 읽는 leaf 여럿이 바뀔 때** - 구독 함수는 셋째 인자로 이번 flush에서 바뀐 leaf 전체(`flushLeaves`,
-LEAF-STORE-LAYOUT.md 4절)를 받는다. `flushLeaves`가 둘 이상이면 처음 불릴 때 `leafOfVar`에서 그중 식이
-읽는 변수를 모아, 그 변수들을 하나도 품지 않은 부분식만 건너뛰며 한꺼번에 센다. 같은 flush의 나머지
-호출은 `flushLeaves`가 이미 처리한 것과 같은 Set이라 바로 끝난다.
+**한 flush에서 읽는 leaf 여럿이 바뀔 때** - 함수가 받은 `changedLeaves`에서 `leafOfVar`로 식이 읽는 변수를
+모두 모아, 그 변수들을 하나도 품지 않은 부분식만 건너뛰며 한꺼번에 센다. 구독 층이 함수를 flush마다 한
+번만 호출하므로 같은 flush에서 다시 세는 일은 없다.
 
 ```
 ((a + b) * c) - (d + e)       변수 a=0, b=1, c=2, d=3, e=4
@@ -265,19 +267,26 @@ a와 d가 함께 바뀌면            {}           건너뛸 부분식이 없어
 일은 `leafOfVar`를 훑어 정수를 만드는 것과 표를 찾는 것뿐이라 배열을 만들지 않는다. 변수가 32개를
 넘는 식은 정수에 담을 수 없어 표를 만들지 않고(`buildSkipTable`이 `null`), 처음부터 센다.
 
-**가지를 떼고 붙일 때** - 구독은 식이 놓인 가지(`TBranch`)의 목록에 함께 담긴다.
+**가지를 떼고 붙일 때** - 파생 구독은 가지가 아니라 식 인스턴스가 든다. 가지는 식 인스턴스 번호만 들고,
+가지가 붙고 떨어질 때 식 인스턴스가 입력 leaf의 구독을 걸고 푼다. `${rows[cursor].score * 2}` 하나가 놓인
+가지에서 결과 leaf가 9면
 
 ```
-branch.leafIndices   [0,  1,  3 ]
-branch.updateFns     [fn, fn, fn]
+branch.leafIndices           [9 ]           통지 구독을 걸 leaf (결과 leaf)
+branch.updateFns             [fn]           그 leaf의 통지 구독 함수
+branch.exprInstanceIndices   [2 ]           식 인스턴스 번호
+                              |
+                              v
+식 인스턴스 2의 leafOfVar     [0, 1, 3]      파생 구독을 걸 입력 leaf (rows, cursor, score)
 ```
 
-- 가지를 떼면 목록대로 구독을 푼다.
-- 가지를 붙이면 목록대로 모두 건 뒤, 목록의 사본을 돌며 떼어져 있던 동안 놓친 값을 따라잡는다.
+- 가지를 떼면 통지 구독을 푼다. 식 인스턴스는 그 인스턴스를 든 가지가 모두 떨어졌을 때 입력 leaf의
+  파생 구독을 푼다(공유한 인스턴스는 다른 가지가 붙어 있을 수 있다).
+- 가지를 붙이면 둘 다 다시 건 뒤, 입력 leaf마다 함수를 한 번 호출해 떨어져 있던 동안 놓친 값을
+  따라잡는다(SUBSCRIPTION-LAYERS.md 3절, 5절).
 
-모두 건 뒤에 따라잡는 이유는, 따라잡는 구독 함수가 인덱스 접근의 구독을 다시 걸며 목록을 고칠 수
-있어서다(5절). 사본에 남은 옛 leafIndex로 함수가 다시 호출되면, 그 leafIndex는 `leafOfVar`에 없으므로
-함수가 바로 끝난다.
+따라잡는 호출이 인덱스 접근의 구독을 다시 걸면 `leafOfVar`가 바뀐다(5절). 그래서 `attach`는 `leafOfVar`를
+매번 다시 읽는다. 함수가 받은 leaf를 읽는 변수가 없으면 지난번 결과를 그대로 돌려준다.
 
 ## 5. 인덱스 접근과 구독 다시 걸기
 
@@ -314,11 +323,6 @@ branch.updateFns     [fn, fn, fn]
 
 새 leaf를 이미 다른 변수가 읽고 있으면 구독을 새로 걸지 않는다(`${rows[cursor].score + rows[0].score}`에서
 cursor가 0이 된 경우). 그 leaf가 바뀌면 두 변수의 위치를 합친 표로 센다(4절).
-
-가지 목록은 위 예처럼 옛 leaf를 빼고 새 leaf를 더하면(대부분이 이 경우다) 같은 자리를 새 leaf로
-덮어쓴다. 빼기만 할 때는 `swapDeleteAt`으로 한다 - 빈자리에 마지막 원소를 옮겨 와 순서가 바뀌지만, 가지
-목록은 순서를 쓰지 않는다. `splice`는 쓰지 않는다. 뺀 원소를 담은 배열을 매번 만들어, 많은 행이 함께
-다시 걸면 버려지는 배열이 행 수만큼 생긴다.
 
 **중첩은 따로 다룰 것이 없다.** 안쪽 부분식이 바깥 구간에 통째로 들어가, 안쪽을 정하는 변수는 두
 연산에 모두 달린다.
