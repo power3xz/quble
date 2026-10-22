@@ -126,6 +126,12 @@
 
 ## 미해결
 
+- **공유 식이 없는 행은 식 인스턴스 풀 도입 뒤 main보다 메모리를 더 쓰고 mount가 느리다** - bench-expr
+  1000행에서 공유 식이 없는 orders는 heap과 mount가, orders-deep은 heap과 "환율+세율 동시 변경" 클릭이
+  main(ef53364)보다 크다. 행마다 공유 식이 든 orders-shared는 mount, heap, 클릭 모두 main보다 작다.
+  재현: `BENCH_N=1000 ./bench-expr-quick.sh ef53364`와 `BENCH_N=1000 ./bench-expr-quick.sh <expr-layer 머지 커밋>`을
+  이어서 재고 `bench-compare.mjs`로 견준다.
+
 - **확장이 클린 클론에서 `npm install`부터 못 한다** - `editors/vscode`의 `dependencies`에
   `"quble-ts-plugin": "0.0.1"`이 있는데 레지스트리에 없는 이름이라 404다. 실물은 `npm run
   build`가 `node_modules/quble-ts-plugin`에 직접 놓으므로, build를 먼저 돌리면 install이 된다
