@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ExprEvaluator } from "./expr-eval.ts";
-import { ExprInstancePool } from "./expr-layer.ts";
+import { ExprInstancePool, NOT_SHARED } from "./expr-layer.ts";
 import { EXPR_ADD, EXPR_LOAD_VAR, EXPR_MUL, EXPR_SUB } from "./expr-opcode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
@@ -124,6 +124,73 @@ test("붙은 채로 release해도 구독이 풀려 반납된 결과 leaf를 건�
   store.set(0, 10);
 
   assert.equal(store.get(reused), 99);
+});
+
+// 같은 풀에서 식 인스턴스 둘을 만든다(공유 조회는 풀 하나 안에서 이뤄진다). 구독은 걸지 않는다.
+const buildTwo = () => {
+  const fixture = sum();
+  const pool = poolOf(fixture.store);
+  const first = pool.create(fixture.expr, fixture.pairs);
+  const second = pool.create(fixture.expr, fixture.pairs);
+  return { pool, first, second };
+};
+
+test("findShared는 올리지 않은 키에는 NOT_SHARED를 돌려준다", () => {
+  const { pool } = buildTwo();
+  assert.equal(pool.findShared(0, 7), NOT_SHARED);
+});
+
+test("markShared로 올린 (exprIndex, scopeUid)로만 그 식 인스턴스가 찾아진다", () => {
+  const { pool, first } = buildTwo();
+  pool.markShared(first, 3, 7);
+
+  assert.equal(pool.findShared(3, 7), first);
+  assert.equal(pool.findShared(3, 8), NOT_SHARED, "scopeUid가 다르면 다른 스코프의 식이다");
+  assert.equal(pool.findShared(4, 7), NOT_SHARED, "exprIndex가 다르면 같은 스코프의 다른 식이다");
+});
+
+test("공유한 식 인스턴스는 참조 수가 0이 될 때 공유 맵에서 빠진다", () => {
+  const { pool, first } = buildTwo();
+  pool.markShared(first, 3, 7);
+  pool.retain(first);
+
+  pool.release(first);
+  assert.equal(pool.findShared(3, 7), first, "참조가 하나 남았으니 계속 찾아진다");
+
+  pool.release(first);
+  assert.equal(pool.findShared(3, 7), NOT_SHARED);
+});
+
+test("반납한 풀 번호를 새 식 인스턴스가 다시 써도 옛 키로 찾아지지 않는다", () => {
+  const { pool, first } = buildTwo();
+  pool.markShared(first, 3, 7);
+  pool.release(first);
+
+  const fixture = sum();
+  const reused = pool.create(fixture.expr, fixture.pairs);
+
+  assert.equal(reused, first, "풀 번호가 재사용된다");
+  assert.equal(pool.findShared(3, 7), NOT_SHARED);
+});
+
+test("공유한 식 인스턴스 하나를 반납해도 다른 키의 식 인스턴스는 그대로 찾아진다", () => {
+  const { pool, first, second } = buildTwo();
+  pool.markShared(first, 3, 7);
+  pool.markShared(second, 3, 8);
+
+  pool.release(first);
+
+  assert.equal(pool.findShared(3, 7), NOT_SHARED);
+  assert.equal(pool.findShared(3, 8), second);
+});
+
+test("clear하면 공유 맵도 비운다", () => {
+  const { pool, first } = buildTwo();
+  pool.markShared(first, 3, 7);
+
+  pool.clear();
+
+  assert.equal(pool.findShared(3, 7), NOT_SHARED);
 });
 
 test("건너뛸 부분식이 있는 식도 같은 규칙으로 구독하고 따라잡는다", () => {

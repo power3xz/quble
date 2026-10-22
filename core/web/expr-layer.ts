@@ -31,7 +31,13 @@ export type TExprInstance = {
   // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
   refCount: number;
   attachedCount: number;
+  // 공유 맵에 올린 키(식 표 번호와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
+  sharedExprIndex: number;
+  sharedScopeUid: number;
 };
+
+// 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared와 인스턴스의 공유 키 자리에 쓴다.
+export const NOT_SHARED = -1;
 
 // derive를 인스턴스 객체에 담기 전에 쓰는 자리 표시 함수. 인스턴스를 가리키는 함수는 인스턴스가 있어야 지을 수 있다.
 const noopDerive: TDeriveSubscriber = () => undefined;
@@ -40,6 +46,8 @@ export class ExprInstancePool {
   pool: Pool<TExprInstance> = new Pool();
   evaluator: ExprEvaluator;
   store: LeafStoreSubject;
+  // 공유 중인 식 인스턴스. shared[exprIndex].get(scopeUid)가 식 인스턴스 번호다.
+  private shared: Array<Map<number, number>> = [];
 
   constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
     this.evaluator = evaluator;
@@ -65,6 +73,8 @@ export class ExprInstancePool {
       derive: noopDerive,
       refCount: 1,
       attachedCount: 0,
+      sharedExprIndex: NOT_SHARED,
+      sharedScopeUid: NOT_SHARED,
     };
     // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 구독 층이 쓰지 않는다.
     instance.derive =
@@ -105,6 +115,19 @@ export class ExprInstancePool {
     this.store.bindDeriveResult(this.pool.entries[exprInstanceIndex].derive, resultLeafIndex);
   };
 
+  // 스코프 인스턴스(scopeUid)에서 식(exprIndex)을 이미 공유 중이면 그 식 인스턴스 번호, 없으면 NOT_SHARED.
+  findShared = (exprIndex: number, scopeUid: number): number => this.shared[exprIndex]?.get(scopeUid) ?? NOT_SHARED;
+
+  // 식 인스턴스를 (exprIndex, scopeUid)로 공유 맵에 올린다. 참조 수가 0이 될 때 release가 지운다.
+  markShared = (exprInstanceIndex: number, exprIndex: number, scopeUid: number): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    instance.sharedExprIndex = exprIndex;
+    instance.sharedScopeUid = scopeUid;
+    const byScopeUid = this.shared[exprIndex] ?? new Map<number, number>();
+    byScopeUid.set(scopeUid, exprInstanceIndex);
+    this.shared[exprIndex] = byScopeUid;
+  };
+
   retain = (exprInstanceIndex: number): void => {
     this.pool.entries[exprInstanceIndex].refCount++;
   };
@@ -119,6 +142,9 @@ export class ExprInstancePool {
     if (instance.attachedCount > 0) {
       this.unsubscribeInputs(instance);
       instance.attachedCount = 0;
+    }
+    if (instance.sharedExprIndex !== NOT_SHARED) {
+      this.shared[instance.sharedExprIndex].delete(instance.sharedScopeUid);
     }
     this.store.freeDeriveResult(instance.derive);
     this.pool.release(exprInstanceIndex);
@@ -159,6 +185,7 @@ export class ExprInstancePool {
 
   clear = (): void => {
     this.pool.clear();
+    this.shared = [];
   };
 
   private unsubscribeInputs = (instance: TExprInstance): void => {
