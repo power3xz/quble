@@ -161,18 +161,18 @@ export class ExprInstancePool {
       return;
     }
     const { derive, readLeaves } = instance;
-    for (let n = 0; n < readLeaves.length; n++) {
-      if (readLeaves[n] >= 0 && readLeaves.indexOf(readLeaves[n]) === n) {
-        this.store.subscribeDerive(readLeaves[n], derive);
+    for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
+      if (this.isInputLeaf(instance, readLeafPosition)) {
+        this.store.subscribeDerive(readLeaves[readLeafPosition], derive);
       }
     }
     if (catchUp) {
       // 건너뛸 부분식이 없는 식은 바뀐 leaf를 보지 않고 처음부터 세므로 입력 leaf 하나로 한 번만 부르면 된다.
       const refreshOnce = instance.table === null;
       // 따라잡는 호출이 READ_LEAF 구독을 다시 걸면 readLeaves가 바뀌므로 길이를 매번 다시 읽는다.
-      for (let n = 0; n < readLeaves.length; n++) {
-        if (readLeaves[n] >= 0 && readLeaves.indexOf(readLeaves[n]) === n) {
-          this.store.refreshDerive(derive, readLeaves[n]);
+      for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
+        if (this.isInputLeaf(instance, readLeafPosition)) {
+          this.store.refreshDerive(derive, readLeaves[readLeafPosition]);
           if (refreshOnce) {
             break;
           }
@@ -197,11 +197,21 @@ export class ExprInstancePool {
 
   private unsubscribeInputs = (instance: TExprInstance): void => {
     const { derive, readLeaves } = instance;
-    for (let n = 0; n < readLeaves.length; n++) {
-      if (readLeaves[n] >= 0 && readLeaves.indexOf(readLeaves[n]) === n) {
-        this.store.unsubscribeDerive(readLeaves[n], derive);
+    for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
+      if (this.isInputLeaf(instance, readLeafPosition)) {
+        this.store.unsubscribeDerive(readLeaves[readLeafPosition], derive);
       }
     }
+  };
+
+  // readLeaves[readLeafPosition]이 구독할 입력 leaf인가 - 유효하고(0 이상) 같은 leaf를 앞에서 이미 읽지 않았다.
+  // 건너뛸 부분식이 없는 식의 readLeaves는 evaluate가 중복 없이 채우므로 앞 검사를 하지 않는다.
+  private isInputLeaf = (instance: TExprInstance, readLeafPosition: number): boolean => {
+    const { readLeaves } = instance;
+    return (
+      readLeaves[readLeafPosition] >= 0 &&
+      (instance.table === null || readLeaves.indexOf(readLeaves[readLeafPosition]) === readLeafPosition)
+    );
   };
 
   // 건너뛸 부분식이 있는 식을 다시 센다. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 층이 한 flush에서
