@@ -16,11 +16,9 @@ import type { TScope } from "./scope.ts";
 export type TExprInstance = {
   expr: Uint8Array;
   pairs: TScope;
-  // 건너뛸 부분식이 있는 식만 갖는다. 없는 식은 table과 cache가 null이고 hasIndexAccess가 false다.
+  // 건너뛸 부분식이 있는 식만 갖는다. 없는 식은 table과 cache가 null이다.
   table: TExprSkipTable | null;
   cache: unknown[] | null;
-  // 인덱스 접근이 있으면 배열 변수가 READ_LEAF가 읽을 leafIndex를 정하므로 readLeafIndexOpsByVar 어딘가가 비어 있지 않다.
-  hasIndexAccess: boolean;
   // 식이 읽은 leaf이자 구독할 입력 leaf. 건너뛸 부분식이 있는 식은 변수마다 읽는 leafIndex(중복과 -1 포함)고, 없는
   // 식은 중복 없는 목록이다. evaluate가 채우고, READ_LEAF 구독을 다시 걸 때 고친다.
   readLeaves: number[];
@@ -67,7 +65,6 @@ export class ExprInstancePool {
       pairs,
       table,
       cache: table === null ? null : new Array(table.opCount),
-      hasIndexAccess: table?.readLeafIndexOpsByVar.some((ops) => ops.length > 0) === true,
       readLeaves: [],
       lastValue: undefined,
       derive: noopDerive,
@@ -242,7 +239,7 @@ export class ExprInstancePool {
         ? table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)]
         : buildSkipPastOpsOfVars(table, expr, changedVarMask);
     const value = this.evaluator.reevalExpr(expr, pairs, table, cache, skipPastOps);
-    if (instance.hasIndexAccess) {
+    if (table.hasIndexAccess) {
       for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
         if (changedVarMask & (1 << varNumber)) {
           this.resubscribeReadLeavesDependingOn(instance, varNumber);
