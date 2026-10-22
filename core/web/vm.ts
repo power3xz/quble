@@ -483,7 +483,7 @@ export type TInterpreter = {
 };
 
 // 해체된 인스턴스의 destroy가 되는 함수. 아무것도 잡지 않는다.
-const noop = (): void => { };
+const noop = (): void => {};
 
 // 인스턴스의 snapshot - typeRef 타입의 값을 store의 base + offset 자리에서 읽어 data와 같은 모양으로 다시 짓는다.
 // 인자를 모두 생략하면 루트 props 전체(propsTypeRef, 0, 0)다. 루트 props의 필드는 앞 필드의 칸 수만큼 이어서
@@ -913,17 +913,17 @@ export class VM {
         elseBodyStart === -1
           ? [] // else 없는 if - 빈 가지
           : nodesOf(
-            this.interpret(
-              argumentSourcePairs,
-              compId,
-              elseBodyStart,
-              ifEndPc,
-              elseBranchIndex,
-              pathPrefix,
-              loopIndexBase,
-              stacks,
-            ),
-          );
+              this.interpret(
+                argumentSourcePairs,
+                compId,
+                elseBodyStart,
+                ifEndPc,
+                elseBranchIndex,
+                pathPrefix,
+                loopIndexBase,
+                stacks,
+              ),
+            );
     };
 
     this.subscribeIfCond(branchIndex, condLeafIndex, regionIndex);
@@ -1516,9 +1516,9 @@ export class VM {
     lastValue =
       op === OP_ATTR_G_VAR || op === OP_ATTR_L_VAR
         ? // 이어서 scope_index, offset
-        this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branchIndex)
+          this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branchIndex)
         : // 이어서 expr_index
-        this.bindExpr(this.module.defs[compId].exprBytecodes[code[pc + 2]], update, argumentSourcePairs, branchIndex);
+          this.bindExpr(this.module.defs[compId].exprBytecodes[code[pc + 2]], update, argumentSourcePairs, branchIndex);
     setAttributeSafely(el, name, lastValue);
   };
 

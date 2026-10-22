@@ -232,7 +232,7 @@ export class RuntimeInterpreter {
     let pending: HTMLElement | null = null;
     let nodeCount = 0;
     let plannable = true;
-    for (let pc = startPc; pc < endPc && plannable;) {
+    for (let pc = startPc; pc < endPc && plannable; ) {
       const at = pc;
       const op = code[pc++];
       switch (op) {

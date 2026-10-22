@@ -124,7 +124,7 @@ export class ResumeInterpreter {
   };
 
   text = (): Text => {
-    for (; ;) {
+    for (;;) {
       const node = this.next();
       if (node.nodeType === node.TEXT_NODE) {
         return node as Text;
