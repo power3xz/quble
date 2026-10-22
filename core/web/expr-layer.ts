@@ -167,10 +167,15 @@ export class ExprInstancePool {
       }
     }
     if (catchUp) {
+      // 건너뛸 부분식이 없는 식은 바뀐 leaf를 보지 않고 처음부터 세므로 입력 leaf 하나로 한 번만 부르면 된다.
+      const refreshOnce = instance.table === null;
       // 따라잡는 호출이 READ_LEAF 구독을 다시 걸면 readLeaves가 바뀌므로 길이를 매번 다시 읽는다.
       for (let n = 0; n < readLeaves.length; n++) {
         if (readLeaves[n] >= 0 && readLeaves.indexOf(readLeaves[n]) === n) {
           this.store.refreshDerive(derive, readLeaves[n]);
+          if (refreshOnce) {
+            break;
+          }
         }
       }
     }

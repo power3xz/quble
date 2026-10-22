@@ -193,6 +193,24 @@ test("clear하면 공유 맵도 비운다", () => {
   assert.equal(pool.findShared(3, 7), NOT_SHARED);
 });
 
+test("건너뛸 부분식이 없는 식은 따라잡을 때 입력 leaf가 여럿이어도 식을 한 번만 센다", () => {
+  const { pool, exprInstanceIndex, store } = build(sum());
+  pool.attach(exprInstanceIndex, false);
+  pool.detach(exprInstanceIndex);
+  store.set(0, 10);
+  const { runExpr } = pool.evaluator;
+  let runs = 0;
+  pool.evaluator.runExpr = (...args) => {
+    runs++;
+    return runExpr(...args);
+  };
+
+  pool.attach(exprInstanceIndex, true);
+
+  assert.equal(runs, 1, "a + b는 입력 leaf가 둘이지만 바뀐 leaf를 보지 않아 한 번이면 된다");
+  assert.equal(store.get(2), 12);
+});
+
 test("resultLeafOf는 결과 leaf를 연결하기 전에는 undefined, 연결한 뒤에는 그 leaf를 돌려준다", () => {
   const { pool, first } = buildTwo();
   assert.equal(pool.resultLeafOf(first), undefined);
