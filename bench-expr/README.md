@@ -61,8 +61,9 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 변경)을 한 번 하되 그 시간은 재지 않는다. 파일은 `quble/orders-toggle.qubc`, `src/quble-toggle.ts`,
 `src/quble-toggle-handlers.ts`다.
 
-`orders-shared`도 quble만 잰다. 기본 행에 props만 읽는 식(`rate * 2`, `rate + tax`, `(100 + tax) * rate / 100`)을
-더해, 같은 식을 모든 행이 식 인스턴스 하나로 공유하는 비용과 이득을 잰다. props, 이벤트, 툴바, 시나리오는
+`orders-shared`도 quble만 잰다. 기본 행에 props만 읽는 식 열 개(`rate * 2`, `rate + tax`, `(100 + tax) * rate / 100`
+외 일곱)를 더해, 같은 식을 모든 행이 식 인스턴스 하나로 공유하는 비용과 이득을 잰다. mount에서 행마다 공유 식을
+다시 세는지가 드러나도록 식을 열 개로 두었다. props, 이벤트, 툴바, 시나리오는
 `orders`와 같다. 파일은 `quble/orders-shared.qubc`, `src/quble-shared.ts`다.
 
 `tests.json`이 테스트별 버전을 가진다. 하네스가 결과와 기록에 이 버전을 적는다. **같은 테스트의 측정 조건을

@@ -39,6 +39,13 @@ component OrdersShared {
             span(class="row__rate2") { ${rate * 2} }
             span(class="row__rate-tax") { ${rate + tax} }
             span(class="row__gross") { ${(100 + tax) * rate / 100} }
+            span(class="row__s1") { ${(rate + tax) * (rate - tax) / (tax + 1)} }
+            span(class="row__s2") { ${rate * rate / 1000 + tax * 3 - pivot} }
+            span(class="row__s3") { ${(threshold - rate) / (tax + 1) + pivot * 2} }
+            span(class="row__s4") { ${rate > threshold && tax > 5 || pivot == 0} }
+            span(class="row__s5") { ${(rate * 3 + tax * 7) % 1000 + (threshold / 100)} }
+            span(class="row__s6") { ${(rate - pivot) * (tax + pivot) / (threshold + 1)} }
+            span(class="row__s7") { ${rate * (100 + tax) / 100 - threshold / (pivot + 1)} }
             span(class="row__diff") { ${row.price - rows[pivot].price} }
             span(class="row__warn" data-warn={row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold}) { "!" }
             a(class="row__link" href={row.url}) { "link" }
