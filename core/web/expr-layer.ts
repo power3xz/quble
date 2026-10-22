@@ -176,7 +176,7 @@ export class ExprInstancePool {
       }
     }
     if (instance.everAttached) {
-      const { catchUpLeaves } = this;
+      const catchUpLeaves = this.catchUpLeaves;
       catchUpLeaves.clear();
       for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
         if (this.isInputLeaf(instance, readLeafPosition)) {
