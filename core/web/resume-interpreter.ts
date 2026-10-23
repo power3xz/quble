@@ -736,14 +736,13 @@ export class ResumeInterpreter {
     branchIndex: number,
     tops: ChildNode[] | null,
   ): number => {
-    const exprIndex = this.code[pc++];
-    const expr = vm.module.defs[compId].exprBytecodes[exprIndex];
+    const localExprIndex = this.code[pc++];
+    const globalExprIndex = vm.globalExprIndexOf(compId, localExprIndex);
     const { exprInstanceIndex, value } = vm.addExprInstance(
-      expr,
+      globalExprIndex,
       argumentSourcePairs,
       branchIndex,
-      exprIndex,
-      vm.sharedScopeUidOf(compId, exprIndex, walkStacks, loopIndexBase),
+      vm.sharedScopeUidOf(compId, localExprIndex, walkStacks, loopIndexBase),
     );
     const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(

@@ -14,10 +14,9 @@ import { Pool } from "./pool-allocator.ts";
 import type { TScope } from "./scope.ts";
 
 export type TExprInstance = {
-  expr: Uint8Array;
+  globalExprIndex: number;
   pairs: TScope;
-  // 건너뛸 부분식이 있는 식만 갖는다. 없는 식은 table과 cache가 null이다.
-  table: TExprSkipTable | null;
+  // 건너뛸 부분식이 있는 식만 갖는다. 없는 식은 cache가 null이다.
   cache: unknown[] | null;
   // 식이 읽은 leaf이자 구독할 입력 leaf. 건너뛸 부분식이 있는 식은 변수마다 읽는 leafIndex(중복과 -1 포함)고, 없는
   // 식은 중복 없는 목록이다. evaluate가 채우고, READ_LEAF 구독을 다시 걸 때 고친다.
@@ -32,8 +31,8 @@ export type TExprInstance = {
   // 입력 leaf에 파생 구독을 한 번이라도 걸었나. 참인데 attachedCount가 0이면 구독이 풀린 동안 입력이 바뀌어 결과
   // leaf가 낡았을 수 있다.
   everAttached: boolean;
-  // 공유 맵에 올린 키(식 표 번호와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
-  sharedExprIndex: number;
+  // 공유 맵에 올린 키(globalExprIndex와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
+  sharedGlobalExprIndex: number;
   sharedScopeUid: number;
 };
 
@@ -47,7 +46,7 @@ export class ExprInstancePool {
   pool: Pool<TExprInstance> = new Pool();
   evaluator: ExprEvaluator;
   store: LeafStoreSubject;
-  // 공유 중인 식 인스턴스. shared[exprIndex].get(scopeUid)가 식 인스턴스 번호다.
+  // 공유 중인 식 인스턴스. shared[globalExprIndex].get(scopeUid)가 식 인스턴스 번호다.
   private shared: Array<Map<number, number>> = [];
   // 따라잡을 때 입력 leaf를 모아 파생 구독에 넘기는 Set. 가지를 켤 때 행마다 Set을 만들면 그 할당이 GC로 드러나
   // 비우고 채우며 재사용한다. 함수가 끝난 뒤에는 쓰지 않으므로 통지가 이어서 다른 인스턴스를 붙여도 안전하다.
@@ -63,13 +62,13 @@ export class ExprInstancePool {
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 나눈다. 없는 식은 cache도 건너뛰기 표도 두지 않고 leaf가 바뀌면 처음부터
   // 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 구독 층이 함수당 한 번만 부르므로 한 번이면 된다.
-  create = (expr: Uint8Array, pairs: TScope): number => {
+  create = (globalExprIndex: number, pairs: TScope): number => {
     const { evaluator } = this;
-    const table = evaluator.skipTable(expr);
+    const expr = evaluator.exprBytes[globalExprIndex];
+    const table = evaluator.skipTable(globalExprIndex);
     const instance: TExprInstance = {
-      expr,
+      globalExprIndex,
       pairs,
-      table,
       cache: table === null ? null : new Array(table.opCount),
       readLeaves: [],
       lastValue: undefined,
@@ -77,7 +76,7 @@ export class ExprInstancePool {
       refCount: 1,
       attachedCount: 0,
       everAttached: false,
-      sharedExprIndex: NOT_SHARED,
+      sharedGlobalExprIndex: NOT_SHARED,
       sharedScopeUid: NOT_SHARED,
     };
     // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 구독 층이 쓰지 않는다.
@@ -92,9 +91,10 @@ export class ExprInstancePool {
   // 같은 결과다. 구독을 건 채로 부르지 않는다 - 구독 대상(readLeaves)이 바뀌는데 구독은 그대로다.
   evaluate = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
-    const { expr, pairs, table, cache } = instance;
+    const { globalExprIndex, pairs, cache } = instance;
+    const expr = this.evaluator.exprBytes[globalExprIndex];
     let value: unknown;
-    if (table === null || cache === null) {
+    if (cache === null) {
       const reads: number[] = [];
       value = this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
       // push로 채운 배열은 V8이 늘어날 몫까지 잡아 둔다(원소 하나를 push하면 용량이 17). 길이만큼의 사본으로 바꾼다.
@@ -106,6 +106,7 @@ export class ExprInstancePool {
       }
       instance.readLeaves = readLeaves.slice();
     } else {
+      const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
       const evaluated = this.evaluator.evalExpr(expr, pairs, table, cache);
       value = evaluated.value;
       instance.readLeaves = evaluated.leafOfVar;
@@ -119,17 +120,18 @@ export class ExprInstancePool {
     this.store.bindDeriveResult(this.pool.entries[exprInstanceIndex].derive, resultLeafIndex);
   };
 
-  // 스코프 인스턴스(scopeUid)에서 식(exprIndex)을 이미 공유 중이면 그 식 인스턴스 번호, 없으면 NOT_SHARED.
-  findShared = (exprIndex: number, scopeUid: number): number => this.shared[exprIndex]?.get(scopeUid) ?? NOT_SHARED;
+  // 스코프 인스턴스(scopeUid)에서 식(globalExprIndex)을 이미 공유 중이면 그 식 인스턴스 번호, 없으면 NOT_SHARED.
+  findShared = (globalExprIndex: number, scopeUid: number): number =>
+    this.shared[globalExprIndex]?.get(scopeUid) ?? NOT_SHARED;
 
-  // 식 인스턴스를 (exprIndex, scopeUid)로 공유 맵에 올린다. 참조 수가 0이 될 때 release가 지운다.
-  markShared = (exprInstanceIndex: number, exprIndex: number, scopeUid: number): void => {
+  // 식 인스턴스를 (globalExprIndex, scopeUid)로 공유 맵에 올린다. 참조 수가 0이 될 때 release가 지운다.
+  markShared = (exprInstanceIndex: number, globalExprIndex: number, scopeUid: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
-    instance.sharedExprIndex = exprIndex;
+    instance.sharedGlobalExprIndex = globalExprIndex;
     instance.sharedScopeUid = scopeUid;
-    const byScopeUid = this.shared[exprIndex] ?? new Map<number, number>();
+    const byScopeUid = this.shared[globalExprIndex] ?? new Map<number, number>();
     byScopeUid.set(scopeUid, exprInstanceIndex);
-    this.shared[exprIndex] = byScopeUid;
+    this.shared[globalExprIndex] = byScopeUid;
   };
 
   // 식 인스턴스의 결과를 쓰는 leaf. bindResultLeaf 전에는 undefined다. 공유한 인스턴스를 두 번째로 든 자리가 같은
@@ -152,8 +154,8 @@ export class ExprInstancePool {
       this.unsubscribeInputs(instance);
       instance.attachedCount = 0;
     }
-    if (instance.sharedExprIndex !== NOT_SHARED) {
-      this.shared[instance.sharedExprIndex].delete(instance.sharedScopeUid);
+    if (instance.sharedGlobalExprIndex !== NOT_SHARED) {
+      this.shared[instance.sharedGlobalExprIndex].delete(instance.sharedScopeUid);
     }
     this.store.freeDeriveResult(instance.derive);
     this.pool.release(exprInstanceIndex);
@@ -217,7 +219,7 @@ export class ExprInstancePool {
     const { readLeaves } = instance;
     return (
       readLeaves[readLeafPosition] >= 0 &&
-      (instance.table === null || readLeaves.indexOf(readLeaves[readLeafPosition]) === readLeafPosition)
+      (instance.cache === null || readLeaves.indexOf(readLeaves[readLeafPosition]) === readLeafPosition)
     );
   };
 
@@ -225,8 +227,9 @@ export class ExprInstancePool {
   // 함수를 한 번만 불러 바뀐 leaf 전체를 넘기므로, 그중 이 식이 읽는 변수를 모아 바뀐 변수 전체로 건너뛰기 표를
   // 골라 한꺼번에 센다. leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
   private runPartial = (instance: TExprInstance, changedLeaves: ReadonlySet<number>): unknown => {
-    const { expr, pairs, readLeaves: leafOfVar } = instance;
-    const table = instance.table as TExprSkipTable;
+    const { globalExprIndex, pairs, readLeaves: leafOfVar } = instance;
+    const expr = this.evaluator.exprBytes[globalExprIndex];
+    const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
     const cache = instance.cache as unknown[];
     // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 번호의 비트로 모은다.
     //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
@@ -274,8 +277,9 @@ export class ExprInstancePool {
   // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.
   // READ_LEAF에 leafIndex를 넘긴 연산의 cache 값이 방금 읽은 leafIndex다.
   private resubscribeReadLeavesDependingOn = (instance: TExprInstance, varNumber: number): void => {
-    const { expr } = instance;
-    const table = instance.table as TExprSkipTable;
+    const { globalExprIndex } = instance;
+    const expr = this.evaluator.exprBytes[globalExprIndex];
+    const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
     const cache = instance.cache as unknown[];
     for (const op of table.readLeafIndexOpsByVar[varNumber]) {
       const readLeafVar = table.varAt[op + instrSize(expr[op])];

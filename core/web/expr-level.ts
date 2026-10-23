@@ -4,7 +4,7 @@
 import type { TModule } from "./decode.ts";
 import { maxScopeIndexRead } from "./expr-opcode.ts";
 
-// 컴포넌트 def 하나의 식마다 level. 결과[exprIndex]가 defs[compId].exprBytecodes[exprIndex]의 level이다.
+// 컴포넌트 def 하나의 식마다 level. 결과[localExprIndex]가 defs[compId].exprBytecodes[localExprIndex]의 level이다.
 // props가 a, b, rows면 propsCount는 3이고 scope_index 3, 4는 깊이 1, 5, 6은 깊이 2다.
 export const exprLevelsOf = (module: TModule, compId: number): number[] => {
   const def = module.defs[compId];
