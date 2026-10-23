@@ -571,7 +571,7 @@ export class VM {
     this.loadedHrefs = loadedHrefs;
     this.store = createLeafStoreSubject(leaves);
     this.arrayPool = arrayPool;
-    this.evaluator = new ExprEvaluator(module.constpool, this.store, arrayPool);
+    this.evaluator = new ExprEvaluator(module.constpool, module.exprBytes, this.store, arrayPool);
     this.exprInstancePool = new ExprInstancePool(this.evaluator, this.store);
     this.regionPool = new Pool();
     this.branchPool = new Pool();
@@ -1427,14 +1427,18 @@ export class VM {
 
   nextScopeUid = (): number => this.scopeUids.next();
 
+  // 컴포넌트 def 안의 번호(localExprIndex)를 모듈 전체 번호(globalExprIndex)로 바꾼다.
+  globalExprIndexOf = (compId: number, localExprIndex: number): number =>
+    this.module.globalExprBase[compId] + localExprIndex;
+
   // 컴포넌트 def의 식 하나가 읽는 변수의 가장 깊은 깊이(expr-level.ts). 컴포넌트마다 처음 필요할 때 한 번 구한다.
-  exprLevel = (compId: number, exprIndex: number): number => {
+  exprLevel = (compId: number, localExprIndex: number): number => {
     let levels = this.exprLevelsByComp[compId];
     if (levels === undefined) {
       levels = exprLevelsOf(this.module, compId);
       this.exprLevelsByComp[compId] = levels;
     }
-    return levels[exprIndex];
+    return levels[localExprIndex];
   };
 
   // 식을 공유할 스코프의 scopeUid. 식의 level이 이 자리가 컴포넌트 안에서 든 @for 깊이보다 낮을 때만 있다 - 같은
@@ -1443,8 +1447,13 @@ export class VM {
   // 올라간 곳이 식이 읽는 가장 깊은 스코프다.
   //   Page(0) > @for 행(1) > Card(2) > @for 행(3)이면 스택은 [0, 1, 2, 3]이고 Card 안 깊이 1에서
   //   level 0은 스택[2], level 1은 스택[3]이다.
-  sharedScopeUidOf = (compId: number, exprIndex: number, walkStacks: TWalkStacks, loopIndexBase: number): number => {
-    const level = this.exprLevel(compId, exprIndex);
+  sharedScopeUidOf = (
+    compId: number,
+    localExprIndex: number,
+    walkStacks: TWalkStacks,
+    loopIndexBase: number,
+  ): number => {
+    const level = this.exprLevel(compId, localExprIndex);
     const forDepth = walkStacks.loopIndexStack.length / 2 - loopIndexBase;
     if (level >= forDepth) {
       return NOT_SHARED;
@@ -1453,27 +1462,26 @@ export class VM {
     return scopeUidStack[scopeUidStack.length - 1 - forDepth + level];
   };
 
-  // 식 인스턴스를 가지에 싣고 그 값과 인스턴스 번호를 돌려준다. sharedScopeUid가 있으면 같은 (exprIndex, scopeUid)로
+  // 식 인스턴스를 가지에 싣고 그 값과 인스턴스 번호를 돌려준다. sharedScopeUid가 있으면 같은 (globalExprIndex, scopeUid)로
   // 공유 중인 인스턴스를 재사용하고, 없으면 새로 만든다. 구독은 가지가 붙을 때 건다(restoreBranchSubs) - 안 보이는
   // 가지는 구독 0이다.
   //
   // 재사용하면 식을 세지 않고 결과 leaf를 읽는다. 구독이 풀린 동안 입력이 바뀌어 낡았으면 이 가지가 붙을 때 attach가
   // 따라잡는다.
   addExprInstance = (
-    expr: Uint8Array,
+    globalExprIndex: number,
     pairs: TScope,
     branchIndex: number,
-    exprIndex: number,
     sharedScopeUid: number,
   ): { exprInstanceIndex: number; value: unknown } => {
     const { exprInstancePool } = this;
     let exprInstanceIndex =
-      sharedScopeUid === NOT_SHARED ? NOT_SHARED : exprInstancePool.findShared(exprIndex, sharedScopeUid);
+      sharedScopeUid === NOT_SHARED ? NOT_SHARED : exprInstancePool.findShared(globalExprIndex, sharedScopeUid);
     let value: unknown;
     if (exprInstanceIndex === NOT_SHARED) {
-      exprInstanceIndex = exprInstancePool.create(expr, pairs);
+      exprInstanceIndex = exprInstancePool.create(globalExprIndex, pairs);
       if (sharedScopeUid !== NOT_SHARED) {
-        exprInstancePool.markShared(exprInstanceIndex, exprIndex, sharedScopeUid);
+        exprInstancePool.markShared(exprInstanceIndex, globalExprIndex, sharedScopeUid);
       }
       value = exprInstancePool.evaluate(exprInstanceIndex);
     } else {
@@ -1503,18 +1511,16 @@ export class VM {
   // 달라졌을 때만 통지 구독인 update가 DOM을 쓴다. 결과 leaf는 식 인스턴스를 든 가지가 없어질 때
   // 반납된다(freeBranchTree).
   bindExpr = (
-    expr: Uint8Array,
+    globalExprIndex: number,
     update: (v: unknown) => void,
     argumentSourcePairs: TScope,
     branchIndex: number,
-    exprIndex: number,
     sharedScopeUid: number,
   ) => {
     const { exprInstanceIndex, value } = this.addExprInstance(
-      expr,
+      globalExprIndex,
       argumentSourcePairs,
       branchIndex,
-      exprIndex,
       sharedScopeUid,
     );
     this.bindLeaf(this.allocResultLeaf(exprInstanceIndex, value), update, branchIndex);
@@ -1563,7 +1569,7 @@ export class VM {
       case OP_TEXT_EXPR: {
         // operand: expr_index
         lastValue = this.bindExpr(
-          this.module.defs[compId].exprBytecodes[code[pc]],
+          this.globalExprIndexOf(compId, code[pc]),
           (v) => {
             if (v !== lastValue) {
               lastValue = v;
@@ -1572,7 +1578,6 @@ export class VM {
           },
           argumentSourcePairs,
           branchIndex,
-          code[pc],
           this.sharedScopeUidOf(compId, code[pc], walkStacks, loopIndexBase),
         );
         node.textContent = lastValue as string;
@@ -1596,11 +1601,10 @@ export class VM {
           this.bindVar(code[pc + 2], code[pc + 3], update, argumentSourcePairs, branchIndex)
         : // 이어서 expr_index
           this.bindExpr(
-            this.module.defs[compId].exprBytecodes[code[pc + 2]],
+            this.globalExprIndexOf(compId, code[pc + 2]),
             update,
             argumentSourcePairs,
             branchIndex,
-            code[pc + 2],
             this.sharedScopeUidOf(compId, code[pc + 2], walkStacks, loopIndexBase),
           );
     setAttributeSafely(el, name, lastValue);

@@ -33,7 +33,8 @@ const load = (slot: number) => [EXPR_LOAD_VAR, slot, 0];
 // 식의 첫 값(10)이 아닌 0으로 시작해, 따라잡았는지를 결과 leaf로 구별한다.
 const setup = () => {
   const store = createLeafStoreSubject([true, 1, 0]);
-  const exprs = new ExprInstancePool(new ExprEvaluator([], store, new Pool()), store);
+  const exprBytes = [new Uint8Array([...load(0), EXPR_LOAD_SMALL_INT, 10, EXPR_MUL])];
+  const exprs = new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
   const regionPool: Pool<TRegion> = new Pool();
   const branchPool: Pool<TBranch> = new Pool();
   const regionIndex = appendIfRegion(regionPool, branchPool, 0);
@@ -41,7 +42,7 @@ const setup = () => {
   document.createElement("div").append(region.anchor);
   const thenBranch = branchPool.entries[region.branchIndices[THEN_INDEX]];
   thenBranch.built = true;
-  const exprInstanceIndex = exprs.create(new Uint8Array([...load(0), EXPR_LOAD_SMALL_INT, 10, EXPR_MUL]), [STORE, 1]);
+  const exprInstanceIndex = exprs.create(0, [STORE, 1]);
   exprs.evaluate(exprInstanceIndex);
   exprs.bindResultLeaf(exprInstanceIndex, 2); // 가지가 붙을 때까지는 구독이 없는 상태(build 직후)
   addExprInstanceToBranch(thenBranch, exprInstanceIndex);
@@ -75,14 +76,15 @@ test("떼면 파생 구독이 해제된다", () => {
 
 test("가지를 지우면 가지가 든 식 인스턴스의 결과 leaf를 반납한다", () => {
   const store = createLeafStoreSubject([1, 1, 0, 0]);
-  const exprs = new ExprInstancePool(new ExprEvaluator([], store, new Pool()), store);
+  const exprBytes = [new Uint8Array([...load(0), ...load(1), EXPR_ADD])];
+  const exprs = new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
   const regionPool: Pool<TRegion> = new Pool();
   const branchPool: Pool<TBranch> = new Pool();
   const regionIndex = appendForRegion(regionPool, 0);
   document.createElement("div").append(regionPool.entries[regionIndex].anchor);
   const branchIndex = appendBranchOfForRegion(regionPool, branchPool, regionIndex);
   // 식 인스턴스 하나가 입력 leaf 둘(0, 1)을 읽고 결과 leaf는 2다.
-  const exprInstanceIndex = exprs.create(new Uint8Array([...load(0), ...load(1), EXPR_ADD]), [STORE, 0, STORE, 1]);
+  const exprInstanceIndex = exprs.create(0, [STORE, 0, STORE, 1]);
   exprs.evaluate(exprInstanceIndex);
   exprs.bindResultLeaf(exprInstanceIndex, 2);
   addExprInstanceToBranch(branchPool.entries[branchIndex], exprInstanceIndex);

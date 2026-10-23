@@ -813,18 +813,17 @@ export class RuntimeInterpreter {
     branchIndex: number,
     parent: Node,
   ): number => {
-    const exprIndex = vm.code[pc++];
-    const expr = vm.module.defs[compId].exprBytecodes[exprIndex];
+    const localExprIndex = vm.code[pc++];
+    const globalExprIndex = vm.globalExprIndexOf(compId, localExprIndex);
     // 식이 읽는 칸이 바뀌면 식을 다시 센 값을 구독 층이 결과 leaf(condLeafIndex)에 write한다. 그 값이 바뀌면
     // 아래 buildIfRegion이 건 통지 구독이 불려 가지를 바꾼다 - 두 단계인 이유는 감시 칸과 조건 칸이 다르기
     // 때문이다. 파생 구독은 부모 가지에 실어 생애를 함께 한다. 결과 leaf는 식의 첫 값으로 잡으므로 식을 센
     // 뒤에 만들어 연결한다.
     const { exprInstanceIndex, value } = vm.addExprInstance(
-      expr,
+      globalExprIndex,
       argumentSourcePairs,
       branchIndex,
-      exprIndex,
-      vm.sharedScopeUidOf(compId, exprIndex, walkStacks, loopIndexBase),
+      vm.sharedScopeUidOf(compId, localExprIndex, walkStacks, loopIndexBase),
     );
     const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(

@@ -30,13 +30,14 @@ const product = () => ({
   resultLeafIndex: 4,
 });
 
-const poolOf = (store: ReturnType<typeof createLeafStoreSubject>) =>
-  new ExprInstancePool(new ExprEvaluator([], store, new Pool()), store);
+// exprBytes[globalExprIndex]가 식 바이트다. 이 테스트의 픽스처는 식이 하나라 globalExprIndex가 0이다.
+const poolOf = (store: ReturnType<typeof createLeafStoreSubject>, exprBytes: Uint8Array[]) =>
+  new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
 
 // 식 인스턴스를 짓고 처음 센 뒤 결과 leaf를 연결한다. 구독은 걸지 않은 상태다(가지가 붙기 전).
 const build = (fixture: ReturnType<typeof sum>) => {
-  const pool = poolOf(fixture.store);
-  const exprInstanceIndex = pool.create(fixture.expr, fixture.pairs);
+  const pool = poolOf(fixture.store, [fixture.expr]);
+  const exprInstanceIndex = pool.create(0, fixture.pairs);
   const value = pool.evaluate(exprInstanceIndex);
   pool.bindResultLeaf(exprInstanceIndex, fixture.resultLeafIndex);
   return { pool, exprInstanceIndex, value, store: fixture.store };
@@ -151,9 +152,9 @@ test("붙은 채로 release해도 구독이 풀려 반납된 결과 leaf를 건�
 // 같은 풀에서 식 인스턴스 둘을 만든다(공유 조회는 풀 하나 안에서 이뤄진다). 구독은 걸지 않는다.
 const buildTwo = () => {
   const fixture = sum();
-  const pool = poolOf(fixture.store);
-  const first = pool.create(fixture.expr, fixture.pairs);
-  const second = pool.create(fixture.expr, fixture.pairs);
+  const pool = poolOf(fixture.store, [fixture.expr]);
+  const first = pool.create(0, fixture.pairs);
+  const second = pool.create(0, fixture.pairs);
   return { pool, first, second };
 };
 
@@ -162,13 +163,13 @@ test("findShared는 올리지 않은 키에는 NOT_SHARED를 돌려준다", () =
   assert.equal(pool.findShared(0, 7), NOT_SHARED);
 });
 
-test("markShared로 올린 (exprIndex, scopeUid)로만 그 식 인스턴스가 찾아진다", () => {
+test("markShared로 올린 (globalExprIndex, scopeUid)로만 그 식 인스턴스가 찾아진다", () => {
   const { pool, first } = buildTwo();
   pool.markShared(first, 3, 7);
 
   assert.equal(pool.findShared(3, 7), first);
   assert.equal(pool.findShared(3, 8), NOT_SHARED, "scopeUid가 다르면 다른 스코프의 식이다");
-  assert.equal(pool.findShared(4, 7), NOT_SHARED, "exprIndex가 다르면 같은 스코프의 다른 식이다");
+  assert.equal(pool.findShared(4, 7), NOT_SHARED, "globalExprIndex가 다르면 같은 스코프의 다른 식이다");
 });
 
 test("공유한 식 인스턴스는 참조 수가 0이 될 때 공유 맵에서 빠진다", () => {
@@ -189,7 +190,7 @@ test("반납한 풀 번호를 새 식 인스턴스가 다시 써도 옛 키로 �
   pool.release(first);
 
   const fixture = sum();
-  const reused = pool.create(fixture.expr, fixture.pairs);
+  const reused = pool.create(0, fixture.pairs);
 
   assert.equal(reused, first, "풀 번호가 재사용된다");
   assert.equal(pool.findShared(3, 7), NOT_SHARED);
@@ -266,7 +267,7 @@ test("떼어 둔 동안 입력 여럿이 바뀌면 따라잡을 때 식을 한 �
 test("건너뛸 부분식이 있는 식도 같은 규칙으로 구독하고 따라잡는다", () => {
   const fixture = product();
   const { pool, exprInstanceIndex, value, store } = build(fixture);
-  assert.notEqual(pool.evaluator.skipTable(fixture.expr), null, "부분식 표가 있는 식이다");
+  assert.notEqual(pool.evaluator.skipTable(0), null, "부분식 표가 있는 식이다");
   assert.equal(value, 6);
   pool.attach(exprInstanceIndex);
 

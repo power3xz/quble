@@ -26,7 +26,7 @@ type TComponentDef = {
   codeLen: number;
   events: TEventEntry[];
   contexts: TEventEntry[];
-  // 이 컴포넌트가 쓰는 표현식들(후위 표기 바이트). IF_EXPR의 expr_index가 이 배열의 인덱스.
+  // 이 컴포넌트가 쓰는 표현식들(후위 표기 바이트). IF_EXPR의 expr_index(localExprIndex)가 이 배열의 인덱스.
   exprBytecodes: Uint8Array[];
 };
 export type TModule = {
@@ -36,6 +36,11 @@ export type TModule = {
   compiledSteps: TStep[][];
   leafCounts: number[];
   defs: TComponentDef[];
+  // compId -> 그 def의 첫 globalExprIndex. globalExprIndex = globalExprBase[compId] + localExprIndex다.
+  //   def 0이 식 3개, def 1이 식 2개면 [0, 3]이고 def 1의 localExprIndex 1은 globalExprIndex 4다.
+  globalExprBase: number[];
+  // globalExprIndex -> 식 바이트. defs[].exprBytecodes와 같은 객체다.
+  exprBytes: Uint8Array[];
 };
 
 class Reader {
@@ -114,11 +119,11 @@ const readType = (reader: Reader): TType => {
 };
 
 // field ref 하나를 읽는다 - 태그 1바이트 + payload(Rust read_ref 대칭). Scope는 부모 슬롯
-// 위치(scopeIndex, offset), Const/Raw는 값 하나(u16), Expr는 exprIndex(u8). offset은 Scope만
+// 위치(scopeIndex, offset), Const/Raw는 값 하나(u16), Expr는 localExprIndex(u8). offset은 Scope만
 // 의미 있어 나머진 0.
 //
 // @param r Reader
-// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=exprIndex
+// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=localExprIndex
 const readRef = (reader: Reader): TRef => {
   const tag = reader.u8();
   if (tag === FV_SCOPE) {
@@ -185,6 +190,8 @@ export const decode = (bytes: TQubleBytecode): TModule => {
 
   const defCount = r.u16();
   const defs = [];
+  const globalExprBase: number[] = [];
+  const exprBytes: Uint8Array[] = [];
   for (let i = 0; i < defCount; i++) {
     const nameConstIndex = r.u16();
     // 이 comp props를 묶은 Object 타입(types 인덱스). defs[0]이 진입점 풀필 구조.
@@ -209,6 +216,8 @@ export const decode = (bytes: TQubleBytecode): TModule => {
     for (let i = 0; i < exprCount; i++) {
       exprBytecodes.push(r.take(r.u8()));
     }
+    globalExprBase.push(exprBytes.length);
+    exprBytes.push(...exprBytecodes);
     defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprBytecodes });
   }
 
@@ -217,5 +226,5 @@ export const decode = (bytes: TQubleBytecode): TModule => {
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
   // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
-  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [] };
+  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [], globalExprBase, exprBytes };
 };

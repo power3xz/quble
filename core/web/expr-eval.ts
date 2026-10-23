@@ -69,10 +69,6 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
   }
 };
 
-// 식 정의(expr 바이트)당 건너뛰기 표 하나. 같은 식을 쓰는 인스턴스(@for 회차마다 생기는 것)끼리
-// 공유한다. expr 바이트는 decode한 모듈이 들고 있어, 모듈이 버려지면 표도 함께 버려진다.
-const skipTables = new WeakMap<Uint8Array, TExprSkipTable | null>();
-
 // 식을 처음 셀 때 runExpr에 넘기는 값 - 아무것도 건너뛰지 않는다.
 export const SKIP_NOTHING: TSkipPastOps = {};
 
@@ -84,22 +80,27 @@ type TConstPool = (string | number | boolean)[];
 
 export class ExprEvaluator {
   constpool: TConstPool;
+  // globalExprIndex -> 식 바이트(decode.ts의 TModule.exprBytes).
+  exprBytes: Uint8Array[];
   store: LeafStoreSubject;
   arrayPool: Pool<TArrayInfo>;
+  // globalExprIndex -> 건너뛰기 표. undefined는 아직 만들지 않았다는 뜻이다. 평가기(VM)마다 따로 갖는다.
+  private exprTables: Array<TExprSkipTable | null | undefined> = [];
 
-  constructor(constpool: TConstPool, store: LeafStoreSubject, arrayPool: Pool<TArrayInfo>) {
+  constructor(constpool: TConstPool, exprBytes: Uint8Array[], store: LeafStoreSubject, arrayPool: Pool<TArrayInfo>) {
     this.constpool = constpool;
+    this.exprBytes = exprBytes;
     this.store = store;
     this.arrayPool = arrayPool;
   }
 
-  // 식 정의당 건너뛰기 표 하나. 같은 expr 바이트면 같은 표를 돌려준다. 건너뛸 부분식이 없는 식은
+  // 식 정의당 건너뛰기 표 하나. 같은 globalExprIndex면 같은 표를 돌려준다. 건너뛸 부분식이 없는 식은
   // null이고, 그것도 담아 두어 다시 판정하지 않는다.
-  skipTable = (expr: Uint8Array): TExprSkipTable | null => {
-    let table = skipTables.get(expr);
+  skipTable = (globalExprIndex: number): TExprSkipTable | null => {
+    let table = this.exprTables[globalExprIndex];
     if (table === undefined) {
-      table = buildSkipTable(expr);
-      skipTables.set(expr, table);
+      table = buildSkipTable(this.exprBytes[globalExprIndex]);
+      this.exprTables[globalExprIndex] = table;
     }
     return table;
   };
