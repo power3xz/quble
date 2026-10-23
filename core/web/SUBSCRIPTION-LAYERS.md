@@ -81,7 +81,7 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 ## 4. 공유
 
-같은 컴포넌트 안의 같은 식(`exprIndex`)이 여러 `@for` 행에 나오고 행마다 읽는 값이 같으면, 행들이 식 인스턴스
+같은 컴포넌트 안의 같은 식(`localExprIndex`)이 여러 `@for` 행에 나오고 행마다 읽는 값이 같으면, 행들이 식 인스턴스
 하나를 사용한다. 값 자리를 만들 때 `[vm]`이 아래 순서로 공유할지, 어느 인스턴스를 사용할지 정한다.
 
 ```
@@ -134,7 +134,7 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 ### 공유 맵
 
-`ExprInstancePool.shared[exprIndex].get(scopeUid)`가 인스턴스 번호다.
+`ExprInstancePool.shared[globalExprIndex].get(scopeUid)`가 인스턴스 번호다.
 
 - `findShared`: 키로 찾는다. 없으면 `NOT_SHARED`.
 - `markShared`: 새로 만든 인스턴스를 키로 올린다.
