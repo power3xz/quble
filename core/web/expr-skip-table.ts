@@ -1,14 +1,8 @@
 import {
-  EXPR_FIELD_AT,
+  arityOf,
   EXPR_LOAD_ARRAY_LENGTH,
-  EXPR_LOAD_CONST,
-  EXPR_LOAD_FALSE,
-  EXPR_LOAD_SMALL_INT,
   EXPR_LOAD_STRING_LENGTH,
-  EXPR_LOAD_TRUE,
   EXPR_LOAD_VAR,
-  EXPR_NEG,
-  EXPR_NOT,
   EXPR_READ_LEAF,
   instrSize,
 } from "./expr-opcode.ts";
@@ -90,20 +84,6 @@ export type TExprSkipTable = {
   // 인스턴스마다 구하지 않고 표를 만들 때 한 번 구한다.
   hasIndexAccess: boolean;
 };
-
-// 잎 명령인가. 스택에서 아무것도 꺼내지 않고 값 하나를 올린다.
-const isLeaf = (opcode: number) =>
-  opcode === EXPR_LOAD_VAR ||
-  opcode === EXPR_LOAD_CONST ||
-  opcode === EXPR_LOAD_ARRAY_LENGTH ||
-  opcode === EXPR_LOAD_STRING_LENGTH ||
-  opcode === EXPR_LOAD_SMALL_INT ||
-  opcode === EXPR_LOAD_TRUE ||
-  opcode === EXPR_LOAD_FALSE;
-
-// 단항 연산인가. 값 하나를 꺼내 하나를 올린다. 나머지 연산(ADD, ELEM_AT 등)은 둘을 꺼내 하나를 올린다.
-const isUnary = (opcode: number) =>
-  opcode === EXPR_NOT || opcode === EXPR_NEG || opcode === EXPR_FIELD_AT || opcode === EXPR_READ_LEAF;
 
 // store 칸을 읽는 명령인가. 이 명령들만 변수로 묶는다. LOAD_CONST, LOAD_SMALL_INT, LOAD_TRUE,
 // LOAD_FALSE는 값이 바이트에 박혀 있어 바뀌지 않는다.
@@ -207,11 +187,14 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
       varAt[pc] = varNumber;
     }
 
-    if (isLeaf(opcode)) {
+    const arity = arityOf(opcode);
+    if (arity === 0) {
       startStack.push(pc);
       continue;
     }
-    if (!isUnary(opcode)) {
+    // 피연산자 arity개를 꺼내 하나를 올린다. 맨 왼쪽 피연산자의 시작 위치만 남기면 그것이 이 연산의
+    // 부분식이 시작하는 위치다.
+    for (let i = 1; i < arity; i++) {
       startStack.pop();
     }
     // 단항이라 스택 맨 위가 피연산자(leafIndex를 내는 부분식)의 시작이다.
@@ -278,7 +261,7 @@ export const buildSkipPastOps = (
   const skipPastOps: TSkipPastOps = {};
   let pc = 0;
   while (pc < expr.length) {
-    if (isLeaf(expr[pc])) {
+    if (arityOf(expr[pc]) === 0) {
       const op = outermostUnchangedFrom(pc);
       if (op !== CHAIN_END) {
         skipPastOps[pc] = op;

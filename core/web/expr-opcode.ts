@@ -56,6 +56,28 @@ export const maxScopeIndexRead = (expr: Uint8Array): number => {
   return max;
 };
 
+// 명령 하나가 스택에서 꺼내는 값의 수. 잎은 0(값 하나를 올리기만 한다), 단항은 1, 나머지 연산은 2다.
+// ELEM_AT도 인덱스와 arrayInfoIndex를 꺼내는 2다. 새 opcode를 더하면 expr-opcode.test.ts의 arity 표에도 넣는다.
+export const arityOf = (opcode: number): 0 | 1 | 2 => {
+  switch (opcode) {
+    case EXPR_LOAD_VAR:
+    case EXPR_LOAD_CONST:
+    case EXPR_LOAD_ARRAY_LENGTH:
+    case EXPR_LOAD_STRING_LENGTH:
+    case EXPR_LOAD_SMALL_INT:
+    case EXPR_LOAD_TRUE:
+    case EXPR_LOAD_FALSE:
+      return 0;
+    case EXPR_NOT:
+    case EXPR_NEG:
+    case EXPR_FIELD_AT:
+    case EXPR_READ_LEAF:
+      return 1;
+    default:
+      return 2;
+  }
+};
+
 // 명령 하나가 차지하는 바이트 수(opcode 포함). LOAD_VAR a -> 3, FIELD_AT 1 -> 2, ADD -> 1
 export const instrSize = (opcode: number) => {
   switch (opcode) {
