@@ -16,8 +16,7 @@ import type { TScope } from "./scope.ts";
 export type TExprInstance = {
   expr: Uint8Array;
   pairs: TScope;
-  // 건너뛸 부분식이 있는 식만 갖는다. 없는 식은 table과 cache가 null이다.
-  table: TExprSkipTable | null;
+  // 건너뛸 부분식이 있는 식만 갖는다. 없는 식은 cache가 null이다.
   cache: unknown[] | null;
   // 식이 읽은 leaf이자 구독할 입력 leaf. 건너뛸 부분식이 있는 식은 변수마다 읽는 leafIndex(중복과 -1 포함)고, 없는
   // 식은 중복 없는 목록이다. evaluate가 채우고, READ_LEAF 구독을 다시 걸 때 고친다.
@@ -69,7 +68,6 @@ export class ExprInstancePool {
     const instance: TExprInstance = {
       expr,
       pairs,
-      table,
       cache: table === null ? null : new Array(table.opCount),
       readLeaves: [],
       lastValue: undefined,
@@ -92,9 +90,9 @@ export class ExprInstancePool {
   // 같은 결과다. 구독을 건 채로 부르지 않는다 - 구독 대상(readLeaves)이 바뀌는데 구독은 그대로다.
   evaluate = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
-    const { expr, pairs, table, cache } = instance;
+    const { expr, pairs, cache } = instance;
     let value: unknown;
-    if (table === null || cache === null) {
+    if (cache === null) {
       const reads: number[] = [];
       value = this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
       // push로 채운 배열은 V8이 늘어날 몫까지 잡아 둔다(원소 하나를 push하면 용량이 17). 길이만큼의 사본으로 바꾼다.
@@ -106,7 +104,7 @@ export class ExprInstancePool {
       }
       instance.readLeaves = readLeaves.slice();
     } else {
-      const evaluated = this.evaluator.evalExpr(expr, pairs, table, cache);
+      const evaluated = this.evaluator.evalExpr(expr, pairs, this.evaluator.skipTable(expr) as TExprSkipTable, cache);
       value = evaluated.value;
       instance.readLeaves = evaluated.leafOfVar;
     }
@@ -217,7 +215,7 @@ export class ExprInstancePool {
     const { readLeaves } = instance;
     return (
       readLeaves[readLeafPosition] >= 0 &&
-      (instance.table === null || readLeaves.indexOf(readLeaves[readLeafPosition]) === readLeafPosition)
+      (instance.cache === null || readLeaves.indexOf(readLeaves[readLeafPosition]) === readLeafPosition)
     );
   };
 
@@ -226,7 +224,7 @@ export class ExprInstancePool {
   // 골라 한꺼번에 센다. leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
   private runPartial = (instance: TExprInstance, changedLeaves: ReadonlySet<number>): unknown => {
     const { expr, pairs, readLeaves: leafOfVar } = instance;
-    const table = instance.table as TExprSkipTable;
+    const table = this.evaluator.skipTable(expr) as TExprSkipTable;
     const cache = instance.cache as unknown[];
     // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 번호의 비트로 모은다.
     //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
@@ -275,7 +273,7 @@ export class ExprInstancePool {
   // READ_LEAF에 leafIndex를 넘긴 연산의 cache 값이 방금 읽은 leafIndex다.
   private resubscribeReadLeavesDependingOn = (instance: TExprInstance, varNumber: number): void => {
     const { expr } = instance;
-    const table = instance.table as TExprSkipTable;
+    const table = this.evaluator.skipTable(expr) as TExprSkipTable;
     const cache = instance.cache as unknown[];
     for (const op of table.readLeafIndexOpsByVar[varNumber]) {
       const readLeafVar = table.varAt[op + instrSize(expr[op])];
