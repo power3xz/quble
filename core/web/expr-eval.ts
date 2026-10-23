@@ -1,7 +1,6 @@
 // 식 평가 - 후위 바이트를 세고, 식 정의당 건너뛰기 표를 둔다(EXPR-EVAL.md). 구독은 여기서 걸지 않는다.
 
 import type { TArrayInfo } from "./array-info.ts";
-import type { TModule } from "./decode.ts";
 import {
   EXPR_ADD,
   EXPR_AND,
@@ -81,12 +80,14 @@ export const SKIP_NOTHING: TSkipPastOps = {};
 // 않아 런타임 인스턴스가 여럿이어도 하나를 함께 쓴다.
 const exprStack: unknown[] = [];
 
+type TConstPool = (string | number | boolean)[];
+
 export class ExprEvaluator {
-  constpool: TModule["constpool"];
+  constpool: TConstPool;
   store: LeafStoreSubject;
   arrayPool: Pool<TArrayInfo>;
 
-  constructor(constpool: TModule["constpool"], store: LeafStoreSubject, arrayPool: Pool<TArrayInfo>) {
+  constructor(constpool: TConstPool, store: LeafStoreSubject, arrayPool: Pool<TArrayInfo>) {
     this.constpool = constpool;
     this.store = store;
     this.arrayPool = arrayPool;
