@@ -8,11 +8,7 @@
 
 ## 하는 중
 
-식 인스턴스의 표 의존 제거와 식 번호 조회 (브랜치 `expr-id-lookup`).
-
-1. `TExprInstance.table` 필드를 없애고 `evaluator.skipTable(expr)`로 조회한다.
-2. 모듈 로드 때 def별 `exprBase`를 계산해 `exprId = exprBase[compId] + exprIndex`로 `exprBytes`와 표를 배열에서 찾는다.
-   바이트코드 포맷은 바꾸지 않는다.
+없음
 
 ## 할 것
 
