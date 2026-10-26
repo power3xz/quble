@@ -1,9 +1,9 @@
-// 표현식 층 - 식 인스턴스(식 하나가 한 스코프에서 읽는 leaf들과 결과)를 풀에 두고, 구독 층(leaf-store.ts)에 입력
-// leaf마다 파생 구독을 건다. 가지는 인스턴스 번호만 들고 붙고 떼고 반납할 때 이 층을 부른다(region.ts).
+// 표현식 층 - 식 인스턴스(식 하나가 한 스코프에서 읽는 leaf들과 결과)를 풀에 두고, 입력 leaf마다 파생 구독을
+// 건다. 가지는 인스턴스 번호만 들고 붙고 떼고 반납할 때 이 층을 부른다(region.ts).
 //
-// 파생 구독은 식 인스턴스 번호로 건다. `(a + b) * (c - d)`면 a~d 네 leaf에 같은 번호를 건다. 구독 층은 바뀐
-// leaf를 읽는 번호마다 run을 부르고, run은 식을 다시 세어 값을 돌려주며 store에 쓰지 않는다 - 돌려준 값을 결과
-// leaf에 write하는 것은 구독 층이다(결과 leaf는 bindResultLeaf로 연결한다).
+// 파생 구독은 식 인스턴스 번호로 건다. `(a + b) * (c - d)`면 a~d 네 leaf에 같은 번호를 건다. 구독 층(leaf-store.ts)은
+// 파생 구독을 모르고, flush마다 바뀐 leaf 모음을 이 층의 flush(통지 전 단계)에 넘긴다. flush는 그 leaf를 읽는
+// 인스턴스를 다시 세어 결과 leaf에 write하고, 통지할 leaf 모음을 돌려준다.
 
 import { type ExprEvaluator, SKIP_NOTHING } from "./expr-eval.ts";
 import { instrSize } from "./expr-opcode.ts";
@@ -22,6 +22,8 @@ export type TExprInstance = {
   readLeaves: number[];
   // 직전에 돌려준 값. 바뀐 입력이 이 식의 변수가 아니면(다시 걸며 이미 뺀 leaf) 이것을 그대로 돌려준다.
   lastValue: unknown;
+  // 식의 값을 write할 leaf. bindResultLeaf 전에는 undefined고, 없으면 센 값을 쓰지 않는다.
+  resultLeaf: number | undefined;
   // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
   refCount: number;
   attachedCount: number;
@@ -36,12 +38,19 @@ export type TExprInstance = {
 // 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared와 인스턴스의 공유 키 자리에 쓴다.
 export const NOT_SHARED = -1;
 
+// leaf마다 파생 구독(식 인스턴스 번호)을 담는 슬롯. 구독이 하나뿐인 leaf가 대부분이라 하나면 번호 그대로, 둘째가
+// 들어오면 Set으로 바꾼다.
+type TDeriveSlot = number | Set<number> | undefined;
+
 export class ExprInstancePool {
   pool: Pool<TExprInstance> = new Pool();
   evaluator: ExprEvaluator;
   store: LeafStoreSubject;
   // 공유 중인 식 인스턴스. shared[globalExprIndex].get(scopeUid)가 식 인스턴스 번호다.
   private shared: Array<Map<number, number>> = [];
+  // 입력 leafIndex -> 그 leaf를 읽는 식 인스턴스 번호들. 번호 하나가 입력 leaf 여러 개의 슬롯에 들 수 있다.
+  // 배열을 바꾸지 않고 비우기만 한다 - 인스턴스가 테스트용으로 이 배열을 내놓는다(vm.ts instanceOf).
+  readonly deriveSubscribers: TDeriveSlot[] = [];
   // 따라잡을 때 입력 leaf를 모아 파생 구독에 넘기는 Set. 가지를 켤 때 행마다 Set을 만들면 그 할당이 GC로 드러나
   // 비우고 채우며 재사용한다. 함수가 끝난 뒤에는 쓰지 않으므로 통지가 이어서 다른 인스턴스를 붙여도 안전하다.
   private catchUpLeaves = new Set<number>();
@@ -49,14 +58,14 @@ export class ExprInstancePool {
   constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
     this.evaluator = evaluator;
     this.store = store;
-    store.setDeriveRunner(this.run);
+    store.setDeriveStage(this.flush);
   }
 
   // 식 인스턴스를 짓는다. refCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고, 가지가
   // 붙을 때 attach가 건다.
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 나눈다. 없는 식은 cache도 건너뛰기 표도 두지 않고 leaf가 바뀌면 처음부터
-  // 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 구독 층이 함수당 한 번만 부르므로 한 번이면 된다.
+  // 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 flush가 인스턴스당 한 번만 세므로 한 번이면 된다.
   create = (globalExprIndex: number, pairs: TScope): number => {
     const table = this.evaluator.skipTable(globalExprIndex);
     const instance: TExprInstance = {
@@ -65,6 +74,7 @@ export class ExprInstancePool {
       cache: table === null ? null : new Array(table.opCount),
       readLeaves: [],
       lastValue: undefined,
+      resultLeaf: undefined,
       refCount: 1,
       attachedCount: 0,
       everAttached: false,
@@ -74,13 +84,72 @@ export class ExprInstancePool {
     return this.pool.alloc(instance);
   };
 
-  // 구독 층이 바뀐 leaf를 읽는 식 인스턴스마다 부른다. 식을 다시 세어 값을 돌려준다.
-  // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 구독 층이 쓰지 않는다.
-  run = (exprInstanceIndex: number, changedLeaves: ReadonlySet<number>): unknown => {
+  // 통지 전 단계(store.setDeriveStage로 등록한다). 바뀐 leaf를 읽는 식 인스턴스를 인스턴스당 한 번 다시 세어 결과
+  // leaf에 write하고, 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 바뀐 leaf 모음(changed)을 모든
+  // 인스턴스가 그대로 공유한다 - 인스턴스마다 자기가 읽는 leaf를 has로 가려내므로 인스턴스별 배열과 Map을 만들
+  // 필요가 없다(1000행의 식이 함께 바뀌면 그 할당이 클릭 한 번의 시간을 늘렸다). 식이 던지면 onError로 넘기고
+  // 나머지는 계속 센다.
+  //
+  // 바뀐 leaf가 하나면 같은 인스턴스를 두 번 만날 일이 없어 이미 센 인스턴스를 Set으로 기억하지 않는다. 한 leaf에
+  // 파생 구독이 수천 개 걸린 식(1000행의 같은 기준값을 읽는 식)에서 그 Set을 채우는 비용이 클릭 한 번보다 컸다.
+  // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 쓰지 않는다.
+  flush = (changed: ReadonlySet<number>, onError: (error: unknown) => void): ReadonlySet<number> => {
+    const { store } = this;
+    const single = changed.size === 1;
+    let counted: Set<number> | undefined;
+    let toNotify: Set<number> | undefined;
+    const countOne = (exprInstanceIndex: number): void => {
+      if (!single) {
+        counted ??= new Set();
+        if (counted.has(exprInstanceIndex)) {
+          return;
+        }
+        counted.add(exprInstanceIndex);
+      }
+      try {
+        const instance = this.pool.entries[exprInstanceIndex];
+        const previous = instance.lastValue;
+        const value = this.run(exprInstanceIndex, changed);
+        const { resultLeaf } = instance;
+        if (resultLeaf !== undefined && value !== previous) {
+          store.write(resultLeaf, value);
+          toNotify ??= new Set(changed);
+          toNotify.add(resultLeaf);
+        }
+      } catch (error) {
+        onError(error);
+      }
+    };
+    for (const leafIndex of changed) {
+      const derives = this.deriveSubscribers[leafIndex];
+      if (derives === undefined) {
+        continue;
+      }
+      if (typeof derives === "number") {
+        countOne(derives);
+      } else if (single) {
+        // 스냅샷 순회 - 세는 도중 읽는 leaf를 다시 걸며 이 Set을 고칠 수 있다. 바뀐 leaf가 여럿이면 counted가
+        // 다시 만난 인스턴스를 거른다.
+        for (const exprInstanceIndex of [...derives]) {
+          countOne(exprInstanceIndex);
+        }
+      } else {
+        for (const exprInstanceIndex of derives) {
+          countOne(exprInstanceIndex);
+        }
+      }
+    }
+    return toNotify ?? changed;
+  };
+
+  // 식을 다시 세어 값을 돌려주고 lastValue에 기록한다. store에 쓰지 않는다. 결과 leaf에는 늘 lastValue가 들어
+  // 있으므로(처음 값은 evaluate가 센 값이다) 결과 leaf를 읽지 않고 lastValue로 바뀌었는지 가린다.
+  private run = (exprInstanceIndex: number, changedLeaves: ReadonlySet<number>): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
     if (instance.cache === null) {
       const expr = this.evaluator.exprBytes[instance.globalExprIndex];
-      return this.evaluator.runExpr(expr, instance.pairs, null, null, SKIP_NOTHING, null);
+      instance.lastValue = this.evaluator.runExpr(expr, instance.pairs, null, null, SKIP_NOTHING, null);
+      return instance.lastValue;
     }
     return this.runPartial(exprInstanceIndex, changedLeaves);
   };
@@ -115,7 +184,7 @@ export class ExprInstancePool {
 
   // 식이 돌려준 값을 쓸 결과 leaf를 연결한다.
   bindResultLeaf = (exprInstanceIndex: number, resultLeafIndex: number): void => {
-    this.store.bindDeriveResult(exprInstanceIndex, resultLeafIndex);
+    this.pool.entries[exprInstanceIndex].resultLeaf = resultLeafIndex;
   };
 
   // 스코프 인스턴스(scopeUid)에서 식(globalExprIndex)을 이미 공유 중이면 그 식 인스턴스 번호, 없으면 NOT_SHARED.
@@ -134,7 +203,7 @@ export class ExprInstancePool {
 
   // 식 인스턴스의 결과를 쓰는 leaf. bindResultLeaf 전에는 undefined다. 공유한 인스턴스를 두 번째로 든 자리가 같은
   // 결과 leaf를 구독하려고 읽는다.
-  resultLeafOf = (exprInstanceIndex: number): number | undefined => this.store.deriveResultOf(exprInstanceIndex);
+  resultLeafOf = (exprInstanceIndex: number): number | undefined => this.pool.entries[exprInstanceIndex].resultLeaf;
 
   retain = (exprInstanceIndex: number): void => {
     this.pool.entries[exprInstanceIndex].refCount++;
@@ -154,7 +223,9 @@ export class ExprInstancePool {
     if (instance.sharedGlobalExprIndex !== NOT_SHARED) {
       this.shared[instance.sharedGlobalExprIndex].delete(instance.sharedScopeUid);
     }
-    this.store.freeDeriveResult(exprInstanceIndex);
+    if (instance.resultLeaf !== undefined) {
+      this.store.free(instance.resultLeaf, 1);
+    }
     this.pool.release(exprInstanceIndex);
   };
 
@@ -171,7 +242,7 @@ export class ExprInstancePool {
     const { readLeaves } = instance;
     for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
       if (this.isInputLeaf(instance, readLeafPosition)) {
-        this.store.subscribeDerive(readLeaves[readLeafPosition], exprInstanceIndex);
+        this.subscribeDerive(readLeaves[readLeafPosition], exprInstanceIndex);
       }
     }
     if (instance.everAttached) {
@@ -182,7 +253,13 @@ export class ExprInstancePool {
           catchUpLeaves.add(readLeaves[readLeafPosition]);
         }
       }
-      this.store.refreshDerive(exprInstanceIndex, catchUpLeaves);
+      const previous = instance.lastValue;
+      const value = this.run(exprInstanceIndex, catchUpLeaves);
+      const { resultLeaf } = instance;
+      if (resultLeaf !== undefined && value !== previous) {
+        this.store.write(resultLeaf, value);
+        this.store.notify(resultLeaf);
+      }
     }
     instance.everAttached = true;
   };
@@ -199,6 +276,29 @@ export class ExprInstancePool {
   clear = (): void => {
     this.pool.clear();
     this.shared = [];
+    this.deriveSubscribers.length = 0;
+  };
+
+  private subscribeDerive = (leafIndex: number, exprInstanceIndex: number): void => {
+    const current = this.deriveSubscribers[leafIndex];
+    if (current === undefined) {
+      this.deriveSubscribers[leafIndex] = exprInstanceIndex;
+    } else if (typeof current === "number") {
+      if (current !== exprInstanceIndex) {
+        this.deriveSubscribers[leafIndex] = new Set([current, exprInstanceIndex]);
+      }
+    } else {
+      current.add(exprInstanceIndex);
+    }
+  };
+
+  private unsubscribeDerive = (leafIndex: number, exprInstanceIndex: number): void => {
+    const current = this.deriveSubscribers[leafIndex];
+    if (current === exprInstanceIndex) {
+      this.deriveSubscribers[leafIndex] = undefined;
+    } else if (current !== undefined && typeof current !== "number") {
+      current.delete(exprInstanceIndex);
+    }
   };
 
   private unsubscribeInputs = (exprInstanceIndex: number): void => {
@@ -206,7 +306,7 @@ export class ExprInstancePool {
     const { readLeaves } = instance;
     for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
       if (this.isInputLeaf(instance, readLeafPosition)) {
-        this.store.unsubscribeDerive(readLeaves[readLeafPosition], exprInstanceIndex);
+        this.unsubscribeDerive(readLeaves[readLeafPosition], exprInstanceIndex);
       }
     }
   };
@@ -302,10 +402,10 @@ export class ExprInstancePool {
     const newAlreadyRead = leafOfVar.includes(newLeafIndex);
     leafOfVar[varNumber] = newLeafIndex;
     if (oldLeafIndex >= 0 && !leafOfVar.includes(oldLeafIndex)) {
-      this.store.unsubscribeDerive(oldLeafIndex, exprInstanceIndex);
+      this.unsubscribeDerive(oldLeafIndex, exprInstanceIndex);
     }
     if (!newAlreadyRead) {
-      this.store.subscribeDerive(newLeafIndex, exprInstanceIndex);
+      this.subscribeDerive(newLeafIndex, exprInstanceIndex);
     }
   };
 }
