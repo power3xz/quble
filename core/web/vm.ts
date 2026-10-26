@@ -674,6 +674,7 @@ export class VM {
       branchPool,
       arrayPool,
       exprInstances: exprInstancePool.pool,
+      deriveSubscribers: exprInstancePool.deriveSubscribers,
       store,
       destroy,
       snapshot: snapshotOf(module, store, arrayPool),

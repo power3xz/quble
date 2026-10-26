@@ -34,11 +34,13 @@ const product = () => ({
 const poolOf = (store: ReturnType<typeof createLeafStoreSubject>, exprBytes: Uint8Array[]) =>
   new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
 
-// 식 인스턴스를 짓고 처음 센 뒤 결과 leaf를 연결한다. 구독은 걸지 않은 상태다(가지가 붙기 전).
+// 식 인스턴스를 짓고 처음 센 뒤 결과 leaf에 그 값을 넣고 연결한다(VM의 allocResultLeaf와 같다). 구독은 걸지
+// 않은 상태다(가지가 붙기 전).
 const build = (fixture: ReturnType<typeof sum>) => {
   const pool = poolOf(fixture.store, [fixture.expr]);
   const exprInstanceIndex = pool.create(0, fixture.pairs);
   const value = pool.evaluate(exprInstanceIndex);
+  fixture.store.write(fixture.resultLeafIndex, value);
   pool.bindResultLeaf(exprInstanceIndex, fixture.resultLeafIndex);
   return { pool, exprInstanceIndex, value, store: fixture.store };
 };
@@ -50,7 +52,7 @@ test("create는 refCount 1로 짓고 evaluate는 식을 세되 구독은 걸지 
 
   store.set(0, 10);
 
-  assert.equal(store.get(2), 0, "attach 전에는 결과 leaf에 쓰지 않는다");
+  assert.equal(store.get(2), 3, "attach 전에는 결과 leaf에 쓰지 않는다");
 });
 
 test("evaluate를 여러 번 불러도 같은 값을 주고 구독 대상이 늘지 않는다", () => {
@@ -62,7 +64,7 @@ test("evaluate를 여러 번 불러도 같은 값을 주고 구독 대상이 늘
 
   store.set(0, 10);
 
-  assert.equal(store.get(2), 0, "detach 한 번으로 모든 구독이 풀린다");
+  assert.equal(store.get(2), 3, "detach 한 번으로 모든 구독이 풀린다");
 });
 
 test("attach하면 입력이 바뀔 때 결과 leaf에 쓴다", () => {
@@ -81,15 +83,21 @@ test("detach하면 입력이 바뀌어도 결과 leaf에 쓰지 않는다", () =
 
   store.set(0, 10);
 
-  assert.equal(store.get(2), 0);
+  assert.equal(store.get(2), 3);
 });
 
 test("처음 붙을 때는 따라잡지 않는다", () => {
-  const { pool, exprInstanceIndex, store } = build(sum());
+  const { pool, exprInstanceIndex } = build(sum());
+  const { runExpr } = pool.evaluator;
+  let runs = 0;
+  pool.evaluator.runExpr = (...args) => {
+    runs++;
+    return runExpr(...args);
+  };
 
   pool.attach(exprInstanceIndex);
 
-  assert.equal(store.get(2), 0, "evaluate가 방금 센 값이 최신이라 식을 다시 세지 않는다");
+  assert.equal(runs, 0, "evaluate가 방금 센 값이 최신이라 식을 다시 세지 않는다");
 });
 
 test("떼어 둔 동안 바뀐 입력은 다시 붙을 때 따라잡는다", () => {
@@ -262,6 +270,70 @@ test("떼어 둔 동안 입력 여럿이 바뀌면 따라잡을 때 식을 한 �
 
   assert.equal(runs, 1, "a와 c를 함께 바뀐 변수로 넘겨 한 번에 센다");
   assert.deepEqual(notified, [24], "(4 + 2) * (7 - 3)만 통지한다 - a만 반영한 중간 값이 나가지 않는다");
+});
+
+// a + b 인스턴스 둘을 같은 풀에서 짓는다. 첫째는 결과 leaf 2, 둘째는 결과 leaf 3에 쓴다. 둘 다 a, b를 읽어 leaf
+// 0과 1의 파생 구독 슬롯이 Set이 된다.
+const buildTwoAttached = () => {
+  const store = createLeafStoreSubject([1, 2, 0, 0]);
+  const pool = poolOf(store, [new Uint8Array([...load(0), ...load(1), EXPR_ADD])]);
+  const pairs = [STORE, 0, STORE, 1];
+  const instances = [2, 3].map((resultLeafIndex) => {
+    const exprInstanceIndex = pool.create(0, pairs);
+    store.write(resultLeafIndex, pool.evaluate(exprInstanceIndex));
+    pool.bindResultLeaf(exprInstanceIndex, resultLeafIndex);
+    pool.attach(exprInstanceIndex);
+    return exprInstanceIndex;
+  });
+  return { store, pool, first: instances[0], second: instances[1] };
+};
+
+test("같은 leaf를 읽는 인스턴스 둘 중 하나를 떼면 나머지만 센다", () => {
+  const { store, pool, first } = buildTwoAttached();
+
+  pool.detach(first);
+  store.set(0, 10);
+
+  assert.deepEqual([store.get(2), store.get(3)], [3, 12], "뗀 첫째의 결과 leaf는 그대로다");
+});
+
+test("batch에서 인스턴스가 읽는 leaf 둘이 함께 바뀌어도 인스턴스마다 한 번 센다", () => {
+  const { store, pool } = buildTwoAttached();
+  const { runExpr } = pool.evaluator;
+  let runs = 0;
+  pool.evaluator.runExpr = (...args) => {
+    runs++;
+    return runExpr(...args);
+  };
+
+  store.batch(() => {
+    store.set(0, 10);
+    store.set(1, 20);
+  });
+
+  assert.equal(runs, 2, "인스턴스 둘이 a, b 두 leaf에 걸려 있지만 각자 한 번");
+  assert.deepEqual([store.get(2), store.get(3)], [30, 30]);
+});
+
+test("인스턴스 하나가 던져도 나머지 인스턴스는 세고 통지는 모두 나간 뒤 첫 예외가 올라간다", () => {
+  const { store, pool } = buildTwoAttached();
+  const { runExpr } = pool.evaluator;
+  let runs = 0;
+  pool.evaluator.runExpr = (...args) => {
+    runs++;
+    if (runs === 1) {
+      throw new Error("첫 식 오류");
+    }
+    return runExpr(...args);
+  };
+  const notified: number[] = [];
+  store.subscribe(0, (_, leafIndex) => notified.push(leafIndex));
+  store.subscribe(3, (_, leafIndex) => notified.push(leafIndex));
+
+  assert.throws(() => store.set(0, 10), /첫 식 오류/);
+
+  assert.equal(store.get(3), 12, "둘째는 센다");
+  assert.deepEqual(notified, [0, 3]);
 });
 
 test("건너뛸 부분식이 있는 식도 같은 규칙으로 구독하고 따라잡는다", () => {
