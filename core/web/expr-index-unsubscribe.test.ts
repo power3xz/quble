@@ -28,8 +28,7 @@ const handlers: THandlers = {
   },
 };
 
-type TDeriveFn = (changedLeaves: ReadonlySet<number>) => unknown;
-type TSubscribeDeriveFn = (leafIndex: number, fn: TDeriveFn, resultLeafIndex?: number) => void;
+type TSubscribeDeriveFn = (leafIndex: number, exprInstanceIndex: number) => void;
 
 // 인스턴스를 만든 뒤부터 leaf마다 건 횟수 - 푼 횟수를 센다.
 const instantiate = () => {
@@ -42,13 +41,13 @@ const instantiate = () => {
   const net = new Map<number, number>();
   const count = (leafIndex: number, d: number) => net.set(leafIndex, (net.get(leafIndex) ?? 0) + d);
   const { subscribeDerive, unsubscribeDerive } = store;
-  store.subscribeDerive = (leafIndex, fn, resultLeafIndex) => {
+  store.subscribeDerive = (leafIndex, exprInstanceIndex) => {
     count(leafIndex, 1);
-    subscribeDerive(leafIndex, fn, resultLeafIndex);
+    subscribeDerive(leafIndex, exprInstanceIndex);
   };
-  store.unsubscribeDerive = (leafIndex, fn) => {
+  store.unsubscribeDerive = (leafIndex, exprInstanceIndex) => {
     count(leafIndex, -1);
-    unsubscribeDerive(leafIndex, fn);
+    unsubscribeDerive(leafIndex, exprInstanceIndex);
   };
   return {
     netOf: (leafIndex: number) => net.get(leafIndex) ?? 0,
