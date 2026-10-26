@@ -4,8 +4,8 @@
 //
 //   createLeafStore(leaves)        -> { get, set }                                 (데이터만)
 //   createLeafStoreSubject(leaves) -> 위 + { write, notify, batch, subscribe, unsubscribe, subscribeDerive,
-//                                     unsubscribeDerive, bindDeriveResult, freeDeriveResult, refreshDerive,
-//                                     alloc, free, clear }                         (반응성 + 동적 칸)
+//                                     unsubscribeDerive, bindDeriveResult, freeDeriveResult, deriveResultOf,
+//                                     refreshDerive, setDeriveRunner, alloc, free, clear }  (반응성 + 동적 칸)
 //
 // runtime.ts의 blueprint가 만들어 인스턴스에 싣는 store가 곧 createLeafStoreSubject의 반환물이다.
 
@@ -36,14 +36,12 @@ const createLeafStore = (leaves: unknown[]) => {
 // 통지 구독 함수. leaf가 바뀌면 notify 단계에서 새 값과 어느 leaf가 바뀌었는지를 받아 불린다.
 export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
 
-// 파생 구독 함수. 이번 flush에서 바뀐 leaf 전체(등록하지 않은 leaf도 든다)를 받아 파생값을 돌려준다. 자기가
-// 읽는 leaf를 가려내는 것은 함수 몫이고, has로 O(1)에 묻는다(바뀐 leaf가 수천 개인 batch에서 배열을 훑으면 함수
-// 수만큼 곱해진다). 입력은 store.get으로 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이 결과 leaf에
-// write한다. 함수 하나를 여러 leaf에 걸 수 있고, flush마다 한 번만 불린다. 받은 Set은 모든 함수가 공유하므로
-// 고치거나 들고 있지 않는다.
-// resultLeafIndex는 store가 bindDeriveResult로 함수에 붙이는 속성이다 - 돌려준 값을 write할 결과 leaf. 값이 바뀐 식마다
-// 읽으므로 WeakMap(해시 조회) 대신 함수 객체의 속성(인라인 캐시)에 둔다. 호출자는 읽거나 쓰지 않는다.
-export type TDeriveSubscriber = ((changedLeaves: ReadonlySet<LeafIndex>) => unknown) & { resultLeafIndex?: LeafIndex };
+// 파생 구독을 세는 함수. 파생 구독은 식 인스턴스 번호로 걸고, store는 이 함수 하나에 번호와 이번 flush에서 바뀐
+// leaf 전체(등록하지 않은 leaf도 든다)를 넘겨 파생값을 받는다. 표현식 층이 setDeriveRunner로 등록한다. 자기가
+// 읽는 leaf를 가려내는 것은 함수 몫이고, has로 O(1)에 묻는다(바뀐 leaf가 수천 개인 batch에서 배열을 훑으면
+// 인스턴스 수만큼 곱해진다). 입력은 store.get으로 읽고 store에 쓰지 않는다 - 돌려준 값은 구독 층이 결과 leaf에
+// write한다. 받은 Set은 모든 호출이 공유하므로 고치거나 들고 있지 않는다.
+export type TDeriveRunner = (exprInstanceIndex: number, changedLeaves: ReadonlySet<LeafIndex>) => unknown;
 
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
@@ -58,17 +56,20 @@ export type LeafStoreSubject = {
   unsubscribe: (leafIndex: LeafIndex, fn: TSubscriber) => void;
   // resultLeafIndex는 fn이 돌려준 값이 write될 leaf다. 없으면 돌려준 값을 쓰지 않는다. 같은 fn은 같은
   // 결과 leaf로만 등록한다.
-  subscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber, resultLeafIndex?: LeafIndex) => void;
-  unsubscribeDerive: (leafIndex: LeafIndex, fn: TDeriveSubscriber) => void;
-  // fn이 돌려준 값을 write할 결과 leaf를 연결한다. 구독 등록과 별개라, 가지가 붙기 전(build 중)에 먼저
-  // 연결해 두고 붙을 때 subscribeDerive(leafIndex, fn)만 해도 값이 결과 leaf로 간다.
-  bindDeriveResult: (fn: TDeriveSubscriber, resultLeafIndex: LeafIndex) => void;
-  // fn의 결과 leaf를 반납하고 연결을 푼다 - 파생 구독을 가진 가지가 없어질 때 부른다. fn이 입력 leaf 여러 개에
-  // 걸려 같은 fn으로 여러 번 불려도 첫 번째만 반납한다.
-  freeDeriveResult: (fn: TDeriveSubscriber) => void;
-  // set이 아닌 경로에서 파생 구독 fn 하나만 changedLeaves로 지금 한 번 부른다 - 식 인스턴스의 구독을 다시 걸 때
+  subscribeDerive: (leafIndex: LeafIndex, exprInstanceIndex: number) => void;
+  unsubscribeDerive: (leafIndex: LeafIndex, exprInstanceIndex: number) => void;
+  // 식 인스턴스가 돌려준 값을 write할 결과 leaf를 연결한다. 구독 등록과 별개라, 가지가 붙기 전(build 중)에 먼저
+  // 연결해 두고 붙을 때 subscribeDerive만 해도 값이 결과 leaf로 간다.
+  bindDeriveResult: (exprInstanceIndex: number, resultLeafIndex: LeafIndex) => void;
+  // 식 인스턴스의 결과 leaf를 반납하고 연결을 푼다. 연결이 없으면 아무것도 하지 않는다.
+  freeDeriveResult: (exprInstanceIndex: number) => void;
+  // 식 인스턴스의 결과 leaf. 연결하지 않았으면 undefined다.
+  deriveResultOf: (exprInstanceIndex: number) => LeafIndex | undefined;
+  // set이 아닌 경로에서 식 인스턴스 하나만 changedLeaves로 지금 한 번 센다 - 식 인스턴스의 구독을 다시 걸 때
   // 놓친 입력을 따라잡는다. 돌려준 값을 결과 leaf에 write하고, 값이 바뀌었으면 그 leaf를 notify한다.
-  refreshDerive: (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>) => void;
+  refreshDerive: (exprInstanceIndex: number, changedLeaves: ReadonlySet<LeafIndex>) => void;
+  // 식 인스턴스 번호로 식을 세는 함수를 등록한다. store가 표현식 층보다 먼저 만들어지므로 생성 뒤에 등록한다.
+  setDeriveRunner: (run: TDeriveRunner) => void;
   clear: () => void;
 };
 // leaf마다 구독을 담는 슬롯. 구독이 하나뿐인 leaf가 대부분이라 하나면 Set 없이 함수를 그대로 담고, 둘째가
@@ -99,11 +100,19 @@ const removeFromSlot = <T extends TSubscriberFn>(slots: Array<TSlot<T>>, leafInd
   }
 };
 
+// leaf마다 파생 구독(식 인스턴스 번호)을 담는 슬롯. 통지 구독 슬롯과 같이 하나면 번호 그대로, 둘째가 들어오면
+// Set으로 바꾼다.
+type TDeriveSlot = number | Set<number> | undefined;
+
 export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   const leafStore = createLeafStore(leaves);
   const subscribers: Array<TSlot<TSubscriber>> = []; // leafIndex -> 그 leaf의 통지 구독들.
-  // 입력 leafIndex -> 그 leaf에 걸린 파생 구독들. 함수 하나가 입력 leaf 여러 개의 슬롯에 들 수 있다.
-  const deriveSubscribers: Array<TSlot<TDeriveSubscriber>> = [];
+  // 입력 leafIndex -> 그 leaf를 읽는 식 인스턴스 번호들. 번호 하나가 입력 leaf 여러 개의 슬롯에 들 수 있다.
+  const deriveSubscribers: TDeriveSlot[] = [];
+  // 식 인스턴스 번호 -> 결과 leaf. 연결이 없으면 undefined다.
+  const deriveResultLeaf: Array<LeafIndex | undefined> = [];
+  // setDeriveRunner로 등록한 함수. 등록 전에는 아무것도 세지 않는다.
+  let runDerive: TDeriveRunner = () => undefined;
   // 요소 회수(free)로 반납된 빈 블록의 시작 leafIndex를 크기별로 모은 free list. 배열 요소 크기 집합은
   // 정적/유한이라(타입이 정함) 크기별 정확 매칭이면 충분 - 병합/split/정렬 없이 O(1) 재사용/반납.
   const freeBySize = new Map<number, LeafIndex[]>();
@@ -147,16 +156,16 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   // 예외를 마지막에 다시 던진다.
   const propagateOne = (
     leafIndex: LeafIndex,
-    derives: TDeriveSubscriber | ReadonlySet<TDeriveSubscriber>,
+    derives: number | ReadonlySet<number>,
     changedLeaves: ReadonlySet<LeafIndex>,
   ): void => {
     let failed = false;
     let firstError: unknown;
     let resultLeaves: LeafIndex[] | undefined;
-    const runDerive = (fn: TDeriveSubscriber): void => {
+    const deriveOne = (exprInstanceIndex: number): void => {
       try {
-        const value = fn(changedLeaves);
-        const resultLeaf = fn.resultLeafIndex;
+        const value = runDerive(exprInstanceIndex, changedLeaves);
+        const resultLeaf = deriveResultLeaf[exprInstanceIndex];
         if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
           write(resultLeaf, value);
           resultLeaves ??= [];
@@ -169,12 +178,12 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
         }
       }
     };
-    if (typeof derives === "function") {
-      runDerive(derives);
+    if (typeof derives === "number") {
+      deriveOne(derives);
     } else {
       // 스냅샷 순회 - 파생 구독이 읽는 leaf를 다시 걸며 이 Set을 고칠 수 있다.
-      for (const fn of [...derives]) {
-        runDerive(fn);
+      for (const exprInstanceIndex of [...derives]) {
+        deriveOne(exprInstanceIndex);
       }
     }
     try {
@@ -208,16 +217,16 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
   // write하고, 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 파생 구독이 던지면 onError로 넘기고
   // 나머지는 계속 부른다.
   const runDerives = (changed: ReadonlySet<LeafIndex>, onError: (error: unknown) => void): ReadonlySet<LeafIndex> => {
-    let called: Set<TDeriveSubscriber> | undefined;
+    let called: Set<number> | undefined;
     let toNotify: Set<LeafIndex> | undefined;
-    const runDerive = (fn: TDeriveSubscriber): void => {
-      if ((called as Set<TDeriveSubscriber>).has(fn)) {
+    const deriveOne = (exprInstanceIndex: number): void => {
+      if ((called as Set<number>).has(exprInstanceIndex)) {
         return;
       }
-      (called as Set<TDeriveSubscriber>).add(fn);
+      (called as Set<number>).add(exprInstanceIndex);
       try {
-        const value = fn(changed);
-        const resultLeaf = fn.resultLeafIndex;
+        const value = runDerive(exprInstanceIndex, changed);
+        const resultLeaf = deriveResultLeaf[exprInstanceIndex];
         if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
           write(resultLeaf, value);
           toNotify ??= new Set(changed);
@@ -233,11 +242,11 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
         continue;
       }
       called ??= new Set();
-      if (typeof derives === "function") {
-        runDerive(derives);
+      if (typeof derives === "number") {
+        deriveOne(derives);
       } else {
-        for (const fn of derives) {
-          runDerive(fn);
+        for (const exprInstanceIndex of derives) {
+          deriveOne(exprInstanceIndex);
         }
       }
     }
@@ -320,37 +329,53 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     removeFromSlot(subscribers, leafIndex, fn);
   };
 
-  const subscribeDerive = (leafIndex: LeafIndex, fn: TDeriveSubscriber, resultLeafIndex?: LeafIndex): void => {
-    addToSlot(deriveSubscribers, leafIndex, fn);
-    if (resultLeafIndex !== undefined) {
-      bindDeriveResult(fn, resultLeafIndex);
+  const subscribeDerive = (leafIndex: LeafIndex, exprInstanceIndex: number): void => {
+    const current = deriveSubscribers[leafIndex];
+    if (current === undefined) {
+      deriveSubscribers[leafIndex] = exprInstanceIndex;
+    } else if (typeof current === "number") {
+      if (current !== exprInstanceIndex) {
+        deriveSubscribers[leafIndex] = new Set([current, exprInstanceIndex]);
+      }
+    } else {
+      current.add(exprInstanceIndex);
     }
   };
 
-  const unsubscribeDerive = (leafIndex: LeafIndex, fn: TDeriveSubscriber): void => {
-    removeFromSlot(deriveSubscribers, leafIndex, fn);
+  const unsubscribeDerive = (leafIndex: LeafIndex, exprInstanceIndex: number): void => {
+    const current = deriveSubscribers[leafIndex];
+    if (current === exprInstanceIndex) {
+      deriveSubscribers[leafIndex] = undefined;
+    } else if (current !== undefined && typeof current !== "number") {
+      current.delete(exprInstanceIndex);
+    }
   };
 
-  const bindDeriveResult = (fn: TDeriveSubscriber, resultLeafIndex: LeafIndex): void => {
-    fn.resultLeafIndex = resultLeafIndex;
+  const bindDeriveResult = (exprInstanceIndex: number, resultLeafIndex: LeafIndex): void => {
+    deriveResultLeaf[exprInstanceIndex] = resultLeafIndex;
   };
 
-  // 속성을 지우지(delete) 않고 undefined로 둔다 - delete는 함수 객체를 사전 모드로 바꿔 읽기가 느려진다.
-  const freeDeriveResult = (fn: TDeriveSubscriber): void => {
-    const resultLeaf = fn.resultLeafIndex;
+  const freeDeriveResult = (exprInstanceIndex: number): void => {
+    const resultLeaf = deriveResultLeaf[exprInstanceIndex];
     if (resultLeaf !== undefined) {
-      fn.resultLeafIndex = undefined;
+      deriveResultLeaf[exprInstanceIndex] = undefined;
       free(resultLeaf, 1);
     }
   };
 
-  const refreshDerive = (fn: TDeriveSubscriber, changedLeaves: ReadonlySet<LeafIndex>): void => {
-    const value = fn(changedLeaves);
-    const resultLeaf = fn.resultLeafIndex;
+  const deriveResultOf = (exprInstanceIndex: number): LeafIndex | undefined => deriveResultLeaf[exprInstanceIndex];
+
+  const refreshDerive = (exprInstanceIndex: number, changedLeaves: ReadonlySet<LeafIndex>): void => {
+    const value = runDerive(exprInstanceIndex, changedLeaves);
+    const resultLeaf = deriveResultLeaf[exprInstanceIndex];
     if (resultLeaf !== undefined && leafStore.get(resultLeaf) !== value) {
       write(resultLeaf, value);
       notify(resultLeaf);
     }
+  };
+
+  const setDeriveRunner = (run: TDeriveRunner): void => {
+    runDerive = run;
   };
 
   // 값, 구독, 빈 블록 기록, 미룬 통지를 모두 비운다 - 인스턴스를 해체할 때 store가 값과 구독 함수를 놓는다.
@@ -358,6 +383,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     leaves.length = 0;
     subscribers.length = 0;
     deriveSubscribers.length = 0;
+    deriveResultLeaf.length = 0;
     freeBySize.clear();
     pendingLeaves.clear();
   };
@@ -406,7 +432,9 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     unsubscribeDerive,
     bindDeriveResult,
     freeDeriveResult,
+    deriveResultOf,
     refreshDerive,
+    setDeriveRunner,
     clear,
   };
 };
