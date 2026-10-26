@@ -85,7 +85,7 @@ export class ExprInstancePool {
   };
 
   // 통지 전 단계(store.setDeriveStage로 등록한다). 바뀐 leaf를 읽는 식 인스턴스를 인스턴스당 한 번 다시 세어 결과
-  // leaf에 write하고, 바뀐 leaf에 값이 바뀐 결과 leaf를 더한 모음을 돌려준다. 바뀐 leaf 모음(changed)을 모든
+  // leaf에 write하고, 값이 바뀐 결과 leaf를 돌려준다(없으면 null). 바뀐 leaf 모음(changed)을 모든
   // 인스턴스가 그대로 공유한다 - 인스턴스마다 자기가 읽는 leaf를 has로 가려내므로 인스턴스별 배열과 Map을 만들
   // 필요가 없다(1000행의 식이 함께 바뀌면 그 할당이 클릭 한 번의 시간을 늘렸다). 식이 던지면 onError로 넘기고
   // 나머지는 계속 센다.
@@ -93,11 +93,11 @@ export class ExprInstancePool {
   // 바뀐 leaf가 하나면 같은 인스턴스를 두 번 만날 일이 없어 이미 센 인스턴스를 Set으로 기억하지 않는다. 한 leaf에
   // 파생 구독이 수천 개 걸린 식(1000행의 같은 기준값을 읽는 식)에서 그 Set을 채우는 비용이 클릭 한 번보다 컸다.
   // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 쓰지 않는다.
-  flush = (changed: ReadonlySet<number>, onError: (error: unknown) => void): ReadonlySet<number> => {
+  flush = (changed: ReadonlySet<number>, onError: (error: unknown) => void): number[] | null => {
     const { store } = this;
     const single = changed.size === 1;
     let counted: Set<number> | undefined;
-    let toNotify: Set<number> | undefined;
+    let resultLeaves: number[] | null = null;
     const countOne = (exprInstanceIndex: number): void => {
       if (!single) {
         counted ??= new Set();
@@ -113,8 +113,8 @@ export class ExprInstancePool {
         const { resultLeaf } = instance;
         if (resultLeaf !== undefined && value !== previous) {
           store.write(resultLeaf, value);
-          toNotify ??= new Set(changed);
-          toNotify.add(resultLeaf);
+          resultLeaves ??= [];
+          resultLeaves.push(resultLeaf);
         }
       } catch (error) {
         onError(error);
@@ -139,7 +139,7 @@ export class ExprInstancePool {
         }
       }
     }
-    return toNotify ?? changed;
+    return resultLeaves;
   };
 
   // 식을 다시 세어 값을 돌려주고 lastValue에 기록한다. store에 쓰지 않는다. 결과 leaf에는 늘 lastValue가 들어

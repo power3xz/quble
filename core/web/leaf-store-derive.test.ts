@@ -1,8 +1,8 @@
-// store의 통지 전 단계(derive stage) - flush마다 바뀐 leaf 모음을 단계에 넘기고, 단계가 돌려준 leaf 모음에 통지
-// 구독을 부른다. store는 단계가 무엇을 어떻게 만드는지 모른다(표현식 층이 등록한다).
+// store의 통지 전 단계(derive stage) - flush마다 바뀐 leaf 모음을 단계에 넘기고, 바뀐 leaf와 단계가 돌려준 파생
+// leaf에 통지 구독을 부른다. store는 단계가 무엇을 어떻게 만드는지 모른다(표현식 층이 등록한다).
 //
-// 규칙: 단계는 flush마다 한 번, 이번 flush에서 바뀐 leaf 전체를 받는다. 단계가 write한 leaf는 통지 구독이 확정된
-// 값으로 읽는다. 단계를 등록하지 않으면 바뀐 leaf만 통지한다. 단계나 통지 구독이 던져도 나머지 통지는 모두
+// 규칙: 단계는 flush마다 한 번, 이번 flush에서 바뀐 leaf 전체를 받는다. 통지는 바뀐 leaf, 파생 leaf 순이고, 단계가
+// write한 leaf는 통지 구독이 확정된 값으로 읽는다. 단계를 등록하지 않으면 바뀐 leaf만 통지한다. 단계나 통지 구독이 던져도 나머지 통지는 모두
 // 나가고 첫 예외가 올라간다. clear는 등록한 단계를 놓는다.
 
 import assert from "node:assert/strict";
@@ -19,12 +19,12 @@ const setup = () => {
     received.push([...changed]);
     log.push("stage");
     store.write(2, (store.get(0) as number) + (store.get(1) as number));
-    return new Set([...changed, 2]);
+    return [2];
   });
   return { store, log, received };
 };
 
-test("단계가 write한 leaf는 단계가 돌려준 모음에 들어 통지 구독이 확정된 값으로 불린다", () => {
+test("바뀐 leaf를 통지한 뒤 단계가 돌려준 파생 leaf를 통지하고, 통지 구독은 확정된 값을 읽는다", () => {
   const { store, log } = setup();
   store.subscribe(0, () => log.push(`notify 0 derived=${store.get(2)}`));
   store.subscribe(2, (value) => log.push(`notify 2 value=${value}`));
@@ -77,10 +77,10 @@ test("단계를 등록하지 않으면 바뀐 leaf만 통지한다", () => {
 test("단계가 onError로 넘긴 예외는 통지를 모두 보낸 뒤 첫 예외로 올라간다", () => {
   const store = createLeafStoreSubject([1, 2, 0]);
   const log: string[] = [];
-  store.setDeriveStage((changed, onError) => {
+  store.setDeriveStage((_changed, onError) => {
     onError(new Error("첫 단계 오류"));
     onError(new Error("둘째 단계 오류"));
-    return changed;
+    return null;
   });
   store.subscribe(0, () => log.push("notify 0"));
   store.subscribe(1, () => log.push("notify 1"));

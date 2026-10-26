@@ -35,17 +35,17 @@ const createLeafStore = (leaves: unknown[]) => {
 // 통지 구독 함수. leaf가 바뀌면 notify 단계에서 새 값과 어느 leaf가 바뀌었는지를 받아 불린다.
 export type TSubscriber = (value: unknown, leafIndex: LeafIndex) => void;
 
-// 통지 전 단계. flush마다 바뀐 leaf 모음을 받아, 그 leaf로 만드는 파생 leaf를 write하고 통지할 leaf 모음(바뀐
-// leaf와 값이 바뀐 파생 leaf)을 돌려준다. 단계 안에서 난 예외는 onError로 넘기고 나머지를 계속한다. 받은 Set은
-// 고치거나 들고 있지 않는다. 표현식 층이 setDeriveStage로 등록한다 - store는 파생 leaf를 무엇이 어떻게 만드는지
-// 모른다.
-export type TDeriveStage = (
-  changed: ReadonlySet<LeafIndex>,
-  onError: (error: unknown) => void,
-) => ReadonlySet<LeafIndex>;
+// 통지 전 단계. flush마다 바뀐 leaf 모음을 받아, 그 leaf로 만드는 파생 leaf를 write하고 값이 바뀐 파생 leaf를
+// 돌려준다(없으면 null). store는 바뀐 leaf를 통지한 뒤 돌려받은 파생 leaf를 통지한다. 단계 안에서 난 예외는
+// onError로 넘기고 나머지를 계속한다. 받은 Set은 고치거나 들고 있지 않는다. 표현식 층이 setDeriveStage로
+// 등록한다 - store는 파생 leaf를 무엇이 어떻게 만드는지 모른다.
+//
+// 바뀐 leaf 모음에 파생 leaf를 더한 Set이 아니라 배열을 따로 돌려받는다 - 1000행의 식이 한 leaf를 읽으면 파생
+// leaf 1000개를 Set에 더하는 비용이 클릭 시간에 드러났다.
+export type TDeriveStage = (changed: ReadonlySet<LeafIndex>, onError: (error: unknown) => void) => LeafIndex[] | null;
 
-// 단계를 등록하지 않았을 때의 단계. 파생 leaf가 없으므로 바뀐 leaf만 통지한다.
-const noDeriveStage: TDeriveStage = (changed) => changed;
+// 단계를 등록하지 않았을 때의 단계. 파생 leaf가 없다.
+const noDeriveStage: TDeriveStage = () => null;
 
 export type LeafStoreSubject = {
   get: (leafIndex: LeafIndex) => unknown;
@@ -126,9 +126,9 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     propagate(new Set([leafIndex]));
   };
 
-  // 통지 전 단계를 거친 뒤 통지 구독을 부른다. 통지할 leaf는 단계가 돌려준 모음이다. 단계나 통지 구독이 던져도
-  // 나머지는 모두 부르고 첫 예외를 마지막에 다시 던진다 - 값은 이미 다 기록됐는데 통지만 건너뛰면 화면이 값을
-  // 따라오지 못한다.
+  // 통지 전 단계를 거친 뒤 바뀐 leaf, 단계가 돌려준 파생 leaf 순으로 통지 구독을 부른다. 단계나 통지 구독이
+  // 던져도 나머지는 모두 부르고 첫 예외를 마지막에 다시 던진다 - 값은 이미 다 기록됐는데 통지만 건너뛰면 화면이
+  // 값을 따라오지 못한다.
   const propagate = (changed: ReadonlySet<LeafIndex>): void => {
     let failed = false;
     let firstError: unknown;
@@ -138,11 +138,21 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
         firstError = error;
       }
     };
-    for (const leafIndex of deriveStage(changed, onError)) {
+    const derived = deriveStage(changed, onError);
+    for (const leafIndex of changed) {
       try {
         fire(leafIndex);
       } catch (error) {
         onError(error);
+      }
+    }
+    if (derived !== null) {
+      for (const leafIndex of derived) {
+        try {
+          fire(leafIndex);
+        } catch (error) {
+          onError(error);
+        }
       }
     }
     if (failed) {
