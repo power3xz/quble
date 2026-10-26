@@ -384,6 +384,7 @@ export const createLeafStoreSubject = (leaves: unknown[]): LeafStoreSubject => {
     subscribers.length = 0;
     deriveSubscribers.length = 0;
     deriveResultLeaf.length = 0;
+    runDerive = () => undefined;
     freeBySize.clear();
     pendingLeaves.clear();
   };

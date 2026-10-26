@@ -1,15 +1,14 @@
 // 표현식 층 - 식 인스턴스(식 하나가 한 스코프에서 읽는 leaf들과 결과)를 풀에 두고, 구독 층(leaf-store.ts)에 입력
 // leaf마다 파생 구독을 건다. 가지는 인스턴스 번호만 들고 붙고 떼고 반납할 때 이 층을 부른다(region.ts).
 //
-// 파생 구독 함수는 식 인스턴스마다 하나다. `(a + b) * (c - d)`면 a~d 네 leaf에 같은 함수를 건다. leaf마다
-// 함수를 만들면 1만 행 목록에서 함수가 수만 개 늘어, 메모리가 CPU 캐시를 넘쳐 다시 세기가 오히려 느려진다.
-// 함수는 바뀐 leaf를 받아 식을 다시 세어 값을 돌려주고 store에 쓰지 않는다 - 돌려준 값을 결과 leaf에 write하는
-// 것은 구독 층이다(결과 leaf는 bindResultLeaf로 연결한다).
+// 파생 구독은 식 인스턴스 번호로 건다. `(a + b) * (c - d)`면 a~d 네 leaf에 같은 번호를 건다. 구독 층은 바뀐
+// leaf를 읽는 번호마다 run을 부르고, run은 식을 다시 세어 값을 돌려주며 store에 쓰지 않는다 - 돌려준 값을 결과
+// leaf에 write하는 것은 구독 층이다(결과 leaf는 bindResultLeaf로 연결한다).
 
 import { type ExprEvaluator, SKIP_NOTHING } from "./expr-eval.ts";
 import { instrSize } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, type TExprSkipTable } from "./expr-skip-table.ts";
-import type { LeafStoreSubject, TDeriveSubscriber } from "./leaf-store.ts";
+import type { LeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import type { TScope } from "./scope.ts";
 
@@ -23,8 +22,6 @@ export type TExprInstance = {
   readLeaves: number[];
   // 직전에 돌려준 값. 바뀐 입력이 이 식의 변수가 아니면(다시 걸며 이미 뺀 leaf) 이것을 그대로 돌려준다.
   lastValue: unknown;
-  // 구독 층에 거는 함수.
-  derive: TDeriveSubscriber;
   // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
   refCount: number;
   attachedCount: number;
@@ -39,9 +36,6 @@ export type TExprInstance = {
 // 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared와 인스턴스의 공유 키 자리에 쓴다.
 export const NOT_SHARED = -1;
 
-// derive를 인스턴스 객체에 담기 전에 쓰는 자리 표시 함수. 인스턴스를 가리키는 함수는 인스턴스가 있어야 지을 수 있다.
-const noopDerive: TDeriveSubscriber = () => undefined;
-
 export class ExprInstancePool {
   pool: Pool<TExprInstance> = new Pool();
   evaluator: ExprEvaluator;
@@ -55,6 +49,7 @@ export class ExprInstancePool {
   constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
     this.evaluator = evaluator;
     this.store = store;
+    store.setDeriveRunner(this.run);
   }
 
   // 식 인스턴스를 짓는다. refCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고, 가지가
@@ -63,28 +58,31 @@ export class ExprInstancePool {
   // 건너뛸 부분식이 있는 식과 없는 식을 나눈다. 없는 식은 cache도 건너뛰기 표도 두지 않고 leaf가 바뀌면 처음부터
   // 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 구독 층이 함수당 한 번만 부르므로 한 번이면 된다.
   create = (globalExprIndex: number, pairs: TScope): number => {
-    const { evaluator } = this;
-    const expr = evaluator.exprBytes[globalExprIndex];
-    const table = evaluator.skipTable(globalExprIndex);
+    const table = this.evaluator.skipTable(globalExprIndex);
     const instance: TExprInstance = {
       globalExprIndex,
       pairs,
       cache: table === null ? null : new Array(table.opCount),
       readLeaves: [],
       lastValue: undefined,
-      derive: noopDerive,
       refCount: 1,
       attachedCount: 0,
       everAttached: false,
       sharedGlobalExprIndex: NOT_SHARED,
       sharedScopeUid: NOT_SHARED,
     };
-    // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 구독 층이 쓰지 않는다.
-    instance.derive =
-      table === null
-        ? () => evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, null)
-        : (changedLeaves) => this.runPartial(instance, changedLeaves);
     return this.pool.alloc(instance);
+  };
+
+  // 구독 층이 바뀐 leaf를 읽는 식 인스턴스마다 부른다. 식을 다시 세어 값을 돌려준다.
+  // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 구독 층이 쓰지 않는다.
+  run = (exprInstanceIndex: number, changedLeaves: ReadonlySet<number>): unknown => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    if (instance.cache === null) {
+      const expr = this.evaluator.exprBytes[instance.globalExprIndex];
+      return this.evaluator.runExpr(expr, instance.pairs, null, null, SKIP_NOTHING, null);
+    }
+    return this.runPartial(exprInstanceIndex, changedLeaves);
   };
 
   // 식을 처음부터 세어 값을 돌려주고, 읽은 leaf(readLeaves)와 값(lastValue)을 인스턴스에 기록한다. 몇 번을 불러도
@@ -117,7 +115,7 @@ export class ExprInstancePool {
 
   // 식이 돌려준 값을 쓸 결과 leaf를 연결한다.
   bindResultLeaf = (exprInstanceIndex: number, resultLeafIndex: number): void => {
-    this.store.bindDeriveResult(this.pool.entries[exprInstanceIndex].derive, resultLeafIndex);
+    this.store.bindDeriveResult(exprInstanceIndex, resultLeafIndex);
   };
 
   // 스코프 인스턴스(scopeUid)에서 식(globalExprIndex)을 이미 공유 중이면 그 식 인스턴스 번호, 없으면 NOT_SHARED.
@@ -136,8 +134,7 @@ export class ExprInstancePool {
 
   // 식 인스턴스의 결과를 쓰는 leaf. bindResultLeaf 전에는 undefined다. 공유한 인스턴스를 두 번째로 든 자리가 같은
   // 결과 leaf를 구독하려고 읽는다.
-  resultLeafOf = (exprInstanceIndex: number): number | undefined =>
-    this.pool.entries[exprInstanceIndex].derive.resultLeafIndex;
+  resultLeafOf = (exprInstanceIndex: number): number | undefined => this.store.deriveResultOf(exprInstanceIndex);
 
   retain = (exprInstanceIndex: number): void => {
     this.pool.entries[exprInstanceIndex].refCount++;
@@ -151,13 +148,13 @@ export class ExprInstancePool {
       return;
     }
     if (instance.attachedCount > 0) {
-      this.unsubscribeInputs(instance);
+      this.unsubscribeInputs(exprInstanceIndex);
       instance.attachedCount = 0;
     }
     if (instance.sharedGlobalExprIndex !== NOT_SHARED) {
       this.shared[instance.sharedGlobalExprIndex].delete(instance.sharedScopeUid);
     }
-    this.store.freeDeriveResult(instance.derive);
+    this.store.freeDeriveResult(exprInstanceIndex);
     this.pool.release(exprInstanceIndex);
   };
 
@@ -171,10 +168,10 @@ export class ExprInstancePool {
     if (instance.attachedCount > 1) {
       return;
     }
-    const { derive, readLeaves } = instance;
+    const { readLeaves } = instance;
     for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
       if (this.isInputLeaf(instance, readLeafPosition)) {
-        this.store.subscribeDerive(readLeaves[readLeafPosition], derive);
+        this.store.subscribeDerive(readLeaves[readLeafPosition], exprInstanceIndex);
       }
     }
     if (instance.everAttached) {
@@ -185,7 +182,7 @@ export class ExprInstancePool {
           catchUpLeaves.add(readLeaves[readLeafPosition]);
         }
       }
-      this.store.refreshDerive(derive, catchUpLeaves);
+      this.store.refreshDerive(exprInstanceIndex, catchUpLeaves);
     }
     instance.everAttached = true;
   };
@@ -195,7 +192,7 @@ export class ExprInstancePool {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.attachedCount--;
     if (instance.attachedCount === 0) {
-      this.unsubscribeInputs(instance);
+      this.unsubscribeInputs(exprInstanceIndex);
     }
   };
 
@@ -204,11 +201,12 @@ export class ExprInstancePool {
     this.shared = [];
   };
 
-  private unsubscribeInputs = (instance: TExprInstance): void => {
-    const { derive, readLeaves } = instance;
+  private unsubscribeInputs = (exprInstanceIndex: number): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    const { readLeaves } = instance;
     for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
       if (this.isInputLeaf(instance, readLeafPosition)) {
-        this.store.unsubscribeDerive(readLeaves[readLeafPosition], derive);
+        this.store.unsubscribeDerive(readLeaves[readLeafPosition], exprInstanceIndex);
       }
     }
   };
@@ -226,7 +224,8 @@ export class ExprInstancePool {
   // 건너뛸 부분식이 있는 식을 다시 센다. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 층이 한 flush에서
   // 함수를 한 번만 불러 바뀐 leaf 전체를 넘기므로, 그중 이 식이 읽는 변수를 모아 바뀐 변수 전체로 건너뛰기 표를
   // 골라 한꺼번에 센다. leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
-  private runPartial = (instance: TExprInstance, changedLeaves: ReadonlySet<number>): unknown => {
+  private runPartial = (exprInstanceIndex: number, changedLeaves: ReadonlySet<number>): unknown => {
+    const instance = this.pool.entries[exprInstanceIndex];
     const { globalExprIndex, pairs, readLeaves: leafOfVar } = instance;
     const expr = this.evaluator.exprBytes[globalExprIndex];
     const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
@@ -266,7 +265,7 @@ export class ExprInstancePool {
     if (table.hasIndexAccess) {
       for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
         if (changedVarMask & (1 << varNumber)) {
-          this.resubscribeReadLeavesDependingOn(instance, varNumber);
+          this.resubscribeReadLeavesDependingOn(exprInstanceIndex, varNumber);
         }
       }
     }
@@ -276,7 +275,8 @@ export class ExprInstancePool {
 
   // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.
   // READ_LEAF에 leafIndex를 넘긴 연산의 cache 값이 방금 읽은 leafIndex다.
-  private resubscribeReadLeavesDependingOn = (instance: TExprInstance, varNumber: number): void => {
+  private resubscribeReadLeavesDependingOn = (exprInstanceIndex: number, varNumber: number): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
     const { globalExprIndex } = instance;
     const expr = this.evaluator.exprBytes[globalExprIndex];
     const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
@@ -284,7 +284,7 @@ export class ExprInstancePool {
     for (const op of table.readLeafIndexOpsByVar[varNumber]) {
       const readLeafVar = table.varAt[op + instrSize(expr[op])];
       const newLeafIndex = cache[table.cacheIndex[op]] as number;
-      this.resubscribeReadLeaf(instance, readLeafVar, newLeafIndex);
+      this.resubscribeReadLeaf(exprInstanceIndex, readLeafVar, newLeafIndex);
     }
   };
 
@@ -293,8 +293,8 @@ export class ExprInstancePool {
   //
   // `${rows[cursor].score + rows[0].score}`에서 cursor가 1 -> 0이면 두 변수가 rows[0].score를 읽게 돼
   // 구독은 그대로 하나다.
-  private resubscribeReadLeaf = (instance: TExprInstance, varNumber: number, newLeafIndex: number): void => {
-    const { readLeaves: leafOfVar, derive } = instance;
+  private resubscribeReadLeaf = (exprInstanceIndex: number, varNumber: number, newLeafIndex: number): void => {
+    const { readLeaves: leafOfVar } = this.pool.entries[exprInstanceIndex];
     const oldLeafIndex = leafOfVar[varNumber];
     if (oldLeafIndex === newLeafIndex) {
       return;
@@ -302,10 +302,10 @@ export class ExprInstancePool {
     const newAlreadyRead = leafOfVar.includes(newLeafIndex);
     leafOfVar[varNumber] = newLeafIndex;
     if (oldLeafIndex >= 0 && !leafOfVar.includes(oldLeafIndex)) {
-      this.store.unsubscribeDerive(oldLeafIndex, derive);
+      this.store.unsubscribeDerive(oldLeafIndex, exprInstanceIndex);
     }
     if (!newAlreadyRead) {
-      this.store.subscribeDerive(newLeafIndex, derive);
+      this.store.subscribeDerive(newLeafIndex, exprInstanceIndex);
     }
   };
 }
