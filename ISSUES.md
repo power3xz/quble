@@ -126,11 +126,16 @@
 
 ## 미해결
 
-- **`@if` 조건이 거짓이 되는 flush에서 떠나는 본문의 식을 한 번 센다** - `@if (i < n) { p() { ${rows[i].x} } }`에서
-  rows 길이와 n이 3이고 i가 2일 때 i를 3으로 바꾸면 `RangeError`(`index 3 out of range (length 3)`)가 `set`을 부른
-  쪽(핸들러면 dispatch)으로 throw된다. 화면은 맞게 본문이 떨어진다. store의 통지 전 단계가 아직 붙어 있는 본문의
-  `rows[i].x` 인스턴스를 다시 센 뒤에, 통지 구독인 `@if` 조건 구독(`vm.ts`의 `subscribeIfCond`)이 본문을 떼기
-  때문이다. 에러를 내지 않는 식이면 결과를 버리는 헛계산으로 끝나 드러나지 않는다.
+- **본문이 떨어지는 flush에서 떠나는 본문(`@if` 본문, 개수 `@for`의 행)의 식을 한 번 센다** - store의 통지 전
+  단계가 아직 붙어 있는 본문의 식 인스턴스를 다시 센 뒤에, 통지 구독이 본문을 떼기 때문이다. 화면은 맞게 본문이
+  떨어지지만 그 식이 throw한 에러가 `set`을 부른 쪽(핸들러면 dispatch)으로 올라간다. 에러를 내지 않는 식이면
+  결과를 버리는 헛계산으로 끝나 드러나지 않는다.
+  - `@if (i < n) { p() { ${rows[i].x} } }`에서 rows 길이와 n이 3이고 i가 2일 때 i를 3으로 바꾸면
+    `RangeError`(`index 3 out of range (length 3)`)다. 본문은 `@if` 조건 구독(`vm.ts`의 `subscribeIfCond`)이
+    뗀다.
+  - `@for (k of n) { p() { ${rows[k].x} } }`에서 rows 길이와 n이 3일 때, 핸들러 하나가 `removeAt(rows, 2)`와
+    n = 2를 함께 하면(순서 무관) `RangeError`(`index 2 out of range (length 2)`)다. `removeAt`이 배열 필드 leaf에
+    통지해 행 2의 식을 다시 세고, 행 2는 그 뒤 n의 통지 구독이 뗀다.
 
 - **공유 식이 없는 행은 식 인스턴스 풀 도입 뒤 main보다 메모리를 더 쓰고 mount가 느리다** - bench-expr
   1000행에서 공유 식이 없는 orders는 heap과 mount가, orders-deep은 heap과 "환율+세율 동시 변경" 클릭이
