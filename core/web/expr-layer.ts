@@ -20,8 +20,11 @@ export type TExprInstance = {
   // 식이 읽은 leaf이자 구독할 입력 leaf. 건너뛸 부분식이 있는 식은 변수마다 읽는 leafIndex(중복과 -1 포함)고, 없는
   // 식은 중복 없는 목록이다. evaluate가 채우고, READ_LEAF 구독을 다시 걸 때 고친다.
   readLeaves: number[];
-  // 직전에 돌려준 값. 바뀐 입력이 이 식의 변수가 아니면(다시 걸며 이미 뺀 leaf) 이것을 그대로 돌려준다.
+  // 직전에 돌려준 값.
   lastValue: unknown;
+  // 마지막으로 센 뒤 바뀐 변수 자리의 비트. readLeaves[n]이 바뀌면 n번 비트를 켠다. flush의 push가 켜고, 0이
+  // 아니면 다시 셀 인스턴스다. 셀 때 이 비트로 건너뛰기 표를 고르고 0으로 지운다.
+  pendingVarMask: number;
   // 식의 값을 write할 leaf. bindResultLeaf 전에는 undefined고, 없으면 센 값을 쓰지 않는다.
   resultLeaf: number | undefined;
   // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
@@ -51,9 +54,8 @@ export class ExprInstancePool {
   // 입력 leafIndex -> 그 leaf를 읽는 식 인스턴스 번호들. 번호 하나가 입력 leaf 여러 개의 슬롯에 들 수 있다.
   // 배열을 바꾸지 않고 비우기만 한다 - 인스턴스가 테스트용으로 이 배열을 내놓는다(vm.ts instanceOf).
   readonly deriveSubscribers: TDeriveSlot[] = [];
-  // 따라잡을 때 입력 leaf를 모아 파생 구독에 넘기는 Set. 가지를 켤 때 행마다 Set을 만들면 그 할당이 GC로 드러나
-  // 비우고 채우며 재사용한다. 함수가 끝난 뒤에는 쓰지 않으므로 통지가 이어서 다른 인스턴스를 붙여도 안전하다.
-  private catchUpLeaves = new Set<number>();
+  // flush의 push가 모은 다시 셀 식 인스턴스 번호. flush마다 배열을 만들지 않고 비우며 재사용한다.
+  private recountExprInstanceIndices: number[] = [];
 
   constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
     this.evaluator = evaluator;
@@ -74,6 +76,7 @@ export class ExprInstancePool {
       cache: table === null ? null : new Array(table.opCount),
       readLeaves: [],
       lastValue: undefined,
+      pendingVarMask: 0,
       resultLeaf: undefined,
       refCount: 1,
       attachedCount: 0,
@@ -84,32 +87,37 @@ export class ExprInstancePool {
     return this.pool.alloc(instance);
   };
 
-  // 통지 전 단계(store.setDeriveStage로 등록한다). 바뀐 leaf를 읽는 식 인스턴스를 인스턴스당 한 번 다시 세어 결과
-  // leaf에 write하고, 값이 바뀐 결과 leaf를 돌려준다(없으면 null). 바뀐 leaf 모음(changed)을 모든
-  // 인스턴스가 그대로 공유한다 - 인스턴스마다 자기가 읽는 leaf를 has로 가려내므로 인스턴스별 배열과 Map을 만들
-  // 필요가 없다(1000행의 식이 함께 바뀌면 그 할당이 클릭 한 번의 시간을 늘렸다). 식이 던지면 onError로 넘기고
-  // 나머지는 계속 센다.
+  // 통지 전 단계(store.setDeriveStage로 등록한다). push와 pull 두 단계로 나눈다.
+  //   - push: 바뀐 leaf마다 그 leaf를 파생 구독한 식 인스턴스의 pendingVarMask에 바뀐 변수 자리를 켠다. 마스크가
+  //     0이었던 인스턴스만 recountExprInstanceIndices에 넣어, 바뀐 leaf 여럿을 읽는 인스턴스도 한 번만 든다.
+  //     세지 않는다.
+  //   - pull: recountExprInstanceIndices의 인스턴스를 그 마스크로 세어 결과 leaf에 write한다.
+  // 값이 바뀐 결과 leaf를 돌려준다(없으면 null). 식이 던지면 onError로 넘기고 나머지는 계속 센다.
   //
-  // 바뀐 leaf가 하나면 같은 인스턴스를 두 번 만날 일이 없어 이미 센 인스턴스를 Set으로 기억하지 않는다. 한 leaf에
-  // 파생 구독이 수천 개 걸린 식(1000행의 같은 기준값을 읽는 식)에서 그 Set을 채우는 비용이 클릭 한 번보다 컸다.
+  // push가 끝난 뒤에 세므로 마스크에는 이번 flush에 바뀐 변수가 모두 들어 있다. 세는 도중 READ_LEAF 구독을 다시
+  // 걸어 파생 구독 슬롯이 바뀌어도 push는 이미 끝나 순회가 깨지지 않는다.
   // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 쓰지 않는다.
   flush = (changed: ReadonlySet<number>, onError: (error: unknown) => void): number[] | null => {
-    const { store } = this;
-    const single = changed.size === 1;
-    let counted: Set<number> | undefined;
-    let resultLeaves: number[] | null = null;
-    const countOne = (exprInstanceIndex: number): void => {
-      if (!single) {
-        counted ??= new Set();
-        if (counted.has(exprInstanceIndex)) {
-          return;
-        }
-        counted.add(exprInstanceIndex);
+    const { store, recountExprInstanceIndices } = this;
+    for (const leafIndex of changed) {
+      const derives = this.deriveSubscribers[leafIndex];
+      if (derives === undefined) {
+        continue;
       }
+      if (typeof derives === "number") {
+        this.markChanged(derives, leafIndex);
+      } else {
+        for (const exprInstanceIndex of derives) {
+          this.markChanged(exprInstanceIndex, leafIndex);
+        }
+      }
+    }
+    let resultLeaves: number[] | null = null;
+    for (const exprInstanceIndex of recountExprInstanceIndices) {
       try {
         const instance = this.pool.entries[exprInstanceIndex];
         const previous = instance.lastValue;
-        const value = this.run(exprInstanceIndex, changed);
+        const value = this.run(exprInstanceIndex);
         const { resultLeaf } = instance;
         if (resultLeaf !== undefined && value !== previous) {
           store.write(resultLeaf, value);
@@ -119,39 +127,40 @@ export class ExprInstancePool {
       } catch (error) {
         onError(error);
       }
-    };
-    for (const leafIndex of changed) {
-      const derives = this.deriveSubscribers[leafIndex];
-      if (derives === undefined) {
-        continue;
-      }
-      if (typeof derives === "number") {
-        countOne(derives);
-      } else if (single) {
-        // 스냅샷 순회 - 세는 도중 읽는 leaf를 다시 걸며 이 Set을 고칠 수 있다. 바뀐 leaf가 여럿이면 counted가
-        // 다시 만난 인스턴스를 거른다.
-        for (const exprInstanceIndex of [...derives]) {
-          countOne(exprInstanceIndex);
-        }
-      } else {
-        for (const exprInstanceIndex of derives) {
-          countOne(exprInstanceIndex);
-        }
-      }
     }
+    recountExprInstanceIndices.length = 0;
     return resultLeaves;
   };
 
+  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켜고, 마스크가
+  // 0이었으면 recountExprInstanceIndices에 넣는다. 같은 leaf를 두 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴
+  // 경우) 두 비트를 켠다.
+  private markChanged = (exprInstanceIndex: number, leafIndex: number): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    const { readLeaves } = instance;
+    const wasZero = instance.pendingVarMask === 0;
+    for (let n = 0; n < readLeaves.length; n++) {
+      if (readLeaves[n] === leafIndex) {
+        instance.pendingVarMask |= 1 << n;
+      }
+    }
+    if (wasZero && instance.pendingVarMask !== 0) {
+      this.recountExprInstanceIndices.push(exprInstanceIndex);
+    }
+  };
+
   // 식을 다시 세어 값을 돌려주고 lastValue에 기록한다. store에 쓰지 않는다. 결과 leaf에는 늘 lastValue가 들어
-  // 있으므로(처음 값은 evaluate가 센 값이다) 결과 leaf를 읽지 않고 lastValue로 바뀌었는지 가린다.
-  private run = (exprInstanceIndex: number, changedLeaves: ReadonlySet<number>): unknown => {
+  // 있으므로(처음 값은 evaluate가 센 값이다) 결과 leaf를 읽지 않고 lastValue로 바뀌었는지 가린다. 세기 전에
+  // pendingVarMask를 0으로 지운다 - 식이 throw해도 마스크가 다음 flush로 남지 않는다.
+  private run = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
     if (instance.cache === null) {
+      instance.pendingVarMask = 0;
       const expr = this.evaluator.exprBytes[instance.globalExprIndex];
       instance.lastValue = this.evaluator.runExpr(expr, instance.pairs, null, null, SKIP_NOTHING, null);
       return instance.lastValue;
     }
-    return this.runPartial(exprInstanceIndex, changedLeaves);
+    return this.runPartial(exprInstanceIndex);
   };
 
   // 식을 처음부터 세어 값을 돌려주고, 읽은 leaf(readLeaves)와 값(lastValue)을 인스턴스에 기록한다. 몇 번을 불러도
@@ -230,9 +239,8 @@ export class ExprInstancePool {
   };
 
   // 붙은 가지를 하나 더한다. 붙은 가지가 0에서 1이 되면 입력 leaf마다 파생 구독을 건다. 구독이 풀렸던 적이 있으면
-  // 입력 leaf 전체를 바뀐 leaf로 넘겨 한 번 불러 놓친 입력을 따라잡는다. leaf마다 부르면 식을 입력 leaf 수만큼
-  // 세고, 나머지 입력이 낡은 채 센 중간 값까지 통지한다. 처음 걸 때는 evaluate가 방금 센 값이 최신이라 따라잡지
-  // 않는다.
+  // 입력 leaf를 읽는 변수의 비트를 모두 켜고 한 번 세어 놓친 입력을 따라잡는다 - 구독이 풀린 동안 무엇이
+  // 바뀌었는지 기록되지 않았다. 처음 걸 때는 evaluate가 방금 센 값이 최신이라 따라잡지 않는다.
   attach = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.attachedCount++;
@@ -246,15 +254,13 @@ export class ExprInstancePool {
       }
     }
     if (instance.everAttached) {
-      const catchUpLeaves = this.catchUpLeaves;
-      catchUpLeaves.clear();
       for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
-        if (this.isInputLeaf(instance, readLeafPosition)) {
-          catchUpLeaves.add(readLeaves[readLeafPosition]);
+        if (readLeaves[readLeafPosition] >= 0) {
+          instance.pendingVarMask |= 1 << readLeafPosition;
         }
       }
       const previous = instance.lastValue;
-      const value = this.run(exprInstanceIndex, catchUpLeaves);
+      const value = this.run(exprInstanceIndex);
       const { resultLeaf } = instance;
       if (resultLeaf !== undefined && value !== previous) {
         this.store.write(resultLeaf, value);
@@ -321,37 +327,21 @@ export class ExprInstancePool {
     );
   };
 
-  // 건너뛸 부분식이 있는 식을 다시 센다. 칸이 바뀌면 그 칸과 무관한 부분식은 건너뛰며 센다. 구독 층이 한 flush에서
-  // 함수를 한 번만 불러 바뀐 leaf 전체를 넘기므로, 그중 이 식이 읽는 변수를 모아 바뀐 변수 전체로 건너뛰기 표를
-  // 골라 한꺼번에 센다. leaf마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
-  private runPartial = (exprInstanceIndex: number, changedLeaves: ReadonlySet<number>): unknown => {
+  // 건너뛸 부분식이 있는 식을 다시 센다. pendingVarMask에 든 바뀐 변수 전체로 건너뛰기 표를 골라 한꺼번에 센다.
+  // 변수마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
+  //
+  // 마스크는 세기 전에 push가 다 모아 둔 것이라, 세는 도중 다시 걸기가 leafOfVar를 고쳐도 바뀐 변수를 놓치지 않는다.
+  //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
+  //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, 그 뒤의 leafOfVar로는 바깥이 안 보인다.
+  private runPartial = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { globalExprIndex, pairs, readLeaves: leafOfVar } = instance;
     const expr = this.evaluator.exprBytes[globalExprIndex];
     const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
     const cache = instance.cache as unknown[];
-    // 다시 걸기가 leafOfVar를 고치므로 바뀐 leaf를 읽는 변수를 먼저 번호의 비트로 모은다.
-    //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
-    //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, leafOfVar로는 바깥이 안 보인다.
-    let changedVarMask = 0;
-    if (changedLeaves.size < leafOfVar.length) {
-      // 바뀐 leaf가 변수보다 적으면 바뀐 leaf를 훑어 정수로 비교한다(1000행이 읽는 기준값 하나가 바뀐 경우).
-      for (const leafIndex of changedLeaves) {
-        for (let n = 0; n < leafOfVar.length; n++) {
-          if (leafOfVar[n] === leafIndex) {
-            changedVarMask |= 1 << n;
-          }
-        }
-      }
-    } else {
-      // 바뀐 leaf가 많으면 변수를 훑어 Set에 묻는다(바뀐 leaf가 수천 개인 batch).
-      for (let n = 0; n < leafOfVar.length; n++) {
-        if (changedLeaves.has(leafOfVar[n])) {
-          changedVarMask |= 1 << n;
-        }
-      }
-    }
-    // 바뀐 leaf 중 이 식이 읽는 것이 없다(구독을 다시 걸며 이미 뺀 leafIndex). 다시 셀 것이 없다.
+    const changedVarMask = instance.pendingVarMask;
+    instance.pendingVarMask = 0;
+    // 변수가 모두 CONST라 입력 leaf가 없는 식을 따라잡을 때(attach)는 바뀐 변수가 없다. 다시 셀 것이 없다.
     if (changedVarMask === 0) {
       return instance.lastValue;
     }

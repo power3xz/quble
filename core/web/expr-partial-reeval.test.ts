@@ -224,6 +224,38 @@ test("batch에서 cursor와 x가 함께 바뀌면 최종 값 하나만 쓰고 �
   assert.equal(textOf("index"), "250", "옛 요소의 score는 더는 읽지 않는다");
 });
 
+// flush는 push(바뀐 leaf를 읽는 인스턴스마다 바뀐 변수 자리를 pendingVarMask에 누적)를 모두 끝낸 뒤 pull(표시된
+// 인스턴스를 그 마스크로 센 뒤 마스크를 0으로 지움)을 한다. 마스크가 남으면 다음 flush가 이번에 바뀌지 않은 변수까지
+// 바뀐 것으로 보고 센다. 마스크가 켜지는지는 위의 부분 재평가 테스트가 본다 - 켜지지 않으면 식을 세지 않아 값이
+// 틀린다.
+//
+// 식 인스턴스는 arith, index, pair(자식 컴포넌트), flag 넷이다. @if (show)의 조건은 변수 하나라 인스턴스가 없고,
+// 본문은 켜진 적이 없어 만들어지지 않았다.
+const pendingVarMasks = (inst: { exprInstances: { entries: Array<{ pendingVarMask: number }> } }) =>
+  inst.exprInstances.entries.map((entry) => entry.pendingVarMask);
+
+test("flush가 끝나면 어느 인스턴스에도 바뀐 변수 표시가 남지 않는다", () => {
+  const { inst } = instantiate();
+  inst.store.batch(() => {
+    inst.store.set(A, 2);
+    inst.store.set(C, 10);
+    inst.store.set(CURSOR, 1);
+    inst.store.set(X, 200);
+    inst.store.set(SHARED, 4);
+    inst.store.set(BIG, 1);
+  });
+  assert.deepEqual(pendingVarMasks(inst), [0, 0, 0, 0]);
+});
+
+test("식이 throw한 flush 뒤에도 표시가 남지 않고 다음 flush에서 맞게 센다", () => {
+  const { inst, set, textOf } = instantiate();
+  // rows는 요소 둘이라 rows[5]가 RangeError를 throw한다.
+  assert.throws(() => set(CURSOR, 5), RangeError);
+  assert.deepEqual(pendingVarMasks(inst), [0, 0, 0, 0]);
+  set(CURSOR, 1);
+  assert.equal(textOf("index"), "120", "rows[1].score(20) + x(100)");
+});
+
 test("batch에서 읽는 칸 둘이 함께 바뀌어도 건너뛴 부분식 없이 한 번 센다", () => {
   const { inst, host, readsDuring } = instantiate();
   const arith = observeWrites(host, "arith");
