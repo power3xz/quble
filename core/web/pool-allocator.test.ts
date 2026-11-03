@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Pool } from "./pool-allocator.ts";
+import { IdPool, Pool } from "./pool-allocator.ts";
 
 const poolOf = <T>(entries: T[]): Pool<T> => {
   const pool = new Pool<T>();
@@ -48,4 +48,27 @@ test("free가 소진되면 다시 끝에 append한다", () => {
   assert.equal(pool.alloc("a2"), 0); // 재사용
   assert.equal(pool.alloc("c"), 2); // free 비어 끝에
   assert.deepEqual(pool.entries, ["a2", "b", "c"]);
+});
+
+test("IdPool은 0부터 순서대로 번호를 내준다", () => {
+  const ids = new IdPool<number>();
+  assert.deepEqual([ids.alloc(), ids.alloc(), ids.alloc()], [0, 1, 2]);
+});
+
+test("IdPool은 돌려받은 번호를 새 번호보다 먼저 다시 내준다", () => {
+  const ids = new IdPool<number>();
+  ids.alloc();
+  ids.alloc();
+  ids.alloc();
+  ids.release(1);
+  assert.deepEqual([ids.alloc(), ids.alloc()], [1, 3]);
+});
+
+test("IdPool을 비우면 다시 0부터 내준다", () => {
+  const ids = new IdPool<number>();
+  ids.alloc();
+  ids.alloc();
+  ids.release(0);
+  ids.clear();
+  assert.deepEqual([ids.alloc(), ids.alloc()], [0, 1]);
 });
