@@ -50,6 +50,7 @@ import {
   OP_TEXT_VAR,
   slotPlaceholderContentEnd,
 } from "./opcodes.ts";
+import { NO_PARENT, OwnershipTree } from "./ownership-tree.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
@@ -524,6 +525,8 @@ export class VM {
   exprInstancePool: ExprInstancePool;
   regionPool: Pool<TRegion>;
   branchPool: Pool<TBranch>;
+  // 소유 트리의 위쪽 간선. Region, 가지, 식 인스턴스를 VM이 만들고 실을 때 함께 기록한다.
+  ownershipTree: OwnershipTree;
   // 진입점 argumentSourcePairs(plantRoot의 rootFlat). store(루트부터의 절대 경로) 접근에 쓴다 -
   // 어느 핸들러든 같은 루트라 인스턴스 전역. props(발화 comp 상대)와 달리 store는 defs[0] 기준.
   rootScope: TScope;
@@ -575,6 +578,7 @@ export class VM {
     this.exprInstancePool = new ExprInstancePool(this.evaluator, this.store);
     this.regionPool = new Pool();
     this.branchPool = new Pool();
+    this.ownershipTree = new OwnershipTree();
     this.rootScope = rootScope;
     this.interpreter = interpreter;
   }
@@ -609,7 +613,9 @@ export class VM {
   // 루트도 region(균일성): swap 없는 단일 가지지만, anchor/branch.nodes를 자식과 똑같이 갖춰 attach가
   // 분기 없이 처리한다. 루트 then은 곧바로 build되므로 built로 둔다. anchor를 주지 않으면 새로 만든다.
   openRootRegion = (anchor?: Comment): TRegion => {
-    const rootRegion = this.regionPool.entries[appendIfRegion(this.regionPool, this.branchPool, -1, anchor)];
+    const rootRegionIndex = appendIfRegion(this.regionPool, this.branchPool, -1, anchor);
+    this.recordIfRegion(rootRegionIndex, NO_PARENT);
+    const rootRegion = this.regionPool.entries[rootRegionIndex];
     this.branchPool.entries[rootRegion.branchIndices[THEN_INDEX]].built = true;
     rootRegion.shownIndex = THEN_INDEX;
     return rootRegion;
@@ -640,7 +646,7 @@ export class VM {
   //
   // update는 루트 props를 이름으로 갱신한다(updateRoot). destroy가 이 클로저도 놓는다 - VM을 잡고 있다.
   instanceOf = (rootRegion: TRegion, nodes: ChildNode[]) => {
-    const { module, store, exprInstancePool, regionPool, branchPool, arrayPool } = this;
+    const { module, store, exprInstancePool, regionPool, branchPool, ownershipTree, arrayPool } = this;
     // 해체한 뒤에는 루트 region을 놓는다 - destroy 클로저가 붙들고 있으면 루트 anchor가 남는다. 이미 해체했으면
     // 풀이 비어 있어 detach가 예외를 throw하므로 두 번째 호출은 건너뛴다.
     let root: TRegion | null = rootRegion;
@@ -658,6 +664,7 @@ export class VM {
       exprInstancePool.clear();
       regionPool.clear();
       branchPool.clear();
+      ownershipTree.clear();
       arrayPool.clear();
       this.forEndCache.clear();
       this.ifRangesCache.clear();
@@ -672,6 +679,7 @@ export class VM {
       nodes,
       regionPool,
       branchPool,
+      ownershipTree,
       arrayPool,
       exprInstances: exprInstancePool.pool,
       deriveSubscribers: exprInstancePool.deriveSubscribers,
@@ -863,7 +871,15 @@ export class VM {
       attachGrownIterations(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, cur);
     }
     if (next < cur) {
-      truncateFor(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, next);
+      truncateFor(
+        this.store,
+        this.exprInstancePool,
+        this.regionPool,
+        this.branchPool,
+        this.ownershipTree,
+        forRegionIndex,
+        next,
+      );
     }
   };
 
@@ -872,6 +888,7 @@ export class VM {
   openForRegion = (branchIndex: number, countLeafIndex: number, anchor?: Comment): number => {
     const forRegionIndex = appendForRegion(this.regionPool, countLeafIndex, anchor);
     this.branchAt(branchIndex).childRegionIndices.push(forRegionIndex);
+    this.ownershipTree.setParentBranchOfRegion(forRegionIndex, branchIndex);
     return forRegionIndex;
   };
 
@@ -880,8 +897,20 @@ export class VM {
   branchAt = (branchIndex: number): TBranch => this.branchPool.entries[branchIndex];
 
   // @for region에 빈 회차 가지를 더하고 그 branchIndex를 돌려준다. 노드와 구독은 호출자가 build해 담는다.
-  appendIteration = (forRegionIndex: number): number =>
-    appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
+  appendIteration = (forRegionIndex: number): number => {
+    const branchIndex = appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
+    this.ownershipTree.setRegionOfBranch(branchIndex, forRegionIndex);
+    return branchIndex;
+  };
+
+  // @if region(then, else 가지 둘)의 위쪽 간선을 소유 트리에 기록한다. 루트 region은 부모 가지가 NO_PARENT다.
+  recordIfRegion = (regionIndex: number, parentBranchIndex: number): void => {
+    const { ownershipTree } = this;
+    ownershipTree.setParentBranchOfRegion(regionIndex, parentBranchIndex);
+    for (const branchIndex of this.regionPool.entries[regionIndex].branchIndices) {
+      ownershipTree.setRegionOfBranch(branchIndex, regionIndex);
+    }
+  };
 
   // 부모 가지 밑에 @if region을 열고 지금 보이는 가지까지 만든다. IF/IF_EXPR 두 해석기가 같은 순서를 밟는 부분이다 -
   // region 등록, 조건 구독, 보이는 가지 build, 안 보이는 가지에 lazyBuild 설치(켜질 때 이것으로 만든다).
@@ -901,6 +930,7 @@ export class VM {
   ): number => {
     const regionIndex = appendIfRegion(this.regionPool, this.branchPool, condLeafIndex, anchor);
     this.branchAt(branchIndex).childRegionIndices.push(regionIndex);
+    this.recordIfRegion(regionIndex, branchIndex);
     const region = this.regionPool.entries[regionIndex];
     const thenBranchIndex = region.branchIndices[THEN_INDEX];
     const elseBranchIndex = region.branchIndices[ELSE_INDEX];
@@ -1147,7 +1177,15 @@ export class VM {
   removeArrayElementAt = (array: TLeafObject, i: number): void => {
     const info = this.arrayInfoOf(array[NODE_BASE]);
     for (const forRegionIndex of info.forRegionIndices) {
-      removeBranchAt(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, i);
+      removeBranchAt(
+        this.store,
+        this.exprInstancePool,
+        this.regionPool,
+        this.branchPool,
+        this.ownershipTree,
+        forRegionIndex,
+        i,
+      );
     }
     this.freeArrayElement(info.elemStartLeafIndices[i], info.elemTypeRef);
     info.elemStartLeafIndices.splice(i, 1);
@@ -1286,7 +1324,15 @@ export class VM {
     if (shrunk) {
       if (info.forRegionIndices.length > 0) {
         for (const forRegionIndex of info.forRegionIndices) {
-          truncateFor(this.store, this.exprInstancePool, this.regionPool, this.branchPool, forRegionIndex, kept);
+          truncateFor(
+            this.store,
+            this.exprInstancePool,
+            this.regionPool,
+            this.branchPool,
+            this.ownershipTree,
+            forRegionIndex,
+            kept,
+          );
         }
         for (const indexLeafIndex of info.indexLeafIndices.splice(kept)) {
           this.store.free(indexLeafIndex, 1);
@@ -1486,10 +1532,10 @@ export class VM {
       }
       value = exprInstancePool.evaluate(exprInstanceIndex);
     } else {
-      exprInstancePool.retain(exprInstanceIndex);
       value = this.store.get(exprInstancePool.resultLeafOf(exprInstanceIndex) as number);
     }
     addExprInstanceToBranch(this.branchAt(branchIndex), exprInstanceIndex);
+    this.ownershipTree.addBranchOfExprInstance(exprInstanceIndex, branchIndex);
     return { exprInstanceIndex, value };
   };
 

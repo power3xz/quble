@@ -1,5 +1,6 @@
 // 식 인스턴스 풀 - 식을 처음 세고, 가지가 붙을 때 입력 leaf에 파생 구독을 걸고 뗄 때 풀며, 구독이 풀렸다가 다시
-// 걸릴 때 그동안 놓친 입력을 따라잡는다. 인스턴스는 참조 수가 0이 되면 구독과 결과 leaf와 풀 번호를 반납한다.
+// 걸릴 때 그동안 놓친 입력을 따라잡는다. release하면 구독과 결과 leaf와 풀 번호를 반납한다. 언제 release할지(인스턴스를
+// 든 가지가 더 없을 때)는 소유 트리가 정한다(ownership-tree.test.ts, ownership-tree-sync.test.ts).
 //
 // 식 바이트와 스코프를 직접 지어 풀만 검증한다(컴파일러 없이).
 
@@ -45,10 +46,9 @@ const build = (fixture: ReturnType<typeof sum>) => {
   return { pool, exprInstanceIndex, value, store: fixture.store };
 };
 
-test("create는 refCount 1로 짓고 evaluate는 식을 세되 구독은 걸지 않는다", () => {
-  const { pool, exprInstanceIndex, value, store } = build(sum());
+test("evaluate는 식을 세되 구독은 걸지 않는다", () => {
+  const { value, store } = build(sum());
   assert.equal(value, 3);
-  assert.equal(pool.pool.entries[exprInstanceIndex].refCount, 1);
 
   store.set(0, 10);
 
@@ -113,7 +113,6 @@ test("떼어 둔 동안 바뀐 입력은 다시 붙을 때 따라잡는다", () 
 
 test("이미 붙은 인스턴스에 가지가 더 붙으면 따라잡지 않는다", () => {
   const { pool, exprInstanceIndex, store } = build(sum());
-  pool.retain(exprInstanceIndex);
   pool.attach(exprInstanceIndex);
   pool.detach(exprInstanceIndex);
   pool.attach(exprInstanceIndex);
@@ -130,15 +129,10 @@ test("이미 붙은 인스턴스에 가지가 더 붙으면 따라잡지 않는�
   assert.equal(store.get(2), 3);
 });
 
-test("release는 refCount가 0이 될 때 결과 leaf와 풀 번호를 반납한다", () => {
+test("release는 결과 leaf와 풀 번호를 반납한다", () => {
   const { pool, exprInstanceIndex, store } = build(sum());
   pool.attach(exprInstanceIndex);
   pool.detach(exprInstanceIndex);
-  pool.retain(exprInstanceIndex);
-
-  pool.release(exprInstanceIndex);
-  assert.equal(pool.pool.entries[exprInstanceIndex].refCount, 1, "하나 남았으니 살아 있다");
-  assert.deepEqual(pool.pool.free, []);
 
   pool.release(exprInstanceIndex);
   assert.deepEqual(pool.pool.free, [exprInstanceIndex], "풀 번호가 반납된다");
@@ -180,15 +174,12 @@ test("markShared로 올린 (globalExprIndex, scopeUid)로만 그 식 인스턴�
   assert.equal(pool.findShared(4, 7), NOT_SHARED, "globalExprIndex가 다르면 같은 스코프의 다른 식이다");
 });
 
-test("공유한 식 인스턴스는 참조 수가 0이 될 때 공유 맵에서 빠진다", () => {
+test("공유한 식 인스턴스는 release하면 공유 맵에서 빠진다", () => {
   const { pool, first } = buildTwo();
   pool.markShared(first, 3, 7);
-  pool.retain(first);
 
   pool.release(first);
-  assert.equal(pool.findShared(3, 7), first, "참조가 하나 남았으니 계속 찾아진다");
 
-  pool.release(first);
   assert.equal(pool.findShared(3, 7), NOT_SHARED);
 });
 
