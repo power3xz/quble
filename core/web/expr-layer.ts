@@ -27,7 +27,8 @@ export type TExprInstance = {
   pendingVarMask: number;
   // 식의 값을 write할 leaf. bindResultLeaf 전에는 undefined고, 없으면 센 값을 쓰지 않는다.
   resultLeaf: number | undefined;
-  // 이 식 인스턴스를 든 가지 중 붙어 있는 가지 수. 든 가지는 소유 트리(ownership-tree.ts)가 기록한다.
+  // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
+  refCount: number;
   attachedCount: number;
   // 입력 leaf에 파생 구독을 한 번이라도 걸었나. 참인데 attachedCount가 0이면 구독이 풀린 동안 입력이 바뀌어 결과
   // leaf가 낡았을 수 있다.
@@ -62,8 +63,8 @@ export class ExprInstancePool {
     store.setDeriveStage(this.flush);
   }
 
-  // 식 인스턴스를 짓는다. 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고, 가지가 붙을 때 attach가
-  // 건다.
+  // 식 인스턴스를 짓는다. refCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고, 가지가
+  // 붙을 때 attach가 건다.
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 나눈다. 없는 식은 cache도 건너뛰기 표도 두지 않고 leaf가 바뀌면 처음부터
   // 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 flush가 인스턴스당 한 번만 세므로 한 번이면 된다.
@@ -77,6 +78,7 @@ export class ExprInstancePool {
       lastValue: undefined,
       pendingVarMask: 0,
       resultLeaf: undefined,
+      refCount: 1,
       attachedCount: 0,
       everAttached: false,
       sharedGlobalExprIndex: NOT_SHARED,
@@ -212,9 +214,17 @@ export class ExprInstancePool {
   // 결과 leaf를 구독하려고 읽는다.
   resultLeafOf = (exprInstanceIndex: number): number | undefined => this.pool.entries[exprInstanceIndex].resultLeaf;
 
-  // 구독을 풀고 결과 leaf와 풀 번호를 반납한다. 인스턴스를 든 가지가 더 없을 때 region.ts의 freeBranchTree가 부른다.
+  retain = (exprInstanceIndex: number): void => {
+    this.pool.entries[exprInstanceIndex].refCount++;
+  };
+
+  // refCount를 하나 줄이고, 0이면 구독을 풀고 결과 leaf와 풀 번호를 반납한다.
   release = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
+    instance.refCount--;
+    if (instance.refCount > 0) {
+      return;
+    }
     if (instance.attachedCount > 0) {
       this.unsubscribeInputs(exprInstanceIndex);
       instance.attachedCount = 0;

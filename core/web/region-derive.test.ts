@@ -10,7 +10,6 @@ import { ExprEvaluator } from "./expr-eval.ts";
 import { ExprInstancePool } from "./expr-layer.ts";
 import { EXPR_ADD, EXPR_LOAD_SMALL_INT, EXPR_LOAD_VAR, EXPR_MUL } from "./expr-opcode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
-import { OwnershipTree } from "./ownership-tree.ts";
 import { Pool } from "./pool-allocator.ts";
 import {
   activateIf,
@@ -89,10 +88,8 @@ test("가지를 지우면 가지가 든 식 인스턴스의 결과 leaf를 반�
   exprs.evaluate(exprInstanceIndex);
   exprs.bindResultLeaf(exprInstanceIndex, 2);
   addExprInstanceToBranch(branchPool.entries[branchIndex], exprInstanceIndex);
-  const tree = new OwnershipTree();
-  tree.addBranchOfExprInstance(exprInstanceIndex, branchIndex);
 
-  removeBranchAt(store, exprs, regionPool, branchPool, tree, regionIndex, 0);
+  removeBranchAt(store, exprs, regionPool, branchPool, regionIndex, 0);
 
   assert.deepEqual([store.alloc([9]), store.alloc([9])], [2, 4], "2는 한 번만 반납되어 재사용되고 다음은 끝에 붙는다");
 });

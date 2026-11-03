@@ -13,14 +13,6 @@
       "rows": [3, 6, 9]
     }
   ],
-  "ownership_tree": [
-    {
-      "n": 3,
-      "limit": 2,
-      "rate": 10,
-      "rows": [1, 5, 7]
-    }
-  ],
   "array_payload": [
     {
       "items": [

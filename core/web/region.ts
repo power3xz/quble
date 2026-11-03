@@ -1,4 +1,3 @@
-import type { OwnershipTree } from "./ownership-tree.ts";
 import type { Pool } from "./pool-allocator.ts";
 
 // Region - 노드가 붙었다/떼였다 하는 경계. @if(then/else 중 하나만 보임)와 @for(회차 전부 보임)
@@ -404,25 +403,22 @@ export const attachGrownIterations = (
 // 떼기)와는 별개 - detach는 @if swap에서도 쓰여 free하면 안 되므로 안 섞는다. 호출 전 detach가
 // 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
 //
-// 가지가 든 식 인스턴스(보간 식, IF_EXPR 조건)도 여기서 놓는다. 소유 트리에서 이 가지를 빼고, 인스턴스를 든 가지가
-// 더 없으면 반납한다(exprs.release) - 결과 leaf까지 store에 돌려준다. 공유한 인스턴스는 다른 가지가 들고 있으면 남는다.
+// 가지가 든 식 인스턴스(보간 식, IF_EXPR 조건)도 여기서 반납한다(exprs.release). 인스턴스의 참조 수가 0이 되면
+// 결과 leaf까지 store에 돌려준다.
 const freeBranchTree = (
   store: Store,
   exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
-  tree: OwnershipTree,
   branchIndex: number,
 ): void => {
   const branch = branchPool.entries[branchIndex];
   for (const childRegionIndex of branch.childRegionIndices) {
-    freeRegionTree(store, exprs, regionPool, branchPool, tree, childRegionIndex);
+    freeRegionTree(store, exprs, regionPool, branchPool, childRegionIndex);
   }
   if (branch.exprInstanceIndices !== null) {
     for (const exprInstanceIndex of branch.exprInstanceIndices) {
-      if (tree.removeBranchOfExprInstance(exprInstanceIndex, branchIndex) === 0) {
-        exprs.release(exprInstanceIndex);
-      }
+      exprs.release(exprInstanceIndex);
     }
   }
   branchPool.release(branchIndex);
@@ -434,12 +430,11 @@ const freeRegionTree = (
   exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
-  tree: OwnershipTree,
   regionIndex: number,
 ): void => {
   const region = regionPool.entries[regionIndex];
   for (const branchIndex of region.branchIndices) {
-    freeBranchTree(store, exprs, regionPool, branchPool, tree, branchIndex);
+    freeBranchTree(store, exprs, regionPool, branchPool, branchIndex);
   }
   regionPool.release(regionIndex);
 };
@@ -451,14 +446,13 @@ export const truncateFor = (
   exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
-  tree: OwnershipTree,
   regionIndex: number,
   count: number,
 ): void => {
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   for (let i = branchIndices.length - 1; i >= count; i--) {
     detachOneBranch(store, exprs, regionPool, branchPool, branchIndices[i]);
-    freeBranchTree(store, exprs, regionPool, branchPool, tree, branchIndices[i]);
+    freeBranchTree(store, exprs, regionPool, branchPool, branchIndices[i]);
   }
   branchIndices.length = count;
 };
@@ -471,12 +465,11 @@ export const removeBranchAt = (
   exprs: TExprInstanceLayer,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
-  tree: OwnershipTree,
   regionIndex: number,
   i: number,
 ): void => {
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   detachOneBranch(store, exprs, regionPool, branchPool, branchIndices[i]);
-  freeBranchTree(store, exprs, regionPool, branchPool, tree, branchIndices[i]);
+  freeBranchTree(store, exprs, regionPool, branchPool, branchIndices[i]);
   branchIndices.splice(i, 1);
 };
