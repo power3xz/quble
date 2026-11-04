@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 bytecode = { path = "../bytecode" }
+
+# 단위 테스트가 소스를 컴파일해 렌더한다. quble-ssr 바이너리에는 들지 않는다.
+[dev-dependencies]
+compiler = { path = "../compiler" }

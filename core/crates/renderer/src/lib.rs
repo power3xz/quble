@@ -479,7 +479,7 @@ impl Renderer<'_> {
                             v
                         }
                         _ => {
-                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            let v = self.eval(&def.exprs[code[pc] as usize], pairs, &def.exprs)?;
                             pc += 1;
                             v
                         }
@@ -501,7 +501,7 @@ impl Renderer<'_> {
                     self.text_node(&v.dom_string());
                 }
                 Op::TextExpr => {
-                    let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                    let v = self.eval(&def.exprs[code[pc] as usize], pairs, &def.exprs)?;
                     pc += 1;
                     self.text_node(&v.dom_string());
                 }
@@ -580,7 +580,7 @@ impl Renderer<'_> {
                             v
                         }
                         _ => {
-                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            let v = self.eval(&def.exprs[code[pc] as usize], pairs, &def.exprs)?;
                             pc += 1;
                             v
                         }
@@ -623,7 +623,7 @@ impl Renderer<'_> {
                         }
                         // 런타임은 식 인스턴스의 결과 칸을 구독하는 region을 연다 - 슬롯 kind와 무관하게 반응형이다.
                         Op::ForCountExpr => {
-                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            let v = self.eval(&def.exprs[code[pc] as usize], pairs, &def.exprs)?;
                             pc += 1;
                             let count = v.num();
                             let count = if count.is_nan() || count < 0.0 {
@@ -670,19 +670,48 @@ impl Renderer<'_> {
         Ok(())
     }
 
-    /// 후위 식 하나를 센다(런타임 runExpr에서 cache/reads를 뺀 것).
-    fn eval(&self, expr: &[u8], pairs: &[Slot]) -> Result<Val, RenderError> {
-        let mut stack: Vec<Val> = Vec::new();
+    /// 후위 식 하나를 센다(런타임 runExpr에서 cache/reads를 뺀 것). exprs는 이 식이 든 컴포넌트의 표현식
+    /// 테이블이다 - 삼항의 하위 식(`LoadExpr k`)을 거기서 찾는다.
+    ///
+    /// 삼항의 피연산자는 바로 세지 않는다. `LoadExpr`와 `LoadVarRef`는 무엇을 셀지만 올리고, `Select`가
+    /// 조건을 센 뒤 고른 갈래만 센다. 고르지 않은 갈래가 범위 밖을 읽어도 에러가 나지 않는다.
+    fn eval(&self, expr: &[u8], pairs: &[Slot], exprs: &[Vec<u8>]) -> Result<Val, RenderError> {
+        let mut stack: Vec<Operand> = Vec::new();
         let mut pc = 0;
-        let pop = |stack: &mut Vec<Val>| stack.pop().expect("식 스택");
+        let pop = |stack: &mut Vec<Operand>| match stack.pop().expect("식 스택") {
+            Operand::Val(v) => v,
+            other => unreachable!("세지 않은 삼항 피연산자는 Select만 꺼낸다: {other:?}"),
+        };
         while pc < expr.len() {
             let byte = expr[pc];
             let op = ExprOp::from_u8(byte).ok_or(RenderError::BadExprOpcode(byte))?;
             pc += 1;
-            match op {
-                ExprOp::LoadVar => {
-                    stack.push(self.slot_value(pairs[expr[pc] as usize], expr[pc + 1] as usize));
+            let value = match op {
+                ExprOp::LoadExpr => {
+                    stack.push(Operand::Expr(expr[pc]));
+                    pc += 1;
+                    continue;
+                }
+                ExprOp::LoadVarRef => {
+                    stack.push(Operand::VarRef(expr[pc], expr[pc + 1]));
                     pc += 2;
+                    continue;
+                }
+                ExprOp::Select => {
+                    pc += 1; // kinds - 스택 항목이 이미 종류를 담고 있어 읽지 않는다.
+                    let else_ = stack.pop().expect("식 스택");
+                    let then = stack.pop().expect("식 스택");
+                    let cond = stack.pop().expect("식 스택");
+                    let picked = match self.eval_operand(cond, pairs, exprs)?.truthy() {
+                        true => then,
+                        false => else_,
+                    };
+                    self.eval_operand(picked, pairs, exprs)?
+                }
+                ExprOp::LoadVar => {
+                    let v = self.slot_value(pairs[expr[pc] as usize], expr[pc + 1] as usize);
+                    pc += 2;
+                    v
                 }
                 ExprOp::LoadArrayLength => {
                     let leaf = match pairs[expr[pc] as usize] {
@@ -690,36 +719,29 @@ impl Renderer<'_> {
                         other => panic!("배열 길이 슬롯은 STORE여야: {other:?}"),
                     };
                     let len = self.store.arrays[self.store.leaves[leaf].num() as usize].len();
-                    stack.push(Val::Num(len as f64));
                     pc += 2;
+                    Val::Num(len as f64)
                 }
                 ExprOp::LoadStringLength => {
                     let s = self.slot_value(pairs[expr[pc] as usize], expr[pc + 1] as usize);
-                    // JS 문자열 길이는 UTF-16 단위다.
-                    stack.push(Val::Num(s.dom_string().encode_utf16().count() as f64));
                     pc += 2;
+                    // JS 문자열 길이는 UTF-16 단위다.
+                    Val::Num(s.dom_string().encode_utf16().count() as f64)
                 }
                 ExprOp::LoadConst => {
                     let index = u16::from_le_bytes([expr[pc], expr[pc + 1]]);
-                    stack.push(Val::from_const(
-                        self.module.pool.get(index).expect("상수풀"),
-                    ));
                     pc += 2;
+                    Val::from_const(self.module.pool.get(index).expect("상수풀"))
                 }
                 ExprOp::LoadSmallInt => {
-                    stack.push(Val::Num(expr[pc] as f64));
+                    let v = Val::Num(expr[pc] as f64);
                     pc += 1;
+                    v
                 }
-                ExprOp::LoadTrue => stack.push(Val::Bool(true)),
-                ExprOp::LoadFalse => stack.push(Val::Bool(false)),
-                ExprOp::Not => {
-                    let v = pop(&mut stack);
-                    stack.push(Val::Bool(!v.truthy()));
-                }
-                ExprOp::Neg => {
-                    let v = pop(&mut stack);
-                    stack.push(Val::Num(-v.num()));
-                }
+                ExprOp::LoadTrue => Val::Bool(true),
+                ExprOp::LoadFalse => Val::Bool(false),
+                ExprOp::Not => Val::Bool(!pop(&mut stack).truthy()),
+                ExprOp::Neg => Val::Num(-pop(&mut stack).num()),
                 ExprOp::ElemAt => {
                     let index = pop(&mut stack).num();
                     let array = pop(&mut stack).num() as usize;
@@ -732,26 +754,53 @@ impl Renderer<'_> {
                             len: starts.len(),
                         });
                     }
-                    stack.push(Val::Num(starts[index as usize] as f64));
+                    Val::Num(starts[index as usize] as f64)
                 }
                 ExprOp::FieldAt => {
-                    let base = pop(&mut stack).num();
-                    stack.push(Val::Num(base + expr[pc] as f64));
+                    let v = Val::Num(pop(&mut stack).num() + expr[pc] as f64);
                     pc += 1;
+                    v
                 }
                 ExprOp::ReadLeaf => {
                     let leaf = pop(&mut stack).num() as usize;
-                    stack.push(self.store.leaves[leaf].clone());
+                    self.store.leaves[leaf].clone()
                 }
                 binary => {
                     let right = pop(&mut stack);
                     let left = pop(&mut stack);
-                    stack.push(apply_binary(binary, left, right));
+                    apply_binary(binary, left, right)
                 }
-            }
+            };
+            stack.push(Operand::Val(value));
         }
         Ok(pop(&mut stack))
     }
+
+    /// 삼항 피연산자를 값으로 센다. 하위 식이면 그 식을 세고, 슬롯 위치면 그 슬롯을 읽는다.
+    fn eval_operand(
+        &self,
+        operand: Operand,
+        pairs: &[Slot],
+        exprs: &[Vec<u8>],
+    ) -> Result<Val, RenderError> {
+        match operand {
+            Operand::Val(v) => Ok(v),
+            Operand::Expr(index) => self.eval(&exprs[index as usize], pairs, exprs),
+            Operand::VarRef(scope_index, offset) => {
+                Ok(self.slot_value(pairs[scope_index as usize], offset as usize))
+            }
+        }
+    }
+}
+
+/// 식 스택의 항목. 삼항의 피연산자는 Select가 고를 때까지 세지 않아, 셀 대상(하위 식 번호, 슬롯 위치)으로 남는다.
+#[derive(Debug)]
+enum Operand {
+    Val(Val),
+    /// `LoadExpr k` - 같은 컴포넌트 표현식 테이블의 k번 식.
+    Expr(u8),
+    /// `LoadVarRef` - 슬롯 위치(scope_index, offset).
+    VarRef(u8, u8),
 }
 
 fn apply_binary(op: ExprOp, left: Val, right: Val) -> Val {
@@ -977,5 +1026,48 @@ mod tests {
         for (n, want) in cases {
             assert_eq!(js_number(n), want, "{n:?}");
         }
+    }
+
+    /// 소스를 컴파일해 data로 렌더하고, 첫 `<p>`의 글을 주석(앵커, 텍스트 경계 표시)을 지우고 돌려준다.
+    fn p_text(src: &str, data: &str) -> Result<String, RenderError> {
+        let out = compiler::compile_src("entry", src, &(|_: &str, _: &str| None)).expect("컴파일");
+        let html = render(&out.bytecode, data, &[])?.html;
+        let start = html.find("<p>").expect("<p>") + "<p>".len();
+        let end = html[start..].find("</p>").expect("</p>") + start;
+        let mut text = html[start..end].to_string();
+        while let Some(open) = text.find("<!--") {
+            let close = text[open..].find("-->").expect("-->") + open + "-->".len();
+            text.replace_range(open..close, "");
+        }
+        Ok(text)
+    }
+
+    #[test]
+    fn ternary_with_leaf_cond_picks_branch() {
+        let src = r#"component C { props { ok: bool } template { p() { ${ok ? "on" : "off"} } } }"#;
+        assert_eq!(p_text(src, r#"{"ok":true}"#), Ok("on".to_string()));
+        assert_eq!(p_text(src, r#"{"ok":false}"#), Ok("off".to_string()));
+    }
+
+    #[test]
+    fn ternary_with_expr_cond_reads_leaf_branch() {
+        let src = "component C { props { price: number, count: number } template { p() { ${price > 10 ? price : count} } } }";
+        assert_eq!(p_text(src, r#"{"price":20,"count":3}"#), Ok("20".to_string()));
+        assert_eq!(p_text(src, r#"{"price":5,"count":3}"#), Ok("3".to_string()));
+    }
+
+    #[test]
+    fn nested_ternary_picks_inner_branch() {
+        let src = r#"component C { props { ok: bool, done: bool } template { p() { ${ok ? (done ? "a" : "b") : "c"} } } }"#;
+        assert_eq!(p_text(src, r#"{"ok":true,"done":false}"#), Ok("b".to_string()));
+        assert_eq!(p_text(src, r#"{"ok":false,"done":true}"#), Ok("c".to_string()));
+    }
+
+    /// 고르지 않은 갈래는 세지 않는다 - i가 범위 밖이어도 `rows[i]`를 읽지 않아 IndexOutOfRange가 나지 않는다.
+    #[test]
+    fn ternary_does_not_eval_unpicked_branch() {
+        let src = "component C { props { rows: number[], i: number } template { p() { ${i < rows.length ? rows[i] : 0} } } }";
+        assert_eq!(p_text(src, r#"{"rows":[1,2],"i":5}"#), Ok("0".to_string()));
+        assert_eq!(p_text(src, r#"{"rows":[1,2],"i":1}"#), Ok("2".to_string()));
     }
 }
