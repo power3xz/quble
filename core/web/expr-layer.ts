@@ -6,6 +6,7 @@
 // 인스턴스를 다시 세어 결과 leaf에 write하고, 통지할 leaf 모음을 돌려준다.
 
 import { type ExprEvaluator, SKIP_NOTHING } from "./expr-eval.ts";
+import { ExprGraph, LABEL_ELSE, LABEL_THEN, type TEdgeId } from "./expr-graph.ts";
 import { instrSize } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, type TExprSkipTable } from "./expr-skip-table.ts";
 import type { LeafStoreSubject } from "./leaf-store.ts";
@@ -25,6 +26,9 @@ export type TExprInstance = {
   // 마지막으로 센 뒤 바뀐 변수 자리의 비트. readLeaves[n]이 바뀌면 n번 비트를 켠다. flush의 push가 켜고, 0이
   // 아니면 다시 셀 인스턴스다. 셀 때 이 비트로 건너뛰기 표를 고르고 0으로 지운다.
   pendingVarMask: number;
+  // 마지막으로 recountExprInstanceIndices에 넣은 flush의 번호. 지금 flush의 번호와 같으면 이미 목록에 있다. pull이
+  // 평가하지 않은 인스턴스는 마스크가 다음 flush까지 남으므로, 마스크로는 목록에 들어 있는지를 알 수 없다.
+  queuedFlushNumber: number;
   // 식의 값을 write할 leaf. bindResultLeaf 전에는 undefined고, 없으면 센 값을 쓰지 않는다.
   resultLeaf: number | undefined;
   // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
@@ -56,6 +60,13 @@ export class ExprInstancePool {
   readonly deriveSubscribers: TDeriveSlot[] = [];
   // flush의 push가 모은 다시 셀 식 인스턴스 번호. flush마다 배열을 만들지 않고 비우며 재사용한다.
   private recountExprInstanceIndices: number[] = [];
+  // flush마다 1씩 올린다. 식 인스턴스의 queuedFlushNumber와 비교해 목록에 이미 넣었는지 가린다. 첫 flush가 1이라
+  // 식 인스턴스의 처음 값 0과 겹치지 않는다.
+  private flushNumber = 0;
+  // 식 인스턴스 사이의 간선. 노드 번호는 식 인스턴스 번호다. pull이 incoming labeled edge로 평가할지 정한다.
+  readonly graph = new ExprGraph();
+  // flush 하나에서 값이 바뀐 결과 leaf. pull이 재귀로 평가하는 식 인스턴스도 여기에 더한다. flush 밖에서는 null이다.
+  private changedResultLeaves: number[] | null = null;
 
   constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
     this.evaluator = evaluator;
@@ -77,6 +88,7 @@ export class ExprInstancePool {
       readLeaves: [],
       lastValue: undefined,
       pendingVarMask: 0,
+      queuedFlushNumber: 0,
       resultLeaf: undefined,
       refCount: 1,
       attachedCount: 0,
@@ -88,17 +100,20 @@ export class ExprInstancePool {
   };
 
   // 통지 전 단계(store.setDeriveStage로 등록한다). push와 pull 두 단계로 나눈다.
-  //   - push: 바뀐 leaf마다 그 leaf를 파생 구독한 식 인스턴스의 pendingVarMask에 바뀐 변수 자리를 켠다. 마스크가
-  //     0이었던 인스턴스만 recountExprInstanceIndices에 넣어, 바뀐 leaf 여럿을 읽는 인스턴스도 한 번만 든다.
+  //   - push: 바뀐 leaf마다 그 leaf를 파생 구독한 식 인스턴스의 pendingVarMask에 바뀐 변수 자리를 켠다. 이번
+  //     flush에 아직 넣지 않은 인스턴스만 recountExprInstanceIndices에 넣어, 바뀐 leaf 여럿을 읽는 인스턴스도 한 번만
+  //     든다.
   //     세지 않는다.
-  //   - pull: recountExprInstanceIndices의 인스턴스를 그 마스크로 세어 결과 leaf에 write한다.
+  //   - pull: recountExprInstanceIndices의 인스턴스를 요청한다(request). 평가 대상인 인스턴스만 그 마스크로 평가해
+  //     결과 leaf에 write한다.
   // 값이 바뀐 결과 leaf를 돌려준다(없으면 null). 식이 던지면 onError로 넘기고 나머지는 계속 센다.
   //
   // push가 끝난 뒤에 세므로 마스크에는 이번 flush에 바뀐 변수가 모두 들어 있다. 세는 도중 READ_LEAF 구독을 다시
   // 걸어 파생 구독 슬롯이 바뀌어도 push는 이미 끝나 순회가 깨지지 않는다.
   // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 쓰지 않는다.
   flush = (changed: ReadonlySet<number>, onError: (error: unknown) => void): number[] | null => {
-    const { store, recountExprInstanceIndices } = this;
+    const { recountExprInstanceIndices } = this;
+    this.flushNumber++;
     for (const leafIndex of changed) {
       const derives = this.deriveSubscribers[leafIndex];
       if (derives === undefined) {
@@ -112,39 +127,73 @@ export class ExprInstancePool {
         }
       }
     }
-    let resultLeaves: number[] | null = null;
     for (const exprInstanceIndex of recountExprInstanceIndices) {
       try {
-        const instance = this.pool.entries[exprInstanceIndex];
-        const previous = instance.lastValue;
-        const value = this.run(exprInstanceIndex);
-        const { resultLeaf } = instance;
-        if (resultLeaf !== undefined && value !== previous) {
-          store.write(resultLeaf, value);
-          resultLeaves ??= [];
-          resultLeaves.push(resultLeaf);
-        }
+        this.request(exprInstanceIndex);
       } catch (error) {
         onError(error);
       }
     }
     recountExprInstanceIndices.length = 0;
+    const resultLeaves = this.changedResultLeaves;
+    this.changedResultLeaves = null;
     return resultLeaves;
   };
 
-  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켜고, 마스크가
-  // 0이었으면 recountExprInstanceIndices에 넣는다. 같은 leaf를 두 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴
+  // 식 인스턴스가 평가 대상이면 true를 돌려준다. incoming labeled edge가 있으면 시작점을 먼저 요청하고, 시작점이 평가
+  // 대상이면서 그 값이 label과 맞는 간선이 하나라도 있어야 평가 대상이다. 평가 대상이고 pendingVarMask가 0이 아니면
+  // 다시 평가한다. 평가 대상이 아니면 마스크를 그대로 둔다 - 나중에 조건이 맞을 때 그 마스크로 평가한다.
+  //
+  // 시작점이 평가 대상인지까지 보는 이유는 겹친 @if다. `[c1] --(then)--> [c2] --(then)--> [x]`에서 c1이 false면 c2는
+  // 평가하지 않아 lastValue가 낡았다. 그 낡은 값이 then과 맞아도 x를 평가하면 안 된다.
+  private request = (exprInstanceIndex: number): boolean => {
+    const incoming = this.graph.incomingEdgesOfNode(exprInstanceIndex);
+    if (incoming !== undefined && !this.someEdgeChooses(incoming)) {
+      return false;
+    }
+    if (this.pool.entries[exprInstanceIndex].pendingVarMask !== 0) {
+      this.recount(exprInstanceIndex);
+    }
+    return true;
+  };
+
+  private someEdgeChooses = (incoming: readonly TEdgeId[]): boolean => {
+    const { graph } = this;
+    for (const edge of incoming) {
+      const startNode = graph.startNodeOfEdge(edge);
+      if (this.request(startNode) && labelMatches(graph.labelOfEdge(edge), this.pool.entries[startNode].lastValue)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // 다시 평가해 값이 바뀌었으면 결과 leaf에 write하고 changedResultLeaves에 더한다.
+  private recount = (exprInstanceIndex: number): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    const previous = instance.lastValue;
+    const value = this.run(exprInstanceIndex);
+    const { resultLeaf } = instance;
+    if (resultLeaf !== undefined && value !== previous) {
+      this.store.write(resultLeaf, value);
+      this.changedResultLeaves ??= [];
+      this.changedResultLeaves.push(resultLeaf);
+    }
+  };
+
+  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켜고, 이번 flush에
+  // 아직 넣지 않았으면(queuedFlushNumber) recountExprInstanceIndices에 넣는다. 같은 leaf를 두 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴
   // 경우) 두 비트를 켠다.
   private markChanged = (exprInstanceIndex: number, leafIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { readLeaves } = instance;
-    const wasZero = instance.pendingVarMask === 0;
     for (let n = 0; n < readLeaves.length; n++) {
       if (readLeaves[n] === leafIndex) {
         instance.pendingVarMask |= 1 << n;
       }
     }
-    if (wasZero && instance.pendingVarMask !== 0) {
+    if (instance.queuedFlushNumber !== this.flushNumber && instance.pendingVarMask !== 0) {
+      instance.queuedFlushNumber = this.flushNumber;
       this.recountExprInstanceIndices.push(exprInstanceIndex);
     }
   };
@@ -235,6 +284,7 @@ export class ExprInstancePool {
     if (instance.resultLeaf !== undefined) {
       this.store.free(instance.resultLeaf, 1);
     }
+    this.graph.removeEdgesOfNode(exprInstanceIndex);
     this.pool.release(exprInstanceIndex);
   };
 
@@ -283,6 +333,7 @@ export class ExprInstancePool {
     this.pool.clear();
     this.shared = [];
     this.deriveSubscribers.length = 0;
+    this.graph.clear();
   };
 
   private subscribeDerive = (leafIndex: number, exprInstanceIndex: number): void => {
@@ -399,3 +450,14 @@ export class ExprInstancePool {
     }
   };
 }
+
+// 간선의 시작점 값이 label과 맞는지. then은 truthy, else는 falsy, 행 번호 k는 k < 값일 때 맞는다.
+const labelMatches = (label: number, startValue: unknown): boolean => {
+  if (label === LABEL_THEN) {
+    return !!startValue;
+  }
+  if (label === LABEL_ELSE) {
+    return !startValue;
+  }
+  return label < Number(startValue);
+};
