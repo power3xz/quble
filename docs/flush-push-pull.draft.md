@@ -84,9 +84,15 @@ leafIndex에서 마스크로 가는 표를 인스턴스마다 두지 않고 비�
 쉬는 동안 입력이 바뀌지 않은 인스턴스는 "다시 세야 함"이 표시되지 않아 다시 붙어도 세지 않는다. 쉬는 동안 바뀐 변수는
 `pendingVarMask`에 누적되어 있으므로, 다시 붙은 본문도 계속 붙어 있던 본문과 같은 방식으로 평가한다.
 
-지금 구현은 반대로 뗄 때 구독을 풀고(`detach`), 붙일 때 구독을 다시 걸면서 입력 leaf 전체를 바뀐 것으로 보고
-다시 센다(`attach`). 구독이 풀린 동안에는 무엇이 바뀌었는지 기록되지 않기 때문이다. 유지하면 이 따라잡기가 필요
-없어 `attachedCount`, `everAttached`, `catchUpLeaves`와 `attach`, `detach`의 구독 처리가 빠진다.
+구독은 vm이 인스턴스를 만들 때 걸고(`subscribeInputs`) `release`가 refCount 0에서 푼다. 다시 붙는 본문은 region이
+식 인스턴스마다 `recountPending`을 호출한다. pull과 같은 요청이라 incoming edge의 시작점을 먼저 요청하고, 마스크가
+남은 인스턴스만 센다. 4의 평가가 이것이다. 가지의 통지 구독(`TBranch.updateFns`)은 지금처럼 뗄 때 풀고 붙일 때
+다시 걸며 현재 값으로 DOM을 맞춘다(`TBranch.everAttached`).
+
+이전 구현은 뗄 때 파생 구독을 풀고(`detach`), 붙일 때 다시 걸면서 입력 leaf 전체를 바뀐 것으로 보고 다시
+셌다(`attach`). 구독이 풀린 동안에는 무엇이 바뀌었는지 기록되지 않기 때문이다. 유지하면서 `attachedCount`,
+`TExprInstance.everAttached`와 `attach`, `detach`가 빠졌다. 3의 "다시 알리지 않는다"는 push가 마스크가 0이던
+인스턴스만 다시 셀 목록에 넣는 것이다 - 앞선 flush에서 평가하지 않아 마스크가 남은 인스턴스는 다시 붙을 때 센다.
 
 유지하는 쪽을 고른 근거는 측정이다. 같은 push, pull 모형 위에서 두 방식을 비교했고(식은 JS 함수로 흉내 내고 DOM
 갱신은 넣지 않았다), 값은 flush 한 번의 평균이다.
@@ -204,4 +210,4 @@ in-degree로 순서를 정하는 Kahn 방식은 쓰지 않는다. incoming edge�
   비트, leaf마다 버전 중에서 정한다.
 - **식 안의 부분 재평가** - skip table 유지, 다시 셀 연산 목록(레지스터 방식), 구간과 위치 비교.
 - **작업 순서** - `@if`와 개수 `@for`의 labeled edge는 끝났다(`FOR_COUNT_EXPR`를 더해 바이트코드가 바뀌었다).
-  남은 것은 삼항과, 쉬는 본문의 구독을 유지하는 일이다.
+  쉬는 본문의 구독 유지도 끝났다. 남은 것은 삼항이다.
