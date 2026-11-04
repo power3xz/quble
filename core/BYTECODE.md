@@ -180,6 +180,9 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
            0x15 Eq    0x16 Ne    0x17 Lt    0x18 Le    0x19 Gt    0x1a Ge
            0x1b And   0x1c Or
            0x1d Not   0x1e Neg                                    // 단항, operand 없음
+           0x22 LoadExpr         : expr_index:u8              // 하위 식의 값. 자기 번호보다 작다(#5.4)
+           0x23 LoadVarRef       : scope_index:u8, offset:u8  // 슬롯 위치만. Select가 고른 뒤 읽는다
+           0x24 Select           : kinds:u8                   // 조건, 참, 거짓을 꺼내 하나를 고른다
 
   // FIELDS - 이벤트 payload와 컨텍스트가 공유하는 필드 목록 인코딩
   <FIELDS> = field_count : u16
@@ -474,6 +477,37 @@ IF_EXPR expr_index  [then]  ELSE  [else]  IF_END
 
 **값 자리가 받는 타입은 원시 셋(bool/number/string)이다.** 객체/배열은 통째로 문자열이 될 수
 없어 컴파일 에러다(SYNTAX.md #5.2).
+
+---
+
+## 5.4 삼항 - `Select`
+
+`c ? a : b`는 조건, 참 갈래, 거짓 갈래를 차례로 올리고 `Select kinds`로 끝난다. 피연산자는 각자 세 종류 중
+하나고, `kinds`가 그 종류를 담는다.
+
+```
+kinds = (조건 << 4) | (참 갈래 << 2) | 거짓 갈래      잎 0, 식 1, 상수 2
+```
+
+| 종류 | 올리는 명령 | 해당하는 피연산자 |
+|---|---|---|
+| 잎 0 | `LoadVarRef` - 슬롯 위치만 | 슬롯 하나로 접히는 참조(`count`, `row.price`) |
+| 식 1 | `LoadExpr k` - 하위 식 k | 연산자, 인덱스 접근, `.length`, 안쪽 삼항 |
+| 상수 2 | `LoadConst`, `LoadSmallInt`, `LoadTrue`, `LoadFalse` | 리터럴 |
+
+- 잎은 값을 읽지 않고 위치만 올린다. 고르지 않은 쪽의 슬롯은 읽지도 구독하지도 않는다. 슬롯이 STORE인지 CONST인지는
+  런타임이 정하므로 leafIndex가 아니라 위치를 올린다.
+- 식 피연산자는 하위 식으로 표현식 테이블에 먼저 들어가 자기 번호가 삼항의 번호보다 작다. 하위 식을 따라가면
+  번호가 줄어들기만 해 순환이 없다. 컴파일러가 보장하므로 런타임은 검사하지 않는다.
+- 갈래에 식이 하나라도 있으면 잎 조건도 그 잎 하나를 읽는 하위 식(`LoadVar`)으로 낸다. 조건 식 인스턴스가 갈래 식
+  인스턴스로 가는 labeled edge의 시작점이 된다 - #5.2의 `IF_EXPR`과 같은 규칙이다. 조건은 상수일 수 없어
+  (`ConstantTernaryCondition` 컴파일 에러) 잎과 식 둘뿐이다.
+
+| 소스 | 표현식 테이블 |
+|---|---|
+| `active ? "on" : "off"` | `#0: LoadVarRef(active) LoadConst("on") LoadConst("off") Select(0b0_10_10)` |
+| `active ? price * qty : count` | `#0: LoadVar(active)`, `#1: price * qty`, `#2: LoadExpr(0) LoadExpr(1) LoadVarRef(count) Select(0b1_01_00)` |
+| `a * b > 10 ? "good" : "bad"` | `#0: a * b > 10`, `#1: LoadExpr(0) LoadConst("good") LoadConst("bad") Select(0b1_10_10)` |
 
 ---
 

@@ -184,6 +184,16 @@ pub enum ExprOp {
     FieldAt = 0x20,
     /// leafIndex를 꺼내 store의 그 값을 올린다. ElemAt/FieldAt 결과를 값으로 쓸 때 붙는다.
     ReadLeaf = 0x21,
+    /// 같은 컴포넌트 표현식 테이블의 하위 식 값을 올린다. operand: expr_index u8. expr_index는
+    /// 자기 식 번호보다 작다 - 컴파일러가 하위 식을 먼저 테이블에 넣는다.
+    LoadExpr = 0x22,
+    /// 슬롯 위치만 올리고 값은 읽지 않는다. operand: scope_index u8, offset u8. 삼항의 잎
+    /// 피연산자에만 쓴다 - Select가 고른 뒤에야 그 슬롯을 읽어, 고르지 않은 슬롯은 읽지도
+    /// 구독하지도 않는다.
+    LoadVarRef = 0x23,
+    /// 스택에서 조건, 참 갈래, 거짓 갈래를 꺼내 조건으로 갈래 하나를 고른다. operand: kinds u8 -
+    /// 세 피연산자의 종류(잎 0, 식 1, 상수 2)를 `(조건 << 4) | (참 << 2) | 거짓`으로 담는다.
+    Select = 0x24,
 }
 
 impl ExprOp {
@@ -215,6 +225,9 @@ impl ExprOp {
             0x1f => ExprOp::ElemAt,
             0x20 => ExprOp::FieldAt,
             0x21 => ExprOp::ReadLeaf,
+            0x22 => ExprOp::LoadExpr,
+            0x23 => ExprOp::LoadVarRef,
+            0x24 => ExprOp::Select,
             _ => return None,
         })
     }

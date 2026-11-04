@@ -1440,6 +1440,161 @@ mod tests {
         (first_op, module.def(0).unwrap().exprs.clone())
     }
 
+    /// `p() { ${식} }` 하나를 컴파일해 표현식 테이블을 돌려준다.
+    fn exprs_of_text(props: &str, expr: &str) -> Vec<Vec<u8>> {
+        let src = format!("component C {{ props {{ {props} }} template {{ p() {{ ${{{expr}}} }} }} }}");
+        first_op_and_exprs(&src).1
+    }
+
+    // Select의 kinds 비트에 넣는 피연산자 종류(BYTECODE.md #4).
+    const LEAF: u8 = 0;
+    const EXPR: u8 = 1;
+    const CONST: u8 = 2;
+    const fn kinds(cond: u8, then: u8, else_: u8) -> u8 {
+        (cond << 4) | (then << 2) | else_
+    }
+
+    #[test]
+    fn ternary_with_leaf_cond_and_const_branches_is_one_expr() {
+        use bytecode::ExprOp;
+        let exprs = exprs_of_text("ok: bool", "ok ? 1 : 2");
+        assert_eq!(
+            exprs,
+            vec![vec![
+                ExprOp::LoadVarRef as u8,
+                0,
+                0,
+                ExprOp::LoadSmallInt as u8,
+                1,
+                ExprOp::LoadSmallInt as u8,
+                2,
+                ExprOp::Select as u8,
+                kinds(LEAF, CONST, CONST),
+            ]]
+        );
+    }
+
+    #[test]
+    fn ternary_with_leaf_branches_reads_slots_by_ref() {
+        use bytecode::ExprOp;
+        let exprs = exprs_of_text("ok: bool, price: number, count: number", "ok ? price : count");
+        assert_eq!(
+            exprs,
+            vec![vec![
+                ExprOp::LoadVarRef as u8,
+                0,
+                0,
+                ExprOp::LoadVarRef as u8,
+                1,
+                0,
+                ExprOp::LoadVarRef as u8,
+                2,
+                0,
+                ExprOp::Select as u8,
+                kinds(LEAF, LEAF, LEAF),
+            ]]
+        );
+    }
+
+    #[test]
+    fn ternary_with_expr_cond_splits_cond_into_sub_expr() {
+        use bytecode::ExprOp;
+        let exprs = exprs_of_text("price: number", "price > 10 ? 1 : 2");
+        assert_eq!(
+            exprs,
+            vec![
+                vec![ExprOp::LoadVar as u8, 0, 0, ExprOp::LoadSmallInt as u8, 10, ExprOp::Gt as u8],
+                vec![
+                    ExprOp::LoadExpr as u8,
+                    0,
+                    ExprOp::LoadSmallInt as u8,
+                    1,
+                    ExprOp::LoadSmallInt as u8,
+                    2,
+                    ExprOp::Select as u8,
+                    kinds(EXPR, CONST, CONST),
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn ternary_with_expr_branch_splits_leaf_cond_too() {
+        // 갈래에 식이 있으면 labeled edge의 시작점이 필요해 잎 조건도 하위 식으로 낸다.
+        use bytecode::ExprOp;
+        let exprs = exprs_of_text(
+            "ok: bool, price: number, qty: number, count: number",
+            "ok ? price * qty : count",
+        );
+        assert_eq!(
+            exprs,
+            vec![
+                vec![ExprOp::LoadVar as u8, 0, 0],
+                vec![ExprOp::LoadVar as u8, 1, 0, ExprOp::LoadVar as u8, 2, 0, ExprOp::Mul as u8],
+                vec![
+                    ExprOp::LoadExpr as u8,
+                    0,
+                    ExprOp::LoadExpr as u8,
+                    1,
+                    ExprOp::LoadVarRef as u8,
+                    3,
+                    0,
+                    ExprOp::Select as u8,
+                    kinds(EXPR, EXPR, LEAF),
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_ternary_is_an_expr_branch() {
+        use bytecode::ExprOp;
+        let exprs = exprs_of_text("ok: bool, done: bool", "ok ? (done ? 1 : 2) : 3");
+        assert_eq!(
+            exprs,
+            vec![
+                vec![ExprOp::LoadVar as u8, 0, 0],
+                vec![
+                    ExprOp::LoadVarRef as u8,
+                    1,
+                    0,
+                    ExprOp::LoadSmallInt as u8,
+                    1,
+                    ExprOp::LoadSmallInt as u8,
+                    2,
+                    ExprOp::Select as u8,
+                    kinds(LEAF, CONST, CONST),
+                ],
+                vec![
+                    ExprOp::LoadExpr as u8,
+                    0,
+                    ExprOp::LoadExpr as u8,
+                    1,
+                    ExprOp::LoadSmallInt as u8,
+                    3,
+                    ExprOp::Select as u8,
+                    kinds(EXPR, EXPR, CONST),
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn ternary_constant_true_cond_is_error() {
+        assert_eq!(
+            error_message("component C { template { p() { ${true ? 1 : 2} } } }"),
+            "condition is always true: the false branch is never used"
+        );
+    }
+
+    #[test]
+    fn ternary_constant_false_cond_is_error() {
+        assert_eq!(
+            error_message("component C { template { p() { ${1 > 2 ? 1 : 2} } } }"),
+            "condition is always false: the true branch is never used"
+        );
+    }
+
     #[test]
     fn leaf_if_with_expr_in_body_compiles_to_if_expr() {
         use bytecode::{ExprOp, Op};

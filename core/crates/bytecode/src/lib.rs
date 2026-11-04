@@ -265,6 +265,9 @@ mod tests {
         assert_eq!(ExprOp::from_u8(0x06), Some(ExprOp::LoadFalse));
         assert_eq!(ExprOp::from_u8(0x19), Some(ExprOp::Gt));
         assert_eq!(ExprOp::from_u8(0x1e), Some(ExprOp::Neg));
+        assert_eq!(ExprOp::from_u8(0x22), Some(ExprOp::LoadExpr));
+        assert_eq!(ExprOp::from_u8(0x23), Some(ExprOp::LoadVarRef));
+        assert_eq!(ExprOp::from_u8(0x24), Some(ExprOp::Select));
         // 잎 태그와 연산자 태그 사이는 비어 있다 - 연산자를 늘릴 자리로 남겨 둔다.
         assert_eq!(ExprOp::from_u8(0x07), None);
         assert_eq!(ExprOp::from_u8(0xff), None);
