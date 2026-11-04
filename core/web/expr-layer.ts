@@ -127,9 +127,16 @@ export class ExprInstancePool {
         }
       }
     }
+    const { graph } = this;
     for (const exprInstanceIndex of recountExprInstanceIndices) {
       try {
-        this.request(exprInstanceIndex);
+        // incoming edge가 없는 인스턴스가 대부분이라 request를 거치지 않고 바로 평가한다. 목록에 든 인스턴스는
+        // 마스크가 0이 아니다 - 앞선 request가 재귀로 이미 평가했으면 0이다.
+        if (graph.incomingEdgesOfNode(exprInstanceIndex) !== undefined) {
+          this.request(exprInstanceIndex);
+        } else if (this.pool.entries[exprInstanceIndex].pendingVarMask !== 0) {
+          this.recount(exprInstanceIndex);
+        }
       } catch (error) {
         onError(error);
       }
