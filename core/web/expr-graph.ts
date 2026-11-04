@@ -83,10 +83,11 @@ const addToList = (lists: Array<TEdgeId[] | undefined>, node: number, edge: TEdg
   }
 };
 
-// 목록에서 간선을 빼고, 목록이 비면 undefined로 되돌린다.
+// 목록에서 간선을 빼고, 목록이 비면 undefined로 되돌린다. 뒤에서부터 찾는다 - 개수 @for는 행을 꼬리부터 지우므로
+// 지울 간선이 늘 목록 끝에 있어, 찾기와 splice가 바로 끝난다.
 const removeFromList = (lists: Array<TEdgeId[] | undefined>, node: number, edge: TEdgeId): void => {
   const list = lists[node] as TEdgeId[];
-  list.splice(list.indexOf(edge), 1);
+  list.splice(list.lastIndexOf(edge), 1);
   if (list.length === 0) {
     lists[node] = undefined;
   }
