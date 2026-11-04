@@ -357,7 +357,17 @@ span(id={count * 10})
 | 단항 | `!` | bool | bool |
 | 단항 | `-` | number | number |
 
-괄호로 묶을 수 있다. 삼항(`? :`)은 아직 없다.
+괄호로 묶을 수 있다.
+
+**삼항 `c ? a : b`.** 조건은 bool, 두 갈래는 같은 원시 타입(number, string, bool)이고 그 타입이 결과다.
+우선순위와 결합은 JS와 같다 - 이항 연산자보다 늦게 묶이고, 이어지는 삼항은 오른쪽으로 묶인다.
+
+```
+p() { ${count > 0 ? count : "none"} }   // X - `?:` needs both sides to be the same type, found number and string
+p() { ${count ? "some" : "none"} }      // X - `?:` expects bool, found number
+p() { ${ok || ready ? "go" : "wait"} }  // 조건은 `ok || ready`
+p() { ${a ? "x" : b ? "y" : "z"} }      // `a ? "x" : (b ? "y" : "z")`
+```
 
 **피연산자는 참조/경로/리터럴/`.length`/인덱스 접근.** 호출은 없다.
 

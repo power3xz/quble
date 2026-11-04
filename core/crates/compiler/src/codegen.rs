@@ -609,9 +609,9 @@ fn expr_field_value(
     types: &mut TypeTable,
     exprs: &mut Vec<Vec<u8>>,
 ) -> Result<(u16, FieldValue), CodegenError> {
-    // 연산자 식은 결과가 늘 원시다. 참조 경로는 객체/배열에도 도달한다.
+    // 연산자 식과 삼항은 결과가 늘 원시다. 참조 경로는 객체/배열에도 도달한다.
     let ty = match value {
-        Expr::Unary(..) | Expr::Binary(..) => expr_type(value, props, &[])?,
+        Expr::Unary(..) | Expr::Binary(..) | Expr::Ternary(..) => expr_type(value, props, &[])?,
         _ => path_type(value, props, &[])?,
     };
     let mut bytes = Vec::new();
@@ -744,6 +744,9 @@ fn fold_expr(expr: &Expr) -> Option<Folded> {
                 _ => unreachable!("타입 검사가 통과시킨 이항 피연산자"),
             })
         }
+
+        // 조건이 리터럴만으로 된 삼항은 방출할 때 ConstantCondition으로 막는다 - 접을 일이 없다.
+        Expr::Ternary(..) => None,
     }
 }
 
@@ -826,6 +829,11 @@ fn emit_expr_postfix(
                 BinaryOp::And => ExprOp::And as u8,
                 BinaryOp::Or => ExprOp::Or as u8,
             });
+        }
+
+        // 삼항을 바이트로 내는 길은 아직 없다.
+        Expr::Ternary(_, _, _, range) => {
+            return Err(CodegenErrorKind::UnsupportedValueExpr.at(range.0));
         }
     }
     Ok(())

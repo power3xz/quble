@@ -317,6 +317,9 @@ mod tests {
             Expr::Binary(op, l, r, _) => {
                 format!("({} {} {})", shape(l), op.sym(), shape(r))
             }
+            Expr::Ternary(cond, then, else_, _) => {
+                format!("({} ? {} : {})", shape(cond), shape(then), shape(else_))
+            }
         }
     }
 
@@ -365,6 +368,30 @@ mod tests {
         assert_eq!(shape(&if_cond("a > 0 && b")), "((a > 0) && b)");
         // == 는 비교보다 나중에 묶인다.
         assert_eq!(shape(&if_cond("a < b == c")), "((a < b) == c)");
+    }
+
+    #[test]
+    fn parse_expr_ternary_binds_after_binary() {
+        // 삼항이 `||`보다 나중에 묶인다 - 조건이 `a || b` 전체다.
+        assert_eq!(shape(&if_cond("a || b ? x : y")), "((a || b) ? x : y)");
+        // 참 갈래와 거짓 갈래도 이항식 전체를 받는다.
+        assert_eq!(shape(&if_cond("a ? b + 1 : c")), "(a ? (b + 1) : c)");
+        assert_eq!(shape(&if_cond("a ? b : c + 1")), "(a ? b : (c + 1))");
+    }
+
+    #[test]
+    fn parse_expr_ternary_is_right_associative() {
+        // JS와 같다 - 거짓 갈래에 이어지는 삼항이 그 갈래로 들어간다.
+        assert_eq!(shape(&if_cond("a ? b : c ? d : e")), "(a ? b : (c ? d : e))");
+        assert_eq!(shape(&if_cond("a ? b ? c : d : e")), "(a ? (b ? c : d) : e)");
+    }
+
+    #[test]
+    fn parse_expr_ternary_needs_colon() {
+        assert_eq!(
+            error_message("component C { template { @if (a ? b) { p( /) } } }"),
+            "expected `:`, found `)`"
+        );
     }
 
     #[test]
@@ -462,6 +489,48 @@ mod tests {
                 "`==` needs both sides to be the same type, found number and string",
                 " 2 | @if (count == title) { p( /) }",
                 "   |      ^^^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 삼항의 조건은 bool - 조건을 탓한다.
+    #[test]
+    fn ternary_cond_must_be_bool() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, a: bool, b: bool }", "count ? a : b"),
+            [
+                "`?:` expects bool, found number",
+                " 2 | @if (count ? a : b) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 삼항의 두 갈래는 같은 타입 - 어느 한쪽을 탓할 수 없어 식 전체를 짚는다.
+    #[test]
+    fn ternary_branches_must_match() {
+        assert_eq!(
+            if_cond_diagnostic("props { ok: bool, count: number, title: string }", "ok ? count : title"),
+            [
+                "`?:` needs both sides to be the same type, found number and string",
+                " 2 | @if (ok ? count : title) { p( /) }",
+                "   |      ^^^^^^^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 삼항의 결과 타입은 갈래의 타입이다 - number 갈래의 삼항은 bool 조건 자리에서 걸린다.
+    #[test]
+    fn ternary_result_is_branch_type() {
+        assert_eq!(
+            if_cond_diagnostic("props { ok: bool, a: number, b: number }", "ok ? a : b"),
+            [
+                "expected bool, found number",
+                " 2 | @if (ok ? a : b) { p( /) }",
+                "   |      ^^^^^^^^^^",
             ]
             .join("\n")
         );

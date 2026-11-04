@@ -212,6 +212,22 @@ pub fn expr_type(expr: &Expr, props: &[Prop], for_vars: &[ForVar]) -> Result<Typ
                 }
             }
         },
+
+        // 조건은 bool, 두 갈래는 같은 타입이고 그 타입이 결과다. 갈래가 어긋나면 `==`처럼 식 전체를 짚는다.
+        Expr::Ternary(cond, then, else_, range) => {
+            require_operand(cond, &Type::Bool, "?:", props, for_vars)?;
+            let then_type = expr_type(then, props, for_vars)?;
+            let else_type = expr_type(else_, props, for_vars)?;
+            match then_type == else_type {
+                true => Ok(then_type),
+                false => Err(ExprTypeErrorKind::OperandMismatch {
+                    op: "?:",
+                    left: Box::new(then_type),
+                    right: Box::new(else_type),
+                }
+                .at(range.0)),
+            }
+        }
     }
 }
 

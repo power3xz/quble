@@ -238,10 +238,12 @@ fn value_type(v: &Expr, props: &[Prop]) -> String {
             },
             _,
         ) => b.to_string(),
-        // codegen expr_field_value와 같은 기준 - 연산자 식은 결과가 늘 원시고, 참조 경로는
+        // codegen expr_field_value와 같은 기준 - 연산자 식과 삼항은 결과가 늘 원시고, 참조 경로는
         // 객체/배열에도 도달한다. 타입이 안 맞으면 codegen이 거르는 몫이다 - d.ts는 편집기가
         // 컴파일 실패 중에도 부르므로 에러 대신 unknown으로 낸다.
-        Expr::Unary(..) | Expr::Binary(..) => ts_or_unknown(expr_type(v, props, &[])),
+        Expr::Unary(..) | Expr::Binary(..) | Expr::Ternary(..) => {
+            ts_or_unknown(expr_type(v, props, &[]))
+        }
         Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => {
             ts_or_unknown(path_type(v, props, &[]))
         }

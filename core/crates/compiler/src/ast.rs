@@ -227,6 +227,9 @@ pub enum Expr {
     Unary(UnaryOp, Box<Expr>, NodeRange),
     /// range는 왼쪽 피연산자 시작부터 오른쪽 끝까지(`a + b`).
     Binary(BinaryOp, Box<Expr>, Box<Expr>, NodeRange),
+    /// 삼항. 첫 자리가 조건, 둘째가 참 갈래, 셋째가 거짓 갈래다. range는 조건 시작부터 거짓 갈래
+    /// 끝까지. `ok ? a : b` -> Ternary(ok, a, b)
+    Ternary(Box<Expr>, Box<Expr>, Box<Expr>, NodeRange),
 }
 
 impl Expr {
@@ -239,7 +242,8 @@ impl Expr {
             | Expr::Field(_, _, r)
             | Expr::Index(_, _, r)
             | Expr::Unary(_, _, r)
-            | Expr::Binary(_, _, _, r) => *r,
+            | Expr::Binary(_, _, _, r)
+            | Expr::Ternary(_, _, _, r) => *r,
         }
     }
 }
