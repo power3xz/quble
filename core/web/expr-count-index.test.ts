@@ -5,9 +5,11 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import { resume } from "./resume-entry.ts";
 import { compile, type THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
+import { renderSsr } from "./test-helpers/ssr.ts";
 
 let qubb: Uint8Array;
 before(() => {
@@ -52,6 +54,33 @@ test("회차 변수를 인덱스로 쓰면 그 회차의 요소를 읽는다", (
 test("개수가 prop인 반복도 회차 번호로 센다", () => {
   const host = mount(compile(qubb)(0)(seed()));
   assert.deepEqual(texts(host, ".var-add"), ["1", "2"]);
+});
+
+// `@for (x, i of n)`은 본문에 식(`${i + 1}`)이 있어 FOR_COUNT_EXPR로 컴파일된다(BYTECODE.md #5.2).
+test("개수가 prop인 반복은 개수가 늘고 줄면 회차가 따라 늘고 준다", () => {
+  const inst = compile(qubb)(0)(seed());
+  const host = mount(inst);
+  assert.deepEqual(texts(host, ".var-add"), ["1", "2"]);
+
+  inst.update({ n: 3 });
+  assert.deepEqual(texts(host, ".var-add"), ["1", "2", "3"]);
+
+  inst.update({ n: 1 });
+  assert.deepEqual(texts(host, ".var-add"), ["1"]);
+});
+
+test("SSR에서 resume한 개수 prop 반복도 개수가 늘고 줄면 회차가 따라 늘고 준다", () => {
+  const host = document.createElement("div");
+  host.innerHTML = renderSsr("expr_count_index", [], seed()).html;
+  const inst = resume(qubb, host, { data: seed() });
+  assert.deepEqual(texts(host, ".var-add"), ["1", "2"]);
+
+  inst.update({ n: 3 });
+  assert.deepEqual(texts(host, ".var-add"), ["1", "2", "3"]);
+
+  inst.update({ n: 1 });
+  assert.deepEqual(texts(host, ".var-add"), ["1"]);
+  inst.destroy();
 });
 
 test("회차 변수를 받은 prop은 자식 식과 페이로드에서도 회차 번호다", () => {

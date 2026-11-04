@@ -604,7 +604,7 @@ impl Renderer<'_> {
                     }
                     pc = if_end + 1;
                 }
-                Op::ForRaw | Op::ForCountVar | Op::ForArrayVar => {
+                Op::ForRaw | Op::ForCountVar | Op::ForCountExpr | Op::ForArrayVar => {
                     // (반응형이라 region이 있는가, 회차 수, 회차마다 요소 시작 leaf)
                     let (reactive, count, elem_starts): (bool, usize, Option<Vec<usize>>) = match op
                     {
@@ -620,6 +620,18 @@ impl Renderer<'_> {
                                 count as usize
                             };
                             (matches!(slot, Slot::Store(_)), count, None)
+                        }
+                        // 런타임은 식 인스턴스의 결과 칸을 구독하는 region을 연다 - 슬롯 kind와 무관하게 반응형이다.
+                        Op::ForCountExpr => {
+                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            pc += 1;
+                            let count = v.num();
+                            let count = if count.is_nan() || count < 0.0 {
+                                0
+                            } else {
+                                count as usize
+                            };
+                            (true, count, None)
                         }
                         _ => {
                             let leaf = match pairs[code[pc] as usize] {
@@ -802,7 +814,10 @@ fn scan_end(code: &[u8], from: usize, scan: Scan) -> Result<usize, RenderError> 
                 matches!(op, Op::IfEnd) || (matches!(op, Op::Else) && depth == 0),
             ),
             Scan::For => (
-                matches!(op, Op::ForRaw | Op::ForCountVar | Op::ForArrayVar),
+                matches!(
+                    op,
+                    Op::ForRaw | Op::ForCountVar | Op::ForCountExpr | Op::ForArrayVar
+                ),
                 matches!(op, Op::ForEnd),
             ),
             Scan::SlotContent => (
@@ -833,7 +848,7 @@ fn operand_len(op: Op) -> usize {
         | Op::ExitContext
         | Op::ForEnd
         | Op::SlotPlaceholderContentEnd => 0,
-        Op::PushThrough | Op::IfExpr | Op::TextExpr => 1,
+        Op::PushThrough | Op::IfExpr | Op::TextExpr | Op::ForCountExpr => 1,
         Op::ElemOpen
         | Op::Text
         | Op::TextVar

@@ -21,6 +21,7 @@ import {
   OP_EXIT_CONTEXT,
   OP_FILL_SLOT_PLACEHOLDER,
   OP_FOR_ARRAY_VAR,
+  OP_FOR_COUNT_EXPR,
   OP_FOR_COUNT_VAR,
   OP_FOR_RAW,
   OP_HALT,
@@ -489,6 +490,33 @@ export class ResumeInterpreter {
               walkStacks,
             );
           }
+          pc = forEndPc + 1;
+          break;
+        }
+        case OP_FOR_COUNT_EXPR: {
+          // 횟수를 식으로 얻는다. IF_EXPR처럼 식 인스턴스를 부모 가지에 싣고 그 결과 leaf를 횟수 leaf로 구독한다.
+          const localExprIndex = u8at();
+          const bodyStart = pc;
+          const forEndPc = vm.cachedForEnd(bodyStart);
+          const { exprInstanceIndex, value } = vm.addExprInstance(
+            vm.globalExprIndexOf(compId, localExprIndex),
+            argumentSourcePairs,
+            startBranchIndex,
+            vm.sharedScopeUidOf(compId, localExprIndex, walkStacks, loopIndexBase),
+          );
+          this.reactiveCountFor(
+            vm,
+            vm.allocResultLeaf(exprInstanceIndex, value),
+            bodyStart,
+            forEndPc,
+            topsIfTop(),
+            startBranchIndex,
+            argumentSourcePairs,
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            walkStacks,
+          );
           pc = forEndPc + 1;
           break;
         }

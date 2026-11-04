@@ -229,8 +229,8 @@ test("batch에서 cursor와 x가 함께 바뀌면 최종 값 하나만 쓰고 �
 // 바뀐 것으로 보고 센다. 마스크가 켜지는지는 위의 부분 재평가 테스트가 본다 - 켜지지 않으면 식을 세지 않아 값이
 // 틀린다.
 //
-// 식 인스턴스는 arith, index, pair(자식 컴포넌트), flag 넷이다. @if (show)의 조건은 변수 하나라 인스턴스가 없고,
-// 본문은 켜진 적이 없어 만들어지지 않았다.
+// 식 인스턴스는 arith, index, pair(자식 컴포넌트), flag, 그리고 @if (show)의 조건 다섯이다. @if (show)는 본문에 식이
+// 있어 조건이 show 하나를 읽는 식 인스턴스가 된다(BYTECODE.md #5.2). 본문은 켜진 적이 없어 만들어지지 않았다.
 const pendingVarMasks = (inst: { exprInstances: { entries: Array<{ pendingVarMask: number }> } }) =>
   inst.exprInstances.entries.map((entry) => entry.pendingVarMask);
 
@@ -244,14 +244,14 @@ test("flush가 끝나면 어느 인스턴스에도 바뀐 변수 표시가 남�
     inst.store.set(SHARED, 4);
     inst.store.set(BIG, 1);
   });
-  assert.deepEqual(pendingVarMasks(inst), [0, 0, 0, 0]);
+  assert.deepEqual(pendingVarMasks(inst), [0, 0, 0, 0, 0]);
 });
 
 test("식이 throw한 flush 뒤에도 표시가 남지 않고 다음 flush에서 맞게 센다", () => {
   const { inst, set, textOf } = instantiate();
   // rows는 요소 둘이라 rows[5]가 RangeError를 throw한다.
   assert.throws(() => set(CURSOR, 5), RangeError);
-  assert.deepEqual(pendingVarMasks(inst), [0, 0, 0, 0]);
+  assert.deepEqual(pendingVarMasks(inst), [0, 0, 0, 0, 0]);
   set(CURSOR, 1);
   assert.equal(textOf("index"), "120", "rows[1].score(20) + x(100)");
 });
