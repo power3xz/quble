@@ -34,23 +34,18 @@ export class ExprGraph {
     addToList(this.incomingEdges, endNode, edge);
   };
 
-  // 식 인스턴스를 해제할 때 그 노드의 incoming edge와 outgoing edge를 모두 지운다. 상대 노드의 목록에서도 뺀다.
-  removeEdgesOfNode = (node: number): void => {
-    const incoming = this.incomingEdges[node];
-    if (incoming !== undefined) {
-      for (const edge of incoming) {
-        removeFromList(this.outgoingEdges, this.startNodes[edge], edge);
+  // 시작점, 끝점, label이 같은 간선 하나를 지운다. 끝점의 incoming edge에서 찾는다 - 그 목록 길이는 끝점의 식
+  // 인스턴스를 가진 조건 아래 가지 수라 보통 1이다.
+  removeEdge = (startNode: number, endNode: number, label: number): void => {
+    const incoming = this.incomingEdges[endNode] as TEdgeId[];
+    for (let i = incoming.length - 1; i >= 0; i--) {
+      const edge = incoming[i];
+      if (this.startNodes[edge] === startNode && this.labels[edge] === label) {
+        removeFromList(this.incomingEdges, endNode, edge);
+        removeFromList(this.outgoingEdges, startNode, edge);
         this.edgeIds.release(edge);
+        return;
       }
-      this.incomingEdges[node] = undefined;
-    }
-    const outgoing = this.outgoingEdges[node];
-    if (outgoing !== undefined) {
-      for (const edge of outgoing) {
-        removeFromList(this.incomingEdges, this.endNodes[edge], edge);
-        this.edgeIds.release(edge);
-      }
-      this.outgoingEdges[node] = undefined;
     }
   };
 

@@ -151,6 +151,8 @@ test("incoming labeled edge가 둘이면 그중 하나만 맞아도 끝점을 �
   const c1 = make(COND_EXPR, C1);
   const c2 = make(COND_EXPR, C2);
   const x = make(TIMES_TEN_EXPR, V);
+  // c1 아래 가지와 c2 아래 가지가 x를 함께 가진다. 가지마다 refCount 하나와 간선 하나다.
+  exprs.retain(x.exprInstanceIndex);
   exprs.graph.addEdge(c1.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
   exprs.graph.addEdge(c2.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
 
@@ -162,18 +164,40 @@ test("incoming labeled edge가 둘이면 그중 하나만 맞아도 끝점을 �
   assert.equal(store.get(x.resultLeaf), 20);
 });
 
-test("식 인스턴스를 해제하면 그 식 인스턴스의 간선이 그래프에서 지워진다", () => {
+test("조건 없는 가지가 함께 가진 식 인스턴스는 incoming labeled edge의 시작점이 false여도 평가한다", () => {
+  // `${x}`가 root와 `@if (c) { ${x} }`에 함께 있는 경우다. refCount는 2, 간선은 @if 가지의 하나다.
   const C = 0;
   const V = 1;
-  const { exprs, make } = setup([true, 1]);
+  const { store, exprs, make } = setup([true, 1]);
   const c = make(COND_EXPR, C);
   const x = make(TIMES_TEN_EXPR, V);
+  exprs.retain(x.exprInstanceIndex);
   exprs.graph.addEdge(c.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
-  assert.equal(exprs.graph.incomingEdgesOfNode(x.exprInstanceIndex)?.length, 1);
-  assert.equal(exprs.graph.outgoingEdgesOfNode(c.exprInstanceIndex)?.length, 1);
+
+  store.batch(() => {
+    store.set(C, false);
+    store.set(V, 2);
+  });
+
+  assert.equal(store.get(x.resultLeaf), 20);
+});
+
+test("조건 없는 가지가 식 인스턴스를 놓으면 그다음부터는 incoming labeled edge로 평가 여부를 정한다", () => {
+  const C = 0;
+  const V = 1;
+  const { store, exprs, make } = setup([true, 1]);
+  const c = make(COND_EXPR, C);
+  const x = make(TIMES_TEN_EXPR, V);
+  exprs.retain(x.exprInstanceIndex);
+  exprs.graph.addEdge(c.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
+  store.batch(() => {
+    store.set(C, false);
+    store.set(V, 2);
+  });
+  assert.equal(store.get(x.resultLeaf), 20, "조건 없는 가지가 있어 평가한다");
 
   exprs.release(x.exprInstanceIndex);
+  store.set(V, 3);
 
-  assert.equal(exprs.graph.incomingEdgesOfNode(x.exprInstanceIndex), undefined);
-  assert.equal(exprs.graph.outgoingEdgesOfNode(c.exprInstanceIndex), undefined);
+  assert.equal(store.get(x.resultLeaf), 20, "남은 가지는 @if 가지뿐이고 c가 false라 평가하지 않는다");
 });

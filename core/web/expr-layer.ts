@@ -153,12 +153,16 @@ export class ExprInstancePool {
   //
   // 시작점이 평가 대상인지까지 보는 이유는 겹친 @if다. `[c1] --(then)--> [c2] --(then)--> [x]`에서 c1이 false면 c2는
   // 평가하지 않아 lastValue가 낡았다. 그 낡은 값이 then과 맞아도 x를 평가하면 안 된다.
+  //
+  // 조건 아래 가지는 식 인스턴스를 가질 때 refCount 하나와 incoming labeled edge 하나를 더한다. incoming labeled
+  // edge 수가 refCount보다 작으면 조건 없이 가진 가지가 있다는 뜻이라 간선을 보지 않고 평가 대상이다.
   private request = (exprInstanceIndex: number): boolean => {
+    const instance = this.pool.entries[exprInstanceIndex];
     const incoming = this.graph.incomingEdgesOfNode(exprInstanceIndex);
-    if (incoming !== undefined && !this.someEdgeChooses(incoming)) {
+    if (incoming !== undefined && incoming.length === instance.refCount && !this.someEdgeChooses(incoming)) {
       return false;
     }
-    if (this.pool.entries[exprInstanceIndex].pendingVarMask !== 0) {
+    if (instance.pendingVarMask !== 0) {
       this.recount(exprInstanceIndex);
     }
     return true;
@@ -291,7 +295,6 @@ export class ExprInstancePool {
     if (instance.resultLeaf !== undefined) {
       this.store.free(instance.resultLeaf, 1);
     }
-    this.graph.removeEdgesOfNode(exprInstanceIndex);
     this.pool.release(exprInstanceIndex);
   };
 
