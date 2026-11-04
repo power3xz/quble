@@ -1361,6 +1361,92 @@ mod tests {
         assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
     }
 
+    /// 조건이 leaf 하나인 `@if`와 숫자 prop `@for`는 본문을 그리면 식 인스턴스가 생길 때만 조건을 식으로 낸다.
+    /// 그 식 인스턴스가 본문 식 인스턴스로 가는 간선의 시작점이 된다. 본문에 식 인스턴스가 없으면 지금처럼 슬롯을
+    /// 그대로 읽는다. 템플릿 첫 노드의 opcode가 code[0]이다.
+    fn first_op_and_exprs(src: &str) -> (u8, Vec<Vec<u8>>) {
+        let bytes = compile(src).expect("컴파일이 성공해야 한다");
+        let module = bytecode::decode(&bytes).unwrap();
+        let first_op = def_code(&module, 0)[0];
+        (first_op, module.def(0).unwrap().exprs.clone())
+    }
+
+    #[test]
+    fn leaf_if_with_expr_in_body_compiles_to_if_expr() {
+        use bytecode::{ExprOp, Op};
+        let (op, exprs) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { p() { ${x + 1} } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+        assert!(
+            exprs.contains(&vec![ExprOp::LoadVar as u8, 0, 0]),
+            "ok 하나를 읽는 식이 표현식 테이블에 있어야"
+        );
+    }
+
+    #[test]
+    fn leaf_if_without_expr_in_body_stays_if() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { p() { ${x} } } } }",
+        );
+        assert_eq!(op, Op::If as u8);
+    }
+
+    #[test]
+    fn leaf_if_with_expr_in_else_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { p( /) } @else { p() { ${x + 1} } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    /// 안쪽 `@if (x > 0)`의 조건 식 인스턴스가 바깥 then 가지에 실린다.
+    #[test]
+    fn leaf_if_with_inner_if_expr_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { @if (x > 0) { p( /) } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    /// 배열 `@for`의 행은 부모 가지의 간선을 물려받으므로 행의 식 인스턴스도 바깥 조건 아래다.
+    #[test]
+    fn leaf_if_with_expr_in_array_for_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, rows: number[] } template { @if (ok) { @for (r of rows) { p() { ${r + 1} } } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    /// 자식 컴포넌트가 있으면 그 템플릿을 보지 않고 식 인스턴스가 생긴다고 본다. Leaf에는 식이 없지만 IF_EXPR이다.
+    /// 자식 템플릿까지 따라가 판정하도록 고치면 이 테스트는 IF를 기대하게 바뀐다.
+    #[test]
+    fn leaf_if_with_component_in_body_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool } template { @if (ok) { Leaf( /) } } }
+             component Leaf { template { p( /) } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    #[test]
+    fn count_for_with_expr_in_body_compiles_to_for_count_expr() {
+        use bytecode::{ExprOp, Op};
+        let (op, exprs) = first_op_and_exprs(
+            "component C { props { n: number } template { @for (k of n) { p() { ${k + 1} } } } }",
+        );
+        assert_eq!(op, Op::ForCountExpr as u8);
+        assert!(
+            exprs.contains(&vec![ExprOp::LoadVar as u8, 0, 0]),
+            "n 하나를 읽는 식이 표현식 테이블에 있어야"
+        );
+    }
+
     /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개라 ForArrayVar (scope=0, offset=0).
     /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 ${tag}가 TextVar 1을 낸다.
     #[test]

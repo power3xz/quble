@@ -79,7 +79,8 @@ pub enum Op {
     /// 안 채운 슬롯이면 아무것도 안 넣는다(미채움 허용).
     FillSlotPlaceholder = 0x1d,
     /// 연산자가 붙은 조건으로 분기 시작(`@if (count > 0)`). operand: expr_index u8(이 def의
-    /// CompDef.exprs 인덱스). 잎 하나짜리 조건은 If로 간다. 이후 코드는 If와 같다 - then 가지가
+    /// CompDef.exprs 인덱스). 잎 하나짜리 조건은 If로 가되, 본문을 그리면 식 인스턴스가 생기면 그 잎을 읽는
+    /// 식으로 IfExpr이 된다(BYTECODE.md #5.2). 이후 코드는 If와 같다 - then 가지가
     /// 이어지고 Else/IfEnd도 그대로. 런타임이 파생 칸을 잡고 식이 읽는 칸들을 구독해 그 칸에
     /// 결과를 넣는다(BYTECODE.md #5.2).
     IfExpr = 0x1e,
@@ -90,6 +91,10 @@ pub enum Op {
     AttrGExpr = 0x20,
     /// 컴포넌트 속성명 + 연산자가 붙은 식 값. operand: name u16(상수풀), expr_index u8.
     AttrLExpr = 0x21,
+    /// `@for (x of n)` 반복 - 횟수를 식으로 얻는다. operand: expr_index u8. 식의 값이 횟수다. 나머지는
+    /// ForCountVar와 같다. 컴파일러는 본문을 그리면 식 인스턴스가 생길 때 ForCountVar 대신 이것을 낸다 - 그
+    /// 식 인스턴스가 행의 식 인스턴스로 가는 간선의 시작점이 된다.
+    ForCountExpr = 0x22,
 }
 
 impl Op {
@@ -130,6 +135,7 @@ impl Op {
             0x1f => Op::TextExpr,
             0x20 => Op::AttrGExpr,
             0x21 => Op::AttrLExpr,
+            0x22 => Op::ForCountExpr,
             _ => return None,
         })
     }

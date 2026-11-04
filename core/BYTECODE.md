@@ -261,6 +261,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `TEXT_EXPR`       | 0x1f | expr_index: u8        | 컴포넌트 표현식 테이블     | 연산자가 붙은 식을 텍스트로 출력(`${count * 2}`). 잎 하나짜리 보간은 `TEXT_VAR`로 간다. 값 자리라 파생 칸을 안 잡는다 - 식이 읽는 칸들을 구독해 바뀌면 다시 세어 그 자리에 쓴다(#5.3). |
 | `ATTR_G_EXPR`     | 0x20 | name:u16, expr_index:u8 | name=전역, value=표현식 테이블 | ` name="..."` 출력. name은 전역 상수풀 ID, 값은 식을 세어 얻는다(`id={count * 10}`). |
 | `ATTR_L_EXPR`     | 0x21 | name:u16, expr_index:u8 | name=컴포넌트 상수풀, value=표현식 테이블 | 위와 같고 name만 컴포넌트 상수풀 인덱스. |
+| `FOR_COUNT_EXPR`  | 0x22 | expr_index: u8        | 컴포넌트 표현식 테이블     | 횟수를 식으로 얻는 반복(`@for (x of n)`). 식의 값이 횟수다. 숫자 prop count인데 본문을 그리면 식 인스턴스가 생길 때 `FOR_COUNT_VAR` 대신 온다(#5.2). 이후는 `FOR_COUNT_VAR`의 STORE 경우와 같다. |
 
 설계 메모:
 
@@ -307,6 +308,8 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
   - `FOR_COUNT_VAR scope_index:u8, offset:u8` - count가 숫자 슬롯(`@for (x of n)`, 필드면
     `a.count`라 offset). 런타임이 그 leaf 값을 횟수로. STORE면 count leaf 구독으로 꼬리 회차를
     늘리고/줄인다(전용 region). CONST(부모가 리터럴로 준 prop)는 안 변하니 인라인.
+  - `FOR_COUNT_EXPR expr_index:u8` - count가 숫자 슬롯인데 본문을 그리면 식 인스턴스가 생기는 반복. 그 슬롯
+    하나를 읽는 식을 표현식 테이블에 넣고, 런타임은 그 식 인스턴스의 결과 칸을 count leaf처럼 구독한다(#5.2).
   - `FOR_ARRAY_VAR scope_index:u8, offset:u8` - count가 배열 슬롯(`@for (item of arr)`). 배열
     칸은 `arrayInfoIndex` 하나라(슬롯 안 펼침) 그 값으로 arrayPool에서 요소 수/위치를 얻어 요소
     수만큼 반복한다. 회차마다 **회차변수(item)** 슬롯을 그 요소 leaf에 바인딩해 본문의
@@ -415,6 +418,13 @@ if-else :  IF cond  [then]  ELSE  [else]  IF_END
 
 `@if (count > 0)`처럼 연산자가 붙은 조건. 잎 하나짜리 조건(`@if (isPaid)`)은 그대로 `IF`가
 받는다 - 표현식 테이블을 거칠 이유가 없다.
+
+잎 하나짜리 조건도 본문을 그리면 식 인스턴스가 생기면 그 잎 하나를 읽는 식으로 `IF_EXPR`이 된다. 숫자 슬롯
+count의 `@for`도 같은 경우에 `FOR_COUNT_VAR` 대신 `FOR_COUNT_EXPR`이 된다. 조건 식 인스턴스가 본문 식
+인스턴스로 가는 간선(label then/else, 행 k)의 시작점이 되어, 본문이 떨어지는 flush에서 본문 식을 평가하지
+않게 한다(core/web/expr-graph.ts). 본문을 그리면 식 인스턴스가 생기는 경우는 본문에 `TEXT_EXPR`,
+`ATTR_*_EXPR`, `IF_EXPR`, `FOR_COUNT_EXPR`, `RENDER` 중 하나가 있을 때다. `RENDER`는 자식 컴포넌트의 템플릿을
+보지 않고 식 인스턴스가 생긴다고 본다.
 
 ```
 IF_EXPR expr_index  [then]  ELSE  [else]  IF_END
