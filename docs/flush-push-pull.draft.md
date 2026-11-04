@@ -137,10 +137,16 @@ ${a ? b : c}
 [c] ----------> [삼항]
 ```
 
-- 조건이 입력 leaf 하나(`@if (show)`, `@for (k of n)`)여도 그 leaf를 읽는 식 인스턴스를 만든다. labeled edge의
-  시작점이 될 노드가 있어야 하기 때문이다. 이런 `@if`와 `@for`마다 식 인스턴스 하나와 결과 leaf 하나가 늘어난다.
-- 배열 `@for`에는 labeled edge가 없다. 지운 행은 handler(`removeAt`)에서 바로 해제되어 flush 때는 이미 없고,
-  남은 행은 모두 평가 대상이며, 늘어난 행은 commit에서 만들 때 현재 값으로 평가된다.
+- 조건이 입력 leaf 하나(`@if (show)`, `@for (k of n)`)여도, 본문을 그리면 식 인스턴스가 생기면 컴파일러가 그
+  leaf 하나를 읽는 식으로 조건을 낸다(`IF_EXPR`, `FOR_COUNT_EXPR`). labeled edge의 시작점이 될 노드가 있어야 하기
+  때문이다. 이런 `@if`와 `@for`마다 식 인스턴스 하나와 결과 leaf 하나가 늘어난다. 본문에 식 인스턴스가 없으면
+  간선을 걸 대상이 없어 지금처럼 `IF`, `FOR_COUNT_VAR`로 낸다. 본문에 자식 컴포넌트가 있으면 지금은 자식 템플릿을
+  보지 않고 식 인스턴스가 생긴다고 본다. 자식 템플릿까지 따라가 판정하는 것은 나중에 한다.
+- 배열 `@for`는 label을 새로 만들지 않는다. 행 가지는 부모 가지의 간선(시작점과 label)을 물려받는다 - 부모가
+  `@if` 가지면 그 조건이 false일 때 행의 식 인스턴스도 평가하지 않는다. 지운 행은 handler(`removeAt`)에서 바로
+  해제되어 flush 때는 이미 없다.
+- 간선은 가지가 식 인스턴스를 실을 때 vm이 걸고(`addExprInstance`), 가지가 없어질 때 region이 지운다
+  (`freeBranchTree`). 가지마다 간선의 시작점과 label을 둔다(`TBranch.edgeStartNode`, `edgeLabel`).
 
 **push는 outgoing edge를 따라간다.**
 
@@ -156,6 +162,11 @@ ${a ? b : c}
 요청한다. incoming labeled edge가 있으면, 그중 하나라도 시작점의 값이 label과 맞을 때만 평가한다(공유된 식
 인스턴스는 incoming labeled edge가 여럿일 수 있다). label이 맞지 않아 평가하지 않은 노드는 `pendingVarMask`를
 그대로 둔다.
+
+조건 없는 가지도 그 식 인스턴스를 가지면 간선과 관계없이 평가한다. `${x}`가 root와 `@if (c)` 안에 함께 있으면
+c가 false여도 root의 x는 갱신되어야 한다. 식 인스턴스를 가진 가지 수가 `refCount`이고, 그중 조건 아래 가지 수가
+incoming labeled edge 수다. incoming labeled edge 수가 `refCount`보다 작으면 조건 없는 가지가 있다는 뜻이라
+간선을 보지 않고 평가한다.
 
 | label | 맞는 경우 |
 |---|---|
@@ -192,4 +203,5 @@ in-degree로 순서를 정하는 Kahn 방식은 쓰지 않는다. incoming edge�
 - **check 표시를 어디에 어떻게 두는지** - dirty는 `pendingVarMask`가 0이 아닌 것으로 나타낸다. check는 노드마다
   비트, leaf마다 버전 중에서 정한다.
 - **식 안의 부분 재평가** - skip table 유지, 다시 셀 연산 목록(레지스터 방식), 구간과 위치 비교.
-- **작업 순서** - 바이트코드를 바꾸지 않는 `@if`와 개수 `@for`부터 할지, 삼항과 함께 할지.
+- **작업 순서** - `@if`와 개수 `@for`의 labeled edge는 끝났다(`FOR_COUNT_EXPR`를 더해 바이트코드가 바뀌었다).
+  남은 것은 삼항과, 쉬는 본문의 구독을 유지하는 일이다.
