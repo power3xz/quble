@@ -33,6 +33,7 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
+import { NO_EDGE_START } from "./region.ts";
 import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import { snapshotStacks, type TSlotPlaceholderContent, type TTemplatePlan, type TWalkStacks, type VM } from "./vm.ts";
@@ -78,9 +79,13 @@ export class RuntimeInterpreter {
   // 가지에 남기고 회차 노드는 anchor 뒤에 붙는다. 초기엔 branch.nodes만 채운다(부모 attachIf가
   // 루트부터 일괄 attach할 때 이 region도 childRegionIndices 재귀로 붙는다 - @if 자식과 동일).
   // count leaf 구독이 꼬리 회차를 늘리고(build+attach) 줄인다(truncate).
+  //
+  // edgeStartNode는 행 수 식 인스턴스(FOR_COUNT_EXPR)다. 행 i 가지가 실은 식 인스턴스에 label i로 간선을 건다.
+  // FOR_COUNT_VAR면 본문에 식 인스턴스가 없어 NO_EDGE_START다.
   reactiveCountFor = (
     vm: VM,
     countLeafIndex: number,
+    edgeStartNode: number,
     bodyStart: number,
     forEndPc: number,
     parent: Node,
@@ -106,7 +111,7 @@ export class RuntimeInterpreter {
     // 몸체 `${i}`가 읽을 회차변수(인덱스) 슬롯 [RAW, i]를 바깥 스코프 뒤에 붙인다. 슬롯 번호 =
     // props+바깥 회차변수 뒤.
     const addIterationBranch = (i: number) => {
-      const newBranchIndex = vm.appendIteration(forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex, edgeStartNode, i);
       vm.branchAt(newBranchIndex).nodes = Array.from(
         (
           vm.buildIteration(
@@ -172,8 +177,11 @@ export class RuntimeInterpreter {
     // array-for는 슬롯 2칸 - [STORE, 요소 base], [STORE, 인덱스 leaf] 순. 요소 슬롯은 몸체가 요소 필드를,
     // 인덱스 슬롯은 몸체 ${i}가 읽는다. 인덱스 leaf는 발화 시 $n으로도 해소되게 loopIndexStack에
     // (STORE, 인덱스 leaf)로 실어 물려준다. 슬롯 번호 = props + 바깥 슬롯 뒤.
+    // 배열 @for의 행은 새 label을 만들지 않고 부모 가지의 간선을 물려받는다 - 부모가 @if 가지면 그 조건이 false일 때
+    // 행의 식 인스턴스도 평가하지 않는다.
+    const { edgeStartNode, edgeLabel } = vm.branchAt(branchIndex);
     const addIterationBranch = (i: number) => {
-      const newBranchIndex = vm.appendIteration(forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex, edgeStartNode, edgeLabel);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchAt(newBranchIndex).nodes = Array.from(
         (
@@ -718,6 +726,7 @@ export class RuntimeInterpreter {
             this.reactiveCountFor(
               vm,
               ref + offset,
+              NO_EDGE_START, // FOR_COUNT_VAR는 본문에 식 인스턴스가 없다(BYTECODE.md #5.2)
               bodyStart,
               forEndPc,
               nodeTop(),
@@ -746,6 +755,7 @@ export class RuntimeInterpreter {
           this.reactiveCountFor(
             vm,
             vm.allocResultLeaf(exprInstanceIndex, value),
+            exprInstanceIndex,
             bodyStart,
             forEndPc,
             nodeTop(),
@@ -816,6 +826,7 @@ export class RuntimeInterpreter {
       vm,
       pc,
       condLeafIndex,
+      NO_EDGE_START, // IF는 본문에 식 인스턴스가 없다(BYTECODE.md #5.2) - 간선을 걸 대상이 없다
       condIsConst ? vm.module.constpool[condRef] : vm.store.get(condLeafIndex),
       argumentSourcePairs,
       compId,
@@ -858,6 +869,7 @@ export class RuntimeInterpreter {
       vm,
       pc,
       condLeafIndex,
+      exprInstanceIndex,
       vm.store.get(condLeafIndex),
       argumentSourcePairs,
       compId,
@@ -878,6 +890,8 @@ export class RuntimeInterpreter {
   //
   // @param pc             가지 첫 op(조건 operand 직후)
   // @param condLeafIndex  조건을 담은 칸. CONST 조건이면 -1(구독 없음)
+  // @param edgeStartNode  조건 식 인스턴스(IF_EXPR). then/else 가지의 식 인스턴스로 가는 간선의 시작점. IF면
+  //                       NO_EDGE_START
   // @param condInitial    초기 조건값 - CONST 조건은 store에 없어 따로 받는다
   // @param branch         구독을 실을 부모 가지 - 부모가 detach/free되면 조건 감시도 꺼진다
   // @param parent         anchor를 붙일 DOM 노드
@@ -886,6 +900,7 @@ export class RuntimeInterpreter {
     vm: VM,
     pc: number,
     condLeafIndex: number,
+    edgeStartNode: number,
     condInitial: unknown,
     argumentSourcePairs: TScope,
     compId: number,
@@ -901,6 +916,7 @@ export class RuntimeInterpreter {
     return vm.openIfRegion(
       pc,
       condLeafIndex,
+      edgeStartNode,
       condInitial,
       argumentSourcePairs,
       compId,

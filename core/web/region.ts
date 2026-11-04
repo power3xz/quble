@@ -32,6 +32,7 @@ export type TExprInstanceLayer = {
   attach: (exprInstanceIndex: number) => void;
   detach: (exprInstanceIndex: number) => void;
   release: (exprInstanceIndex: number) => void;
+  graph: { removeEdge: (startNode: number, endNode: number, label: number) => void };
 };
 
 export type TBranch = {
@@ -42,6 +43,12 @@ export type TBranch = {
   // 이 가지가 든 식 인스턴스 번호(표현식 층의 풀). 가지가 붙고 떼지고 없어질 때 그 인스턴스의 파생 구독을 걸고 풀고
   // 반납한다. 식이 없는 가지는 null이라 배열을 잡지 않는다.
   exprInstanceIndices: number[] | null;
+  // 이 가지가 실은 식 인스턴스마다 거는 incoming edge의 시작점(식 인스턴스 번호)과 label(expr-graph.ts). @if
+  // 가지는 조건 식 인스턴스와 then/else, 개수 @for의 행 k는 행 수 식 인스턴스와 k, 배열 @for의 행은 부모 가지의
+  // 두 값이다. 시작점이 없으면 NO_EDGE_START라 간선을 걸지 않는다 - root, 그리고 본문에 식 인스턴스가 없어 IF나
+  // FOR_COUNT_VAR로 컴파일된 가지다(BYTECODE.md #5.2).
+  edgeStartNode: number;
+  edgeLabel: number;
   childRegionIndices: number[];
   built: boolean;
   // 한 번이라도 DOM에 붙었나. 처음 붙을 때는 build가 방금 현재 값으로 노드를 채웠으므로 놓친 값을
@@ -75,6 +82,9 @@ export type TRegion = {
   tail: (region: TRegion) => number | undefined;
 };
 
+// TBranch.edgeStartNode에서 간선의 시작점이 없다는 뜻. 식 인스턴스 번호는 0 이상이라 겹치지 않는다.
+export const NO_EDGE_START = -1;
+
 export const THEN_INDEX = 0;
 export const ELSE_INDEX = 1;
 
@@ -85,6 +95,8 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     leafIndices: [],
     updateFns: [],
     exprInstanceIndices: null,
+    edgeStartNode: NO_EDGE_START,
+    edgeLabel: 0,
     childRegionIndices: [],
     built: false,
     everAttached: false,
@@ -404,7 +416,9 @@ export const attachGrownIterations = (
 // 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
 //
 // 가지가 든 식 인스턴스(보간 식, IF_EXPR 조건)도 여기서 반납한다(exprs.release). 인스턴스의 참조 수가 0이 되면
-// 결과 leaf까지 store에 돌려준다.
+// 결과 leaf까지 store에 돌려준다. 반납하기 전에 이 가지가 건 incoming edge를 지운다. 자식 region을 먼저 반납하므로
+// 이 가지가 실은 식 인스턴스가 시작점인 간선(자식 @if의 조건 식 인스턴스, 자식 개수 @for의 행 수 식 인스턴스에서
+// 나가는 간선)은 그 인스턴스를 반납할 때 이미 지워져 있다.
 const freeBranchTree = (
   store: Store,
   exprs: TExprInstanceLayer,
@@ -417,7 +431,11 @@ const freeBranchTree = (
     freeRegionTree(store, exprs, regionPool, branchPool, childRegionIndex);
   }
   if (branch.exprInstanceIndices !== null) {
+    const { edgeStartNode, edgeLabel } = branch;
     for (const exprInstanceIndex of branch.exprInstanceIndices) {
+      if (edgeStartNode !== NO_EDGE_START) {
+        exprs.graph.removeEdge(edgeStartNode, exprInstanceIndex, edgeLabel);
+      }
       exprs.release(exprInstanceIndex);
     }
   }

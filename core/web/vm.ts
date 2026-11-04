@@ -37,6 +37,7 @@ import {
 } from "./decode.ts";
 import { ATTRS, DOM_EVENTS, setAttributeSafely } from "./dom-tables.ts";
 import { ExprEvaluator, SKIP_NOTHING } from "./expr-eval.ts";
+import { LABEL_ELSE, LABEL_THEN } from "./expr-graph.ts";
 import { ExprInstancePool, NOT_SHARED } from "./expr-layer.ts";
 import { exprLevelsOf } from "./expr-level.ts";
 import { createLeafStoreSubject, type LeafStoreSubject as TLeafStoreSubject } from "./leaf-store.ts";
@@ -59,6 +60,7 @@ import {
   appendIfRegion,
   attachGrownIterations,
   ELSE_INDEX,
+  NO_EDGE_START,
   removeBranchAt,
   type TBranch,
   THEN_INDEX,
@@ -674,6 +676,7 @@ export class VM {
       branchPool,
       arrayPool,
       exprInstances: exprInstancePool.pool,
+      exprGraph: exprInstancePool.graph,
       deriveSubscribers: exprInstancePool.deriveSubscribers,
       store,
       destroy,
@@ -880,16 +883,27 @@ export class VM {
   branchAt = (branchIndex: number): TBranch => this.branchPool.entries[branchIndex];
 
   // @for region에 빈 회차 가지를 더하고 그 branchIndex를 돌려준다. 노드와 구독은 호출자가 build해 담는다.
-  appendIteration = (forRegionIndex: number): number =>
-    appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
+  // edgeStartNode와 edgeLabel은 회차 가지가 실은 식 인스턴스에 거는 간선이다(TBranch). 개수 @for는 (행 수 식
+  // 인스턴스, 행 번호), 배열 @for는 부모 가지의 두 값이다.
+  appendIteration = (forRegionIndex: number, edgeStartNode: number, edgeLabel: number): number => {
+    const branchIndex = appendBranchOfForRegion(this.regionPool, this.branchPool, forRegionIndex);
+    const branch = this.branchAt(branchIndex);
+    branch.edgeStartNode = edgeStartNode;
+    branch.edgeLabel = edgeLabel;
+    return branchIndex;
+  };
 
   // 부모 가지 밑에 @if region을 열고 지금 보이는 가지까지 만든다. IF/IF_EXPR 두 해석기가 같은 순서를 밟는 부분이다 -
   // region 등록, 조건 구독, 보이는 가지 build, 안 보이는 가지에 lazyBuild 설치(켜질 때 이것으로 만든다).
   // 가지는 부른 시점의 해석기로 만든다 - resume 중에는 SSR 노드를 연결하고 runtime은 새로 만든다.
   // anchor를 DOM 어디에 붙일지는 호출자 몫이다. 다음 pc(IF_END 다음)를 돌려준다.
+  //
+  // edgeStartNode는 조건 식 인스턴스다. then/else 가지가 실은 식 인스턴스에 label then/else로 간선을 건다. 조건이
+  // 식 인스턴스가 아니면(IF - 본문에 식 인스턴스가 없다) NO_EDGE_START다.
   openIfRegion = (
     pc: number,
     condLeafIndex: number,
+    edgeStartNode: number,
     condInitial: unknown,
     argumentSourcePairs: TScope,
     compId: number,
@@ -906,6 +920,10 @@ export class VM {
     const elseBranchIndex = region.branchIndices[ELSE_INDEX];
     const thenBranch = this.branchPool.entries[thenBranchIndex];
     const elseBranch = this.branchPool.entries[elseBranchIndex];
+    thenBranch.edgeStartNode = edgeStartNode;
+    thenBranch.edgeLabel = LABEL_THEN;
+    elseBranch.edgeStartNode = edgeStartNode;
+    elseBranch.edgeLabel = LABEL_ELSE;
 
     const { ifBodyEnd, elseBodyStart, ifEndPc } = this.cachedIfRanges(pc);
 
@@ -1489,7 +1507,12 @@ export class VM {
       exprInstancePool.retain(exprInstanceIndex);
       value = this.store.get(exprInstancePool.resultLeafOf(exprInstanceIndex) as number);
     }
-    addExprInstanceToBranch(this.branchAt(branchIndex), exprInstanceIndex);
+    const branch = this.branchAt(branchIndex);
+    addExprInstanceToBranch(branch, exprInstanceIndex);
+    // 가지에 간선의 시작점이 있으면 그 시작점에서 이 식 인스턴스로 간선을 건다. 가지가 없어질 때 freeBranchTree가 지운다.
+    if (branch.edgeStartNode !== NO_EDGE_START) {
+      exprInstancePool.graph.addEdge(branch.edgeStartNode, exprInstanceIndex, branch.edgeLabel);
+    }
     return { exprInstanceIndex, value };
   };
 
