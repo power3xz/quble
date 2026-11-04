@@ -165,8 +165,9 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
 
   // EXPR - 식 하나의 바이트. 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다(되돌아갈 일이 없다).
   //   런타임은 이 바이트를 두 번 훑는다 - 구독을 걸 때 한 번, 값을 셀 때 한 번(#5.2).
-  //   스택에는 **값만** 올라간다. 칸 번호(leafIndex)는 안 올라간다 - 주소와 값이 섞이면 연산자가
-  //   무엇을 계산하는지 알 수 없어진다. Load*가 이미 값을 꺼내 올린다.
+  //   연산자는 값만 받는다. 값이 아닌 것을 올리는 명령은 둘뿐이다 - 인덱스 접근(ElemAt, FieldAt)은
+  //   leafIndex를 올리고 ReadLeaf가 값으로 바꾼다. 삼항의 잎 피연산자(LoadVarRef)는 슬롯 위치를 올리고
+  //   Select가 고른 뒤 읽는다.
   //   타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 런타임은 타입을 안 본다.
   <EXPR> = opcode 1바이트 + opcode별 operand   // 코드의 opcode(#5)와 다른 이름공간 - 값이 겹친다
            0x00 LoadVar          : scope_index:u8, offset:u8  // 그 칸의 값
@@ -180,6 +181,9 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
            0x15 Eq    0x16 Ne    0x17 Lt    0x18 Le    0x19 Gt    0x1a Ge
            0x1b And   0x1c Or
            0x1d Not   0x1e Neg                                    // 단항, operand 없음
+           0x1f ElemAt           : -                          // 인덱스와 배열 정보 번호를 꺼내 요소 시작 leafIndex
+           0x20 FieldAt          : offset:u8                  // leafIndex에 필드 거리를 더한다
+           0x21 ReadLeaf         : -                          // leafIndex를 꺼내 그 leaf의 값
            0x22 LoadExpr         : expr_index:u8              // 하위 식의 값. 자기 번호보다 작다(#5.4)
            0x23 LoadVarRef       : scope_index:u8, offset:u8  // 슬롯 위치만. Select가 고른 뒤 읽는다
            0x24 Select           : kinds:u8                   // 조건, 참, 거짓을 꺼내 하나를 고른다
