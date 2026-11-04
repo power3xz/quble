@@ -6,9 +6,11 @@
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
+import { resume } from "./resume-entry.ts";
 import { compile, type THandlers } from "./runtime.ts";
 import { buildFixture } from "./test-helpers/build.ts";
 import { mount } from "./test-helpers/dom.ts";
+import { renderSsr } from "./test-helpers/ssr.ts";
 
 let qubb: Uint8Array;
 before(() => {
@@ -28,7 +30,8 @@ const handlers: THandlers = {
   },
 };
 
-// subscribed(leafIndex)는 그 leaf에 파생 구독이 걸려 있는지 표현식 층의 구독 표에서 본다.
+// subscribed(leafIndex)는 그 leaf에 파생 구독이 걸려 있는지 표현식 층의 구독 표에서 본다. text()는 `@if (show)`
+// 본문의 글이다.
 const instantiate = () => {
   const inst = compile(qubb)(0)(
     { rows: [{ title: "A" }, { title: "B" }, { title: "C" }], cursor: 0, show: true },
@@ -39,6 +42,7 @@ const instantiate = () => {
     subscribed: (leafIndex: number) => inst.deriveSubscribers[leafIndex] !== undefined,
     set: (leafIndex: number, v: unknown) => inst.store.set(leafIndex, v),
     removeFirstRow: () => (host.querySelector(".remove-first-row") as HTMLButtonElement).click(),
+    text: () => host.querySelector(".shown")?.textContent,
   };
 };
 
@@ -61,12 +65,40 @@ test("앞 요소가 제거되면 빠진 요소의 leaf 구독을 풀고 당겨�
   assert.equal(subscribed(ROWS), true, "배열 필드 leaf 구독은 그대로다");
 });
 
-test("구독을 다시 건 뒤 가지가 꺼지면 다시 건 leaf의 구독을 푼다", () => {
+test("구독을 다시 건 뒤 가지가 꺼져도 다시 건 leaf의 구독은 남는다", () => {
   const { subscribed, set } = instantiate();
   set(CURSOR, 1);
   set(SHOW, false);
-  assert.equal(subscribed(titleLeaf(1)), false, "다시 건 B의 title leaf 구독도 푼다");
-  assert.equal(subscribed(titleLeaf(0)), false, "A의 title leaf 구독도 풀린 채다");
-  assert.equal(subscribed(ROWS), false, "배열 필드 leaf 구독을 푼다");
-  assert.equal(subscribed(CURSOR), false, "cursor 구독을 푼다");
+  assert.equal(subscribed(titleLeaf(1)), true, "다시 건 B의 title leaf 구독이 남는다");
+  assert.equal(subscribed(titleLeaf(0)), false, "A의 title leaf 구독은 풀린 채다");
+  assert.equal(subscribed(ROWS), true, "배열 필드 leaf 구독이 남는다");
+  assert.equal(subscribed(CURSOR), true, "cursor 구독이 남는다");
+});
+
+test("가지가 꺼진 동안 인덱스가 바뀌면 구독을 옮기지 않고, 다시 켜질 때 옮긴다", () => {
+  const { subscribed, set, text } = instantiate();
+  set(SHOW, false);
+  set(CURSOR, 2);
+  assert.equal(subscribed(titleLeaf(0)), true, "식을 세지 않아 A의 title leaf 구독이 남는다");
+  assert.equal(subscribed(titleLeaf(2)), false);
+
+  set(SHOW, true);
+
+  assert.equal(subscribed(titleLeaf(0)), false, "A의 title leaf 구독을 푼다");
+  assert.equal(subscribed(titleLeaf(2)), true, "C의 title leaf에 건다");
+  assert.equal(text(), "C");
+});
+
+test("SSR에서 resume해도 가지가 꺼진 동안 인덱스가 바뀌면 다시 켜질 때 바뀐 요소의 글을 보인다", () => {
+  const data = { rows: [{ title: "A" }, { title: "B" }, { title: "C" }], cursor: 0, show: true };
+  const host = document.createElement("div");
+  host.innerHTML = renderSsr("expr_index_unsubscribe", [], data).html;
+  const inst = resume(qubb, host, { data, handlers });
+  inst.update({ show: false });
+  inst.update({ cursor: 2 });
+
+  inst.update({ show: true });
+
+  assert.equal(host.querySelector(".shown")?.textContent, "C");
+  inst.destroy();
 });

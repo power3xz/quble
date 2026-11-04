@@ -29,7 +29,7 @@ const setup = (leaves: unknown[]) => {
     const value = exprs.evaluate(exprInstanceIndex);
     const resultLeaf = store.alloc([value]);
     exprs.bindResultLeaf(exprInstanceIndex, resultLeaf);
-    exprs.attach(exprInstanceIndex);
+    exprs.subscribeInputs(exprInstanceIndex);
     return { exprInstanceIndex, resultLeaf };
   };
   return { store, exprs, make };
@@ -120,7 +120,8 @@ test("바깥 조건이 false면 안쪽 조건이 true로 남아 있어도 안쪽
   assert.equal(store.get(x.resultLeaf), 10);
 });
 
-test("평가하지 않은 식 인스턴스는 pendingVarMask를 남기고, 다음에 조건이 맞을 때 평가된다", () => {
+test("평가하지 않은 식 인스턴스는 pendingVarMask를 남기고, 조건이 다시 맞은 뒤 recountPending이 평가한다", () => {
+  // 조건이 다시 맞으면 본문이 다시 붙고 region이 recountPending을 호출한다. 이 테스트는 그 호출을 직접 한다.
   const C = 0;
   const V = 1;
   const { store, exprs, make } = setup([true, 1]);
@@ -139,8 +140,39 @@ test("평가하지 않은 식 인스턴스는 pendingVarMask를 남기고, 다�
     store.set(C, true);
     store.set(V, 3);
   });
+  assert.equal(store.get(x.resultLeaf), 10, "마스크가 남은 x는 push가 다시 셀 목록에 넣지 않는다");
+
+  exprs.recountPending(x.exprInstanceIndex);
+
   assert.equal(store.get(x.resultLeaf), 30);
   assert.equal(exprs.pool.entries[x.exprInstanceIndex].pendingVarMask, 0, "평가하고 마스크를 지운다");
+});
+
+test("recountPending은 incoming edge의 시작점을 먼저 평가하고 그 값으로 평가 여부를 정한다", () => {
+  // `[c1] --(then)--> [c2] --(then)--> [x]`에서 c1이 false인 동안 c2의 입력이 false로, x의 입력이 2로 바뀐다. c2와
+  // x는 평가되지 않아 마스크가 남고, c2의 lastValue는 true인 채다. c1이 true가 된 뒤 x를 recountPending하면 c2를
+  // 먼저 평가해 false를 얻으므로 x를 평가하지 않는다. c2를 먼저 평가하지 않으면 낡은 true로 x를 평가한다.
+  const C1 = 0;
+  const C2 = 1;
+  const V = 2;
+  const { store, exprs, make } = setup([true, true, 1]);
+  const c1 = make(COND_EXPR, C1);
+  const c2 = make(COND_EXPR, C2);
+  const x = make(TIMES_TEN_EXPR, V);
+  exprs.graph.addEdge(c1.exprInstanceIndex, c2.exprInstanceIndex, LABEL_THEN);
+  exprs.graph.addEdge(c2.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
+  store.batch(() => {
+    store.set(C1, false);
+    store.set(C2, false);
+    store.set(V, 2);
+  });
+  store.set(C1, true);
+  assert.equal(store.get(c2.resultLeaf), true, "c2는 아직 평가되지 않았다");
+
+  exprs.recountPending(x.exprInstanceIndex);
+
+  assert.equal(store.get(c2.resultLeaf), false, "c2를 먼저 평가한다");
+  assert.equal(store.get(x.resultLeaf), 10, "c2가 false라 x를 평가하지 않는다");
 });
 
 test("incoming labeled edge가 둘이면 그중 하나만 맞아도 끝점을 평가한다", () => {

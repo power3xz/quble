@@ -1,5 +1,5 @@
 // 표현식 층 - 식 인스턴스(식 하나가 한 스코프에서 읽는 leaf들과 결과)를 풀에 두고, 입력 leaf마다 파생 구독을
-// 건다. 가지는 인스턴스 번호만 들고 붙고 떼고 반납할 때 이 층을 부른다(region.ts).
+// 건다. 가지는 인스턴스 번호만 들고 다시 붙고 반납할 때 이 층을 부른다(region.ts).
 //
 // 파생 구독은 식 인스턴스 번호로 건다. `(a + b) * (c - d)`면 a~d 네 leaf에 같은 번호를 건다. 구독 층(leaf-store.ts)은
 // 파생 구독을 모르고, flush마다 바뀐 leaf 모음을 이 층의 flush(통지 전 단계)에 넘긴다. flush는 그 leaf를 읽는
@@ -24,19 +24,13 @@ export type TExprInstance = {
   // 직전에 돌려준 값.
   lastValue: unknown;
   // 마지막으로 센 뒤 바뀐 변수 자리의 비트. readLeaves[n]이 바뀌면 n번 비트를 켠다. flush의 push가 켜고, 0이
-  // 아니면 다시 셀 인스턴스다. 셀 때 이 비트로 건너뛰기 표를 고르고 0으로 지운다.
+  // 아니면 다시 셀 인스턴스다. 셀 때 이 비트로 건너뛰기 표를 고르고 0으로 지운다. pull이 평가하지 않은 쉬는
+  // 인스턴스는 마스크가 다시 붙을 때까지 남는다(recountPending).
   pendingVarMask: number;
-  // 마지막으로 recountExprInstanceIndices에 넣은 flush의 번호. 지금 flush의 번호와 같으면 이미 목록에 있다. pull이
-  // 평가하지 않은 인스턴스는 마스크가 다음 flush까지 남으므로, 마스크로는 목록에 들어 있는지를 알 수 없다.
-  queuedFlushNumber: number;
   // 식의 값을 write할 leaf. bindResultLeaf 전에는 undefined고, 없으면 센 값을 쓰지 않는다.
   resultLeaf: number | undefined;
-  // 이 식 인스턴스를 든 가지 수와, 그중 붙어 있는 가지 수.
+  // 이 식 인스턴스를 든 가지 수.
   refCount: number;
-  attachedCount: number;
-  // 입력 leaf에 파생 구독을 한 번이라도 걸었나. 참인데 attachedCount가 0이면 구독이 풀린 동안 입력이 바뀌어 결과
-  // leaf가 낡았을 수 있다.
-  everAttached: boolean;
   // 공유 맵에 올린 키(globalExprIndex와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
   sharedGlobalExprIndex: number;
   sharedScopeUid: number;
@@ -60,12 +54,10 @@ export class ExprInstancePool {
   readonly deriveSubscribers: TDeriveSlot[] = [];
   // flush의 push가 모은 다시 셀 식 인스턴스 번호. flush마다 배열을 만들지 않고 비우며 재사용한다.
   private recountExprInstanceIndices: number[] = [];
-  // flush마다 1씩 올린다. 식 인스턴스의 queuedFlushNumber와 비교해 목록에 이미 넣었는지 가린다. 첫 flush가 1이라
-  // 식 인스턴스의 처음 값 0과 겹치지 않는다.
-  private flushNumber = 0;
   // 식 인스턴스 사이의 간선. 노드 번호는 식 인스턴스 번호다. pull이 incoming labeled edge로 평가할지 정한다.
   readonly graph = new ExprGraph();
-  // flush 하나에서 값이 바뀐 결과 leaf. pull이 재귀로 평가하는 식 인스턴스도 여기에 더한다. flush 밖에서는 null이다.
+  // flush 하나나 recountPending 하나에서 값이 바뀐 결과 leaf. 요청이 재귀로 평가하는 식 인스턴스도 여기에 더한다.
+  // 둘 밖에서는 null이다.
   private changedResultLeaves: number[] | null = null;
 
   constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
@@ -74,8 +66,8 @@ export class ExprInstancePool {
     store.setDeriveStage(this.flush);
   }
 
-  // 식 인스턴스를 짓는다. refCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고, 가지가
-  // 붙을 때 attach가 건다.
+  // 식 인스턴스를 짓는다. refCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고,
+  // subscribeInputs가 건다.
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 나눈다. 없는 식은 cache도 건너뛰기 표도 두지 않고 leaf가 바뀌면 처음부터
   // 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 flush가 인스턴스당 한 번만 세므로 한 번이면 된다.
@@ -88,11 +80,8 @@ export class ExprInstancePool {
       readLeaves: [],
       lastValue: undefined,
       pendingVarMask: 0,
-      queuedFlushNumber: 0,
       resultLeaf: undefined,
       refCount: 1,
-      attachedCount: 0,
-      everAttached: false,
       sharedGlobalExprIndex: NOT_SHARED,
       sharedScopeUid: NOT_SHARED,
     };
@@ -100,9 +89,9 @@ export class ExprInstancePool {
   };
 
   // 통지 전 단계(store.setDeriveStage로 등록한다). push와 pull 두 단계로 나눈다.
-  //   - push: 바뀐 leaf마다 그 leaf를 파생 구독한 식 인스턴스의 pendingVarMask에 바뀐 변수 자리를 켠다. 이번
-  //     flush에 아직 넣지 않은 인스턴스만 recountExprInstanceIndices에 넣어, 바뀐 leaf 여럿을 읽는 인스턴스도 한 번만
-  //     든다.
+  //   - push: 바뀐 leaf마다 그 leaf를 파생 구독한 식 인스턴스의 pendingVarMask에 바뀐 변수 자리를 켠다. 마스크가
+  //     0이었던 인스턴스만 recountExprInstanceIndices에 넣어, 바뀐 leaf 여럿을 읽는 인스턴스도 한 번만 든다. 앞선
+  //     flush에서 평가하지 않아 마스크가 남은 쉬는 인스턴스도 다시 넣지 않는다 - 다시 붙을 때 recountPending이 센다.
   //     세지 않는다.
   //   - pull: recountExprInstanceIndices의 인스턴스를 요청한다(request). 평가 대상인 인스턴스만 그 마스크로 평가해
   //     결과 leaf에 write한다.
@@ -113,7 +102,6 @@ export class ExprInstancePool {
   // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 쓰지 않는다.
   flush = (changed: ReadonlySet<number>, onError: (error: unknown) => void): number[] | null => {
     const { recountExprInstanceIndices } = this;
-    this.flushNumber++;
     for (const leafIndex of changed) {
       const derives = this.deriveSubscribers[leafIndex];
       if (derives === undefined) {
@@ -192,19 +180,19 @@ export class ExprInstancePool {
     }
   };
 
-  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켜고, 이번 flush에
-  // 아직 넣지 않았으면(queuedFlushNumber) recountExprInstanceIndices에 넣는다. 같은 leaf를 두 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴
+  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켜고, 마스크가
+  // 0이었으면 recountExprInstanceIndices에 넣는다. 같은 leaf를 두 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴
   // 경우) 두 비트를 켠다.
   private markChanged = (exprInstanceIndex: number, leafIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { readLeaves } = instance;
+    const wasZero = instance.pendingVarMask === 0;
     for (let n = 0; n < readLeaves.length; n++) {
       if (readLeaves[n] === leafIndex) {
         instance.pendingVarMask |= 1 << n;
       }
     }
-    if (instance.queuedFlushNumber !== this.flushNumber && instance.pendingVarMask !== 0) {
-      instance.queuedFlushNumber = this.flushNumber;
+    if (wasZero && instance.pendingVarMask !== 0) {
       this.recountExprInstanceIndices.push(exprInstanceIndex);
     }
   };
@@ -278,17 +266,14 @@ export class ExprInstancePool {
     this.pool.entries[exprInstanceIndex].refCount++;
   };
 
-  // refCount를 하나 줄이고, 0이면 구독을 풀고 결과 leaf와 풀 번호를 반납한다.
+  // refCount를 하나 줄이고, 0이면 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다.
   release = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.refCount--;
     if (instance.refCount > 0) {
       return;
     }
-    if (instance.attachedCount > 0) {
-      this.unsubscribeInputs(exprInstanceIndex);
-      instance.attachedCount = 0;
-    }
+    this.unsubscribeInputs(exprInstanceIndex);
     if (instance.sharedGlobalExprIndex !== NOT_SHARED) {
       this.shared[instance.sharedGlobalExprIndex].delete(instance.sharedScopeUid);
     }
@@ -298,44 +283,31 @@ export class ExprInstancePool {
     this.pool.release(exprInstanceIndex);
   };
 
-  // 붙은 가지를 하나 더한다. 붙은 가지가 0에서 1이 되면 입력 leaf마다 파생 구독을 건다. 구독이 풀렸던 적이 있으면
-  // 입력 leaf를 읽는 변수의 비트를 모두 켜고 한 번 세어 놓친 입력을 따라잡는다 - 구독이 풀린 동안 무엇이
-  // 바뀌었는지 기록되지 않았다. 처음 걸 때는 evaluate가 방금 센 값이 최신이라 따라잡지 않는다.
-  attach = (exprInstanceIndex: number): void => {
+  // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 release가 refCount 0에서
+  // 풀 때까지 둔다. 가지가 떼어져 쉬는 동안에도 구독이 남아 push가 바뀐 변수를 pendingVarMask에 모은다.
+  subscribeInputs = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
-    instance.attachedCount++;
-    if (instance.attachedCount > 1) {
-      return;
-    }
     const { readLeaves } = instance;
     for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
       if (this.isInputLeaf(instance, readLeafPosition)) {
         this.subscribeDerive(readLeaves[readLeafPosition], exprInstanceIndex);
       }
     }
-    if (instance.everAttached) {
-      for (let readLeafPosition = 0; readLeafPosition < readLeaves.length; readLeafPosition++) {
-        if (readLeaves[readLeafPosition] >= 0) {
-          instance.pendingVarMask |= 1 << readLeafPosition;
-        }
-      }
-      const previous = instance.lastValue;
-      const value = this.run(exprInstanceIndex);
-      const { resultLeaf } = instance;
-      if (resultLeaf !== undefined && value !== previous) {
-        this.store.write(resultLeaf, value);
-        this.store.notify(resultLeaf);
-      }
-    }
-    instance.everAttached = true;
   };
 
-  // 붙은 가지를 하나 줄인다. 마지막 가지가 떼지면 파생 구독을 푼다.
-  detach = (exprInstanceIndex: number): void => {
-    const instance = this.pool.entries[exprInstanceIndex];
-    instance.attachedCount--;
-    if (instance.attachedCount === 0) {
-      this.unsubscribeInputs(exprInstanceIndex);
+  // 다시 붙는 가지의 식 인스턴스를 요청해(request), 쉬는 동안 남은 pendingVarMask로 평가한다. 요청이 incoming edge의
+  // 시작점을 먼저 요청하므로 시작점도 마스크가 남았으면 먼저 평가한다. 마스크가 0이면 세지 않는다.
+  //
+  // 값이 바뀐 결과 leaf는 바로 notify한다. 가지는 flush의 notify 단계에서 다시 붙어, 바뀐 결과 leaf를 돌려줄 flush가
+  // 이미 끝났다.
+  recountPending = (exprInstanceIndex: number): void => {
+    this.request(exprInstanceIndex);
+    const resultLeaves = this.changedResultLeaves;
+    this.changedResultLeaves = null;
+    if (resultLeaves !== null) {
+      for (const resultLeaf of resultLeaves) {
+        this.store.notify(resultLeaf);
+      }
     }
   };
 
@@ -402,10 +374,6 @@ export class ExprInstancePool {
     const cache = instance.cache as unknown[];
     const changedVarMask = instance.pendingVarMask;
     instance.pendingVarMask = 0;
-    // 변수가 모두 CONST라 입력 leaf가 없는 식을 따라잡을 때(attach)는 바뀐 변수가 없다. 다시 셀 것이 없다.
-    if (changedVarMask === 0) {
-      return instance.lastValue;
-    }
     // 변수 하나만 바뀌면 식 정의가 공유하는 표를 쓴다. 둘 이상이면 그 변수들을 모두 품지 않은 부분식의
     // 표를 만든다(부모가 같은 칸을 두 prop으로 넘긴 경우도 여기다).
     const skipPastOps =

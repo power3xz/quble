@@ -650,7 +650,7 @@ export class VM {
       if (root === null) {
         return;
       }
-      root.detach(store, exprInstancePool, regionPool, branchPool, root);
+      root.detach(store, regionPool, branchPool, root);
       root.anchor.remove();
       root = null;
       this.removeDelegates();
@@ -1482,11 +1482,11 @@ export class VM {
   };
 
   // 식 인스턴스를 가지에 싣고 그 값과 인스턴스 번호를 돌려준다. sharedScopeUid가 있으면 같은 (globalExprIndex, scopeUid)로
-  // 공유 중인 인스턴스를 재사용하고, 없으면 새로 만든다. 구독은 가지가 붙을 때 건다(restoreBranchSubs) - 안 보이는
-  // 가지는 구독 0이다.
+  // 공유 중인 인스턴스를 재사용하고, 없으면 새로 만들어 세고 입력 leaf에 파생 구독을 건다. 구독은 인스턴스를 반납할
+  // 때까지 둔다.
   //
-  // 재사용하면 식을 세지 않고 결과 leaf를 읽는다. 구독이 풀린 동안 입력이 바뀌어 낡았으면 이 가지가 붙을 때 attach가
-  // 따라잡는다.
+  // 재사용하면 식을 세지 않고 결과 leaf를 읽는다. 인스턴스가 쉬는 동안 입력이 바뀌어 낡았으면 이 가지가 붙을 때
+  // recountPending이 센다.
   addExprInstance = (
     globalExprIndex: number,
     pairs: TScope,
@@ -1503,6 +1503,7 @@ export class VM {
         exprInstancePool.markShared(exprInstanceIndex, globalExprIndex, sharedScopeUid);
       }
       value = exprInstancePool.evaluate(exprInstanceIndex);
+      exprInstancePool.subscribeInputs(exprInstanceIndex);
     } else {
       exprInstancePool.retain(exprInstanceIndex);
       value = this.store.get(exprInstancePool.resultLeafOf(exprInstanceIndex) as number);
