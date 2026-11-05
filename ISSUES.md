@@ -141,6 +141,13 @@
 
 ## 미해결
 
+- **해체한 인스턴스를 호출자가 쥐고 있으면 인스턴스당 약 5.2KB가 남는다** - `destroy`는 vm을 가리키는 클로저를
+  끊지만, 인스턴스 객체가 직접 가리키는 그릇은 비우기만 하고 놓지 않는다. 남는 것은 `regionPool`, `branchPool`,
+  `scopeParentPool`, `exprInstances`(각 약 230~290B), `exprGraph`(약 1000B), `snapshot` 클로저(약 170B, `store`와
+  `arrayPool`을 가리킨다)다. 그릇이 비어도 큰 것은 클래스 필드에 화살표 함수를 넣어 객체마다 함수가 따로 생기기
+  때문이다. 그릇을 모두 끊으면 799B가 남는다. 재현: `destroy-memory.test.ts`의 "destroy한 인스턴스를 쥐고 있어도
+  VM을 붙들지 않는다"(todo)가 해체한 `event_toggle` 인스턴스 1000개를 쥐고 인스턴스당 힙을 잰다.
+
 - **공유 식이 없는 행은 식 인스턴스 풀 도입 뒤 main보다 메모리를 더 쓰고 mount가 느리다** - bench-expr
   1000행에서 공유 식이 없는 orders는 heap과 mount가, orders-deep은 heap과 "환율+세율 동시 변경" 클릭이
   main(ef53364)보다 크다. 행마다 공유 식이 든 orders-shared는 mount, heap, 클릭 모두 main보다 작다.
