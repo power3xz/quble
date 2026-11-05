@@ -10,7 +10,7 @@ import { mount } from "./test-helpers/dom.ts";
 
 const qubb: Record<string, Uint8Array> = {};
 before(() => {
-  for (const name of ["for_count", "for_if_count"]) {
+  for (const name of ["for_count", "for_if_count", "for_nested_scope"]) {
     qubb[name] = buildFixture(name);
   }
 });
@@ -54,6 +54,24 @@ test("@if 품은 회차 재증가 시 region 칸도 재사용돼 regionPool이 �
   store.set(0, 3); // n
   assert.equal(inst.regionPool.free.length, 0, "반납된 region 칸 전부 재사용");
   assert.equal(inst.regionPool.entries.length, lenAt3, "재사용했으니 regionPool 길이 그대로");
+});
+
+// for_nested_scope는 n행 x m칸이고 칸마다 자식 컴포넌트 ScopeCell을 그린다. scope는 root 1개, 행 n개, 칸 n x m개,
+// ScopeCell n x m개다. n=2, m=3이면 1 + 2 + 6 + 6 = 15개다.
+test("행을 모두 지우면 행, 그 안의 칸, 칸이 그린 자식 컴포넌트의 scopeUid가 반납된다", () => {
+  const { store, inst } = instantiate("for_nested_scope", { n: 2, m: 3 });
+  assert.equal(inst.scopeParentPool.entries.length, 15);
+  assert.equal(inst.scopeParentPool.free.length, 0, "초기엔 반납된 scopeUid 없음");
+  store.set(0, 0); // n
+  assert.equal(inst.scopeParentPool.free.length, 14, "root를 뺀 14개 반납");
+});
+
+test("행을 다시 늘리면 반납된 scopeUid를 재사용해 scopeParentPool이 안 커진다", () => {
+  const { store, inst } = instantiate("for_nested_scope", { n: 2, m: 3 });
+  store.set(0, 0); // n
+  store.set(0, 2); // n
+  assert.equal(inst.scopeParentPool.free.length, 0, "반납된 scopeUid 전부 재사용");
+  assert.equal(inst.scopeParentPool.entries.length, 15, "재사용했으니 길이 그대로");
 });
 
 // 제거된 회차의 @if 조건 구독이 store에 잔류하면, 이후 flag 토글이 free된(또는 재사용된) region을

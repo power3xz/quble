@@ -1,4 +1,5 @@
 import type { Pool } from "./pool-allocator.ts";
+import type { TScopeParentPool } from "./scope-uid.ts";
 
 // Region - 노드가 붙었다/떼였다 하는 경계. @if(then/else 중 하나만 보임)와 @for(회차 전부 보임)
 // 두 종류. 모든 관계는 인덱스 기반 - 객체는 regionPool/branchPool 두 배열에만 살고 나머지는 숫자로
@@ -51,6 +52,10 @@ export type TBranch = {
   // FOR_COUNT_VAR로 컴파일된 가지다(BYTECODE.md #5.2).
   edgeStartNode: number;
   edgeLabel: number;
+  // 이 가지가 연 scope의 scopeUid. @for 회차 가지는 그 회차의 scopeUid, 그리고 가지 안에서 그린 자식 컴포넌트들의
+  // scopeUid다(자식 컴포넌트는 가지를 따로 만들지 않는다). 가지를 반납할 때 함께 반납한다. 연 scope가 없는 가지는
+  // null이라 배열을 잡지 않는다.
+  scopeUids: number[] | null;
   childRegionIndices: number[];
   built: boolean;
   // 한 번이라도 DOM에 붙었나. 처음 붙을 때는 build가 방금 현재 값으로 노드를 채웠으므로 놓친 값을
@@ -93,6 +98,7 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
     exprInstanceIndices: null,
     edgeStartNode: NO_EDGE_START,
     edgeLabel: 0,
+    scopeUids: null,
     childRegionIndices: [],
     built: false,
     everAttached: false,
@@ -103,6 +109,12 @@ const appendBranch = (branchPool: Pool<TBranch>): number =>
 export const addExprInstanceToBranch = (branch: TBranch, exprInstanceIndex: number): void => {
   branch.exprInstanceIndices ??= [];
   branch.exprInstanceIndices.push(exprInstanceIndex);
+};
+
+// 가지가 연 scope의 scopeUid를 가지의 목록에 더한다. 목록은 처음 더할 때 만든다.
+export const addScopeUidToBranch = (branch: TBranch, scopeUid: number): void => {
+  branch.scopeUids ??= [];
+  branch.scopeUids.push(scopeUid);
 };
 
 // 한 가지의 직속 통지 구독만 끊는다(잎 작업). 자식 Region 재귀는 detach 함수가 전담.
@@ -396,17 +408,18 @@ export const attachGrownIterations = (
 // 가지가 든 식 인스턴스(보간 식, IF_EXPR 조건)도 여기서 반납한다(exprs.release). 인스턴스의 참조 수가 0이 되면
 // 결과 leaf까지 store에 돌려준다. 반납하기 전에 이 가지가 건 incoming edge를 지운다. 자식 region을 먼저 반납하므로
 // 이 가지가 실은 식 인스턴스가 시작점인 간선(자식 @if의 조건 식 인스턴스, 자식 개수 @for의 행 수 식 인스턴스에서
-// 나가는 간선)은 그 인스턴스를 반납할 때 이미 지워져 있다.
+// 나가는 간선)은 그 인스턴스를 반납할 때 이미 지워져 있다. 가지가 연 scope의 scopeUid도 여기서 반납한다.
 const freeBranchTree = (
   store: Store,
   exprs: TExprInstanceLayer,
+  scopeParentPool: TScopeParentPool,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   branchIndex: number,
 ): void => {
   const branch = branchPool.entries[branchIndex];
   for (const childRegionIndex of branch.childRegionIndices) {
-    freeRegionTree(store, exprs, regionPool, branchPool, childRegionIndex);
+    freeRegionTree(store, exprs, scopeParentPool, regionPool, branchPool, childRegionIndex);
   }
   if (branch.exprInstanceIndices !== null) {
     const { edgeStartNode, edgeLabel } = branch;
@@ -417,6 +430,11 @@ const freeBranchTree = (
       exprs.release(exprInstanceIndex);
     }
   }
+  if (branch.scopeUids !== null) {
+    for (const scopeUid of branch.scopeUids) {
+      scopeParentPool.release(scopeUid);
+    }
+  }
   branchPool.release(branchIndex);
 };
 
@@ -424,13 +442,14 @@ const freeBranchTree = (
 const freeRegionTree = (
   store: Store,
   exprs: TExprInstanceLayer,
+  scopeParentPool: TScopeParentPool,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
 ): void => {
   const region = regionPool.entries[regionIndex];
   for (const branchIndex of region.branchIndices) {
-    freeBranchTree(store, exprs, regionPool, branchPool, branchIndex);
+    freeBranchTree(store, exprs, scopeParentPool, regionPool, branchPool, branchIndex);
   }
   regionPool.release(regionIndex);
 };
@@ -440,6 +459,7 @@ const freeRegionTree = (
 export const truncateFor = (
   store: Store,
   exprs: TExprInstanceLayer,
+  scopeParentPool: TScopeParentPool,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
@@ -448,7 +468,7 @@ export const truncateFor = (
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   for (let i = branchIndices.length - 1; i >= count; i--) {
     detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-    freeBranchTree(store, exprs, regionPool, branchPool, branchIndices[i]);
+    freeBranchTree(store, exprs, scopeParentPool, regionPool, branchPool, branchIndices[i]);
   }
   branchIndices.length = count;
 };
@@ -459,6 +479,7 @@ export const truncateFor = (
 export const removeBranchAt = (
   store: Store,
   exprs: TExprInstanceLayer,
+  scopeParentPool: TScopeParentPool,
   regionPool: Pool<TRegion>,
   branchPool: Pool<TBranch>,
   regionIndex: number,
@@ -466,6 +487,6 @@ export const removeBranchAt = (
 ): void => {
   const branchIndices = regionPool.entries[regionIndex].branchIndices;
   detachOneBranch(store, regionPool, branchPool, branchIndices[i]);
-  freeBranchTree(store, exprs, regionPool, branchPool, branchIndices[i]);
+  freeBranchTree(store, exprs, scopeParentPool, regionPool, branchPool, branchIndices[i]);
   branchIndices.splice(i, 1);
 };

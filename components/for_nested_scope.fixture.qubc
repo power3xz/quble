@@ -1,0 +1,18 @@
+component ForNestedScope {
+  props { n: number, m: number }
+  template {
+    div() {
+      @for (row of n) {
+        @for (cell of m) {
+          Cell: ScopeCell( /)
+        }
+      }
+    }
+  }
+}
+
+component ScopeCell {
+  template {
+    span() { "c" }
+  }
+}

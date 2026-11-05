@@ -24,6 +24,7 @@ import {
   type TRegion,
 } from "./region.ts";
 import { STORE } from "./scope.ts";
+import type { TScopeParentPool } from "./scope-uid.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 
 void mount;
@@ -107,6 +108,7 @@ test("가지를 지우면 가지가 든 식 인스턴스의 결과 leaf를 반�
   const exprs = new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
   const regionPool: Pool<TRegion> = new Pool();
   const branchPool: Pool<TBranch> = new Pool();
+  const scopeParentPool: TScopeParentPool = new Pool<number>();
   const regionIndex = appendForRegion(regionPool, 0);
   document.createElement("div").append(regionPool.entries[regionIndex].anchor);
   const branchIndex = appendBranchOfForRegion(regionPool, branchPool, regionIndex);
@@ -116,7 +118,7 @@ test("가지를 지우면 가지가 든 식 인스턴스의 결과 leaf를 반�
   exprs.bindResultLeaf(exprInstanceIndex, 2);
   addExprInstanceToBranch(branchPool.entries[branchIndex], exprInstanceIndex);
 
-  removeBranchAt(store, exprs, regionPool, branchPool, regionIndex, 0);
+  removeBranchAt(store, exprs, scopeParentPool, regionPool, branchPool, regionIndex, 0);
 
   assert.deepEqual([store.alloc([9]), store.alloc([9])], [2, 4], "2는 한 번만 반납되어 재사용되고 다음은 끝에 붙는다");
 });

@@ -35,6 +35,7 @@ import {
 } from "./opcodes.ts";
 import { NO_EDGE_START } from "./region.ts";
 import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
+import { NO_PARENT_SCOPE_UID } from "./scope-uid.ts";
 import { STEP_FIRST_CHILD, STEP_NEXT_SIBLING, stepsToEachHole } from "./template-steps.ts";
 import { snapshotStacks, type TSlotPlaceholderContent, type TTemplatePlan, type TWalkStacks, type VM } from "./vm.ts";
 
@@ -628,7 +629,7 @@ export class RuntimeInterpreter {
           // childRegionIndices에 합류하고 같은 regionPool 배열에 append된다(인덱스 전역 유일).
           // 자식 루트 region 없음 - 자식 직속 노드는 fragment로 모여 RENDER 위치에 붙는다.
           const childDef = vm.module.defs[childCompId];
-          walkStacks.scopeUidStack.push(vm.nextScopeUid());
+          walkStacks.scopeUidStack.push(vm.allocScopeUid(NO_PARENT_SCOPE_UID, startBranchIndex));
           const childFragment = this.interpret(
             vm,
             childArgumentSourcePairs,

@@ -40,9 +40,10 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
-import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
-import { staticElementEnds } from "./static-spans.ts";
 import { NO_EDGE_START } from "./region.ts";
+import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
+import { NO_PARENT_SCOPE_UID } from "./scope-uid.ts";
+import { staticElementEnds } from "./static-spans.ts";
 import { nodesOf, snapshotStacks, type TSlotPlaceholderContent, type TWalkStacks, type VM } from "./vm.ts";
 
 // SSR이 텍스트 경계를 주석으로 남긴다(crates/renderer).
@@ -389,7 +390,7 @@ export class ResumeInterpreter {
           const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
           segment = null;
           const childDef = vm.module.defs[childCompId];
-          walkStacks.scopeUidStack.push(vm.nextScopeUid());
+          walkStacks.scopeUidStack.push(vm.allocScopeUid(NO_PARENT_SCOPE_UID, startBranchIndex));
           const childTops = this.interpret(
             vm,
             childArgumentSourcePairs,

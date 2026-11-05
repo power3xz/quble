@@ -1,4 +1,5 @@
 {
+  "for_nested_scope": [{ "n": 2, "m": 3 }],
   "expr_level": [
     {
       "a": 2,
