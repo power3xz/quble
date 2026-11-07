@@ -36,7 +36,8 @@ export type TExprInstance = {
   // 이 식 인스턴스를 든 가지 수.
   heldByBranchCount: number;
   // 입력 식의 인스턴스. evaluate가 처음 셀 때 만든다. 계산 식은 inputs[i]의 인스턴스, 삼항은 [cond, 참 갈래, 거짓
-  // 갈래]이고, 삼항에서 잎과 상수 피연산자, 아직 고르지 않은 갈래 자리는 undefined다. 입력이 없으면 NO_INPUT_INSTANCES다.
+  // 갈래]이고, 삼항에서 잎과 상수 피연산자, 아직 고르지 않은 갈래 자리는 undefined다. 삼항은 피연산자가 모두 잎이어도
+  // 처음 셀 때 배열을 둔다. 입력이 없는 계산 식과 아직 세지 않은 인스턴스는 NO_INPUT_INSTANCES다.
   inputInstances: readonly (number | undefined)[];
   // 계산 식이 셀 때 평가기에 넘기는 입력 값. inputValues[i]가 inputInstances[i]의 값이다. 입력이 없으면 NO_INPUT_VALUES다.
   inputValues: readonly unknown[];
@@ -240,21 +241,28 @@ export class ExprInstancePool {
     }
   };
 
-  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켠다. 다시 셀
-  // 인스턴스가 아니었으면 recountExprInstanceIndices에 넣고 그 값을 읽는 식 인스턴스로 표시를 올린다. 같은 leaf를 두
-  // 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴 경우) 두 비트를 켠다.
+  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켠다. 마스크가
+  // 0이었으면 recountExprInstanceIndices에 넣고 그 값을 읽는 식 인스턴스로 표시를 올린다. 같은 leaf를 두 변수가
+  // 읽으면(부모가 같은 칸을 두 prop으로 넘긴 경우) 두 비트를 켠다.
+  //
+  // inputMarked만 켜져 있던 인스턴스도 마스크가 0이라 목록에 다시 든다. 셀 때 표시를 지우므로 두 번 세지 않고, 위로
+  // 올리는 표시도 이미 표시된 인스턴스에서 멈춘다.
   private markChanged = (exprInstanceIndex: number, leafIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { readLeaves } = instance;
-    const wasMarked = needsRecount(instance);
+    const wasZero = instance.pendingVarMask === 0;
     for (let n = 0; n < readLeaves.length; n++) {
       if (readLeaves[n] === leafIndex) {
         instance.pendingVarMask |= 1 << n;
       }
     }
-    if (!wasMarked && instance.pendingVarMask !== 0) {
+    if (wasZero && instance.pendingVarMask !== 0) {
       this.recountExprInstanceIndices.push(exprInstanceIndex);
-      this.markOutputInstances(exprInstanceIndex);
+      // 읽는 식이 없는 인스턴스가 대부분이다. 호출 전에 걸러 두면 V8이 flush에 markOutputInstances를 inline하지 않아,
+      // flush의 inline 한도가 recount에 남는다.
+      if (instance.outputInstances !== null) {
+        this.markOutputInstances(exprInstanceIndex, instance.outputInstances);
+      }
     }
   };
 
@@ -263,11 +271,7 @@ export class ExprInstancePool {
   // recountExprInstanceIndices에 넣는다.
   //   ok ? price * 2 : row.x 에서 price가 바뀌면 price * 2에서 ok가 true인 행의 삼항으로 올라간다. ok가 false인 행은
   //   price * 2를 고르지 않아 올라가지 않는다.
-  private markOutputInstances = (exprInstanceIndex: number): void => {
-    const { outputInstances } = this.pool.entries[exprInstanceIndex];
-    if (outputInstances === null) {
-      return;
-    }
+  private markOutputInstances = (exprInstanceIndex: number, outputInstances: readonly number[]): void => {
     for (const output of outputInstances) {
       const outputInstance = this.pool.entries[output];
       if (needsRecount(outputInstance) || !this.readsActively(outputInstance, exprInstanceIndex)) {
@@ -277,7 +281,9 @@ export class ExprInstancePool {
       if (outputInstance.heldByBranchCount > 0) {
         this.recountExprInstanceIndices.push(output);
       }
-      this.markOutputInstances(output);
+      if (outputInstance.outputInstances !== null) {
+        this.markOutputInstances(output, outputInstance.outputInstances);
+      }
     }
   };
 
@@ -290,27 +296,14 @@ export class ExprInstancePool {
 
   // 식을 다시 세어 값을 돌려주고 lastValue에 기록한다. store에 쓰지 않는다. 결과 leaf에는 늘 lastValue가 들어
   // 있으므로(처음 값은 evaluate가 센 값이다) 결과 leaf를 읽지 않고 lastValue로 바뀌었는지 가린다. 세기 전에
-  // pendingVarMask와 inputMarked를 지운다 - 식이 throw해도 표시가 다음 flush로 남지 않는다.
+  // pendingVarMask를 0으로 지운다 - 식이 throw해도 마스크가 다음 flush로 남지 않는다.
   //
-  // 삼항과 입력이 있는 계산 식은 evaluate로 처음부터 센다. evaluate가 연결한 입력 인스턴스를 먼저 요청해 이번 flush의
-  // 값으로 만든다. 부분 재평가를 하지 않는 이유는 LoadInput이 leafOfVar에 자리가 없어 건너뛰기 표가 바뀐 입력을 모르기
-  // 때문이다. 다시 센 뒤 읽는 leaf가 바뀌었으면 구독을 옮긴다. 바뀌는 때는 삼항이 다른 갈래를 골랐을 때와 계산 식의
-  // 배열 인덱스가 바뀌었을 때뿐이라 그때만 견준다.
+  // 삼항과 입력이 있는 계산 식(inputInstances가 NO_INPUT_INSTANCES가 아니다)은 runWithInputs가 센다. 그 경로를 이
+  // 함수에 두면 flush에 inline되는 크기가 커져, 입력이 없는 식만 있는 화면도 느려진다.
   private run = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
-    const exprInputs = this.exprInputs[instance.globalExprIndex];
-    if (exprInputs.kind === "ternary" || exprInputs.inputs.length > 0) {
-      instance.pendingVarMask = 0;
-      instance.inputMarked = false;
-      const previousReadLeaves = instance.readLeaves;
-      const previousChosenPosition = instance.chosenPosition;
-      const value = this.evaluate(exprInstanceIndex);
-      if (exprInputs.kind !== "ternary") {
-        this.resubscribeChangedVars(exprInstanceIndex, previousReadLeaves);
-      } else if (instance.chosenPosition !== previousChosenPosition) {
-        this.resubscribeBranchLeaf(exprInstanceIndex, previousReadLeaves);
-      }
-      return value;
+    if (instance.inputInstances !== NO_INPUT_INSTANCES) {
+      return this.runWithInputs(exprInstanceIndex);
     }
     if (instance.cache === null) {
       instance.pendingVarMask = 0;
@@ -327,6 +320,26 @@ export class ExprInstancePool {
       return instance.lastValue;
     }
     return this.runPartial(exprInstanceIndex);
+  };
+
+  // 삼항과 입력이 있는 계산 식을 evaluate로 처음부터 다시 센다. 세기 전에 pendingVarMask와 inputMarked를 지운다.
+  // evaluate가 연결한 입력 인스턴스를 먼저 요청해 이번 flush의 값으로 만든다. 부분 재평가를 하지 않는 이유는
+  // LoadInput이 leafOfVar에 자리가 없어 건너뛰기 표가 바뀐 입력을 모르기 때문이다. 다시 센 뒤 읽는 leaf가 바뀌었으면
+  // 구독을 옮긴다. 바뀌는 때는 삼항이 다른 갈래를 골랐을 때와 계산 식의 배열 인덱스가 바뀌었을 때뿐이라 그때만 견준다.
+  private runWithInputs = (exprInstanceIndex: number): unknown => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    const exprInputs = this.exprInputs[instance.globalExprIndex];
+    instance.pendingVarMask = 0;
+    instance.inputMarked = false;
+    const previousReadLeaves = instance.readLeaves;
+    const previousChosenPosition = instance.chosenPosition;
+    const value = this.evaluate(exprInstanceIndex);
+    if (exprInputs.kind !== "ternary") {
+      this.resubscribeChangedVars(exprInstanceIndex, previousReadLeaves);
+    } else if (instance.chosenPosition !== previousChosenPosition) {
+      this.resubscribeBranchLeaf(exprInstanceIndex, previousReadLeaves);
+    }
+    return value;
   };
 
   // 식을 처음부터 세어 값을 돌려주고, 읽은 leaf(readLeaves)와 값(lastValue)을 인스턴스에 기록한다. 몇 번을 불러도
@@ -404,7 +417,9 @@ export class ExprInstancePool {
       value = this.readOperand(instance, exprInputs.elseBranch, elseInstance, reads);
       instance.chosenPosition = ELSE_POSITION;
     }
+    // 피연산자가 모두 잎이어도 처음 셀 때 배열을 둔다. run이 NO_INPUT_INSTANCES인지만 보고 입력이 있는 식을 가린다.
     if (
+      linked === NO_INPUT_INSTANCES ||
       condInstance !== linked[COND_POSITION] ||
       thenInstance !== linked[THEN_POSITION] ||
       elseInstance !== linked[ELSE_POSITION]
