@@ -139,6 +139,21 @@ export const snapshotStacks = (walkStacks: TWalkStacks): TWalkStacks => ({
   activeContexts: [...walkStacks.activeContexts],
 });
 
+// 지금 자리를 컴포넌트 안에서 감싼 @for 수. loopIndexStack은 @for마다 (kind, ref) 둘을 쌓고 바깥 컴포넌트의 @for도
+// 담아, 이 컴포넌트가 시작할 때의 회차 수(loopIndexBase)를 뺀다.
+const forDepthOf = (walkStacks: TWalkStacks, loopIndexBase: number): number =>
+  walkStacks.loopIndexStack.length / 2 - loopIndexBase;
+
+// 이 컴포넌트 안에서 깊이 level인 scope의 scopeUid. 깊이는 컴포넌트 root가 0이고 안쪽 @for로 갈수록 커진다.
+// 스택은 컴포넌트를 가로질러 쌓이므로 이 컴포넌트 root의 자리는 맨 위에서 forDepth만큼 내려간 곳이고, 거기서 level만큼
+// 올라간 곳이다.
+//   Page(0) > @for 행(1) > Card(2) > @for 행(3)이면 스택은 [0, 1, 2, 3]이고 Card 안 forDepth 1에서
+//   level 0은 스택[2], level 1은 스택[3]이다.
+const scopeUidAtLevel = (walkStacks: TWalkStacks, forDepth: number, level: number): number => {
+  const { scopeUidStack } = walkStacks;
+  return scopeUidStack[scopeUidStack.length - 1 - forDepth + level];
+};
+
 // field ref 하나를 assemble이 커서로 소비할 [kind, ref, ...] 열로 푼다(바인딩 때 1회). 한 field는
 // 단일 출처다 - 리터럴이면 CONST 쌍 하나, 변수면 그 슬롯의 kind. 객체 변수는 store에 연속으로
 // 깔려(base부터 재귀적으로 이어짐) base+offset부터 leaf 개수만큼 STORE 쌍으로 펼친다. leaf
@@ -1488,30 +1503,10 @@ export class VM {
   globalExprIndexOf = (compId: number, localExprIndex: number): number =>
     this.module.globalExprBase[compId] + localExprIndex;
 
-  // 식을 공유할 스코프의 scopeUid. 식의 level이 이 자리가 컴포넌트 안에서 든 @for 깊이보다 낮을 때만 있다 - 같은
-  // 깊이면 행마다 값이 달라 공유할 것이 없으므로 NOT_SHARED다.
-  // 스택은 컴포넌트를 가로질러 쌓이므로 이 컴포넌트의 scopeUid 위치는 맨 위에서 @for 깊이만큼 내려간 곳이고, level만큼
-  // 올라간 곳이 식이 읽는 가장 깊은 스코프다.
-  //   Page(0) > @for 행(1) > Card(2) > @for 행(3)이면 스택은 [0, 1, 2, 3]이고 Card 안 깊이 1에서
-  //   level 0은 스택[2], level 1은 스택[3]이다.
-  sharedScopeUidOf = (
-    compId: number,
-    localExprIndex: number,
-    walkStacks: TWalkStacks,
-    loopIndexBase: number,
-  ): number => {
-    const level = this.exprLevels[this.globalExprIndexOf(compId, localExprIndex)];
-    const forDepth = walkStacks.loopIndexStack.length / 2 - loopIndexBase;
-    if (level >= forDepth) {
-      return NOT_SHARED;
-    }
-    const { scopeUidStack } = walkStacks;
-    return scopeUidStack[scopeUidStack.length - 1 - forDepth + level];
-  };
-
-  // 식 인스턴스를 가지에 싣고 그 값과 인스턴스 번호를 돌려준다. sharedScopeUid가 있으면 같은 (globalExprIndex, scopeUid)로
-  // 공유 중인 인스턴스를 재사용하고, 없으면 새로 만들어 세고 입력 leaf에 파생 구독을 건다. 구독은 인스턴스를 반납할
-  // 때까지 둔다.
+  // 식 인스턴스를 가지에 싣고 그 값과 인스턴스 번호를 돌려준다. 인스턴스는 식의 level 깊이에 있는 scope에 둔다. level이
+  // 이 자리를 컴포넌트 안에서 감싼 @for 깊이보다 낮으면 같은 (globalExprIndex, scopeUid)로 공유 중인 인스턴스를
+  // 재사용하고, 없으면 새로 만들어 세고 입력 leaf에 파생 구독을 건다. 같은 깊이면 행마다 값이 달라 공유할 것이 없어 늘
+  // 새로 만든다. 구독은 인스턴스를 반납할 때까지 둔다.
   //
   // 재사용하면 식을 세지 않고 결과 leaf를 읽는다. 인스턴스가 쉬는 동안 입력이 바뀌어 낡았으면 이 가지가 붙을 때
   // recountPending이 센다.
@@ -1519,23 +1514,27 @@ export class VM {
     globalExprIndex: number,
     pairs: TScope,
     branchIndex: number,
-    sharedScopeUid: number,
+    walkStacks: TWalkStacks,
+    loopIndexBase: number,
   ): { exprInstanceIndex: number; value: unknown } => {
     const { exprInstancePool } = this;
-    let exprInstanceIndex =
-      sharedScopeUid === NOT_SHARED ? NOT_SHARED : exprInstancePool.findShared(globalExprIndex, sharedScopeUid);
+    const level = this.exprLevels[globalExprIndex];
+    const forDepth = forDepthOf(walkStacks, loopIndexBase);
+    const scopeUid = scopeUidAtLevel(walkStacks, forDepth, level);
+    const shared = level < forDepth;
+    let exprInstanceIndex = shared ? exprInstancePool.findShared(globalExprIndex, scopeUid) : NOT_SHARED;
     let value: unknown;
     if (exprInstanceIndex === NOT_SHARED) {
-      exprInstanceIndex = exprInstancePool.create(globalExprIndex, pairs);
-      if (sharedScopeUid !== NOT_SHARED) {
-        exprInstancePool.markShared(exprInstanceIndex, globalExprIndex, sharedScopeUid);
+      exprInstanceIndex = exprInstancePool.create(globalExprIndex, pairs, scopeUid);
+      if (shared) {
+        exprInstancePool.markShared(exprInstanceIndex, globalExprIndex, scopeUid);
       }
       value = exprInstancePool.evaluate(exprInstanceIndex);
       exprInstancePool.subscribeInputs(exprInstanceIndex);
     } else {
-      exprInstancePool.retainByBranch(exprInstanceIndex);
       value = this.store.get(exprInstancePool.resultLeafOf(exprInstanceIndex) as number);
     }
+    exprInstancePool.retainByBranch(exprInstanceIndex);
     const branch = this.branchAt(branchIndex);
     addExprInstanceToBranch(branch, exprInstanceIndex);
     // 가지에 간선의 시작점이 있으면 그 시작점에서 이 식 인스턴스로 간선을 건다. 가지가 없어질 때 freeBranchTree가 지운다.
@@ -1568,13 +1567,15 @@ export class VM {
     update: (v: unknown) => void,
     argumentSourcePairs: TScope,
     branchIndex: number,
-    sharedScopeUid: number,
+    walkStacks: TWalkStacks,
+    loopIndexBase: number,
   ) => {
     const { exprInstanceIndex, value } = this.addExprInstance(
       globalExprIndex,
       argumentSourcePairs,
       branchIndex,
-      sharedScopeUid,
+      walkStacks,
+      loopIndexBase,
     );
     this.bindLeaf(this.allocResultLeaf(exprInstanceIndex, value), update, branchIndex);
     return value;
@@ -1631,7 +1632,8 @@ export class VM {
           },
           argumentSourcePairs,
           branchIndex,
-          this.sharedScopeUidOf(compId, code[pc], walkStacks, loopIndexBase),
+          walkStacks,
+          loopIndexBase,
         );
         node.textContent = lastValue as string;
         return;
@@ -1658,7 +1660,8 @@ export class VM {
             update,
             argumentSourcePairs,
             branchIndex,
-            this.sharedScopeUidOf(compId, code[pc + 2], walkStacks, loopIndexBase),
+            walkStacks,
+            loopIndexBase,
           );
     setAttributeSafely(el, name, lastValue);
   };

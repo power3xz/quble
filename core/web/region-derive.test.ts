@@ -30,6 +30,8 @@ import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
 void mount;
 
 const load = (slot: number) => [EXPR_LOAD_VAR, slot, 0];
+// 이 파일의 식 인스턴스는 모두 scope 하나(root)에 있다.
+const SCOPE_UID = 0;
 
 // leaf 0은 조건, 1은 입력 a, 2는 `a * 10`의 결과, 3은 조건 식 인스턴스의 결과다. then 가지가 `a * 10` 식 인스턴스
 // 하나를 싣고, 조건 식 인스턴스에서 label then 간선을 받는다(vm의 addExprInstance가 거는 것과 같다). 결과 leaf 2는
@@ -44,7 +46,8 @@ const setup = () => {
   const regionIndex = appendIfRegion(regionPool, branchPool, 0);
   const region = regionPool.entries[regionIndex];
   document.createElement("div").append(region.anchor);
-  const cond = exprs.create(1, [STORE, 0]);
+  const cond = exprs.create(1, [STORE, 0], SCOPE_UID);
+  exprs.retainByBranch(cond);
   exprs.evaluate(cond);
   exprs.bindResultLeaf(cond, 3);
   exprs.subscribeInputs(cond);
@@ -52,7 +55,8 @@ const setup = () => {
   thenBranch.built = true;
   thenBranch.edgeStartNode = cond;
   thenBranch.edgeLabel = LABEL_THEN;
-  const exprInstanceIndex = exprs.create(0, [STORE, 1]);
+  const exprInstanceIndex = exprs.create(0, [STORE, 1], SCOPE_UID);
+  exprs.retainByBranch(exprInstanceIndex);
   exprs.evaluate(exprInstanceIndex);
   exprs.bindResultLeaf(exprInstanceIndex, 2);
   exprs.subscribeInputs(exprInstanceIndex);
@@ -113,7 +117,8 @@ test("가지를 지우면 가지가 든 식 인스턴스의 결과 leaf를 반�
   document.createElement("div").append(regionPool.entries[regionIndex].anchor);
   const branchIndex = appendBranchOfForRegion(regionPool, branchPool, regionIndex);
   // 식 인스턴스 하나가 입력 leaf 둘(0, 1)을 읽고 결과 leaf는 2다.
-  const exprInstanceIndex = exprs.create(0, [STORE, 0, STORE, 1]);
+  const exprInstanceIndex = exprs.create(0, [STORE, 0, STORE, 1], SCOPE_UID);
+  exprs.retainByBranch(exprInstanceIndex);
   exprs.evaluate(exprInstanceIndex);
   exprs.bindResultLeaf(exprInstanceIndex, 2);
   addExprInstanceToBranch(branchPool.entries[branchIndex], exprInstanceIndex);

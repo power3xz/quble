@@ -34,14 +34,17 @@ const product = () => ({
 
 // exprBytes[globalExprIndex]가 식 바이트다. build는 픽스처의 식을 0번, leaf 하나를 그대로 읽는 조건을 1번에 둔다.
 const COND_EXPR = 1;
+// 이 파일의 식 인스턴스는 모두 scope 하나(root)에 있다.
+const SCOPE_UID = 0;
 const poolOf = (store: ReturnType<typeof createLeafStoreSubject>, exprBytes: Uint8Array[]) =>
   new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
 
-// 식 인스턴스를 만들고 처음 센 뒤 결과 leaf에 그 값을 넣고 연결한다(VM의 allocResultLeaf와 같다). 구독은 걸지
-// 않은 상태다.
+// 식 인스턴스를 만들어 가지 하나가 든 것처럼 retainByBranch하고, 처음 센 뒤 결과 leaf에 그 값을 넣고 연결한다(VM의
+// addExprInstance, allocResultLeaf와 같다). 구독은 걸지 않은 상태다.
 const build = (fixture: ReturnType<typeof sum>) => {
   const pool = poolOf(fixture.store, [fixture.expr, new Uint8Array(load(0))]);
-  const exprInstanceIndex = pool.create(0, fixture.pairs);
+  const exprInstanceIndex = pool.create(0, fixture.pairs, SCOPE_UID);
+  pool.retainByBranch(exprInstanceIndex);
   const value = pool.evaluate(exprInstanceIndex);
   fixture.store.write(fixture.resultLeafIndex, value);
   pool.bindResultLeaf(exprInstanceIndex, fixture.resultLeafIndex);
@@ -57,17 +60,26 @@ const rest = (
   exprInstanceIndex: number,
 ): (() => void) => {
   const condLeaf = store.alloc([false]);
-  const cond = pool.create(COND_EXPR, [STORE, condLeaf]);
+  const cond = pool.create(COND_EXPR, [STORE, condLeaf], SCOPE_UID);
+  pool.retainByBranch(cond);
   pool.evaluate(cond);
   pool.subscribeInputs(cond);
   pool.graph.addEdge(cond, exprInstanceIndex, LABEL_THEN);
   return () => store.set(condLeaf, true);
 };
 
-test("create는 heldByBranchCount 1로 만들고 evaluate는 식을 세되 구독은 걸지 않는다", () => {
-  const { pool, exprInstanceIndex, value, store } = build(sum());
+test("create는 가지도 식도 붙들지 않은 인스턴스를 만든다", () => {
+  const fixture = sum();
+  const pool = poolOf(fixture.store, [fixture.expr]);
+  const instance = pool.pool.entries[pool.create(0, fixture.pairs, SCOPE_UID)];
+  assert.equal(instance.heldByBranchCount, 0);
+  assert.equal(instance.readByExprCount, 0);
+  assert.equal(instance.scopeUid, SCOPE_UID);
+});
+
+test("evaluate는 식을 세되 구독은 걸지 않는다", () => {
+  const { value, store } = build(sum());
   assert.equal(value, 3);
-  assert.equal(pool.pool.entries[exprInstanceIndex].heldByBranchCount, 1);
 
   store.set(0, 10);
 
@@ -187,12 +199,43 @@ test("구독을 건 채로 release해도 구독이 풀려 반납된 결과 leaf�
   assert.equal(store.get(reused), 99);
 });
 
+test("가지가 놓아도 식이 읽고 있으면 반납하지 않는다", () => {
+  const { pool, exprInstanceIndex } = build(sum());
+  pool.retainByExpr(exprInstanceIndex);
+
+  pool.releaseByBranch(exprInstanceIndex);
+
+  assert.deepEqual(pool.pool.free, []);
+});
+
+test("식이 놓아도 가지가 들고 있으면 반납하지 않는다", () => {
+  const { pool, exprInstanceIndex } = build(sum());
+  pool.retainByExpr(exprInstanceIndex);
+
+  pool.releaseByExpr(exprInstanceIndex);
+
+  assert.deepEqual(pool.pool.free, []);
+});
+
+test("가지와 식이 모두 놓으면 결과 leaf와 풀 번호를 반납한다", () => {
+  const { pool, exprInstanceIndex, store } = build(sum());
+  pool.retainByExpr(exprInstanceIndex);
+
+  pool.releaseByBranch(exprInstanceIndex);
+  pool.releaseByExpr(exprInstanceIndex);
+
+  assert.deepEqual(pool.pool.free, [exprInstanceIndex]);
+  assert.equal(store.alloc([9]), 2, "결과 leaf가 반납되어 다시 쓰인다");
+});
+
 // 같은 풀에서 식 인스턴스 둘을 만든다(공유 조회는 풀 하나 안에서 이뤄진다). 구독은 걸지 않는다.
 const buildTwo = () => {
   const fixture = sum();
   const pool = poolOf(fixture.store, [fixture.expr]);
-  const first = pool.create(0, fixture.pairs);
-  const second = pool.create(0, fixture.pairs);
+  const first = pool.create(0, fixture.pairs, SCOPE_UID);
+  const second = pool.create(0, fixture.pairs, SCOPE_UID);
+  pool.retainByBranch(first);
+  pool.retainByBranch(second);
   return { pool, first, second };
 };
 
@@ -228,7 +271,7 @@ test("반납한 풀 번호를 새 식 인스턴스가 다시 써도 옛 키로 �
   pool.releaseByBranch(first);
 
   const fixture = sum();
-  const reused = pool.create(0, fixture.pairs);
+  const reused = pool.create(0, fixture.pairs, SCOPE_UID);
 
   assert.equal(reused, first, "풀 번호가 재사용된다");
   assert.equal(pool.findShared(3, 7), NOT_SHARED);
@@ -312,7 +355,8 @@ const buildTwoSubscribed = () => {
   const pool = poolOf(store, [new Uint8Array([...load(0), ...load(1), EXPR_ADD])]);
   const pairs = [STORE, 0, STORE, 1];
   const instances = [2, 3].map((resultLeafIndex) => {
-    const exprInstanceIndex = pool.create(0, pairs);
+    const exprInstanceIndex = pool.create(0, pairs, SCOPE_UID);
+    pool.retainByBranch(exprInstanceIndex);
     store.write(resultLeafIndex, pool.evaluate(exprInstanceIndex));
     pool.bindResultLeaf(exprInstanceIndex, resultLeafIndex);
     pool.subscribeInputs(exprInstanceIndex);

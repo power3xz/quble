@@ -505,7 +505,8 @@ export class ResumeInterpreter {
             vm.globalExprIndexOf(compId, localExprIndex),
             argumentSourcePairs,
             startBranchIndex,
-            vm.sharedScopeUidOf(compId, localExprIndex, walkStacks, loopIndexBase),
+            walkStacks,
+            loopIndexBase,
           );
           this.reactiveCountFor(
             vm,
@@ -779,7 +780,8 @@ export class ResumeInterpreter {
       globalExprIndex,
       argumentSourcePairs,
       branchIndex,
-      vm.sharedScopeUidOf(compId, localExprIndex, walkStacks, loopIndexBase),
+      walkStacks,
+      loopIndexBase,
     );
     const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(

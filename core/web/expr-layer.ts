@@ -29,8 +29,12 @@ export type TExprInstance = {
   pendingVarMask: number;
   // 식의 값을 write할 leaf. bindResultLeaf 전에는 undefined고, 없으면 센 값을 쓰지 않는다.
   resultLeaf: number | undefined;
+  // 이 식 인스턴스가 있는 scope. 늘 식의 level과 같은 깊이의 scope다.
+  scopeUid: number;
   // 이 식 인스턴스를 든 가지 수.
   heldByBranchCount: number;
+  // 이 식 인스턴스를 입력으로 읽는 식 인스턴스 수. heldByBranchCount와 함께 0이 되면 반납한다.
+  readByExprCount: number;
   // 공유 맵에 올린 키(globalExprIndex와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
   sharedGlobalExprIndex: number;
   sharedScopeUid: number;
@@ -66,12 +70,12 @@ export class ExprInstancePool {
     store.setDeriveStage(this.flush);
   }
 
-  // 식 인스턴스를 만든다. heldByBranchCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고,
-  // subscribeInputs가 건다.
+  // 식 인스턴스를 만든다. 아직 가지도 식도 붙들지 않았다 - 붙드는 쪽이 retainByBranch나 retainByExpr를 호출한다. 식은
+  // 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고, subscribeInputs가 건다.
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 나눈다. 없는 식은 cache도 건너뛰기 표도 두지 않고 leaf가 바뀌면 처음부터
   // 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 flush가 인스턴스당 한 번만 세므로 한 번이면 된다.
-  create = (globalExprIndex: number, pairs: TScope): number => {
+  create = (globalExprIndex: number, pairs: TScope, scopeUid: number): number => {
     const table = this.evaluator.skipTable(globalExprIndex);
     const instance: TExprInstance = {
       globalExprIndex,
@@ -81,7 +85,9 @@ export class ExprInstancePool {
       lastValue: undefined,
       pendingVarMask: 0,
       resultLeaf: undefined,
-      heldByBranchCount: 1,
+      scopeUid,
+      heldByBranchCount: 0,
+      readByExprCount: 0,
       sharedGlobalExprIndex: NOT_SHARED,
       sharedScopeUid: NOT_SHARED,
     };
@@ -256,7 +262,7 @@ export class ExprInstancePool {
   findShared = (globalExprIndex: number, scopeUid: number): number =>
     this.shared[globalExprIndex]?.get(scopeUid) ?? NOT_SHARED;
 
-  // 식 인스턴스를 (globalExprIndex, scopeUid)로 공유 맵에 올린다. heldByBranchCount가 0이 될 때 releaseByBranch가 지운다.
+  // 식 인스턴스를 (globalExprIndex, scopeUid)로 공유 맵에 올린다. 인스턴스를 반납할 때 freeIfUnheld가 지운다.
   markShared = (exprInstanceIndex: number, globalExprIndex: number, scopeUid: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.sharedGlobalExprIndex = globalExprIndex;
@@ -274,11 +280,26 @@ export class ExprInstancePool {
     this.pool.entries[exprInstanceIndex].heldByBranchCount++;
   };
 
-  // heldByBranchCount를 하나 줄이고, 0이면 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다.
+  // heldByBranchCount를 하나 줄이고, 식도 읽지 않으면 반납한다(freeIfUnheld).
   releaseByBranch = (exprInstanceIndex: number): void => {
+    this.pool.entries[exprInstanceIndex].heldByBranchCount--;
+    this.freeIfUnheld(exprInstanceIndex);
+  };
+
+  retainByExpr = (exprInstanceIndex: number): void => {
+    this.pool.entries[exprInstanceIndex].readByExprCount++;
+  };
+
+  // readByExprCount를 하나 줄이고, 가지도 들지 않으면 반납한다(freeIfUnheld).
+  releaseByExpr = (exprInstanceIndex: number): void => {
+    this.pool.entries[exprInstanceIndex].readByExprCount--;
+    this.freeIfUnheld(exprInstanceIndex);
+  };
+
+  // 가지도 식도 붙들지 않으면 파생 구독을 풀고 공유 키, 결과 leaf, 풀 번호를 반납한다.
+  private freeIfUnheld = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
-    instance.heldByBranchCount--;
-    if (instance.heldByBranchCount > 0) {
+    if (instance.heldByBranchCount > 0 || instance.readByExprCount > 0) {
       return;
     }
     this.unsubscribeInputs(exprInstanceIndex);
@@ -291,7 +312,7 @@ export class ExprInstancePool {
     this.pool.release(exprInstanceIndex);
   };
 
-  // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 releaseByBranch가 heldByBranchCount 0에서
+  // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 인스턴스를 반납할 때(freeIfUnheld)
   // 풀 때까지 둔다. 가지가 떼어져 쉬는 동안에도 구독이 남아 push가 바뀐 변수를 pendingVarMask에 모은다.
   subscribeInputs = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];

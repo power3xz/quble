@@ -18,14 +18,18 @@ const load = (slot: number) => [EXPR_LOAD_VAR, slot, 0];
 // 식 0은 leaf 하나를 그대로 읽는 조건, 식 1은 `v * 10`이다.
 const COND_EXPR = 0;
 const TIMES_TEN_EXPR = 1;
+// 이 파일의 식 인스턴스는 모두 scope 하나(root)에 있다.
+const SCOPE_UID = 0;
 
 const setup = (leaves: unknown[]) => {
   const store = createLeafStoreSubject(leaves);
   const exprBytes = [new Uint8Array(load(0)), new Uint8Array([...load(0), EXPR_LOAD_SMALL_INT, 10, EXPR_MUL])];
   const exprs = new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
-  // 식 인스턴스를 만들어 결과 leaf를 잡고 입력 leaf를 구독한다. 식 인스턴스 번호와 결과 leaf를 돌려준다.
+  // 식 인스턴스를 만들어 가지 하나가 든 것처럼 retainByBranch하고, 결과 leaf를 잡고 입력 leaf를 구독한다. 식 인스턴스
+  // 번호와 결과 leaf를 돌려준다.
   const make = (globalExprIndex: number, inputLeaf: number) => {
-    const exprInstanceIndex = exprs.create(globalExprIndex, [STORE, inputLeaf]);
+    const exprInstanceIndex = exprs.create(globalExprIndex, [STORE, inputLeaf], SCOPE_UID);
+    exprs.retainByBranch(exprInstanceIndex);
     const value = exprs.evaluate(exprInstanceIndex);
     const resultLeaf = store.alloc([value]);
     exprs.bindResultLeaf(exprInstanceIndex, resultLeaf);

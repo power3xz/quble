@@ -470,7 +470,7 @@ scope  root(uid 1),  행0(uid 2),  행0의 item0(uid 3),  행1(uid 4),  행1의 
 
 **조상 scope의 uid를 얻는 곳 - 부모 표**
 
-- 처음 그릴 때는 vm의 `scopeUidStack`에서 얻는다. `sharedScopeUidOf`(core/web/vm.ts)가 지금도 이렇게 계산한다.
+- 처음 그릴 때는 vm의 `scopeUidStack`에서 얻는다. `scopeUidAtLevel`(core/web/vm.ts)이 지금도 이렇게 계산한다.
   깊이와 level은 그 식이 속한 컴포넌트의 root를 0으로 하는 상대값이고, 스택에는 바깥 컴포넌트의 scope도 쌓여
   있다. 그래서 먼저 이 컴포넌트 root의 스택 자리(스택 길이 - 1 - 지금 자리를 감싼 이 컴포넌트 안의 `@for` 수)를
   구하고, 거기서 level만큼 떨어진 자리를 읽는다.

@@ -123,7 +123,7 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 공유 키의 `scopeUid`는 `level`이 가리키는 스코프의 번호다. 스택은 컴포넌트를 가로질러 쌓이므로 이 컴포넌트의
 루트 스코프는 맨 위에서 `forDepth`만큼 내려간 자리고, 거기서 `level`만큼 올라간 자리를 고른다
-(`vm.ts`의 `sharedScopeUidOf`).
+(`vm.ts`의 `scopeUidAtLevel`).
 
 ```
   scopeUidStack[length - 1 - forDepth + level]
