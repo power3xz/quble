@@ -1,6 +1,10 @@
 component TernaryValue {
   props { ok: bool, price: number }
+  events { APPLY({}) }
   template {
-    span(class="v") { ${ok ? price : 0} }
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      span(class="v") { ${ok ? price : 0} }
+    }
   }
 }

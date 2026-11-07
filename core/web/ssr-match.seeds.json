@@ -1392,6 +1392,10 @@
       "k": 10
     }
   ],
+  "ternary_index_input": [
+    { "ok": true, "cursor": 0, "rows": [{ "x": 1 }, { "x": 2 }] },
+    { "ok": false, "cursor": 1, "rows": [{ "x": 1 }, { "x": 2 }] }
+  ],
   "ternary_in_for": [
     { "ok": true, "price": 5, "rows": [{ "x": 1 }, { "x": 2 }] },
     { "ok": false, "price": 5, "rows": [{ "x": 1 }, { "x": 2 }] }

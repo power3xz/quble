@@ -1,6 +1,10 @@
 component TernaryLazy {
   props { ok: bool, cursor: number, rows: { x: number }[] }
+  events { APPLY({}) }
   template {
-    span(class="v") { ${ok ? rows[cursor].x : 0} }
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      span(class="v") { ${ok ? rows[cursor].x : 0} }
+    }
   }
 }

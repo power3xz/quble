@@ -43,7 +43,14 @@ export type TExprInstance = {
   // 이 식 인스턴스를 입력으로 읽는 식 인스턴스. 한 식이 두 자리에서 읽으면(`x ? x : y`) 두 번 든다. 읽는 식이 없으면
   // null이다. heldByBranchCount가 0이고 이것도 비면 반납한다.
   outputInstances: number[] | null;
+  // 연결한 입력 인스턴스 중 다시 세야 할 것이 있다. markOutputInstances가 켜고, 셀 때 지운다.
+  inputMarked: boolean;
+  // 삼항이 지금 고른 갈래의 inputInstances 자리(THEN_POSITION이나 ELSE_POSITION). 계산 식은 사용하지 않는다.
+  chosenPosition: number;
 };
+
+// 다시 셀 식 인스턴스인가 - 읽는 leaf가 바뀌었거나 연결한 입력 인스턴스 중 다시 세야 할 것이 있다.
+const needsRecount = (instance: TExprInstance): boolean => instance.pendingVarMask !== 0 || instance.inputMarked;
 
 // 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared가 쓴다.
 export const NOT_SHARED = -1;
@@ -129,6 +136,8 @@ export class ExprInstancePool {
       inputInstances: NO_INPUT_INSTANCES,
       inputValues: NO_INPUT_VALUES,
       outputInstances: null,
+      inputMarked: false,
+      chosenPosition: THEN_POSITION,
     };
     return this.pool.alloc(instance);
   };
@@ -162,12 +171,18 @@ export class ExprInstancePool {
     }
     const { graph } = this;
     for (const exprInstanceIndex of recountExprInstanceIndices) {
+      const instance = this.pool.entries[exprInstanceIndex];
+      // 입력으로만 쓰이는 인스턴스(가지가 들지 않음)는 그 값을 읽는 식 인스턴스가 셀 때 요청한다. 고르지 않은 갈래면
+      // 요청하지 않아 세지 않는다.
+      if (instance.heldByBranchCount === 0) {
+        continue;
+      }
       try {
-        // incoming edge가 없는 인스턴스가 대부분이라 request를 거치지 않고 바로 평가한다. 목록에 든 인스턴스는
-        // 마스크가 0이 아니다 - 앞선 request가 재귀로 이미 평가했으면 0이다.
+        // incoming edge가 없는 인스턴스가 대부분이라 request를 거치지 않고 바로 평가한다. 앞선 request가 재귀로 이미
+        // 평가했으면 다시 셀 인스턴스가 아니다.
         if (graph.incomingEdgesOfNode(exprInstanceIndex) !== undefined) {
           this.request(exprInstanceIndex);
-        } else if (this.pool.entries[exprInstanceIndex].pendingVarMask !== 0) {
+        } else if (needsRecount(instance)) {
           this.recount(exprInstanceIndex);
         }
       } catch (error) {
@@ -181,8 +196,8 @@ export class ExprInstancePool {
   };
 
   // 식 인스턴스가 평가 대상이면 true를 돌려준다. incoming labeled edge가 있으면 시작점을 먼저 요청하고, 시작점이 평가
-  // 대상이면서 그 값이 label과 맞는 간선이 하나라도 있어야 평가 대상이다. 평가 대상이고 pendingVarMask가 0이 아니면
-  // 다시 평가한다. 평가 대상이 아니면 마스크를 그대로 둔다 - 나중에 조건이 맞을 때 그 마스크로 평가한다.
+  // 대상이면서 그 값이 label과 맞는 간선이 하나라도 있어야 평가 대상이다. 평가 대상이고 다시 셀 인스턴스(needsRecount)면
+  // 다시 평가한다. 평가 대상이 아니면 표시를 그대로 둔다 - 나중에 조건이 맞을 때 그 표시로 평가한다.
   //
   // 시작점이 평가 대상인지까지 보는 이유는 겹친 @if다. `[c1] --(then)--> [c2] --(then)--> [x]`에서 c1이 false면 c2는
   // 평가하지 않아 lastValue가 낡았다. 그 낡은 값이 then과 맞아도 x를 평가하면 안 된다.
@@ -195,7 +210,7 @@ export class ExprInstancePool {
     if (incoming !== undefined && incoming.length === instance.heldByBranchCount && !this.someEdgeChooses(incoming)) {
       return false;
     }
-    if (instance.pendingVarMask !== 0) {
+    if (needsRecount(instance)) {
       this.recount(exprInstanceIndex);
     }
     return true;
@@ -225,28 +240,78 @@ export class ExprInstancePool {
     }
   };
 
-  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켜고, 마스크가
-  // 0이었으면 recountExprInstanceIndices에 넣는다. 같은 leaf를 두 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴
-  // 경우) 두 비트를 켠다.
+  // 식 인스턴스에 바뀐 leaf를 표시한다. readLeaves에서 leafIndex인 자리의 비트를 pendingVarMask에 켠다. 다시 셀
+  // 인스턴스가 아니었으면 recountExprInstanceIndices에 넣고 그 값을 읽는 식 인스턴스로 표시를 올린다. 같은 leaf를 두
+  // 변수가 읽으면(부모가 같은 칸을 두 prop으로 넘긴 경우) 두 비트를 켠다.
   private markChanged = (exprInstanceIndex: number, leafIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { readLeaves } = instance;
-    const wasZero = instance.pendingVarMask === 0;
+    const wasMarked = needsRecount(instance);
     for (let n = 0; n < readLeaves.length; n++) {
       if (readLeaves[n] === leafIndex) {
         instance.pendingVarMask |= 1 << n;
       }
     }
-    if (wasZero && instance.pendingVarMask !== 0) {
+    if (!wasMarked && instance.pendingVarMask !== 0) {
       this.recountExprInstanceIndices.push(exprInstanceIndex);
+      this.markOutputInstances(exprInstanceIndex);
     }
   };
 
+  // 식 인스턴스의 값을 활성 간선으로 읽는 식 인스턴스에 inputMarked를 켜고, 그 인스턴스의 outputInstances로 이어
+  // 올린다. 이미 다시 셀 인스턴스면 그 위도 이미 표시되어 있어 멈춘다. 가지가 든 인스턴스는 flush의 pull이 세도록
+  // recountExprInstanceIndices에 넣는다.
+  //   ok ? price * 2 : row.x 에서 price가 바뀌면 price * 2에서 ok가 true인 행의 삼항으로 올라간다. ok가 false인 행은
+  //   price * 2를 고르지 않아 올라가지 않는다.
+  private markOutputInstances = (exprInstanceIndex: number): void => {
+    const { outputInstances } = this.pool.entries[exprInstanceIndex];
+    if (outputInstances === null) {
+      return;
+    }
+    for (const output of outputInstances) {
+      const outputInstance = this.pool.entries[output];
+      if (needsRecount(outputInstance) || !this.readsActively(outputInstance, exprInstanceIndex)) {
+        continue;
+      }
+      outputInstance.inputMarked = true;
+      if (outputInstance.heldByBranchCount > 0) {
+        this.recountExprInstanceIndices.push(output);
+      }
+      this.markOutputInstances(output);
+    }
+  };
+
+  // 식 인스턴스(output)가 입력 인스턴스(input)를 활성 간선으로 읽는가. 계산 식은 입력을 늘 읽고, 삼항은 cond와 지금
+  // 고른 갈래만 읽는다.
+  private readsActively = (output: TExprInstance, input: number): boolean =>
+    this.exprInputs[output.globalExprIndex].kind !== "ternary" ||
+    output.inputInstances[COND_POSITION] === input ||
+    output.inputInstances[output.chosenPosition] === input;
+
   // 식을 다시 세어 값을 돌려주고 lastValue에 기록한다. store에 쓰지 않는다. 결과 leaf에는 늘 lastValue가 들어
   // 있으므로(처음 값은 evaluate가 센 값이다) 결과 leaf를 읽지 않고 lastValue로 바뀌었는지 가린다. 세기 전에
-  // pendingVarMask를 0으로 지운다 - 식이 throw해도 마스크가 다음 flush로 남지 않는다.
+  // pendingVarMask와 inputMarked를 지운다 - 식이 throw해도 표시가 다음 flush로 남지 않는다.
+  //
+  // 삼항과 입력이 있는 계산 식은 evaluate로 처음부터 센다. evaluate가 연결한 입력 인스턴스를 먼저 요청해 이번 flush의
+  // 값으로 만든다. 부분 재평가를 하지 않는 이유는 LoadInput이 leafOfVar에 자리가 없어 건너뛰기 표가 바뀐 입력을 모르기
+  // 때문이다. 다시 센 뒤 읽는 leaf가 바뀌었으면 구독을 옮긴다. 바뀌는 때는 삼항이 다른 갈래를 골랐을 때와 계산 식의
+  // 배열 인덱스가 바뀌었을 때뿐이라 그때만 견준다.
   private run = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
+    const exprInputs = this.exprInputs[instance.globalExprIndex];
+    if (exprInputs.kind === "ternary" || exprInputs.inputs.length > 0) {
+      instance.pendingVarMask = 0;
+      instance.inputMarked = false;
+      const previousReadLeaves = instance.readLeaves;
+      const previousChosenPosition = instance.chosenPosition;
+      const value = this.evaluate(exprInstanceIndex);
+      if (exprInputs.kind !== "ternary") {
+        this.resubscribeChangedVars(exprInstanceIndex, previousReadLeaves);
+      } else if (instance.chosenPosition !== previousChosenPosition) {
+        this.resubscribeBranchLeaf(exprInstanceIndex, previousReadLeaves);
+      }
+      return value;
+    }
     if (instance.cache === null) {
       instance.pendingVarMask = 0;
       const expr = this.evaluator.exprBytes[instance.globalExprIndex];
@@ -265,10 +330,12 @@ export class ExprInstancePool {
   };
 
   // 식을 처음부터 세어 값을 돌려주고, 읽은 leaf(readLeaves)와 값(lastValue)을 인스턴스에 기록한다. 몇 번을 불러도
-  // 같은 결과다. 구독을 건 채로 부르지 않는다 - 구독 대상(readLeaves)이 바뀌는데 구독은 그대로다.
+  // 같은 결과다. 구독을 건 채로 부르지 않는다 - 구독 대상(readLeaves)이 바뀌는데 구독은 그대로다. 구독을 건 뒤 다시
+  // 셀 때는 run이 부르고 구독을 옮긴다.
   //
-  // 입력이 있는 식은 정적 그래프(exprInputs)를 따라 입력 식의 인스턴스를 처음 셀 때 연결한다. 삼항은 cond를 센 뒤 고른
-  // 갈래만 연결하고, 계산 식은 입력을 모두 연결해 그 값을 inputValues로 평가기에 넘긴다.
+  // 입력이 있는 식은 정적 그래프(exprInputs)를 따라 입력 식의 인스턴스를 처음 셀 때 연결한다. 이미 연결한 입력
+  // 인스턴스는 요청해(request) 다시 셀 인스턴스면 먼저 센다. 삼항은 cond를 센 뒤 고른 갈래만 연결하거나 요청하고,
+  // 계산 식은 입력을 모두 연결하거나 요청해 그 값을 inputValues로 평가기에 넘긴다.
   evaluate = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { globalExprIndex, pairs, cache } = instance;
@@ -296,18 +363,24 @@ export class ExprInstancePool {
     return value;
   };
 
-  // 계산 식의 입력 식 인스턴스를 처음 셀 때 한 번 연결하고, 셀 때마다 그 값을 inputValues에 담는다.
+  // 계산 식의 입력 식 인스턴스를 처음 셀 때 한 번 연결하고, 그 뒤로는 셀 때마다 요청한다. 셀 때마다 그 값을
+  // inputValues에 담는다.
   //   #1 = base - #0, inputs [0]이면 inputInstances [#0의 인스턴스], inputValues [#0의 값]
   private linkCalcInputs = (exprInstanceIndex: number, inputs: readonly number[]): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     if (instance.inputInstances === NO_INPUT_INSTANCES) {
       instance.inputInstances = inputs.map((input) => this.linkInputInstance(exprInstanceIndex, input));
+    } else {
+      for (const input of instance.inputInstances) {
+        this.request(input as number);
+      }
     }
     instance.inputValues = instance.inputInstances.map((input) => this.pool.entries[input as number].lastValue);
   };
 
   // 삼항을 센다. cond를 읽고, cond 값으로 고른 갈래만 읽는다. 식인 cond와 식인 갈래는 처음 읽을 때 인스턴스를
-  // 연결하고, 고르지 않은 갈래는 연결하지 않는다. 잎인 cond와 고른 잎 갈래는 readLeaves에 넣어 구독 대상으로 둔다.
+  // 연결하고 그 뒤로는 요청하며, 고르지 않은 갈래는 연결하지도 요청하지도 않는다. 잎인 cond와 고른 잎 갈래는
+  // readLeaves에 넣어 구독 대상으로 둔다.
   //   ok ? price * 2 : row.x 에서 ok가 true면 inputInstances [undefined, price * 2의 인스턴스, undefined],
   //   readLeaves [ok의 leaf]
   private evaluateTernary = (
@@ -317,17 +390,19 @@ export class ExprInstancePool {
     const instance = this.pool.entries[exprInstanceIndex];
     const linked = instance.inputInstances;
     const reads: number[] = [];
-    const condInstance = linked[COND_POSITION] ?? this.linkOperandInstance(exprInstanceIndex, exprInputs.cond);
+    const condInstance = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.cond, linked[COND_POSITION]);
     const cond = this.readOperand(instance, exprInputs.cond, condInstance, reads);
     let thenInstance = linked[THEN_POSITION];
     let elseInstance = linked[ELSE_POSITION];
     let value: unknown;
     if (cond) {
-      thenInstance ??= this.linkOperandInstance(exprInstanceIndex, exprInputs.thenBranch);
+      thenInstance = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.thenBranch, thenInstance);
       value = this.readOperand(instance, exprInputs.thenBranch, thenInstance, reads);
+      instance.chosenPosition = THEN_POSITION;
     } else {
-      elseInstance ??= this.linkOperandInstance(exprInstanceIndex, exprInputs.elseBranch);
+      elseInstance = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.elseBranch, elseInstance);
       value = this.readOperand(instance, exprInputs.elseBranch, elseInstance, reads);
+      instance.chosenPosition = ELSE_POSITION;
     }
     if (
       condInstance !== linked[COND_POSITION] ||
@@ -340,9 +415,19 @@ export class ExprInstancePool {
     return value;
   };
 
-  // 삼항 피연산자가 식이면 그 인스턴스를 연결해 번호를 돌려주고, 잎이나 상수면 undefined.
-  private linkOperandInstance = (exprInstanceIndex: number, operand: TRef): number | undefined =>
-    operand.tag === FV_EXPR ? this.linkInputInstance(exprInstanceIndex, operand.ref) : undefined;
+  // 삼항 피연산자가 식이면 그 인스턴스 번호를 돌려준다. 이미 연결했으면(linkedInstance) 요청해 다시 셀 인스턴스면
+  // 세고, 아직이면 연결한다. 잎이나 상수면 undefined.
+  private requestOrLinkOperand = (
+    exprInstanceIndex: number,
+    operand: TRef,
+    linkedInstance: number | undefined,
+  ): number | undefined => {
+    if (linkedInstance !== undefined) {
+      this.request(linkedInstance);
+      return linkedInstance;
+    }
+    return operand.tag === FV_EXPR ? this.linkInputInstance(exprInstanceIndex, operand.ref) : undefined;
+  };
 
   // 삼항 피연산자의 값. 상수는 상수풀, 식은 연결한 인스턴스의 값, 잎은 슬롯의 값이다. 잎이 store leaf면 reads에
   // 이어 붙인다.
@@ -363,7 +448,8 @@ export class ExprInstancePool {
 
   // 식 인스턴스(소비자)가 입력 식(inputGlobalExprIndex)의 인스턴스를 연결한다. 입력 인스턴스는 입력 식의 level 깊이
   // scope에 있고, 그 scope는 소비자 scope에서 부모를 (소비자 level - 입력 level)번 올라가 얻는다. 그 (식, scope)로
-  // 공유 중이면 재사용하고, 없으면 만들어 공유 맵에 올리고 세고 구독을 건다. 어느 쪽이든 retainByExpr로 붙든다.
+  // 공유 중이면 요청해(쉬는 동안 표시가 남았으면 센다) 재사용하고, 없으면 만들어 공유 맵에 올리고 세고 구독을 건다.
+  // 어느 쪽이든 retainByExpr로 붙든다.
   //   @for (row of rows) { ${ok ? price * 2 : row.x} }에서 행의 삼항(level 1)이 price * 2(level 0)를 연결하면
   //   행 scope에서 한 번 올라간 root scope의 인스턴스 하나를 모든 행이 함께 쓴다.
   private linkInputInstance = (exprInstanceIndex: number, inputGlobalExprIndex: number): number => {
@@ -379,6 +465,8 @@ export class ExprInstancePool {
       this.markShared(input);
       this.evaluate(input);
       this.subscribeInputs(input);
+    } else {
+      this.request(input);
     }
     this.retainByExpr(input, exprInstanceIndex);
     return input;
@@ -580,6 +668,45 @@ export class ExprInstancePool {
       const readLeafVar = table.varAt[op + instrSize(expr[op])];
       const newLeafIndex = cache[table.cacheIndex[op]] as number;
       this.resubscribeReadLeaf(exprInstanceIndex, readLeafVar, newLeafIndex);
+    }
+  };
+
+  // 삼항이 다른 갈래를 고른 뒤 읽는 leaf의 구독을 옮긴다. previousReadLeaves(세기 전)에만 있는 leaf는 구독을 풀고
+  // readLeaves(지금)에만 있는 leaf는 구독한다. 둘 다 cond leaf와 갈래 leaf까지 많아야 둘이다. 떠나는 갈래와 cond가
+  // 같은 leaf면(`ok ? ok : x`) 지금도 읽어 풀지 않는다.
+  //   ok ? price : 0 에서 ok가 false -> true면 [ok의 leaf]가 [ok의 leaf, price의 leaf]가 되어 price를 구독한다.
+  private resubscribeBranchLeaf = (exprInstanceIndex: number, previousReadLeaves: readonly number[]): void => {
+    const { readLeaves } = this.pool.entries[exprInstanceIndex];
+    for (const leafIndex of previousReadLeaves) {
+      if (!readLeaves.includes(leafIndex)) {
+        this.unsubscribeDerive(leafIndex, exprInstanceIndex);
+      }
+    }
+    for (const leafIndex of readLeaves) {
+      if (!previousReadLeaves.includes(leafIndex)) {
+        this.subscribeDerive(leafIndex, exprInstanceIndex);
+      }
+    }
+  };
+
+  // 입력이 있는 계산 식을 다시 센 뒤 배열 인덱스가 바뀌어 읽는 leaf가 달라진 변수 자리만 구독을 옮긴다. 옛 배열
+  // (previousLeafOfVar)을 readLeaves로 되돌린 뒤 자리마다 resubscribeReadLeaf로 새 leafIndex를 기록한다.
+  //
+  // 건너뛸 부분식이 없는 식(cache가 null)은 옛 readLeaves를 그대로 둔다. 입력이 없는 같은 식을 다시 셀 때(run)도
+  // readLeaves를 고치지 않는다.
+  private resubscribeChangedVars = (exprInstanceIndex: number, previousLeafOfVar: number[]): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    const leafOfVar = instance.readLeaves;
+    instance.readLeaves = previousLeafOfVar;
+    if (instance.cache === null) {
+      return;
+    }
+    const table = this.evaluator.skipTable(instance.globalExprIndex) as TExprSkipTable;
+    if (!table.hasIndexAccess) {
+      return;
+    }
+    for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
+      this.resubscribeReadLeaf(exprInstanceIndex, varNumber, leafOfVar[varNumber]);
     }
   };
 
