@@ -1,6 +1,8 @@
 //! 모듈 <-> 바이트 직렬화. 리틀엔디안, 문자열은 u16 길이 접두 + UTF-8(BYTECODE.md #4).
 
-use crate::module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
+use crate::module::{
+    CompDef, ContextDef, EventDef, ExprDef, Field, FieldValue, Module, TernaryOperand, TypeEntry,
+};
 use crate::pool::{Const, ConstPool};
 
 const MAGIC: &[u8; 4] = b"QBL\0";
@@ -21,6 +23,10 @@ const TAG_SCOPE: u8 = 0;
 const TAG_CONST: u8 = 1;
 const TAG_RAW: u8 = 2;
 const TAG_EXPR: u8 = 3;
+
+// 그래프 섹션 항목의 input_count가 이 값이면 삼항이다. 계산 식의 입력은 자기보다 번호가 작은 식이라
+// 많아야 254개여서 겹치지 않는다(BYTECODE.md #4 expr_inputs).
+const TERNARY_INPUT_COUNT: u8 = 255;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -71,22 +77,8 @@ pub fn encode(m: &Module) -> Vec<u8> {
             put_u16(&mut out, context.name_const_index);
             put_fields(&mut out, &context.fields);
         }
-        // 표현식 테이블 - expr_count:u8, [(len:u8, code)]. code는 후위 표기(ExprOp).
-        // 둘 다 u8이라 넘치면 조용히 잘린다. 막는 자리는 codegen이지만(소스 위치를 짚어 에러를
-        // 낸다) 여기까지 온 것은 이미 버그라 개발 중에 걸리게 둔다.
-        debug_assert!(
-            def.exprs.len() <= u8::MAX as usize,
-            "표현식이 255개를 넘었다"
-        );
-        out.push(def.exprs.len() as u8);
-        for expr in &def.exprs {
-            debug_assert!(
-                expr.len() <= u8::MAX as usize,
-                "표현식 하나가 255바이트를 넘었다"
-            );
-            out.push(expr.len() as u8);
-            out.extend_from_slice(expr);
-        }
+        put_exprs(&mut out, &def.exprs);
+        put_expr_inputs(&mut out, &def.exprs);
     }
 
     // 코드
@@ -157,6 +149,75 @@ fn put_fields(out: &mut Vec<u8>, fields: &[Field]) {
         put_u16(out, field.name_const_index);
         put_u16(out, field.type_ref);
         put_ref(out, &field.value);
+    }
+}
+
+/// 표현식 테이블 - expr_count:u8, [(len:u8, code)]. Calc는 code(후위 표기 ExprOp)를, Ternary는
+/// len 0을 쓴다. 둘 다 u8이라 넘치면 조용히 잘린다. 막는 자리는 codegen이지만(소스 위치를 짚어
+/// 에러를 낸다) 여기까지 온 것은 이미 버그라 개발 중에 걸리게 둔다.
+fn put_exprs(out: &mut Vec<u8>, exprs: &[ExprDef]) {
+    debug_assert!(exprs.len() <= u8::MAX as usize, "표현식이 255개를 넘었다");
+    out.push(exprs.len() as u8);
+    for expr in exprs {
+        match expr {
+            ExprDef::Calc { code, .. } => {
+                debug_assert!(
+                    code.len() <= u8::MAX as usize,
+                    "표현식 하나가 255바이트를 넘었다"
+                );
+                out.push(code.len() as u8);
+                out.extend_from_slice(code);
+            }
+            ExprDef::Ternary { .. } => out.push(0),
+        }
+    }
+}
+
+/// 그래프 섹션 - entry_count:u8, [(expr_index:u8, input_count:u8, payload)]. 간선이 있는 식과
+/// 삼항만 싣는다. input_count가 TERNARY_INPUT_COUNT면 삼항이고 payload는 피연산자 셋, 아니면
+/// 계산 식이고 payload는 입력 식 번호 input_count개다.
+fn put_expr_inputs(out: &mut Vec<u8>, exprs: &[ExprDef]) {
+    let has_inputs = |expr: &ExprDef| match expr {
+        ExprDef::Calc { inputs, .. } => !inputs.is_empty(),
+        ExprDef::Ternary { .. } => true,
+    };
+    out.push(exprs.iter().filter(|expr| has_inputs(expr)).count() as u8);
+    for (expr_index, expr) in exprs.iter().enumerate() {
+        if !has_inputs(expr) {
+            continue;
+        }
+        out.push(expr_index as u8);
+        match expr {
+            ExprDef::Calc { inputs, .. } => {
+                out.push(inputs.len() as u8);
+                out.extend_from_slice(inputs);
+            }
+            ExprDef::Ternary { cond, then, else_ } => {
+                out.push(TERNARY_INPUT_COUNT);
+                put_ternary_operand(out, cond);
+                put_ternary_operand(out, then);
+                put_ternary_operand(out, else_);
+            }
+        }
+    }
+}
+
+/// 삼항 피연산자 하나 - `<REF>`의 tag 0(Scope), 1(Const), 3(Expr)과 같은 인코딩.
+fn put_ternary_operand(out: &mut Vec<u8>, operand: &TernaryOperand) {
+    match operand {
+        TernaryOperand::Leaf(scope_index, offset) => {
+            out.push(TAG_SCOPE);
+            out.push(*scope_index);
+            out.push(*offset);
+        }
+        TernaryOperand::Const(index) => {
+            out.push(TAG_CONST);
+            put_u16(out, *index);
+        }
+        TernaryOperand::Expr(index) => {
+            out.push(TAG_EXPR);
+            out.push(*index);
+        }
     }
 }
 
@@ -238,12 +299,7 @@ pub fn decode(bytes: &[u8]) -> Result<Module, DecodeError> {
                 fields: read_fields(&mut r)?,
             });
         }
-        let expr_count = r.u8()?;
-        let mut exprs = Vec::with_capacity(expr_count as usize);
-        for _ in 0..expr_count {
-            let len = r.u8()? as usize;
-            exprs.push(r.take(len)?.to_vec());
-        }
+        let exprs = read_exprs(&mut r)?;
         defs.push(CompDef {
             name_const_index,
             props_type_ref,
@@ -307,6 +363,50 @@ fn read_ref(r: &mut Reader) -> Result<FieldValue, DecodeError> {
         TAG_CONST => Ok(FieldValue::Const(r.u16()?)),
         TAG_RAW => Ok(FieldValue::Raw(r.u16()?)),
         TAG_EXPR => Ok(FieldValue::Expr(r.u8()?)),
+        other => Err(DecodeError::BadRefTag(other)),
+    }
+}
+
+/// 표현식 테이블과 그래프 섹션을 읽어 식마다 ExprDef 하나로 합친다(put_exprs, put_expr_inputs 대칭).
+/// 그래프 섹션에 없는 식은 입력이 없는 계산 식이다.
+fn read_exprs(r: &mut Reader) -> Result<Vec<ExprDef>, DecodeError> {
+    let expr_count = r.u8()?;
+    let mut exprs = Vec::with_capacity(expr_count as usize);
+    for _ in 0..expr_count {
+        let len = r.u8()? as usize;
+        exprs.push(ExprDef::Calc {
+            code: r.take(len)?.to_vec(),
+            inputs: vec![],
+        });
+    }
+    let entry_count = r.u8()?;
+    for _ in 0..entry_count {
+        let expr_index = r.u8()? as usize;
+        let input_count = r.u8()?;
+        // 항목의 식 번호는 컴파일러가 낸 것이라 표현식 테이블 안에 있다고 본다.
+        let expr = &mut exprs[expr_index];
+        match (input_count, expr) {
+            (TERNARY_INPUT_COUNT, expr) => {
+                *expr = ExprDef::Ternary {
+                    cond: read_ternary_operand(r)?,
+                    then: read_ternary_operand(r)?,
+                    else_: read_ternary_operand(r)?,
+                };
+            }
+            (_, ExprDef::Calc { inputs, .. }) => *inputs = r.take(input_count as usize)?.to_vec(),
+            (_, ExprDef::Ternary { .. }) => unreachable!("표현식 테이블은 Calc로만 채웠다"),
+        }
+    }
+    Ok(exprs)
+}
+
+/// 삼항 피연산자 하나(put_ternary_operand 대칭). 알 수 없는 태그는 BadRefTag로 거부.
+fn read_ternary_operand(r: &mut Reader) -> Result<TernaryOperand, DecodeError> {
+    let tag = r.u8()?;
+    match tag {
+        TAG_SCOPE => Ok(TernaryOperand::Leaf(r.u8()?, r.u8()?)),
+        TAG_CONST => Ok(TernaryOperand::Const(r.u16()?)),
+        TAG_EXPR => Ok(TernaryOperand::Expr(r.u8()?)),
         other => Err(DecodeError::BadRefTag(other)),
     }
 }

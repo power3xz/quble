@@ -19,6 +19,32 @@ pub enum FieldValue {
     Expr(/* expr_index */ u8),
 }
 
+/// 컴포넌트 표현식 테이블의 식 하나. 테이블 순서가 expr_index다.
+/// 직렬화는 두 섹션으로 나뉜다 - Calc의 code는 `exprs`에, Ternary는 `exprs`에 len 0 자리만 두고,
+/// 입력은 `expr_inputs`에 간선이 있는 식과 삼항만 싣는다(serialize.rs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprDef {
+    /// 평가기가 세는 식. code는 후위 바이트(`ExprOp`), inputs는 `LoadInput i`의 i번째 입력 식 번호.
+    /// 입력 식 번호는 자기 번호보다 작다 - 컴파일러가 입력 식을 먼저 테이블에 넣는다.
+    Calc { code: Vec<u8>, inputs: Vec<u8> },
+    /// 그래프가 cond를 읽고 갈래를 고르는 식. 평가기가 세지 않아 바이트가 없다.
+    Ternary {
+        cond: TernaryOperand,
+        then: TernaryOperand,
+        else_: TernaryOperand,
+    },
+}
+
+/// 삼항 피연산자 하나. 잎과 상수는 노드가 아니라 간선을 만들지 않고, Expr만 삼항으로 들어오는 간선이다.
+/// 직렬화는 `<REF>`의 tag 0(Scope), 1(Const), 3(Expr)을 그대로 쓴다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TernaryOperand {
+    /// 슬롯 하나로 접히는 참조. 고른 뒤에야 읽고 구독한다.
+    Leaf(/* scope_index */ u8, /* offset */ u8),
+    Const(/* const_index */ u16),
+    Expr(/* expr_index */ u8),
+}
+
 /// payload/context가 담는 객체 타입의 구조. 모듈 전역 테이블(Module.types)에 dedup 저장.
 /// 조립 명세다 - 값도 인덱스도 없이 구조(필드명/중첩)만 담고, 런타임이 field.refs를
 /// 받아 이 구조로 객체를 조립한다. object 필드는 자식을 type_ref(테이블 인덱스)로 가리켜
@@ -81,10 +107,10 @@ pub struct CompDef {
     /// 이 컴포넌트가 선언한 컨텍스트들. 선언 순서 = context_index.
     pub contexts: Vec<ContextDef>,
     /// 이 컴포넌트가 쓰는 표현식들. 순서 = `IF_EXPR`의 expr_index(u8이라 255개까지).
-    /// 후위 표기 바이트 그대로 든다 - 중복 제거를 바이트 동일성으로 하고 런타임도 이 바이트를
-    /// 훑어서, 중간 표현을 두면 층만 하나 는다(DECISIONS.md "표현식 테이블 - 컴포넌트 소유 +
-    /// 후위 표기 채택"). 바이트 하나하나는 `ExprOp`.
-    pub exprs: Vec<Vec<u8>>,
+    /// 계산 식은 후위 표기 바이트 그대로 든다 - 런타임도 이 바이트를 훑어서, 중간 표현을 두면
+    /// 층만 하나 는다(DECISIONS.md "표현식 테이블 - 컴포넌트 소유 + 후위 표기 채택").
+    /// 중복 제거는 `ExprDef` 전체가 같을 때다 - code가 같아도 입력이 다르면 다른 식이다.
+    pub exprs: Vec<ExprDef>,
 }
 
 /// 바이트코드 모듈 하나(= 하나의 컴파일 산출물/파일).

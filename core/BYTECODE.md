@@ -158,16 +158,17 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
                                          //   개수가 255까지라 쓰이는 인덱스는 0~254 - expr_index가
                                          //   표현할 수 있는 255는 나오지 않는다
                  exprs      : expr_count x (
-                   len  : u8             // code 바이트 수(최대 255)
+                   len  : u8             // code 바이트 수(최대 255). 삼항은 0 - 평가기가 세지 않는다
                    code : [u8; len]      // 후위 표기 - 아래 <EXPR> opcode들
                  )
+                 expr_inputs : <EXPR_INPUTS>   // 식 사이의 간선과 삼항 피연산자(#5.4)
                )
 
   // EXPR - 식 하나의 바이트. 후위 표기라 앞에서 뒤로 한 번 훑으면 끝난다(되돌아갈 일이 없다).
   //   런타임은 이 바이트를 두 번 훑는다 - 구독을 걸 때 한 번, 값을 셀 때 한 번(#5.2).
   //   연산자는 값만 받는다. 값이 아닌 것을 올리는 명령은 둘뿐이다 - 인덱스 접근(ElemAt, FieldAt)은
-  //   leafIndex를 올리고 ReadLeaf가 값으로 바꾼다. 삼항의 잎 피연산자(LoadVarRef)는 슬롯 위치를 올리고
-  //   Select가 고른 뒤 읽는다.
+  //   leafIndex를 올리고 ReadLeaf가 값으로 바꾼다. 삼항은 바이트가 없고, 삼항을 감싼 식은 그 값의 자리를
+  //   LoadInput으로 표시한다(#5.4).
   //   타입은 컴파일타임에 검사가 끝나(compiler/src/expr_type.rs) 런타임은 타입을 안 본다.
   <EXPR> = opcode 1바이트 + opcode별 operand   // 코드의 opcode(#5)와 다른 이름공간 - 값이 겹친다
            0x00 LoadVar          : scope_index:u8, offset:u8  // 그 칸의 값
@@ -184,9 +185,18 @@ SVG 계열은 없다 - `createElementNS`와 자손 네임스페이스 전파가 
            0x1f ElemAt           : -                          // 인덱스와 배열 정보 번호를 꺼내 요소 시작 leafIndex
            0x20 FieldAt          : offset:u8                  // leafIndex에 필드 거리를 더한다
            0x21 ReadLeaf         : -                          // leafIndex를 꺼내 그 leaf의 값
-           0x22 LoadExpr         : expr_index:u8              // 하위 식의 값. 자기 번호보다 작다(#5.4)
-           0x23 LoadVarRef       : scope_index:u8, offset:u8  // 슬롯 위치만. Select가 고른 뒤 읽는다
-           0x24 Select           : kinds:u8                   // 조건, 참, 거짓을 꺼내 하나를 고른다
+           0x22 LoadInput        : input_position:u8          // 이 식의 입력 하나의 값. 위치는 expr_inputs의
+                                                              //   inputs에서의 위치다(#5.4)
+
+  // EXPR_INPUTS - 그래프 섹션. 간선이 있는 계산 식과 삼항만 싣고, 실리지 않은 식은 입력이 없는 계산 식이다.
+  //   항목 하나가 식 하나이고, 그 식으로 들어오는 간선을 모두 담는다.
+  <EXPR_INPUTS> = entry_count : u8
+                  entries     : entry_count x (
+                    expr_index  : u8
+                    input_count : u8   // 255(TERNARY)면 삼항, 0..254면 계산 식의 입력 개수
+                    계산 : inputs : input_count x expr_index:u8   // LoadInput i의 i번째
+                    삼항 : cond, then, else : 3 x <REF>            // tag 0 Scope(잎), 1 Const, 3 Expr만
+                  )
 
   // FIELDS - 이벤트 payload와 컨텍스트가 공유하는 필드 목록 인코딩
   <FIELDS> = field_count : u16
@@ -484,34 +494,35 @@ IF_EXPR expr_index  [then]  ELSE  [else]  IF_END
 
 ---
 
-## 5.4 삼항 - `Select`
+## 5.4 삼항 - `expr_inputs`와 `LoadInput`
 
-`c ? a : b`는 조건, 참 갈래, 거짓 갈래를 차례로 올리고 `Select kinds`로 끝난다. 피연산자는 각자 세 종류 중
-하나고, `kinds`가 그 종류를 담는다.
+삼항은 평가기가 세지 않는다. 런타임의 그래프가 조건을 읽고 고른 갈래만 요청한다. 그래서 삼항은 `exprs`에 바이트
+없는(len 0) 자리를 갖고, 조건과 두 갈래는 `expr_inputs`에 `<REF>` 셋으로 적힌다. 식 보간, `IF_EXPR`, `REF`
+Expr는 식 번호 하나로 계산 식과 삼항을 함께 가리킨다.
 
-```
-kinds = (조건 << 4) | (참 갈래 << 2) | 거짓 갈래      잎 0, 식 1, 상수 2
-```
-
-| 종류 | 올리는 명령 | 해당하는 피연산자 |
+| 피연산자 | `<REF>` | 해당하는 것 |
 |---|---|---|
-| 잎 0 | `LoadVarRef` - 슬롯 위치만 | 슬롯 하나로 접히는 참조(`count`, `row.price`) |
-| 식 1 | `LoadExpr k` - 하위 식 k | 연산자, 인덱스 접근, `.length`, 안쪽 삼항 |
-| 상수 2 | `LoadConst`, `LoadSmallInt`, `LoadTrue`, `LoadFalse` | 리터럴 |
+| 잎 | Scope(scope_index, offset) | 슬롯 하나로 접히는 참조(`count`, `row.price`). 고른 뒤에야 읽고 구독한다 |
+| 상수 | Const(const_index) | 리터럴 |
+| 식 | Expr(expr_index) | 연산자, 인덱스 접근, `.length`, 안쪽 삼항 |
 
-- 잎은 값을 읽지 않고 위치만 올린다. 고르지 않은 쪽의 슬롯은 읽지도 구독하지도 않는다. 슬롯이 STORE인지 CONST인지는
-  런타임이 정하므로 leafIndex가 아니라 위치를 올린다.
-- 식 피연산자는 하위 식으로 표현식 테이블에 먼저 들어가 자기 번호가 삼항의 번호보다 작다. 하위 식을 따라가면
-  번호가 줄어들기만 해 순환이 없다. 컴파일러가 보장하므로 런타임은 검사하지 않는다.
-- 갈래에 식이 하나라도 있으면 잎 조건도 그 잎 하나를 읽는 하위 식(`LoadVar`)으로 낸다. 조건 식 인스턴스가 갈래 식
-  인스턴스로 가는 labeled edge의 시작점이 된다 - #5.2의 `IF_EXPR`과 같은 규칙이다. 조건은 상수일 수 없어
-  (`ConstantTernaryCondition` 컴파일 에러) 잎과 식 둘뿐이다.
+- 잎과 상수는 노드를 만들지 않는다. 식인 피연산자만 그 식에서 삼항으로 들어오는 간선이다. 슬롯이 STORE인지
+  CONST인지는 런타임이 정하므로 leafIndex가 아니라 위치를 적는다.
+- 조건은 상수일 수 없다(`ConstantTernaryCondition` 컴파일 에러).
 
-| 소스 | 표현식 테이블 |
-|---|---|
-| `active ? "on" : "off"` | `#0: LoadVarRef(active) LoadConst("on") LoadConst("off") Select(0b0_10_10)` |
-| `active ? price * qty : count` | `#0: LoadVar(active)`, `#1: price * qty`, `#2: LoadExpr(0) LoadExpr(1) LoadVarRef(count) Select(0b1_01_00)` |
-| `a * b > 10 ? "good" : "bad"` | `#0: a * b > 10`, `#1: LoadExpr(0) LoadConst("good") LoadConst("bad") Select(0b1_10_10)` |
+삼항을 감싼 계산 식은 삼항의 값이 후위 바이트의 어디에 들어가는지를 `LoadInput i`로 표시한다. i는 그 식의 `inputs`
+에서의 위치이고, 어느 식인지는 `inputs`에만 있다. `inputs`는 바이트에서 처음 나오는 순서로 채우고, 같은 식을 두 번
+읽으면 같은 i를 사용한다. 그래서 code가 같아도 `inputs`가 다르면 다른 식이다.
+
+- 입력 식(삼항의 Expr 피연산자, 계산 식의 `inputs`)은 표현식 테이블에 먼저 들어가 자기 번호가 소비하는 식의
+  번호보다 작다. 입력을 따라가면 번호가 줄어들기만 해 순환이 없다. 컴파일러가 보장하므로 런타임은 검사하지 않는다.
+- 지금 컴파일러는 삼항만 따로 식으로 나눈다. 그래서 `inputs`의 식은 늘 삼항이다.
+
+| 소스 | `exprs` | `expr_inputs` |
+|---|---|---|
+| `active ? "on" : "off"` | `#0: len 0` | `#0: TERNARY, Scope(active), Const("on"), Const("off")` |
+| `active ? price * qty : count` | `#0: price * qty`, `#1: len 0` | `#1: TERNARY, Scope(active), Expr(0), Scope(count)` |
+| `base - (ok ? price : 0)` | `#0: len 0`, `#1: LoadVar(base) LoadInput(0) Sub` | `#0: TERNARY, Scope(ok), Scope(price), Const(0)`, `#1: 1, [0]` |
 
 ---
 
