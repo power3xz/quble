@@ -35,13 +35,14 @@ export type TExprInstance = {
   scopeUid: number;
   // 이 식 인스턴스를 든 가지 수.
   heldByBranchCount: number;
-  // 이 식 인스턴스를 입력으로 읽는 식 인스턴스 수. heldByBranchCount와 함께 0이 되면 반납한다.
-  readByExprCount: number;
   // 입력 식의 인스턴스. evaluate가 처음 셀 때 만든다. 계산 식은 inputs[i]의 인스턴스, 삼항은 [cond, 참 갈래, 거짓
   // 갈래]이고, 삼항에서 잎과 상수 피연산자, 아직 고르지 않은 갈래 자리는 undefined다. 입력이 없으면 NO_INPUT_INSTANCES다.
   inputInstances: readonly (number | undefined)[];
   // 계산 식이 셀 때 평가기에 넘기는 입력 값. inputValues[i]가 inputInstances[i]의 값이다. 입력이 없으면 NO_INPUT_VALUES다.
   inputValues: readonly unknown[];
+  // 이 식 인스턴스를 입력으로 읽는 식 인스턴스. 한 식이 두 자리에서 읽으면(`x ? x : y`) 두 번 든다. 읽는 식이 없으면
+  // null이다. heldByBranchCount가 0이고 이것도 비면 반납한다.
+  outputInstances: number[] | null;
 };
 
 // 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared가 쓴다.
@@ -125,9 +126,9 @@ export class ExprInstancePool {
       resultLeaf: undefined,
       scopeUid,
       heldByBranchCount: 0,
-      readByExprCount: 0,
       inputInstances: NO_INPUT_INSTANCES,
       inputValues: NO_INPUT_VALUES,
+      outputInstances: null,
     };
     return this.pool.alloc(instance);
   };
@@ -379,7 +380,7 @@ export class ExprInstancePool {
       this.evaluate(input);
       this.subscribeInputs(input);
     }
-    this.retainByExpr(input);
+    this.retainByExpr(input, exprInstanceIndex);
     return input;
   };
 
@@ -417,13 +418,19 @@ export class ExprInstancePool {
     this.freeIfUnheld(exprInstanceIndex);
   };
 
-  retainByExpr = (exprInstanceIndex: number): void => {
-    this.pool.entries[exprInstanceIndex].readByExprCount++;
+  // 식 인스턴스(exprInstanceIndex)의 outputInstances에 그 값을 읽는 식 인스턴스(outputExprInstanceIndex)를 더한다.
+  retainByExpr = (exprInstanceIndex: number, outputExprInstanceIndex: number): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    instance.outputInstances ??= [];
+    instance.outputInstances.push(outputExprInstanceIndex);
   };
 
-  // readByExprCount를 하나 줄이고, 가지도 들지 않으면 반납한다(freeIfUnheld).
-  releaseByExpr = (exprInstanceIndex: number): void => {
-    this.pool.entries[exprInstanceIndex].readByExprCount--;
+  // outputInstances에서 outputExprInstanceIndex 하나를 빼고, 가지도 들지 않으면 반납한다(freeIfUnheld). 뺀 자리에는
+  // 맨 끝 번호를 옮긴다 - 순서는 보지 않는다.
+  releaseByExpr = (exprInstanceIndex: number, outputExprInstanceIndex: number): void => {
+    const outputs = this.pool.entries[exprInstanceIndex].outputInstances as number[];
+    outputs[outputs.indexOf(outputExprInstanceIndex)] = outputs[outputs.length - 1];
+    outputs.pop();
     this.freeIfUnheld(exprInstanceIndex);
   };
 
@@ -431,7 +438,7 @@ export class ExprInstancePool {
   // releaseByExpr로 놓아, 그 인스턴스를 읽는 다른 식도 없으면 함께 반납된다.
   private freeIfUnheld = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
-    if (instance.heldByBranchCount > 0 || instance.readByExprCount > 0) {
+    if (instance.heldByBranchCount > 0 || (instance.outputInstances?.length ?? 0) > 0) {
       return;
     }
     this.unsubscribeInputs(exprInstanceIndex);
@@ -447,7 +454,7 @@ export class ExprInstancePool {
     this.pool.release(exprInstanceIndex);
     for (const input of instance.inputInstances) {
       if (input !== undefined) {
-        this.releaseByExpr(input);
+        this.releaseByExpr(input, exprInstanceIndex);
       }
     }
   };

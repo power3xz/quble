@@ -141,7 +141,7 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 - `findShared`: 키로 찾는다. 없으면 `NOT_SHARED`.
 - `markShared`: 새로 만든 인스턴스를 자기 `(globalExprIndex, scopeUid)`로 올린다.
-- `freeIfUnheld`: 인스턴스를 반납할 때(`heldByBranchCount`와 `readByExprCount`가 모두 0) 그 키가 이 인스턴스를 가리키면
+- `freeIfUnheld`: 인스턴스를 반납할 때(`heldByBranchCount`가 0이고 `outputInstances`가 빔) 그 키가 이 인스턴스를 가리키면
   지운다. 같은 식을 `@for` 안(공유)과 밖(공유 안 함)에서 쓰면 두 인스턴스의 키가 같아, 가리키는지 보지 않으면 공유하지
   않은 쪽을 반납할 때 공유한 쪽의 항목이 빠진다. `scopeUid`는 반납 뒤 다시 할당되지만, 그 scope의 식 인스턴스는 scope를
   연 가지와 함께 먼저 반납되므로 옛 키가 새 scope에 걸리지 않는다.
@@ -187,8 +187,8 @@ leaf에 기록하고 그 leaf를 `notify`한다. 가지가 붙는 것은 flush�
 
 - **식 인스턴스가 다른 식 인스턴스를 입력으로 받는 경우**는 처음 그리기까지만 있다. 삼항과 삼항을 읽는 계산 식이
   정적 그래프(`TModule.exprInputs`)를 따라 입력 인스턴스를 연결한다(`expr-layer.ts`의 `linkInputInstance`). 입력
-  인스턴스는 입력 식의 `level` 깊이 scope에서 공유하고, 읽는 식 인스턴스 수(`readByExprCount`)와 든 가지 수가 모두 0이
-  되면 반납한다. 입력이 바뀐 뒤 다시 세는 순서(표시와 셈)는 아직 없다(docs/expr-graph.draft.md "전파"). 파생 구독의
+  인스턴스는 입력 식의 `level` 깊이 scope에서 공유하고, 그 값을 읽는 식 인스턴스(`outputInstances`)가 비고 든 가지 수가
+  0이 되면 반납한다. 입력이 바뀐 뒤 다시 세는 순서(표시와 셈)는 아직 없다(docs/expr-graph.draft.md "전파"). 파생 구독의
   입력은 지금도 변수 leaf뿐이다.
 - **`[vm]`의 경계**: `vm.ts` 한 파일이 DOM 바인딩과 조립(식 인스턴스, 풀, store 연결)을 함께 맡는다.
 - **`scopeUid` 낭비**: `@for` 행과 `RENDER`마다 번호를 받지만 대부분의 행에는 공유하는 식이 없다.

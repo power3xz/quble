@@ -47,7 +47,7 @@ const build = (fixture: ReturnType<typeof sum>) => {
   const value = pool.evaluate(exprInstanceIndex);
   fixture.store.write(fixture.resultLeafIndex, value);
   pool.bindResultLeaf(exprInstanceIndex, fixture.resultLeafIndex);
-  return { pool, exprInstanceIndex, value, store: fixture.store };
+  return { pool, exprInstanceIndex, value, store: fixture.store, pairs: fixture.pairs };
 };
 
 // 식 인스턴스를 false인 조건 아래 가지에 실린 것처럼 쉬게 한다. 새 leaf를 읽는 조건 식 인스턴스에서 label then
@@ -72,7 +72,7 @@ test("create는 가지도 식도 붙들지 않은 인스턴스를 만든다", ()
   const pool = poolOf(fixture.store, [fixture.expr]);
   const instance = pool.pool.entries[pool.create(0, fixture.pairs, SCOPE_UID)];
   assert.equal(instance.heldByBranchCount, 0);
-  assert.equal(instance.readByExprCount, 0);
+  assert.equal(instance.outputInstances, null);
   assert.equal(instance.scopeUid, SCOPE_UID);
 });
 
@@ -199,8 +199,9 @@ test("구독을 건 채로 release해도 구독이 풀려 반납된 결과 leaf�
 });
 
 test("가지가 놓아도 식이 읽고 있으면 반납하지 않는다", () => {
-  const { pool, exprInstanceIndex } = build(sum());
-  pool.retainByExpr(exprInstanceIndex);
+  const { pool, exprInstanceIndex, pairs } = build(sum());
+  const output = pool.create(0, pairs, SCOPE_UID);
+  pool.retainByExpr(exprInstanceIndex, output);
 
   pool.releaseByBranch(exprInstanceIndex);
 
@@ -208,20 +209,22 @@ test("가지가 놓아도 식이 읽고 있으면 반납하지 않는다", () =>
 });
 
 test("식이 놓아도 가지가 들고 있으면 반납하지 않는다", () => {
-  const { pool, exprInstanceIndex } = build(sum());
-  pool.retainByExpr(exprInstanceIndex);
+  const { pool, exprInstanceIndex, pairs } = build(sum());
+  const output = pool.create(0, pairs, SCOPE_UID);
+  pool.retainByExpr(exprInstanceIndex, output);
 
-  pool.releaseByExpr(exprInstanceIndex);
+  pool.releaseByExpr(exprInstanceIndex, output);
 
   assert.deepEqual(pool.pool.free, []);
 });
 
 test("가지와 식이 모두 놓으면 결과 leaf와 풀 번호를 반납한다", () => {
-  const { pool, exprInstanceIndex, store } = build(sum());
-  pool.retainByExpr(exprInstanceIndex);
+  const { pool, exprInstanceIndex, store, pairs } = build(sum());
+  const output = pool.create(0, pairs, SCOPE_UID);
+  pool.retainByExpr(exprInstanceIndex, output);
 
   pool.releaseByBranch(exprInstanceIndex);
-  pool.releaseByExpr(exprInstanceIndex);
+  pool.releaseByExpr(exprInstanceIndex, output);
 
   assert.deepEqual(pool.pool.free, [exprInstanceIndex]);
   assert.equal(store.alloc([9]), 2, "결과 leaf가 반납되어 다시 쓰인다");
