@@ -627,7 +627,7 @@ export class ResumeInterpreter {
         stacks,
       ) as ChildNode[]; // 이 해석기는 늘 배열을 낸다
     };
-    // count가 늘 때의 회차는 노드를 새로 짓는다.
+    // count가 늘 때의 회차는 노드를 새로 만든다.
     const growIteration = (i: number) => {
       const newBranchIndex = vm.appendIteration(forRegionIndex, edgeStartNode, i);
       vm.branchAt(newBranchIndex).nodes = nodesOf(

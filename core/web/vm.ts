@@ -179,7 +179,7 @@ export const storeSourcePairs = (base: number, leafCount: number): number[] => {
 };
 
 // 조립 step - 런타임 내부 미니 명령(바이트코드 opcode와 다른 층). type_ref 구조를 평탄한 step
-// 열로 컴파일해두고, assemble이 그 열을 반복 실행해 중첩 객체를 짓는다(재귀/트리순회 없음).
+// 열로 컴파일해두고, assemble이 그 열을 반복 실행해 중첩 객체를 만든다(재귀/트리순회 없음).
 //   STEP_ENTER key : 새 객체를 만들어 부모[key]에 걸고 내려간다
 //   STEP_LEAF  key : 부모[key] = 다음 leaf 값
 //   STEP_EXIT      : 부모로 돌아온다
@@ -493,7 +493,7 @@ export type TInterpreter = {
 // 해체된 인스턴스의 destroy가 되는 함수. 아무것도 잡지 않는다.
 const noop = (): void => {};
 
-// 인스턴스의 snapshot - typeRef 타입의 값을 store의 base + offset 자리에서 읽어 data와 같은 모양으로 다시 짓는다.
+// 인스턴스의 snapshot - typeRef 타입의 값을 store의 base + offset 자리에서 읽어 data와 같은 모양으로 다시 만든다.
 // 인자를 모두 생략하면 루트 props 전체(propsTypeRef, 0, 0)다. 루트 props의 필드는 앞 필드의 칸 수만큼 이어서
 // 놓이므로 루트를 base 0의 한 객체로 읽을 수 있다. VM이 아니라 인자만 잡으므로, 인스턴스를 쥔 호출자가
 // VM까지 붙들지 않는다.
@@ -642,7 +642,7 @@ export class VM {
   // destroy는 인스턴스를 해체한다 - 붙은 DOM/구독을 region 트리 재귀로 떼고(detach - 반응 갱신으로 나중에
   // 붙은 노드까지 region이 안다), 루트 anchor와 document 위임 리스너를 제거해 인스턴스가 GC되게 한다.
   //
-  // snapshot은 타입과 위치를 받아 store의 그 자리 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 짓는다
+  // snapshot은 타입과 위치를 받아 store의 그 자리 값을 mount 때 넘긴 rootValue와 같은 모양으로 다시 만든다
   // (핸들러 payload와 같은 조립). 인자를 생략하면 루트 props 전체다(snapshotOf).
   //
   // update는 루트 props를 이름으로 갱신한다(updateRoot). destroy가 이 클로저도 놓는다 - VM을 잡고 있다.

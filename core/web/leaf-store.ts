@@ -64,7 +64,7 @@ export type LeafStoreSubject = {
 };
 // leaf마다 구독을 담는 슬롯. 구독이 하나뿐인 leaf가 대부분이라 하나면 Set 없이 함수를 그대로 담고, 둘째가
 // 들어올 때 Set으로 바꾼다 - leaf마다 Set을 두면 힙을 크게 차지하고, 가지를 껐다 켤 때 구독을 걸고 푸는 일이 Set의
-// 표를 다시 짓는 할당이 된다. 같은 함수를 두 번 걸어도 한 번만 든다.
+// 표를 다시 만드는 할당이 된다. 같은 함수를 두 번 걸어도 한 번만 든다.
 type TSubscriberFn = (...args: never[]) => unknown;
 type TSlot<T extends TSubscriberFn> = T | Set<T> | undefined;
 

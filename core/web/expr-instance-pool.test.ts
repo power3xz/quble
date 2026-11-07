@@ -37,7 +37,7 @@ const COND_EXPR = 1;
 const poolOf = (store: ReturnType<typeof createLeafStoreSubject>, exprBytes: Uint8Array[]) =>
   new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
 
-// 식 인스턴스를 짓고 처음 센 뒤 결과 leaf에 그 값을 넣고 연결한다(VM의 allocResultLeaf와 같다). 구독은 걸지
+// 식 인스턴스를 만들고 처음 센 뒤 결과 leaf에 그 값을 넣고 연결한다(VM의 allocResultLeaf와 같다). 구독은 걸지
 // 않은 상태다.
 const build = (fixture: ReturnType<typeof sum>) => {
   const pool = poolOf(fixture.store, [fixture.expr, new Uint8Array(load(0))]);
@@ -305,7 +305,7 @@ test("쉬는 동안 입력 여럿이 바뀌면 recountPending이 식을 한 번 
   assert.deepEqual(notified, [24], "(4 + 2) * (7 - 3)만 통지한다 - a만 반영한 중간 값이 나가지 않는다");
 });
 
-// a + b 인스턴스 둘을 같은 풀에서 짓고 구독을 건다. 첫째는 결과 leaf 2, 둘째는 결과 leaf 3에 쓴다. 둘 다 a, b를
+// a + b 인스턴스 둘을 같은 풀에서 만들고 구독을 건다. 첫째는 결과 leaf 2, 둘째는 결과 leaf 3에 쓴다. 둘 다 a, b를
 // 읽어 leaf 0과 1의 파생 구독 슬롯이 Set이 된다.
 const buildTwoSubscribed = () => {
   const store = createLeafStoreSubject([1, 2, 0, 0]);
