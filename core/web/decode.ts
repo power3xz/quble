@@ -14,7 +14,7 @@ const TYPE_ARRAY = 2;
 
 export type TField = [number, number];
 export type TType = { tag: "scalar" } | { tag: "object"; fields: TField[] } | { tag: "array"; elemTypeRef: number };
-export type TRef = { kind: number; ref: number; offset: number };
+export type TRef = { tag: number; ref: number; offset: number };
 export type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
 export type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
 // 조립 step 하나 - [STEP_*, key, elemSteps?]. STEP_* 상수와 의미는 vm.ts.
@@ -132,20 +132,20 @@ const readType = (reader: Reader): TType => {
 // 의미 있어 나머진 0.
 //
 // @param r Reader
-// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=localExprIndex
+// @returns { tag, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=localExprIndex
 const readRef = (reader: Reader): TRef => {
   const tag = reader.u8();
   if (tag === FV_SCOPE) {
-    return { kind: FV_SCOPE, ref: reader.u8(), offset: reader.u8() };
+    return { tag: FV_SCOPE, ref: reader.u8(), offset: reader.u8() };
   }
   if (tag === FV_CONST) {
-    return { kind: FV_CONST, ref: reader.u16(), offset: 0 };
+    return { tag: FV_CONST, ref: reader.u16(), offset: 0 };
   }
   if (tag === FV_RAW) {
-    return { kind: FV_RAW, ref: reader.u16(), offset: 0 };
+    return { tag: FV_RAW, ref: reader.u16(), offset: 0 };
   }
   if (tag === FV_EXPR) {
-    return { kind: FV_EXPR, ref: reader.u8(), offset: 0 };
+    return { tag: FV_EXPR, ref: reader.u8(), offset: 0 };
   }
   throw new Error(`bad ref tag ${tag}`);
 };

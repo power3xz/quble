@@ -149,10 +149,10 @@ export const snapshotStacks = (walkStacks: TWalkStacks): TWalkStacks => ({
 // @param argumentSourcePairs flat 슬롯 배열
 // @returns          [kind, ref, ...] 열
 const refToSourcePairs = (ref: TRef, leafCount: number, scope: TScope): number[] => {
-  if (ref.kind === FV_CONST) {
+  if (ref.tag === FV_CONST) {
     return [CONST, ref.ref];
   }
-  if (ref.kind === FV_RAW) {
+  if (ref.tag === FV_RAW) {
     throw new Error("FV_RAW는 아직 미구현(@for)");
   }
   // FV_SCOPE - 슬롯의 kind를 물려받는다. CONST 슬롯(부모가 리터럴로 준 prop)은 상수 하나.
@@ -1020,7 +1020,7 @@ export class VM {
   // 바인딩 때 필드 하나를 발생 시점에 조립할 준비물로 푼다(payload/컨텍스트 공용).
   toAssembled = (compId: number, field: TFieldEntry, argumentSourcePairs: TScope): TAssembled => {
     const name = this.module.constpool[field.nameConstIndex] as string;
-    if (field.ref.kind === FV_EXPR) {
+    if (field.ref.tag === FV_EXPR) {
       const expr = this.module.defs[compId].exprBytecodes[field.ref.ref];
       return { name, typeRef: field.typeRef, expr, pairs: argumentSourcePairs };
     }

@@ -35,9 +35,9 @@ test("그래프 섹션의 삼항과 입력 있는 계산 식을 읽고, 없는 �
     { kind: "calc", inputs: [] },
     {
       kind: "ternary",
-      cond: { kind: 0, ref: 0, offset: 0 },
-      thenBranch: { kind: 0, ref: 1, offset: 0 },
-      elseBranch: { kind: 1, ref: 0, offset: 0 },
+      cond: { tag: 0, ref: 0, offset: 0 },
+      thenBranch: { tag: 0, ref: 1, offset: 0 },
+      elseBranch: { tag: 1, ref: 0, offset: 0 },
     },
     { kind: "calc", inputs: [1] },
   ]);

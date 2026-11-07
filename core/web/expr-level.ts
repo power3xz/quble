@@ -21,10 +21,10 @@ const depthOfScopeIndex = (scopeIndex: number, propsCount: number): number =>
 
 // 삼항 피연산자 하나의 level. 잎은 그 슬롯의 깊이, 상수는 0, 식은 levels에 이미 구한 그 식의 level이다.
 const levelOfTernaryOperand = (operand: TRef, levels: number[], propsCount: number): number => {
-  if (operand.kind === FV_CONST) {
+  if (operand.tag === FV_CONST) {
     return 0;
   }
-  if (operand.kind === FV_EXPR) {
+  if (operand.tag === FV_EXPR) {
     return levels[operand.ref];
   }
   return depthOfScopeIndex(operand.ref, propsCount);
