@@ -1527,7 +1527,7 @@ export class VM {
     if (exprInstanceIndex === NOT_SHARED) {
       exprInstanceIndex = exprInstancePool.create(globalExprIndex, pairs, scopeUid);
       if (shared) {
-        exprInstancePool.markShared(exprInstanceIndex, globalExprIndex, scopeUid);
+        exprInstancePool.markShared(exprInstanceIndex);
       }
       value = exprInstancePool.evaluate(exprInstanceIndex);
       exprInstancePool.subscribeInputs(exprInstanceIndex);

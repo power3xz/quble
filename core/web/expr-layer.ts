@@ -35,12 +35,9 @@ export type TExprInstance = {
   heldByBranchCount: number;
   // 이 식 인스턴스를 입력으로 읽는 식 인스턴스 수. heldByBranchCount와 함께 0이 되면 반납한다.
   readByExprCount: number;
-  // 공유 맵에 올린 키(globalExprIndex와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
-  sharedGlobalExprIndex: number;
-  sharedScopeUid: number;
 };
 
-// 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared와 인스턴스의 공유 키 자리에 쓴다.
+// 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared가 쓴다.
 export const NOT_SHARED = -1;
 
 // leaf마다 파생 구독(식 인스턴스 번호)을 담는 슬롯. 구독이 하나뿐인 leaf가 대부분이라 하나면 번호 그대로, 둘째가
@@ -88,8 +85,6 @@ export class ExprInstancePool {
       scopeUid,
       heldByBranchCount: 0,
       readByExprCount: 0,
-      sharedGlobalExprIndex: NOT_SHARED,
-      sharedScopeUid: NOT_SHARED,
     };
     return this.pool.alloc(instance);
   };
@@ -262,11 +257,9 @@ export class ExprInstancePool {
   findShared = (globalExprIndex: number, scopeUid: number): number =>
     this.shared[globalExprIndex]?.get(scopeUid) ?? NOT_SHARED;
 
-  // 식 인스턴스를 (globalExprIndex, scopeUid)로 공유 맵에 올린다. 인스턴스를 반납할 때 freeIfUnheld가 지운다.
-  markShared = (exprInstanceIndex: number, globalExprIndex: number, scopeUid: number): void => {
-    const instance = this.pool.entries[exprInstanceIndex];
-    instance.sharedGlobalExprIndex = globalExprIndex;
-    instance.sharedScopeUid = scopeUid;
+  // 식 인스턴스를 자기 (globalExprIndex, scopeUid)로 공유 맵에 올린다. 인스턴스를 반납할 때 freeIfUnheld가 지운다.
+  markShared = (exprInstanceIndex: number): void => {
+    const { globalExprIndex, scopeUid } = this.pool.entries[exprInstanceIndex];
     const byScopeUid = this.shared[globalExprIndex] ?? new Map<number, number>();
     byScopeUid.set(scopeUid, exprInstanceIndex);
     this.shared[globalExprIndex] = byScopeUid;
@@ -303,8 +296,11 @@ export class ExprInstancePool {
       return;
     }
     this.unsubscribeInputs(exprInstanceIndex);
-    if (instance.sharedGlobalExprIndex !== NOT_SHARED) {
-      this.shared[instance.sharedGlobalExprIndex].delete(instance.sharedScopeUid);
+    // 맵의 그 키가 이 인스턴스를 가리킬 때만 지운다. 같은 식을 @for 안(공유)과 밖(공유 안 함)에서 쓰면 두 인스턴스의
+    // (globalExprIndex, scopeUid)가 같아, 키만 보고 지우면 공유하지 않은 쪽을 반납할 때 공유한 쪽의 항목이 빠진다.
+    const byScopeUid = this.shared[instance.globalExprIndex];
+    if (byScopeUid?.get(instance.scopeUid) === exprInstanceIndex) {
+      byScopeUid.delete(instance.scopeUid);
     }
     if (instance.resultLeaf !== undefined) {
       this.store.free(instance.resultLeaf, 1);

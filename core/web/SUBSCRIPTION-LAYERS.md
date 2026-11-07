@@ -138,9 +138,11 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 `ExprInstancePool.shared[globalExprIndex].get(scopeUid)`가 인스턴스 번호다.
 
 - `findShared`: 키로 찾는다. 없으면 `NOT_SHARED`.
-- `markShared`: 새로 만든 인스턴스를 키로 올린다.
-- `releaseByBranch`: `heldByBranchCount`가 0이 되면 키를 지운다. `scopeUid`를 다시 사용하지 않으므로, 없어진 스코프의 키에 새 스코프가
-  걸리지 않는다.
+- `markShared`: 새로 만든 인스턴스를 자기 `(globalExprIndex, scopeUid)`로 올린다.
+- `freeIfUnheld`: 인스턴스를 반납할 때(`heldByBranchCount`와 `readByExprCount`가 모두 0) 그 키가 이 인스턴스를 가리키면
+  지운다. 같은 식을 `@for` 안(공유)과 밖(공유 안 함)에서 쓰면 두 인스턴스의 키가 같아, 가리키는지 보지 않으면 공유하지
+  않은 쪽을 반납할 때 공유한 쪽의 항목이 빠진다. `scopeUid`는 반납 뒤 다시 할당되지만, 그 scope의 식 인스턴스는 scope를
+  연 가지와 함께 먼저 반납되므로 옛 키가 새 scope에 걸리지 않는다.
 
 ### 재사용
 

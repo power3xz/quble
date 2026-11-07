@@ -228,15 +228,16 @@ test("가지와 식이 모두 놓으면 결과 leaf와 풀 번호를 반납한�
   assert.equal(store.alloc([9]), 2, "결과 leaf가 반납되어 다시 쓰인다");
 });
 
-// 같은 풀에서 식 인스턴스 둘을 만든다(공유 조회는 풀 하나 안에서 이뤄진다). 구독은 걸지 않는다.
+// 같은 풀에서 식 0의 인스턴스 둘을 scope 7과 8에 만든다(공유 조회는 풀 하나 안에서 이뤄진다). 식 1은 식 0과 바이트가
+// 같은 다른 식이다. 구독은 걸지 않는다.
 const buildTwo = () => {
   const fixture = sum();
-  const pool = poolOf(fixture.store, [fixture.expr]);
-  const first = pool.create(0, fixture.pairs, SCOPE_UID);
-  const second = pool.create(0, fixture.pairs, SCOPE_UID);
+  const pool = poolOf(fixture.store, [fixture.expr, fixture.expr]);
+  const first = pool.create(0, fixture.pairs, 7);
+  const second = pool.create(0, fixture.pairs, 8);
   pool.retainByBranch(first);
   pool.retainByBranch(second);
-  return { pool, first, second };
+  return { pool, first, second, fixture };
 };
 
 test("findShared는 올리지 않은 키에는 NOT_SHARED를 돌려준다", () => {
@@ -244,57 +245,68 @@ test("findShared는 올리지 않은 키에는 NOT_SHARED를 돌려준다", () =
   assert.equal(pool.findShared(0, 7), NOT_SHARED);
 });
 
-test("markShared로 올린 (globalExprIndex, scopeUid)로만 그 식 인스턴스가 찾아진다", () => {
+test("markShared는 인스턴스의 (globalExprIndex, scopeUid)로 올리고 그 키로만 찾아진다", () => {
   const { pool, first } = buildTwo();
-  pool.markShared(first, 3, 7);
+  pool.markShared(first);
 
-  assert.equal(pool.findShared(3, 7), first);
-  assert.equal(pool.findShared(3, 8), NOT_SHARED, "scopeUid가 다르면 다른 스코프의 식이다");
-  assert.equal(pool.findShared(4, 7), NOT_SHARED, "globalExprIndex가 다르면 같은 스코프의 다른 식이다");
+  assert.equal(pool.findShared(0, 7), first);
+  assert.equal(pool.findShared(0, 8), NOT_SHARED, "scopeUid가 다르면 다른 스코프의 식이다");
+  assert.equal(pool.findShared(1, 7), NOT_SHARED, "globalExprIndex가 다르면 같은 스코프의 다른 식이다");
 });
 
 test("공유한 식 인스턴스는 참조 수가 0이 될 때 공유 맵에서 빠진다", () => {
   const { pool, first } = buildTwo();
-  pool.markShared(first, 3, 7);
+  pool.markShared(first);
   pool.retainByBranch(first);
 
   pool.releaseByBranch(first);
-  assert.equal(pool.findShared(3, 7), first, "참조가 하나 남았으니 계속 찾아진다");
+  assert.equal(pool.findShared(0, 7), first, "참조가 하나 남았으니 계속 찾아진다");
 
   pool.releaseByBranch(first);
-  assert.equal(pool.findShared(3, 7), NOT_SHARED);
+  assert.equal(pool.findShared(0, 7), NOT_SHARED);
 });
 
 test("반납한 풀 번호를 새 식 인스턴스가 다시 써도 옛 키로 찾아지지 않는다", () => {
-  const { pool, first } = buildTwo();
-  pool.markShared(first, 3, 7);
+  const { pool, first, fixture } = buildTwo();
+  pool.markShared(first);
   pool.releaseByBranch(first);
 
-  const fixture = sum();
-  const reused = pool.create(0, fixture.pairs, SCOPE_UID);
+  const reused = pool.create(0, fixture.pairs, 7);
 
   assert.equal(reused, first, "풀 번호가 재사용된다");
-  assert.equal(pool.findShared(3, 7), NOT_SHARED);
+  assert.equal(pool.findShared(0, 7), NOT_SHARED);
 });
 
 test("공유한 식 인스턴스 하나를 반납해도 다른 키의 식 인스턴스는 그대로 찾아진다", () => {
   const { pool, first, second } = buildTwo();
-  pool.markShared(first, 3, 7);
-  pool.markShared(second, 3, 8);
+  pool.markShared(first);
+  pool.markShared(second);
 
   pool.releaseByBranch(first);
 
-  assert.equal(pool.findShared(3, 7), NOT_SHARED);
-  assert.equal(pool.findShared(3, 8), second);
+  assert.equal(pool.findShared(0, 7), NOT_SHARED);
+  assert.equal(pool.findShared(0, 8), second);
+});
+
+// 같은 식을 @for 안(공유)과 밖(공유 안 함)에서 쓰면 두 인스턴스의 (globalExprIndex, scopeUid)가 같다.
+test("공유 맵 키가 같아도 공유하지 않은 인스턴스를 반납하면 공유한 인스턴스는 그대로 찾아진다", () => {
+  const { pool, first, fixture } = buildTwo();
+  pool.markShared(first);
+  const unshared = pool.create(0, fixture.pairs, 7);
+  pool.retainByBranch(unshared);
+
+  pool.releaseByBranch(unshared);
+
+  assert.equal(pool.findShared(0, 7), first);
 });
 
 test("clear하면 공유 맵도 비운다", () => {
   const { pool, first } = buildTwo();
-  pool.markShared(first, 3, 7);
+  pool.markShared(first);
 
   pool.clear();
 
-  assert.equal(pool.findShared(3, 7), NOT_SHARED);
+  assert.equal(pool.findShared(0, 7), NOT_SHARED);
 });
 
 test("건너뛸 부분식이 없는 식은 쉬는 동안 입력 leaf 여럿이 바뀌어도 recountPending이 식을 한 번만 센다", () => {
