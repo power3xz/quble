@@ -548,8 +548,8 @@ export class VM {
   // code는 인스턴스 내내 불변이라 스캔 결과가 pc마다 고정. @for 회차/@if lazyBuild가 같은
   // IF/FOR 지점을 회차 수만큼 재해석하며 매번 몸체를 재스캔하는 낭비를 없앤다. 키는 시작 pc.
   forEndCache = new Map<number, number>();
-  // 컴포넌트 def별 식 level 배열. 처음 필요할 때 구한다(exprLevel).
-  exprLevelsByComp: Array<number[] | undefined> = [];
+  // globalExprIndex -> 식의 level(expr-level.ts). VM을 만들 때 모든 def의 식을 한 번에 구한다.
+  exprLevels: number[];
   scopeParentPool: TScopeParentPool = new Pool<number>();
   ifRangesCache = new Map<number, { ifBodyEnd: number; elseBodyStart: number; ifEndPc: number }>();
   slotContentEndCache = new Map<number, number>();
@@ -574,6 +574,7 @@ export class VM {
     this.loadedHrefs = loadedHrefs;
     this.store = createLeafStoreSubject(leaves);
     this.arrayPool = arrayPool;
+    this.exprLevels = module.defs.flatMap((_, compId) => exprLevelsOf(module, compId));
     this.evaluator = new ExprEvaluator(module.constpool, module.exprBytes, this.store, arrayPool);
     this.exprInstancePool = new ExprInstancePool(this.evaluator, this.store);
     this.regionPool = new Pool();
@@ -1487,16 +1488,6 @@ export class VM {
   globalExprIndexOf = (compId: number, localExprIndex: number): number =>
     this.module.globalExprBase[compId] + localExprIndex;
 
-  // 컴포넌트 def의 식 하나가 읽는 변수의 가장 깊은 깊이(expr-level.ts). 컴포넌트마다 처음 필요할 때 한 번 구한다.
-  exprLevel = (compId: number, localExprIndex: number): number => {
-    let levels = this.exprLevelsByComp[compId];
-    if (levels === undefined) {
-      levels = exprLevelsOf(this.module, compId);
-      this.exprLevelsByComp[compId] = levels;
-    }
-    return levels[localExprIndex];
-  };
-
   // 식을 공유할 스코프의 scopeUid. 식의 level이 이 자리가 컴포넌트 안에서 든 @for 깊이보다 낮을 때만 있다 - 같은
   // 깊이면 행마다 값이 달라 공유할 것이 없으므로 NOT_SHARED다.
   // 스택은 컴포넌트를 가로질러 쌓이므로 이 컴포넌트의 scopeUid 위치는 맨 위에서 @for 깊이만큼 내려간 곳이고, level만큼
@@ -1509,7 +1500,7 @@ export class VM {
     walkStacks: TWalkStacks,
     loopIndexBase: number,
   ): number => {
-    const level = this.exprLevel(compId, localExprIndex);
+    const level = this.exprLevels[this.globalExprIndexOf(compId, localExprIndex)];
     const forDepth = walkStacks.loopIndexStack.length / 2 - loopIndexBase;
     if (level >= forDepth) {
       return NOT_SHARED;

@@ -50,6 +50,8 @@ export type TModule = {
   globalExprBase: number[];
   // globalExprIndex -> 식 바이트. defs[].exprBytecodes와 같은 객체다.
   exprBytes: Uint8Array[];
+  // globalExprIndex -> 식의 입력. defs[].exprInputs와 달리 삼항 피연산자와 계산 식 입력의 식 번호가 globalExprIndex다.
+  exprInputs: TExprInputs[];
 };
 
 class Reader {
@@ -197,6 +199,24 @@ const readExprInputs = (reader: Reader, exprCount: number): TExprInputs[] => {
   return exprInputs;
 };
 
+// def 하나의 exprInputs에서 식 번호를 localExprIndex에서 globalExprIndex로 옮긴 사본. 잎과 상수 피연산자는 그대로다.
+//   globalExprBase가 1이면 { kind: "calc", inputs: [1] } -> { kind: "calc", inputs: [2] }
+const rebaseExprInputs = (exprInputs: TExprInputs[], globalExprBase: number): TExprInputs[] =>
+  exprInputs.map((entry) =>
+    entry.kind === "calc"
+      ? { kind: "calc", inputs: entry.inputs.map((input) => input + globalExprBase) }
+      : {
+          kind: "ternary",
+          cond: rebaseExprRef(entry.cond, globalExprBase),
+          thenBranch: rebaseExprRef(entry.thenBranch, globalExprBase),
+          elseBranch: rebaseExprRef(entry.elseBranch, globalExprBase),
+        },
+  );
+
+// 식을 가리키는 ref면 식 번호에 globalExprBase를 더한 사본, 아니면 그대로.
+const rebaseExprRef = (ref: TRef, globalExprBase: number): TRef =>
+  ref.tag === FV_EXPR ? { tag: FV_EXPR, ref: ref.ref + globalExprBase, offset: 0 } : ref;
+
 // 컴파일된 qubb 바이트. 진입점(mount/resume)과 번들러 플러그인이 같은 타입으로 주고받는다.
 // THandlerMap은 값에 실리지 않는 타입 정보다 - 플러그인이 낸 x.qubc.d.ts가 그 컴포넌트의 핸들러 맵 타입
 // (THandlers)을 채워, 바이트코드를 받는 쪽이 핸들러 키와 컨텍스트 타입을 추론한다.
@@ -231,6 +251,7 @@ export const decode = (bytes: TQubleBytecode): TModule => {
   const defs = [];
   const globalExprBase: number[] = [];
   const exprBytes: Uint8Array[] = [];
+  const globalExprInputs: TExprInputs[] = [];
   for (let i = 0; i < defCount; i++) {
     const nameConstIndex = r.u16();
     // 이 comp props를 묶은 Object 타입(types 인덱스). defs[0]이 진입점 풀필 구조.
@@ -257,6 +278,7 @@ export const decode = (bytes: TQubleBytecode): TModule => {
     }
     const exprInputs = readExprInputs(r, exprCount);
     globalExprBase.push(exprBytes.length);
+    globalExprInputs.push(...rebaseExprInputs(exprInputs, exprBytes.length));
     exprBytes.push(...exprBytecodes);
     defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprBytecodes, exprInputs });
   }
@@ -266,5 +288,15 @@ export const decode = (bytes: TQubleBytecode): TModule => {
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
   // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
-  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [], globalExprBase, exprBytes };
+  return {
+    constpool,
+    types,
+    defs,
+    code,
+    compiledSteps: [],
+    leafCounts: [],
+    globalExprBase,
+    exprBytes,
+    exprInputs: globalExprInputs,
+  };
 };
