@@ -1253,6 +1253,12 @@
       ]
     }
   ],
+  "payload_ternary": [
+    {
+      "n": 5,
+      "open": true
+    }
+  ],
   "props_beyond_payload": [
     {
       "label": "제목",
