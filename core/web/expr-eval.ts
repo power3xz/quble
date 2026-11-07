@@ -14,6 +14,7 @@ import {
   EXPR_LOAD_ARRAY_LENGTH,
   EXPR_LOAD_CONST,
   EXPR_LOAD_FALSE,
+  EXPR_LOAD_INPUT,
   EXPR_LOAD_SMALL_INT,
   EXPR_LOAD_STRING_LENGTH,
   EXPR_LOAD_TRUE,
@@ -72,6 +73,9 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
 // 식을 처음 셀 때 runExpr에 넘기는 값 - 아무것도 건너뛰지 않는다.
 export const SKIP_NOTHING: TSkipPastOps = {};
 
+// 입력 식이 없는 식을 셀 때 runExpr에 넘기는 inputValues. 셀 때마다 빈 배열을 새로 만들지 않고 이것을 함께 쓴다.
+export const NO_INPUT_VALUES: readonly unknown[] = [];
+
 // 식 평가 스택. runExpr마다 새로 만들지 않고 이것을 다시 쓴다. 식 평가는 동기이고 runExpr가 다시 부르지
 // 않아 런타임 인스턴스가 여럿이어도 하나를 함께 쓴다.
 const exprStack: unknown[] = [];
@@ -124,9 +128,10 @@ export class ExprEvaluator {
     pairs: TScope,
     table: TExprSkipTable,
     cache: unknown[],
+    inputValues: readonly unknown[],
   ): { value: unknown; leafOfVar: number[] } => {
     const reads: number[] = [];
-    const value = this.runExpr(expr, pairs, table, cache, SKIP_NOTHING, reads);
+    const value = this.runExpr(expr, pairs, table, cache, SKIP_NOTHING, reads, inputValues);
     const leafOfVar: number[] = new Array(table.positionsByVar.length).fill(-1);
     for (let i = 0; i < reads.length; i += 2) {
       leafOfVar[table.varAt[reads[i + 1]]] = reads[i];
@@ -141,7 +146,8 @@ export class ExprEvaluator {
     table: TExprSkipTable,
     cache: unknown[],
     skipPastOps: TSkipPastOps,
-  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOps, null);
+    inputValues: readonly unknown[],
+  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOps, null, inputValues);
 
   // 식을 후위 표기로 센다(BYTECODE.md #4 <EXPR>). evalExpr와 reevalExpr가 함께 쓰는 본체다.
   //
@@ -153,6 +159,8 @@ export class ExprEvaluator {
   //     건너뛸 부분식이 없는 식은 표도 cache도 없어(null) 쓰지 않는다.
   //   - reads가 있으면 store 칸을 읽을 때마다 leafIndex와 읽은 명령의 위치를 이어 붙인다. a + b에서
   //     a, b가 칸 20, 21이면 [20, 0, 21, 3]. 다시 셀 때는 구독이 이미 걸려 있어 null을 넘긴다.
+  //   - inputValues[i]는 식의 inputs[i]번 입력 식의 값이다. 식 층이 세기 전에 모아 넘기고, LOAD_INPUT i가
+  //     그 값을 올린다. store 칸을 읽지 않아 reads에 넣지 않는다.
   runExpr = (
     expr: Uint8Array,
     pairs: TScope,
@@ -160,6 +168,7 @@ export class ExprEvaluator {
     cache: unknown[] | null,
     skipPastOps: TSkipPastOps,
     reads: number[] | null,
+    inputValues: readonly unknown[],
   ): unknown => {
     // 스택 높이. 0부터 센다 - 앞선 평가가 ELEM_AT의 RangeError로 중간에 멈췄으면 배열에 그때 값이
     // 남아 있다. 배열 길이를 0으로 비우지 않는 것은 V8이 저장 공간을 놓아 다음에 다시 할당하기 때문이다.
@@ -216,6 +225,9 @@ export class ExprEvaluator {
           continue;
         case EXPR_LOAD_FALSE:
           exprStack[sp++] = false;
+          continue;
+        case EXPR_LOAD_INPUT:
+          exprStack[sp++] = inputValues[expr[pc++]];
           continue;
         // 단항 - 하나 꺼내 하나 넣는다.
         case EXPR_NOT:

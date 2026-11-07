@@ -5,7 +5,7 @@
 // 파생 구독을 모르고, flush마다 바뀐 leaf 모음을 이 층의 flush(통지 전 단계)에 넘긴다. flush는 그 leaf를 읽는
 // 인스턴스를 다시 세어 결과 leaf에 write하고, 통지할 leaf 모음을 돌려준다.
 
-import { type ExprEvaluator, SKIP_NOTHING } from "./expr-eval.ts";
+import { type ExprEvaluator, NO_INPUT_VALUES, SKIP_NOTHING } from "./expr-eval.ts";
 import { ExprGraph, LABEL_ELSE, LABEL_THEN, type TEdgeId } from "./expr-graph.ts";
 import { instrSize } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, type TExprSkipTable } from "./expr-skip-table.ts";
@@ -205,7 +205,15 @@ export class ExprInstancePool {
     if (instance.cache === null) {
       instance.pendingVarMask = 0;
       const expr = this.evaluator.exprBytes[instance.globalExprIndex];
-      instance.lastValue = this.evaluator.runExpr(expr, instance.pairs, null, null, SKIP_NOTHING, null);
+      instance.lastValue = this.evaluator.runExpr(
+        expr,
+        instance.pairs,
+        null,
+        null,
+        SKIP_NOTHING,
+        null,
+        NO_INPUT_VALUES,
+      );
       return instance.lastValue;
     }
     return this.runPartial(exprInstanceIndex);
@@ -220,7 +228,7 @@ export class ExprInstancePool {
     let value: unknown;
     if (cache === null) {
       const reads: number[] = [];
-      value = this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads);
+      value = this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads, NO_INPUT_VALUES);
       // push로 채운 배열은 V8이 늘어날 몫까지 잡아 둔다(원소 하나를 push하면 용량이 17). 길이만큼의 사본으로 바꾼다.
       const readLeaves: number[] = [];
       for (let i = 0; i < reads.length; i += 2) {
@@ -231,7 +239,7 @@ export class ExprInstancePool {
       instance.readLeaves = readLeaves.slice();
     } else {
       const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
-      const evaluated = this.evaluator.evalExpr(expr, pairs, table, cache);
+      const evaluated = this.evaluator.evalExpr(expr, pairs, table, cache, NO_INPUT_VALUES);
       value = evaluated.value;
       instance.readLeaves = evaluated.leafOfVar;
     }
@@ -380,7 +388,7 @@ export class ExprInstancePool {
       (changedVarMask & (changedVarMask - 1)) === 0
         ? table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)]
         : buildSkipPastOpsOfVars(table, expr, changedVarMask);
-    const value = this.evaluator.reevalExpr(expr, pairs, table, cache, skipPastOps);
+    const value = this.evaluator.reevalExpr(expr, pairs, table, cache, skipPastOps, NO_INPUT_VALUES);
     if (table.hasIndexAccess) {
       for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
         if (changedVarMask & (1 << varNumber)) {

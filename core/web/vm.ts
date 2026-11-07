@@ -36,7 +36,7 @@ import {
   type TType,
 } from "./decode.ts";
 import { ATTRS, DOM_EVENTS, setAttributeSafely } from "./dom-tables.ts";
-import { ExprEvaluator, SKIP_NOTHING } from "./expr-eval.ts";
+import { ExprEvaluator, NO_INPUT_VALUES, SKIP_NOTHING } from "./expr-eval.ts";
 import { LABEL_ELSE, LABEL_THEN } from "./expr-graph.ts";
 import { ExprInstancePool, NOT_SHARED } from "./expr-layer.ts";
 import { exprLevelsOf } from "./expr-level.ts";
@@ -1039,7 +1039,7 @@ export class VM {
     if (!("expr" in p)) {
       return assemble(steps, p.fieldSourcePairs, this.store, this.module, this.arrayPool);
     }
-    const result = this.evaluator.runExpr(p.expr, p.pairs, null, null, SKIP_NOTHING, null);
+    const result = this.evaluator.runExpr(p.expr, p.pairs, null, null, SKIP_NOTHING, null, NO_INPUT_VALUES);
     if (this.module.types[p.typeRef].tag === "scalar") {
       return result;
     }
