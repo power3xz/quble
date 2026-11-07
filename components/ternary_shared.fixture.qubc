@@ -1,0 +1,9 @@
+component TernaryShared {
+  props { ok: bool, price: number, base: number }
+  template {
+    div() {
+      span(class="a") { ${base - (ok ? price : 0)} }
+      span(class="b") { ${(ok ? price : 0) * (ok ? price : 0)} }
+    }
+  }
+}

@@ -6,13 +6,12 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ExprEvaluator } from "./expr-eval.ts";
 import { LABEL_THEN } from "./expr-graph.ts";
-import { ExprInstancePool, NOT_SHARED } from "./expr-layer.ts";
+import { type ExprInstancePool, NOT_SHARED } from "./expr-layer.ts";
 import { EXPR_ADD, EXPR_LOAD_VAR, EXPR_MUL, EXPR_SUB } from "./expr-opcode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
-import { Pool } from "./pool-allocator.ts";
 import { STORE } from "./scope.ts";
+import { exprPoolOf } from "./test-helpers/expr-pool.ts";
 
 const load = (slot: number) => [EXPR_LOAD_VAR, slot, 0];
 
@@ -37,7 +36,7 @@ const COND_EXPR = 1;
 // 이 파일의 식 인스턴스는 모두 scope 하나(root)에 있다.
 const SCOPE_UID = 0;
 const poolOf = (store: ReturnType<typeof createLeafStoreSubject>, exprBytes: Uint8Array[]) =>
-  new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
+  exprPoolOf(store, exprBytes);
 
 // 식 인스턴스를 만들어 가지 하나가 든 것처럼 retainByBranch하고, 처음 센 뒤 결과 leaf에 그 값을 넣고 연결한다(VM의
 // addExprInstance, allocResultLeaf와 같다). 구독은 걸지 않은 상태다.

@@ -1392,6 +1392,16 @@
       "k": 10
     }
   ],
+  "ternary_in_for": [
+    { "ok": true, "price": 5, "rows": [{ "x": 1 }, { "x": 2 }] },
+    { "ok": false, "price": 5, "rows": [{ "x": 1 }, { "x": 2 }] }
+  ],
+  "ternary_lazy": [
+    { "ok": false, "cursor": 5, "rows": [{ "x": 1 }] },
+    { "ok": true, "cursor": 0, "rows": [{ "x": 1 }] }
+  ],
+  "ternary_shared": [{ "ok": true, "price": 5, "base": 9 }, { "ok": false, "price": 5, "base": 9 }],
+  "ternary_value": [{ "ok": true, "price": 5 }, { "ok": false, "price": 5 }],
   "triple_if": [
     {
       "c1": true,

@@ -1,0 +1,6 @@
+component TernaryValue {
+  props { ok: bool, price: number }
+  template {
+    span(class="v") { ${ok ? price : 0} }
+  }
+}

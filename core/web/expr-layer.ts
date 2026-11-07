@@ -5,6 +5,7 @@
 // 파생 구독을 모르고, flush마다 바뀐 leaf 모음을 이 층의 flush(통지 전 단계)에 넘긴다. flush는 그 leaf를 읽는
 // 인스턴스를 다시 세어 결과 leaf에 write하고, 통지할 leaf 모음을 돌려준다.
 
+import { FV_CONST, FV_EXPR, type TExprInputs, type TRef } from "./decode.ts";
 import { type ExprEvaluator, NO_INPUT_VALUES, SKIP_NOTHING } from "./expr-eval.ts";
 import { ExprGraph, LABEL_ELSE, LABEL_THEN, type TEdgeId } from "./expr-graph.ts";
 import { instrSize } from "./expr-opcode.ts";
@@ -12,6 +13,7 @@ import { buildSkipPastOpsOfVars, type TExprSkipTable } from "./expr-skip-table.t
 import type { LeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
 import type { TScope } from "./scope.ts";
+import { ancestorScopeUid, type TScopeParentPool } from "./scope-uid.ts";
 
 export type TExprInstance = {
   globalExprIndex: number;
@@ -35,10 +37,35 @@ export type TExprInstance = {
   heldByBranchCount: number;
   // 이 식 인스턴스를 입력으로 읽는 식 인스턴스 수. heldByBranchCount와 함께 0이 되면 반납한다.
   readByExprCount: number;
+  // 입력 식의 인스턴스. evaluate가 처음 셀 때 만든다. 계산 식은 inputs[i]의 인스턴스, 삼항은 [cond, 참 갈래, 거짓
+  // 갈래]이고, 삼항에서 잎과 상수 피연산자, 아직 고르지 않은 갈래 자리는 undefined다. 입력이 없으면 NO_INPUT_INSTANCES다.
+  inputInstances: readonly (number | undefined)[];
+  // 계산 식이 셀 때 평가기에 넘기는 입력 값. inputValues[i]가 inputInstances[i]의 값이다. 입력이 없으면 NO_INPUT_VALUES다.
+  inputValues: readonly unknown[];
 };
 
 // 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared가 쓴다.
 export const NOT_SHARED = -1;
+
+// 입력 식이 없는 식 인스턴스의 inputInstances. 인스턴스마다 빈 배열을 만들지 않고 이것을 함께 쓴다.
+const NO_INPUT_INSTANCES: readonly (number | undefined)[] = [];
+
+// 삼항 inputInstances의 자리.
+const COND_POSITION = 0;
+const THEN_POSITION = 1;
+const ELSE_POSITION = 2;
+
+// runExpr의 reads([leafIndex, 읽은 명령 위치, ...])에서 중복 없는 leafIndex 목록을 만든다. push로 채운 배열은 V8이
+// 늘어날 몫까지 잡아 두므로(원소 하나를 push하면 용량이 17) 길이만큼의 사본을 돌려준다.
+const uniqueLeavesOf = (reads: readonly number[]): number[] => {
+  const leaves: number[] = [];
+  for (let i = 0; i < reads.length; i += 2) {
+    if (!leaves.includes(reads[i])) {
+      leaves.push(reads[i]);
+    }
+  }
+  return leaves.slice();
+};
 
 // leaf마다 파생 구독(식 인스턴스 번호)을 담는 슬롯. 구독이 하나뿐인 leaf가 대부분이라 하나면 번호 그대로, 둘째가
 // 들어오면 Set으로 바꾼다.
@@ -60,10 +87,24 @@ export class ExprInstancePool {
   // flush 하나나 recountPending 하나에서 값이 바뀐 결과 leaf. 요청이 재귀로 평가하는 식 인스턴스도 여기에 더한다.
   // 둘 밖에서는 null이다.
   private changedResultLeaves: number[] | null = null;
+  // 정적 그래프. globalExprIndex -> 식의 입력(decode.ts TModule.exprInputs)과 level(vm.ts exprLevels).
+  private exprInputs: TExprInputs[];
+  private exprLevels: number[];
+  // 입력 식의 인스턴스를 둘 조상 scope를 찾는 부모 표. vm과 함께 쓴다.
+  private scopeParentPool: TScopeParentPool;
 
-  constructor(evaluator: ExprEvaluator, store: LeafStoreSubject) {
+  constructor(
+    evaluator: ExprEvaluator,
+    store: LeafStoreSubject,
+    exprInputs: TExprInputs[],
+    exprLevels: number[],
+    scopeParentPool: TScopeParentPool,
+  ) {
     this.evaluator = evaluator;
     this.store = store;
+    this.exprInputs = exprInputs;
+    this.exprLevels = exprLevels;
+    this.scopeParentPool = scopeParentPool;
     store.setDeriveStage(this.flush);
   }
 
@@ -85,6 +126,8 @@ export class ExprInstancePool {
       scopeUid,
       heldByBranchCount: 0,
       readByExprCount: 0,
+      inputInstances: NO_INPUT_INSTANCES,
+      inputValues: NO_INPUT_VALUES,
     };
     return this.pool.alloc(instance);
   };
@@ -222,31 +265,126 @@ export class ExprInstancePool {
 
   // 식을 처음부터 세어 값을 돌려주고, 읽은 leaf(readLeaves)와 값(lastValue)을 인스턴스에 기록한다. 몇 번을 불러도
   // 같은 결과다. 구독을 건 채로 부르지 않는다 - 구독 대상(readLeaves)이 바뀌는데 구독은 그대로다.
+  //
+  // 입력이 있는 식은 정적 그래프(exprInputs)를 따라 입력 식의 인스턴스를 처음 셀 때 연결한다. 삼항은 cond를 센 뒤 고른
+  // 갈래만 연결하고, 계산 식은 입력을 모두 연결해 그 값을 inputValues로 평가기에 넘긴다.
   evaluate = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { globalExprIndex, pairs, cache } = instance;
+    const exprInputs = this.exprInputs[globalExprIndex];
+    if (exprInputs.kind === "ternary") {
+      instance.lastValue = this.evaluateTernary(exprInstanceIndex, exprInputs);
+      return instance.lastValue;
+    }
+    if (exprInputs.inputs.length > 0) {
+      this.linkCalcInputs(exprInstanceIndex, exprInputs.inputs);
+    }
     const expr = this.evaluator.exprBytes[globalExprIndex];
     let value: unknown;
     if (cache === null) {
       const reads: number[] = [];
-      value = this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads, NO_INPUT_VALUES);
-      // push로 채운 배열은 V8이 늘어날 몫까지 잡아 둔다(원소 하나를 push하면 용량이 17). 길이만큼의 사본으로 바꾼다.
-      const readLeaves: number[] = [];
-      for (let i = 0; i < reads.length; i += 2) {
-        if (!readLeaves.includes(reads[i])) {
-          readLeaves.push(reads[i]);
-        }
-      }
-      instance.readLeaves = readLeaves.slice();
+      value = this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, reads, instance.inputValues);
+      instance.readLeaves = uniqueLeavesOf(reads);
     } else {
       const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
-      const evaluated = this.evaluator.evalExpr(expr, pairs, table, cache, NO_INPUT_VALUES);
+      const evaluated = this.evaluator.evalExpr(expr, pairs, table, cache, instance.inputValues);
       value = evaluated.value;
       instance.readLeaves = evaluated.leafOfVar;
     }
     instance.lastValue = value;
     return value;
   };
+
+  // 계산 식의 입력 식 인스턴스를 처음 셀 때 한 번 연결하고, 셀 때마다 그 값을 inputValues에 담는다.
+  //   #1 = base - #0, inputs [0]이면 inputInstances [#0의 인스턴스], inputValues [#0의 값]
+  private linkCalcInputs = (exprInstanceIndex: number, inputs: readonly number[]): void => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    if (instance.inputInstances === NO_INPUT_INSTANCES) {
+      instance.inputInstances = inputs.map((input) => this.linkInputInstance(exprInstanceIndex, input));
+    }
+    instance.inputValues = instance.inputInstances.map((input) => this.pool.entries[input as number].lastValue);
+  };
+
+  // 삼항을 센다. cond를 읽고, cond 값으로 고른 갈래만 읽는다. 식인 cond와 식인 갈래는 처음 읽을 때 인스턴스를
+  // 연결하고, 고르지 않은 갈래는 연결하지 않는다. 잎인 cond와 고른 잎 갈래는 readLeaves에 넣어 구독 대상으로 둔다.
+  //   ok ? price * 2 : row.x 에서 ok가 true면 inputInstances [undefined, price * 2의 인스턴스, undefined],
+  //   readLeaves [ok의 leaf]
+  private evaluateTernary = (
+    exprInstanceIndex: number,
+    exprInputs: Extract<TExprInputs, { kind: "ternary" }>,
+  ): unknown => {
+    const instance = this.pool.entries[exprInstanceIndex];
+    const linked = instance.inputInstances;
+    const reads: number[] = [];
+    const condInstance = linked[COND_POSITION] ?? this.linkOperandInstance(exprInstanceIndex, exprInputs.cond);
+    const cond = this.readOperand(instance, exprInputs.cond, condInstance, reads);
+    let thenInstance = linked[THEN_POSITION];
+    let elseInstance = linked[ELSE_POSITION];
+    let value: unknown;
+    if (cond) {
+      thenInstance ??= this.linkOperandInstance(exprInstanceIndex, exprInputs.thenBranch);
+      value = this.readOperand(instance, exprInputs.thenBranch, thenInstance, reads);
+    } else {
+      elseInstance ??= this.linkOperandInstance(exprInstanceIndex, exprInputs.elseBranch);
+      value = this.readOperand(instance, exprInputs.elseBranch, elseInstance, reads);
+    }
+    if (
+      condInstance !== linked[COND_POSITION] ||
+      thenInstance !== linked[THEN_POSITION] ||
+      elseInstance !== linked[ELSE_POSITION]
+    ) {
+      instance.inputInstances = [condInstance, thenInstance, elseInstance];
+    }
+    instance.readLeaves = uniqueLeavesOf(reads);
+    return value;
+  };
+
+  // 삼항 피연산자가 식이면 그 인스턴스를 연결해 번호를 돌려주고, 잎이나 상수면 undefined.
+  private linkOperandInstance = (exprInstanceIndex: number, operand: TRef): number | undefined =>
+    operand.tag === FV_EXPR ? this.linkInputInstance(exprInstanceIndex, operand.ref) : undefined;
+
+  // 삼항 피연산자의 값. 상수는 상수풀, 식은 연결한 인스턴스의 값, 잎은 슬롯의 값이다. 잎이 store leaf면 reads에
+  // 이어 붙인다.
+  private readOperand = (
+    instance: TExprInstance,
+    operand: TRef,
+    operandInstance: number | undefined,
+    reads: number[],
+  ): unknown => {
+    if (operand.tag === FV_CONST) {
+      return this.evaluator.constpool[operand.ref];
+    }
+    if (operand.tag === FV_EXPR) {
+      return this.pool.entries[operandInstance as number].lastValue;
+    }
+    return this.evaluator.slotValue(instance.pairs, operand.ref, operand.offset, 0, reads);
+  };
+
+  // 식 인스턴스(소비자)가 입력 식(inputGlobalExprIndex)의 인스턴스를 연결한다. 입력 인스턴스는 입력 식의 level 깊이
+  // scope에 있고, 그 scope는 소비자 scope에서 부모를 (소비자 level - 입력 level)번 올라가 얻는다. 그 (식, scope)로
+  // 공유 중이면 재사용하고, 없으면 만들어 공유 맵에 올리고 세고 구독을 건다. 어느 쪽이든 retainByExpr로 붙든다.
+  //   @for (row of rows) { ${ok ? price * 2 : row.x} }에서 행의 삼항(level 1)이 price * 2(level 0)를 연결하면
+  //   행 scope에서 한 번 올라간 root scope의 인스턴스 하나를 모든 행이 함께 쓴다.
+  private linkInputInstance = (exprInstanceIndex: number, inputGlobalExprIndex: number): number => {
+    const { globalExprIndex, scopeUid, pairs } = this.pool.entries[exprInstanceIndex];
+    const inputScopeUid = ancestorScopeUid(
+      this.scopeParentPool,
+      scopeUid,
+      this.exprLevels[globalExprIndex] - this.exprLevels[inputGlobalExprIndex],
+    );
+    let input = this.findShared(inputGlobalExprIndex, inputScopeUid);
+    if (input === NOT_SHARED) {
+      input = this.create(inputGlobalExprIndex, pairs, inputScopeUid);
+      this.markShared(input);
+      this.evaluate(input);
+      this.subscribeInputs(input);
+    }
+    this.retainByExpr(input);
+    return input;
+  };
+
+  // 식 인스턴스의 직전 값. 공유 중인 인스턴스를 찾은 VM이 읽는다 - 입력으로만 쓰이던 인스턴스는 결과 leaf가 없다.
+  valueOf = (exprInstanceIndex: number): unknown => this.pool.entries[exprInstanceIndex].lastValue;
 
   // 식이 돌려준 값을 쓸 결과 leaf를 연결한다.
   bindResultLeaf = (exprInstanceIndex: number, resultLeafIndex: number): void => {
@@ -289,7 +427,8 @@ export class ExprInstancePool {
     this.freeIfUnheld(exprInstanceIndex);
   };
 
-  // 가지도 식도 붙들지 않으면 파생 구독을 풀고 공유 키, 결과 leaf, 풀 번호를 반납한다.
+  // 가지도 식도 붙들지 않으면 파생 구독을 풀고 공유 키, 결과 leaf, 풀 번호를 반납한다. 연결한 입력 식의 인스턴스는
+  // releaseByExpr로 놓아, 그 인스턴스를 읽는 다른 식도 없으면 함께 반납된다.
   private freeIfUnheld = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     if (instance.heldByBranchCount > 0 || instance.readByExprCount > 0) {
@@ -306,6 +445,11 @@ export class ExprInstancePool {
       this.store.free(instance.resultLeaf, 1);
     }
     this.pool.release(exprInstanceIndex);
+    for (const input of instance.inputInstances) {
+      if (input !== undefined) {
+        this.releaseByExpr(input);
+      }
+    }
   };
 
   // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 인스턴스를 반납할 때(freeIfUnheld)

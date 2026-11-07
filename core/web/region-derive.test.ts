@@ -6,9 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ExprEvaluator } from "./expr-eval.ts";
 import { LABEL_THEN } from "./expr-graph.ts";
-import { ExprInstancePool } from "./expr-layer.ts";
 import { EXPR_ADD, EXPR_LOAD_SMALL_INT, EXPR_LOAD_VAR, EXPR_MUL } from "./expr-opcode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
@@ -26,6 +24,7 @@ import {
 import { STORE } from "./scope.ts";
 import type { TScopeParentPool } from "./scope-uid.ts";
 import { mount } from "./test-helpers/dom.ts"; // jsdom 전역 document 주입
+import { exprPoolOf } from "./test-helpers/expr-pool.ts";
 
 void mount;
 
@@ -40,7 +39,7 @@ const setup = () => {
   const store = createLeafStoreSubject([true, 1, 0, true]);
   const timesTen = new Uint8Array([...load(0), EXPR_LOAD_SMALL_INT, 10, EXPR_MUL]);
   const exprBytes = [timesTen, new Uint8Array(load(0))];
-  const exprs = new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
+  const exprs = exprPoolOf(store, exprBytes);
   const regionPool: Pool<TRegion> = new Pool();
   const branchPool: Pool<TBranch> = new Pool();
   const regionIndex = appendIfRegion(regionPool, branchPool, 0);
@@ -109,7 +108,7 @@ test("떼어도 파생 구독은 남는다", () => {
 test("가지를 지우면 가지가 든 식 인스턴스의 결과 leaf를 반납한다", () => {
   const store = createLeafStoreSubject([1, 1, 0, 0]);
   const exprBytes = [new Uint8Array([...load(0), ...load(1), EXPR_ADD])];
-  const exprs = new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
+  const exprs = exprPoolOf(store, exprBytes);
   const regionPool: Pool<TRegion> = new Pool();
   const branchPool: Pool<TBranch> = new Pool();
   const scopeParentPool: TScopeParentPool = new Pool<number>();

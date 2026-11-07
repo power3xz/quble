@@ -5,13 +5,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ExprEvaluator } from "./expr-eval.ts";
 import { LABEL_ELSE, LABEL_THEN } from "./expr-graph.ts";
-import { ExprInstancePool } from "./expr-layer.ts";
 import { EXPR_LOAD_SMALL_INT, EXPR_LOAD_VAR, EXPR_MUL } from "./expr-opcode.ts";
 import { createLeafStoreSubject } from "./leaf-store.ts";
-import { Pool } from "./pool-allocator.ts";
 import { STORE } from "./scope.ts";
+import { exprPoolOf } from "./test-helpers/expr-pool.ts";
 
 const load = (slot: number) => [EXPR_LOAD_VAR, slot, 0];
 
@@ -24,7 +22,7 @@ const SCOPE_UID = 0;
 const setup = (leaves: unknown[]) => {
   const store = createLeafStoreSubject(leaves);
   const exprBytes = [new Uint8Array(load(0)), new Uint8Array([...load(0), EXPR_LOAD_SMALL_INT, 10, EXPR_MUL])];
-  const exprs = new ExprInstancePool(new ExprEvaluator([], exprBytes, store, new Pool()), store);
+  const exprs = exprPoolOf(store, exprBytes);
   // 식 인스턴스를 만들어 가지 하나가 든 것처럼 retainByBranch하고, 결과 leaf를 잡고 입력 leaf를 구독한다. 식 인스턴스
   // 번호와 결과 leaf를 돌려준다.
   const make = (globalExprIndex: number, inputLeaf: number) => {

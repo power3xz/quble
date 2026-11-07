@@ -1,0 +1,18 @@
+component TernaryInFor {
+  props { ok: bool, price: number, rows: { x: number }[] }
+  template {
+    div() {
+      @for (row, i of rows) {
+        span(class="v") { ${ok ? price * 2 : row.x} }
+        Item: DropButton( /)
+      }
+    }
+  }
+}
+
+component DropButton {
+  events { DROP({}) }
+  template {
+    button(class="drop" @click:DROP) { "drop" }
+  }
+}

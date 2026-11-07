@@ -591,7 +591,13 @@ export class VM {
     this.arrayPool = arrayPool;
     this.exprLevels = module.defs.flatMap((_, compId) => exprLevelsOf(module, compId));
     this.evaluator = new ExprEvaluator(module.constpool, module.exprBytes, this.store, arrayPool);
-    this.exprInstancePool = new ExprInstancePool(this.evaluator, this.store);
+    this.exprInstancePool = new ExprInstancePool(
+      this.evaluator,
+      this.store,
+      module.exprInputs,
+      this.exprLevels,
+      this.scopeParentPool,
+    );
     this.regionPool = new Pool();
     this.branchPool = new Pool();
     this.rootScope = rootScope;
@@ -1532,7 +1538,7 @@ export class VM {
       value = exprInstancePool.evaluate(exprInstanceIndex);
       exprInstancePool.subscribeInputs(exprInstanceIndex);
     } else {
-      value = this.store.get(exprInstancePool.resultLeafOf(exprInstanceIndex) as number);
+      value = exprInstancePool.valueOf(exprInstanceIndex);
     }
     exprInstancePool.retainByBranch(exprInstanceIndex);
     const branch = this.branchAt(branchIndex);
