@@ -117,8 +117,10 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 ### scopeUid
 
-스코프(컴포넌트 RENDER 한 번 또는 `@for` 행 하나)가 열릴 때마다 받는 번호다. `ScopeUidCounter`가 하나씩 올려
-주고 다시 사용하지 않는다. RENDER와 `@for` 행(`buildIteration`)이 열릴 때 `scopeUidStack`에 쌓고 닫힐 때 꺼낸다.
+스코프(컴포넌트 RENDER 한 번 또는 `@for` 행 하나)가 열릴 때마다 받는 번호다. 부모 표 `scopeParentPool`(`Pool<number>`)의
+칸 번호이고, 칸 값은 부모 scope의 scopeUid다(`vm.ts`의 `allocScopeUid`). 번호는 scope를 연 가지의 `scopeUids`에 기록하고,
+`freeBranchTree`(`region.ts`)가 그 가지를 반납할 때 함께 반납해 다시 할당된다. RENDER와 `@for` 행(`buildIteration`)이 열릴 때
+`scopeUidStack`에 쌓고 닫힐 때 꺼낸다.
 나중에 만드는 가지(`@if`의 `lazyBuild`, `@for`가 늘 때)는 만든 시점의 스택을 복사해 두므로 같은 번호를 본다.
 
 공유 키의 `scopeUid`는 `level`이 가리키는 스코프의 번호다. 스택은 컴포넌트를 가로질러 쌓이므로 이 컴포넌트의
