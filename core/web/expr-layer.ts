@@ -256,7 +256,7 @@ export class ExprInstancePool {
   findShared = (globalExprIndex: number, scopeUid: number): number =>
     this.shared[globalExprIndex]?.get(scopeUid) ?? NOT_SHARED;
 
-  // 식 인스턴스를 (globalExprIndex, scopeUid)로 공유 맵에 올린다. 참조 수가 0이 될 때 release가 지운다.
+  // 식 인스턴스를 (globalExprIndex, scopeUid)로 공유 맵에 올린다. heldByBranchCount가 0이 될 때 releaseByBranch가 지운다.
   markShared = (exprInstanceIndex: number, globalExprIndex: number, scopeUid: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.sharedGlobalExprIndex = globalExprIndex;
@@ -270,12 +270,12 @@ export class ExprInstancePool {
   // 결과 leaf를 구독하려고 읽는다.
   resultLeafOf = (exprInstanceIndex: number): number | undefined => this.pool.entries[exprInstanceIndex].resultLeaf;
 
-  retain = (exprInstanceIndex: number): void => {
+  retainByBranch = (exprInstanceIndex: number): void => {
     this.pool.entries[exprInstanceIndex].heldByBranchCount++;
   };
 
   // heldByBranchCount를 하나 줄이고, 0이면 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다.
-  release = (exprInstanceIndex: number): void => {
+  releaseByBranch = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.heldByBranchCount--;
     if (instance.heldByBranchCount > 0) {
@@ -291,7 +291,7 @@ export class ExprInstancePool {
     this.pool.release(exprInstanceIndex);
   };
 
-  // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 release가 heldByBranchCount 0에서
+  // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 releaseByBranch가 heldByBranchCount 0에서
   // 풀 때까지 둔다. 가지가 떼어져 쉬는 동안에도 구독이 남아 push가 바뀐 변수를 pendingVarMask에 모은다.
   subscribeInputs = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];

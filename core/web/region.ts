@@ -34,7 +34,7 @@ export type Store = {
 // expr-layer.ts의 ExprInstancePool 중 가지가 부르는 부분(Store 타입과 같은 이유로 다시 정의한다).
 export type TExprInstanceLayer = {
   recountPending: (exprInstanceIndex: number) => void;
-  release: (exprInstanceIndex: number) => void;
+  releaseByBranch: (exprInstanceIndex: number) => void;
   graph: { removeEdge: (startNode: number, endNode: number, label: number) => void };
 };
 
@@ -405,7 +405,7 @@ export const attachGrownIterations = (
 // 떼기)와는 별개 - detach는 @if swap에서도 쓰여 free하면 안 되므로 안 섞는다. 호출 전 detach가
 // 이미 끝난 상태를 가정한다(truncateFor가 detachOneBranch 후 부른다). 자식 먼저, 자기 나중(리프부터).
 //
-// 가지가 든 식 인스턴스(보간 식, IF_EXPR 조건)도 여기서 반납한다(exprs.release). 인스턴스의 참조 수가 0이 되면
+// 가지가 든 식 인스턴스(보간 식, IF_EXPR 조건)도 여기서 반납한다(exprs.releaseByBranch). 인스턴스의 heldByBranchCount가 0이 되면
 // 결과 leaf까지 store에 돌려준다. 반납하기 전에 이 가지가 건 incoming edge를 지운다. 자식 region을 먼저 반납하므로
 // 이 가지가 실은 식 인스턴스가 시작점인 간선(자식 @if의 조건 식 인스턴스, 자식 개수 @for의 행 수 식 인스턴스에서
 // 나가는 간선)은 그 인스턴스를 반납할 때 이미 지워져 있다. 가지가 연 scope의 scopeUid도 여기서 반납한다.
@@ -427,7 +427,7 @@ const freeBranchTree = (
       if (edgeStartNode !== NO_EDGE_START) {
         exprs.graph.removeEdge(edgeStartNode, exprInstanceIndex, edgeLabel);
       }
-      exprs.release(exprInstanceIndex);
+      exprs.releaseByBranch(exprInstanceIndex);
     }
   }
   if (branch.scopeUids !== null) {

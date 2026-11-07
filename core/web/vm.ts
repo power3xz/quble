@@ -1542,7 +1542,7 @@ export class VM {
       value = exprInstancePool.evaluate(exprInstanceIndex);
       exprInstancePool.subscribeInputs(exprInstanceIndex);
     } else {
-      exprInstancePool.retain(exprInstanceIndex);
+      exprInstancePool.retainByBranch(exprInstanceIndex);
       value = this.store.get(exprInstancePool.resultLeafOf(exprInstanceIndex) as number);
     }
     const branch = this.branchAt(branchIndex);

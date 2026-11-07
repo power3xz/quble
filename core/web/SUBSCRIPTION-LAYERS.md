@@ -74,7 +74,7 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 | `create`, `evaluate`, `bindResultLeaf` | `[vm]`, 값 자리를 만들 때 | 인스턴스를 만들고 처음 값을 센다. 결과 leaf를 할당해 인스턴스에 연결한다 |
 | `subscribeInputs` | `[vm]`, 새로 만든 인스턴스를 처음 센 직후 | 입력 leaf마다 파생 구독을 건다 |
 | `recountPending` | `[region]`, 가지가 DOM에 붙을 때 | 쉬는 동안 바뀐 입력이 있으면 센다(5절) |
-| `release` | `[region]`, 가지가 없어질 때 | 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다 |
+| `releaseByBranch` | `[region]`, 가지가 없어질 때 | 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다 |
 
 인스턴스는 `heldByBranchCount`(인스턴스를 든 가지 수)를 센다. 파생 구독은 인스턴스를 만들 때 걸고 `heldByBranchCount`가 0이 되어
 반납할 때 푼다. 가지가 DOM에서 떨어져도 파생 구독은 그대로다 - 떼고 붙일 때 풀고 거는 것은 가지의 통지 구독뿐이다.
@@ -86,7 +86,7 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 하나를 사용한다. 값 자리를 만들 때 `[vm]`이 아래 순서로 공유할지, 어느 인스턴스를 사용할지 정한다.
 
 ```
-  level 구하기 -> forDepth와 비교 -> scopeUid 고르기 -> 공유 맵 조회 -> 있으면 retain, 없으면 create + markShared
+  level 구하기 -> forDepth와 비교 -> scopeUid 고르기 -> 공유 맵 조회 -> 있으면 retainByBranch, 없으면 create + markShared
 ```
 
 ### level
@@ -139,12 +139,12 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 - `findShared`: 키로 찾는다. 없으면 `NOT_SHARED`.
 - `markShared`: 새로 만든 인스턴스를 키로 올린다.
-- `release`: `heldByBranchCount`가 0이 되면 키를 지운다. `scopeUid`를 다시 사용하지 않으므로, 없어진 스코프의 키에 새 스코프가
+- `releaseByBranch`: `heldByBranchCount`가 0이 되면 키를 지운다. `scopeUid`를 다시 사용하지 않으므로, 없어진 스코프의 키에 새 스코프가
   걸리지 않는다.
 
 ### 재사용
 
-찾은 인스턴스는 `retain`으로 `heldByBranchCount`만 올리고, 같은 결과 leaf에 통지 구독을 건다. 식은 다시 세지 않고 결과
+찾은 인스턴스는 `retainByBranch`로 `heldByBranchCount`만 올리고, 같은 결과 leaf에 통지 구독을 건다. 식은 다시 세지 않고 결과
 leaf의 값을 읽는다. 그 값이 낡았으면 가지가 붙을 때 `recountPending`이 센다.
 
 ## 5. 쉬는 동안 바뀐 입력
@@ -172,7 +172,7 @@ leaf에 기록하고 그 leaf를 `notify`한다. 가지가 붙는 것은 flush�
               3. recountPending: show가 true이고 마스크가 남아 식을 센다 -> leaf 7에 6000을 기록하고 통지 -> DOM 6000
 ```
 
-꺼진 동안 새 행이 붙으면, 새 행은 `retain`으로 leaf 7의 낡은 값(5300)을 읽어 DOM을 채운다. 새 행의 가지는 부모
+꺼진 동안 새 행이 붙으면, 새 행은 `retainByBranch`로 leaf 7의 낡은 값(5300)을 읽어 DOM을 채운다. 새 행의 가지는 부모
 가지의 간선을 물려받아 `recountPending`도 show가 false라 세지 않는다. 행이 모두 보이지 않으므로 낡은 값은 화면에
 나오지 않고, show가 true가 되어 다시 붙을 때 위 3에서 함께 고쳐진다.
 

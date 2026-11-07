@@ -164,13 +164,13 @@ test("recountPending은 쉬는 동안 바뀐 입력으로 세어 결과 leaf에 
 
 test("release는 heldByBranchCount가 0이 될 때 결과 leaf와 풀 번호를 반납한다", () => {
   const { pool, exprInstanceIndex, store } = build(sum());
-  pool.retain(exprInstanceIndex);
+  pool.retainByBranch(exprInstanceIndex);
 
-  pool.release(exprInstanceIndex);
+  pool.releaseByBranch(exprInstanceIndex);
   assert.equal(pool.pool.entries[exprInstanceIndex].heldByBranchCount, 1, "하나 남았으니 살아 있다");
   assert.deepEqual(pool.pool.free, []);
 
-  pool.release(exprInstanceIndex);
+  pool.releaseByBranch(exprInstanceIndex);
   assert.deepEqual(pool.pool.free, [exprInstanceIndex], "풀 번호가 반납된다");
   assert.equal(store.alloc([9]), 2, "결과 leaf가 반납되어 다시 쓰인다");
 });
@@ -179,7 +179,7 @@ test("구독을 건 채로 release해도 구독이 풀려 반납된 결과 leaf�
   const { pool, exprInstanceIndex, store } = build(sum());
   pool.subscribeInputs(exprInstanceIndex);
 
-  pool.release(exprInstanceIndex);
+  pool.releaseByBranch(exprInstanceIndex);
   const reused = store.alloc([99]);
   assert.equal(reused, 2);
   store.set(0, 10);
@@ -213,19 +213,19 @@ test("markShared로 올린 (globalExprIndex, scopeUid)로만 그 식 인스턴�
 test("공유한 식 인스턴스는 참조 수가 0이 될 때 공유 맵에서 빠진다", () => {
   const { pool, first } = buildTwo();
   pool.markShared(first, 3, 7);
-  pool.retain(first);
+  pool.retainByBranch(first);
 
-  pool.release(first);
+  pool.releaseByBranch(first);
   assert.equal(pool.findShared(3, 7), first, "참조가 하나 남았으니 계속 찾아진다");
 
-  pool.release(first);
+  pool.releaseByBranch(first);
   assert.equal(pool.findShared(3, 7), NOT_SHARED);
 });
 
 test("반납한 풀 번호를 새 식 인스턴스가 다시 써도 옛 키로 찾아지지 않는다", () => {
   const { pool, first } = buildTwo();
   pool.markShared(first, 3, 7);
-  pool.release(first);
+  pool.releaseByBranch(first);
 
   const fixture = sum();
   const reused = pool.create(0, fixture.pairs);
@@ -239,7 +239,7 @@ test("공유한 식 인스턴스 하나를 반납해도 다른 키의 식 인스
   pool.markShared(first, 3, 7);
   pool.markShared(second, 3, 8);
 
-  pool.release(first);
+  pool.releaseByBranch(first);
 
   assert.equal(pool.findShared(3, 7), NOT_SHARED);
   assert.equal(pool.findShared(3, 8), second);
@@ -323,7 +323,7 @@ const buildTwoSubscribed = () => {
 
 test("같은 leaf를 읽는 인스턴스 둘 중 하나를 release하면 나머지만 센다", () => {
   const { store, pool, first } = buildTwoSubscribed();
-  pool.release(first);
+  pool.releaseByBranch(first);
   const { runExpr } = pool.evaluator;
   let runs = 0;
   pool.evaluator.runExpr = (...args) => {

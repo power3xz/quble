@@ -184,7 +184,7 @@ test("incoming labeled edge가 둘이면 그중 하나만 맞아도 끝점을 �
   const c2 = make(COND_EXPR, C2);
   const x = make(TIMES_TEN_EXPR, V);
   // c1 아래 가지와 c2 아래 가지가 x를 함께 가진다. 가지마다 heldByBranchCount 하나와 간선 하나다.
-  exprs.retain(x.exprInstanceIndex);
+  exprs.retainByBranch(x.exprInstanceIndex);
   exprs.graph.addEdge(c1.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
   exprs.graph.addEdge(c2.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
 
@@ -203,7 +203,7 @@ test("조건 없는 가지가 함께 가진 식 인스턴스는 incoming labeled
   const { store, exprs, make } = setup([true, 1]);
   const c = make(COND_EXPR, C);
   const x = make(TIMES_TEN_EXPR, V);
-  exprs.retain(x.exprInstanceIndex);
+  exprs.retainByBranch(x.exprInstanceIndex);
   exprs.graph.addEdge(c.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
 
   store.batch(() => {
@@ -220,7 +220,7 @@ test("조건 없는 가지가 식 인스턴스를 놓으면 그다음부터는 i
   const { store, exprs, make } = setup([true, 1]);
   const c = make(COND_EXPR, C);
   const x = make(TIMES_TEN_EXPR, V);
-  exprs.retain(x.exprInstanceIndex);
+  exprs.retainByBranch(x.exprInstanceIndex);
   exprs.graph.addEdge(c.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
   store.batch(() => {
     store.set(C, false);
@@ -228,7 +228,7 @@ test("조건 없는 가지가 식 인스턴스를 놓으면 그다음부터는 i
   });
   assert.equal(store.get(x.resultLeaf), 20, "조건 없는 가지가 있어 평가한다");
 
-  exprs.release(x.exprInstanceIndex);
+  exprs.releaseByBranch(x.exprInstanceIndex);
   store.set(V, 3);
 
   assert.equal(store.get(x.resultLeaf), 20, "남은 가지는 @if 가지뿐이고 c가 false라 평가하지 않는다");
