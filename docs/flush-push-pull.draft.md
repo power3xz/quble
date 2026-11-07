@@ -84,7 +84,7 @@ leafIndex에서 마스크로 가는 표를 인스턴스마다 두지 않고 비�
 쉬는 동안 입력이 바뀌지 않은 인스턴스는 "다시 세야 함"이 표시되지 않아 다시 붙어도 세지 않는다. 쉬는 동안 바뀐 변수는
 `pendingVarMask`에 누적되어 있으므로, 다시 붙은 본문도 계속 붙어 있던 본문과 같은 방식으로 평가한다.
 
-구독은 vm이 인스턴스를 만들 때 걸고(`subscribeInputs`) `release`가 refCount 0에서 푼다. 다시 붙는 본문은 region이
+구독은 vm이 인스턴스를 만들 때 걸고(`subscribeInputs`) `release`가 heldByBranchCount 0에서 푼다. 다시 붙는 본문은 region이
 식 인스턴스마다 `recountPending`을 호출한다. pull과 같은 요청이라 incoming edge의 시작점을 먼저 요청하고, 마스크가
 남은 인스턴스만 센다. 4의 평가가 이것이다. 가지의 통지 구독(`TBranch.updateFns`)은 지금처럼 뗄 때 풀고 붙일 때
 다시 걸며 현재 값으로 DOM을 맞춘다(`TBranch.everAttached`).
@@ -170,8 +170,8 @@ ${a ? b : c}
 그대로 둔다.
 
 조건 없는 가지도 그 식 인스턴스를 가지면 간선과 관계없이 평가한다. `${x}`가 root와 `@if (c)` 안에 함께 있으면
-c가 false여도 root의 x는 갱신되어야 한다. 식 인스턴스를 가진 가지 수가 `refCount`이고, 그중 조건 아래 가지 수가
-incoming labeled edge 수다. incoming labeled edge 수가 `refCount`보다 작으면 조건 없는 가지가 있다는 뜻이라
+c가 false여도 root의 x는 갱신되어야 한다. 식 인스턴스를 가진 가지 수가 `heldByBranchCount`이고, 그중 조건 아래 가지 수가
+incoming labeled edge 수다. incoming labeled edge 수가 `heldByBranchCount`보다 작으면 조건 없는 가지가 있다는 뜻이라
 간선을 보지 않고 평가한다.
 
 | label | 맞는 경우 |

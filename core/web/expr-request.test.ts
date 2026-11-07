@@ -183,7 +183,7 @@ test("incoming labeled edge가 둘이면 그중 하나만 맞아도 끝점을 �
   const c1 = make(COND_EXPR, C1);
   const c2 = make(COND_EXPR, C2);
   const x = make(TIMES_TEN_EXPR, V);
-  // c1 아래 가지와 c2 아래 가지가 x를 함께 가진다. 가지마다 refCount 하나와 간선 하나다.
+  // c1 아래 가지와 c2 아래 가지가 x를 함께 가진다. 가지마다 heldByBranchCount 하나와 간선 하나다.
   exprs.retain(x.exprInstanceIndex);
   exprs.graph.addEdge(c1.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
   exprs.graph.addEdge(c2.exprInstanceIndex, x.exprInstanceIndex, LABEL_THEN);
@@ -197,7 +197,7 @@ test("incoming labeled edge가 둘이면 그중 하나만 맞아도 끝점을 �
 });
 
 test("조건 없는 가지가 함께 가진 식 인스턴스는 incoming labeled edge의 시작점이 false여도 평가한다", () => {
-  // `${x}`가 root와 `@if (c) { ${x} }`에 함께 있는 경우다. refCount는 2, 간선은 @if 가지의 하나다.
+  // `${x}`가 root와 `@if (c) { ${x} }`에 함께 있는 경우다. heldByBranchCount는 2, 간선은 @if 가지의 하나다.
   const C = 0;
   const V = 1;
   const { store, exprs, make } = setup([true, 1]);

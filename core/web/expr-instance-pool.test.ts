@@ -64,10 +64,10 @@ const rest = (
   return () => store.set(condLeaf, true);
 };
 
-test("create는 refCount 1로 짓고 evaluate는 식을 세되 구독은 걸지 않는다", () => {
+test("create는 heldByBranchCount 1로 만들고 evaluate는 식을 세되 구독은 걸지 않는다", () => {
   const { pool, exprInstanceIndex, value, store } = build(sum());
   assert.equal(value, 3);
-  assert.equal(pool.pool.entries[exprInstanceIndex].refCount, 1);
+  assert.equal(pool.pool.entries[exprInstanceIndex].heldByBranchCount, 1);
 
   store.set(0, 10);
 
@@ -162,12 +162,12 @@ test("recountPending은 쉬는 동안 바뀐 입력으로 세어 결과 leaf에 
   assert.equal(pool.pool.entries[exprInstanceIndex].pendingVarMask, 0, "세고 마스크를 지운다");
 });
 
-test("release는 refCount가 0이 될 때 결과 leaf와 풀 번호를 반납한다", () => {
+test("release는 heldByBranchCount가 0이 될 때 결과 leaf와 풀 번호를 반납한다", () => {
   const { pool, exprInstanceIndex, store } = build(sum());
   pool.retain(exprInstanceIndex);
 
   pool.release(exprInstanceIndex);
-  assert.equal(pool.pool.entries[exprInstanceIndex].refCount, 1, "하나 남았으니 살아 있다");
+  assert.equal(pool.pool.entries[exprInstanceIndex].heldByBranchCount, 1, "하나 남았으니 살아 있다");
   assert.deepEqual(pool.pool.free, []);
 
   pool.release(exprInstanceIndex);

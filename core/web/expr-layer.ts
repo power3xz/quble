@@ -30,7 +30,7 @@ export type TExprInstance = {
   // 식의 값을 write할 leaf. bindResultLeaf 전에는 undefined고, 없으면 센 값을 쓰지 않는다.
   resultLeaf: number | undefined;
   // 이 식 인스턴스를 든 가지 수.
-  refCount: number;
+  heldByBranchCount: number;
   // 공유 맵에 올린 키(globalExprIndex와 스코프 인스턴스 번호). 공유하지 않는 인스턴스는 둘 다 NOT_SHARED다.
   sharedGlobalExprIndex: number;
   sharedScopeUid: number;
@@ -66,7 +66,7 @@ export class ExprInstancePool {
     store.setDeriveStage(this.flush);
   }
 
-  // 식 인스턴스를 짓는다. refCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고,
+  // 식 인스턴스를 만든다. heldByBranchCount는 1이고 식은 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고,
   // subscribeInputs가 건다.
   //
   // 건너뛸 부분식이 있는 식과 없는 식을 나눈다. 없는 식은 cache도 건너뛰기 표도 두지 않고 leaf가 바뀌면 처음부터
@@ -81,7 +81,7 @@ export class ExprInstancePool {
       lastValue: undefined,
       pendingVarMask: 0,
       resultLeaf: undefined,
-      refCount: 1,
+      heldByBranchCount: 1,
       sharedGlobalExprIndex: NOT_SHARED,
       sharedScopeUid: NOT_SHARED,
     };
@@ -142,12 +142,12 @@ export class ExprInstancePool {
   // 시작점이 평가 대상인지까지 보는 이유는 겹친 @if다. `[c1] --(then)--> [c2] --(then)--> [x]`에서 c1이 false면 c2는
   // 평가하지 않아 lastValue가 낡았다. 그 낡은 값이 then과 맞아도 x를 평가하면 안 된다.
   //
-  // 조건 아래 가지는 식 인스턴스를 가질 때 refCount 하나와 incoming labeled edge 하나를 더한다. incoming labeled
-  // edge 수가 refCount보다 작으면 조건 없이 가진 가지가 있다는 뜻이라 간선을 보지 않고 평가 대상이다.
+  // 조건 아래 가지는 식 인스턴스를 가질 때 heldByBranchCount 하나와 incoming labeled edge 하나를 더한다. incoming
+  // labeled edge 수가 heldByBranchCount보다 작으면 조건 없이 가진 가지가 있다는 뜻이라 간선을 보지 않고 평가 대상이다.
   private request = (exprInstanceIndex: number): boolean => {
     const instance = this.pool.entries[exprInstanceIndex];
     const incoming = this.graph.incomingEdgesOfNode(exprInstanceIndex);
-    if (incoming !== undefined && incoming.length === instance.refCount && !this.someEdgeChooses(incoming)) {
+    if (incoming !== undefined && incoming.length === instance.heldByBranchCount && !this.someEdgeChooses(incoming)) {
       return false;
     }
     if (instance.pendingVarMask !== 0) {
@@ -271,14 +271,14 @@ export class ExprInstancePool {
   resultLeafOf = (exprInstanceIndex: number): number | undefined => this.pool.entries[exprInstanceIndex].resultLeaf;
 
   retain = (exprInstanceIndex: number): void => {
-    this.pool.entries[exprInstanceIndex].refCount++;
+    this.pool.entries[exprInstanceIndex].heldByBranchCount++;
   };
 
-  // refCount를 하나 줄이고, 0이면 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다.
+  // heldByBranchCount를 하나 줄이고, 0이면 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다.
   release = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
-    instance.refCount--;
-    if (instance.refCount > 0) {
+    instance.heldByBranchCount--;
+    if (instance.heldByBranchCount > 0) {
       return;
     }
     this.unsubscribeInputs(exprInstanceIndex);
@@ -291,7 +291,7 @@ export class ExprInstancePool {
     this.pool.release(exprInstanceIndex);
   };
 
-  // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 release가 refCount 0에서
+  // 입력 leaf마다 파생 구독을 건다. evaluate가 readLeaves를 채운 뒤 한 번 부르고, 구독은 release가 heldByBranchCount 0에서
   // 풀 때까지 둔다. 가지가 떼어져 쉬는 동안에도 구독이 남아 push가 바뀐 변수를 pendingVarMask에 모은다.
   subscribeInputs = (exprInstanceIndex: number): void => {
     const instance = this.pool.entries[exprInstanceIndex];
