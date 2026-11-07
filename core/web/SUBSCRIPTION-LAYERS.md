@@ -185,11 +185,13 @@ leaf에 기록하고 그 leaf를 `notify`한다. 가지가 붙는 것은 flush�
 
 ## 6. 남은 것
 
-- **식 인스턴스가 다른 식 인스턴스를 입력으로 받는 경우**는 처음 그리기까지만 있다. 삼항과 삼항을 읽는 계산 식이
-  정적 그래프(`TModule.exprInputs`)를 따라 입력 인스턴스를 연결한다(`expr-layer.ts`의 `linkInputInstance`). 입력
+- **식 인스턴스가 다른 식 인스턴스를 입력으로 받는 경우**는 템플릿의 삼항과 삼항을 읽는 계산 식에만 있다. 정적
+  그래프(`TModule.exprInputs`)를 따라 입력 인스턴스를 연결한다(`expr-layer.ts`의 `linkInputInstance`). 입력
   인스턴스는 입력 식의 `level` 깊이 scope에서 공유하고, 그 값을 읽는 식 인스턴스(`outputInstances`)가 비고 든 가지 수가
-  0이 되면 반납한다. 입력이 바뀐 뒤 다시 세는 순서(표시와 셈)는 아직 없다(docs/expr-graph.draft.md "전파"). 파생 구독의
-  입력은 지금도 변수 leaf뿐이다.
+  0이 되면 반납한다. 입력 leaf가 바뀌면 `markOutputInstances`가 활성 간선(삼항의 cond와 고른 갈래, 계산 식의 입력)을
+  따라 위로 표시하고, flush의 pull은 가지가 든 인스턴스부터 세며 입력 인스턴스를 요청한다(docs/expr-graph.draft.md
+  "전파"). 남은 것은 둘이다. 발화 때 평가하는 payload/context 식은 식 인스턴스를 거치지 않아 삼항을 셀 수 없고,
+  `@if`는 아직 고르기 노드가 아니다. 파생 구독의 입력은 지금도 변수 leaf뿐이다.
 - **`[vm]`의 경계**: `vm.ts` 한 파일이 DOM 바인딩과 조립(식 인스턴스, 풀, store 연결)을 함께 맡는다.
 - **`scopeUid` 낭비**: `@for` 행과 `RENDER`마다 번호를 받지만 대부분의 행에는 공유하는 식이 없다.
 - **같은 깊이의 중복**: `forDepth`와 `level`이 같으면 같은 행 안에서 같은 식이 두 번 나와도 공유하지 않는다.
