@@ -651,3 +651,24 @@ level이 낮다는 것은 깊이가 얕다는 것, 즉 더 바깥 scope의 변�
   한 번으로 줄 뿐이다. 노드마다 인스턴스, 결과 leaf, 간선, 요청 비용이 붙으므로 나누지 않는다.
 - 바이트코드 형식은 바뀌지 않는다. 나뉜 부분식은 `expr_inputs`의 입력이 되고, 감싼 식은 그 자리를 `LoadInput`으로
   가리킨다. 바뀌는 것은 컴파일러가 언제 나누느냐다.
+
+### code를 따로 중복 제거하고 식을 code와 inputs의 조합으로 둔다
+
+지금은 식 하나가 code와 inputs를 함께 갖고, 둘 다 같을 때만 같은 식이다. 그래서 code가 같고 inputs만 다른 식은
+같은 code 바이트를 따로 갖는다.
+
+```
+${base - (ok ? price : 0)}   ${base - (ok ? 0 : price)}
+
+#1 = base - #0    code: LoadVar base, LoadInput 0, Sub   inputs [0]
+#3 = base - #2    code: LoadVar base, LoadInput 0, Sub   inputs [2]
+```
+
+code를 따로 표에 두고 식을 `(code 번호, inputs)`로 두면, code는 계산하는 방법(함수 본문)이고 inputs는 무엇을
+넘기는지(호출하는 쪽)라 둘의 역할과도 맞는다.
+
+- 같은 code 바이트를 한 번만 둔다. 런타임이 code마다 미리 만드는 것(부분 재평가의 건너뛸 표, level 계산의
+  `scope_index` 훑기)도 code당 한 번이 된다.
+- 계산 식마다 code 번호 1바이트가 든다. 지금은 `exprs`의 위치가 곧 식 번호라 이 바이트가 없다.
+- 지금 컴파일러에서 code가 같고 inputs만 다른 식은 모양이 같은 계산 식이 서로 다른 삼항을 감쌀 때뿐이다. 위의
+  부분식 분리가 들어오면 늘어나므로 그때 함께 검토한다.
