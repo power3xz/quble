@@ -32,6 +32,7 @@ export const EXPR_NEG = 0x1e;
 export const EXPR_ELEM_AT = 0x1f; // 인덱스와 arrayInfoIndex를 꺼내 elemStartLeafIndices[i]를 올린다
 export const EXPR_FIELD_AT = 0x20; // offset: u8 - leafIndex에 필드 거리를 더한다
 export const EXPR_READ_LEAF = 0x21; // leafIndex를 꺼내 그 칸의 값을 올린다
+export const EXPR_LOAD_INPUT = 0x22; // input_position: u8 - 식의 inputs[input_position]번 식의 값을 올린다
 
 // 식이 읽는 scope_index 중 가장 큰 값. 읽는 것이 없으면 -1.
 // a * row.x   props가 a, b이고 @for 하나의 item이 row라면 scope_index는 a가 0, b가 1, row가 2다.
@@ -67,6 +68,7 @@ export const arityOf = (opcode: number): 0 | 1 | 2 => {
     case EXPR_LOAD_SMALL_INT:
     case EXPR_LOAD_TRUE:
     case EXPR_LOAD_FALSE:
+    case EXPR_LOAD_INPUT:
       return 0;
     case EXPR_NOT:
     case EXPR_NEG:
@@ -88,6 +90,7 @@ export const instrSize = (opcode: number) => {
       return 3;
     case EXPR_LOAD_SMALL_INT:
     case EXPR_FIELD_AT:
+    case EXPR_LOAD_INPUT:
       return 2;
     default:
       return 1;
