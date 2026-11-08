@@ -626,7 +626,7 @@ fn expr_field_value(
         _ => {
             let mut code = Vec::new();
             let mut inputs = Vec::new();
-            emit_ref_path(value, props, &[], pool, exprs, &mut inputs, &mut code)?;
+            emit_elem_leaf_index(value, props, &[], pool, exprs, &mut inputs, &mut code)?;
             intern_expr_def(exprs, ExprDef::Calc { code, inputs }, value.range().0)?
         }
     };
@@ -769,8 +769,8 @@ fn folded_eq(a: &Folded, b: &Folded) -> bool {
 /// 식 하나를 후위 표기 바이트로 낸다(BYTECODE.md #4 `<EXPR>`). 왼쪽 -> 오른쪽 -> 연산자 순서로
 /// 밀어서, 런타임이 앞에서 뒤로 한 번 훑으면 스택 계산이 끝난다.
 ///
-/// 식 안의 삼항은 따로 exprs에 넣고, 그 값이 들어갈 자리에 `LoadInput`을 낸다. 삼항의 번호는
-/// inputs(이 식의 입력 목록)에 더한다. 삼항을 먼저 넣으므로 그 번호는 이 식이 나중에 받을 번호보다 작다.
+/// 식 안의 삼항과 인덱스 접근은 따로 exprs에 넣고, 그 값이 들어갈 자리에 `LoadInput`을 낸다. 그 식의 번호는
+/// inputs(이 식의 입력 목록)에 더한다. 먼저 넣으므로 그 번호는 이 식이 나중에 받을 번호보다 작다.
 ///
 /// 타입은 이미 맞다고 보고 짠다 - 부르기 전에 `require_expr_type`이 검사를 마쳤다.
 fn emit_expr_postfix(
@@ -809,11 +809,7 @@ fn emit_expr_postfix(
         Expr::List(..) => unreachable!("배열은 식으로 평가되지 않는다"),
 
         Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => {
-            if let Pushed::LeafIndex =
-                emit_ref_path(expr, props, for_vars, pool, exprs, inputs, out)?
-            {
-                out.push(ExprOp::ReadLeaf as u8);
-            }
+            emit_ref_path(expr, props, for_vars, pool, exprs, inputs, out)?
         }
 
         Expr::Unary(op, operand, _) => {
@@ -936,18 +932,12 @@ fn intern_input(inputs: &mut Vec<u8>, expr_index: u8) -> u8 {
     }
 }
 
-/// `emit_ref_path`가 스택에 올린 것. 인덱스 접근을 거치면 leafIndex라 값으로 쓰려면 ReadLeaf가 붙는다.
-enum Pushed {
-    Value,
-    LeafIndex,
-}
-
-/// 참조 경로를 바이트코드로 낸다. 슬롯 하나로 접히면 그 자리에서 값이 나오고, 인덱스 접근이
-/// 끼면 leafIndex까지만 낸다.
-/// count       -> LoadVar(slot, 0)                            Value
-/// a.b         -> LoadVar(slot, b 거리)                        Value
-/// tags.length -> LoadArrayLength(slot, offset)               Value
-/// a[i].b      -> LoadVar(a) LoadVar(i) ElemAt FieldAt(b 거리)  LeafIndex
+/// 참조 경로의 값을 바이트코드로 낸다. 슬롯 하나로 접히면 그 자리에서 값을 읽고, 인덱스 접근이 끼면 값 읽기 식으로
+/// 떼어 내 그 자리를 `LoadInput`으로 표시한다.
+/// count       -> LoadVar(slot, 0)
+/// a.b         -> LoadVar(slot, b 거리)
+/// tags.length -> LoadArrayLength(slot, offset)
+/// a[i].b      -> LoadInput(a[i].b의 값 읽기 식)
 fn emit_ref_path(
     expr: &Expr,
     props: &[Prop],
@@ -956,52 +946,107 @@ fn emit_ref_path(
     exprs: &mut Vec<ExprDef>,
     inputs: &mut Vec<u8>,
     out: &mut Vec<u8>,
-) -> Result<Pushed, CodegenError> {
+) -> Result<(), CodegenError> {
     // 슬롯 하나로 접히면 경로를 안 걷는다 - 필드 거리가 이미 offset에 누적돼 있다.
     if let Some((scope_index, offset, _)) = fixed_ref_of(expr, props, for_vars)? {
         out.push(ExprOp::LoadVar as u8);
         out.push(scope_index);
         out.push(offset);
-        return Ok(Pushed::Value);
+        return Ok(());
     }
-    match expr {
+    // 실제 필드가 먼저다 - 없는 필드가 `length`일 때만 길이다. 배열은 길이를 담은 leafIndex를, 문자열은 값
+    // leafIndex를 구독한다 - 런타임이 볼 대상이 달라 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
+    if let Expr::Field(owner, field, _) = expr {
+        let owner_ty = path_type(owner, props, for_vars)?;
+        if let Err(not_found) = lookup_field(&owner_ty, field, owner, expr) {
+            if field != "length" {
+                return Err(not_found.into());
+            }
+            let (scope_index, offset, _) = match fixed_ref_of(owner, props, for_vars)? {
+                Some(found) => found,
+                None => return Err(not_found.into()),
+            };
+            out.push(match owner_ty {
+                Type::Array(_) => ExprOp::LoadArrayLength as u8,
+                _ => ExprOp::LoadStringLength as u8,
+            });
+            out.push(scope_index);
+            out.push(offset);
+            return Ok(());
+        }
+    }
+    let read = intern_elem_read(expr, props, for_vars, pool, exprs)?;
+    out.push(ExprOp::LoadInput as u8);
+    out.push(intern_input(inputs, read));
+    Ok(())
+}
+
+/// 인덱스 접근이 낀 참조 경로의 값을 읽는 값 읽기 식을 표현식 테이블에 넣고 expr_index를 준다.
+/// a[i].b -> LoadInput(a[i]의 주소 식) FieldAt(b 거리) ReadLeaf
+fn intern_elem_read(
+    path: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+) -> Result<u8, CodegenError> {
+    let mut code = Vec::new();
+    let mut inputs = Vec::new();
+    emit_elem_leaf_index(path, props, for_vars, pool, exprs, &mut inputs, &mut code)?;
+    code.push(ExprOp::ReadLeaf as u8);
+    intern_expr_def(exprs, ExprDef::Calc { code, inputs }, path.range().0)
+}
+
+/// 인덱스 접근이 낀 참조 경로가 가리키는 leafIndex를 낸다. 인덱스 접근은 주소 식으로 떼어 `LoadInput`으로 읽고,
+/// 필드는 왼쪽이 낸 leafIndex에 거리를 더한다.
+/// a[i]   -> LoadInput(a[i]의 주소 식)
+/// a[i].b -> LoadInput(a[i]의 주소 식) FieldAt(b 거리)
+fn emit_elem_leaf_index(
+    path: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+    inputs: &mut Vec<u8>,
+    out: &mut Vec<u8>,
+) -> Result<(), CodegenError> {
+    match path {
         Expr::Index(arr, index, _) => {
-            emit_expr_postfix(arr, props, for_vars, pool, exprs, inputs, out)?;
-            emit_expr_postfix(index, props, for_vars, pool, exprs, inputs, out)?;
-            out.push(ExprOp::ElemAt as u8);
-            Ok(Pushed::LeafIndex)
+            let address = intern_elem_address(arr, index, props, for_vars, pool, exprs)?;
+            out.push(ExprOp::LoadInput as u8);
+            out.push(intern_input(inputs, address));
+            Ok(())
         }
         Expr::Field(owner, field, _) => {
             let owner_ty = path_type(owner, props, for_vars)?;
-            match lookup_field(&owner_ty, field, owner, expr) {
-                // 실제 필드가 먼저다 - 왼쪽이 낸 leafIndex에 거리를 더한다.
-                Ok((_, offset)) => {
-                    emit_ref_path(owner, props, for_vars, pool, exprs, inputs, out)?;
-                    out.push(ExprOp::FieldAt as u8);
-                    out.push(offset);
-                    Ok(Pushed::LeafIndex)
-                }
-                // 배열은 길이를 담은 leafIndex를, 문자열은 값 leafIndex를 구독한다 - 런타임이
-                // 볼 대상이 달라 태그를 나눈다. 그 외 타입은 expr_type이 이미 걸렀다.
-                Err(not_found) if field == "length" => {
-                    let (scope_index, offset, _) = match fixed_ref_of(owner, props, for_vars)? {
-                        Some(found) => found,
-                        None => return Err(not_found.into()),
-                    };
-                    out.push(match owner_ty {
-                        Type::Array(_) => ExprOp::LoadArrayLength as u8,
-                        _ => ExprOp::LoadStringLength as u8,
-                    });
-                    out.push(scope_index);
-                    out.push(offset);
-                    Ok(Pushed::Value)
-                }
-                Err(not_found) => Err(not_found.into()),
-            }
+            let (_, offset) = lookup_field(&owner_ty, field, owner, path)?;
+            emit_elem_leaf_index(owner, props, for_vars, pool, exprs, inputs, out)?;
+            out.push(ExprOp::FieldAt as u8);
+            out.push(offset);
+            Ok(())
         }
         // 슬롯으로 접히지 않는 참조 경로는 인덱스 접근이 낀 것뿐이다.
         other => Err(CodegenErrorKind::UnsupportedValueExpr.at(other.range().0)),
     }
+}
+
+/// `arr[index]`가 가리키는 요소의 시작 leafIndex를 내는 주소 식을 표현식 테이블에 넣고 expr_index를 준다. 배열과
+/// 인덱스는 값으로 내므로, 그 안의 삼항과 인덱스 접근은 이 식의 입력이 된다.
+/// rows[pivot + 1] -> LoadVar(rows) LoadVar(pivot) LoadSmallInt(1) Add ElemAt
+fn intern_elem_address(
+    arr: &Expr,
+    index: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+) -> Result<u8, CodegenError> {
+    let mut code = Vec::new();
+    let mut inputs = Vec::new();
+    emit_expr_postfix(arr, props, for_vars, pool, exprs, &mut inputs, &mut code)?;
+    emit_expr_postfix(index, props, for_vars, pool, exprs, &mut inputs, &mut code)?;
+    code.push(ExprOp::ElemAt as u8);
+    intern_expr_def(exprs, ExprDef::Calc { code, inputs }, arr.range().0)
 }
 
 /// `LoadSmallInt`로 낼 수 있는 값인지 - 0~255 정수. 음수는 `Neg`가 따로 붙고, 그 밖은 상수풀로.
@@ -1018,9 +1063,14 @@ fn intern_expr_def(
     def: ExprDef,
     at: SrcRange,
 ) -> Result<u8, CodegenError> {
-    if let ExprDef::Calc { code, .. } = &def {
+    if let ExprDef::Calc { code, inputs } = &def {
         if code.len() > u8::MAX as usize {
             return Err(CodegenErrorKind::ExprTooLong.at(at));
+        }
+        // 입력 하나를 그대로 내는 식은 넣지 않고 그 입력 식을 준다. 식 전체가 인덱스 접근 하나인
+        // `${rows[i].title}`이 값 읽기 식을 한 겹 더 감싸지 않는다.
+        if code.as_slice() == [ExprOp::LoadInput as u8, 0] {
+            return Ok(inputs[0]);
         }
     }
     if let Some(index) = exprs.iter().position(|expr| *expr == def) {
