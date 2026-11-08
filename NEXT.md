@@ -8,7 +8,10 @@
 
 ## 하는 중
 
-없음
+배열 인덱스 접근을 주소 식(`rows[pivot]`)과 값 읽기 식(`LoadInput FieldAt ReadLeaf`)으로 떼어 내 바깥 식이
+`LoadInput`으로 읽게 한다. `@for` 안에서 바깥 배열을 인덱스로 읽는 식이 root 인스턴스를 함께 사용한다. 바이트코드
+형식은 그대로다. 런타임에서 건너뛰기 표의 `readLeafIndexOpsByVar`, `hasIndexAccess`와 READ_LEAF 구독 다시 걸기를
+readLeaves 전후 비교로 줄인다. docs/expr-graph.draft.md "배열 접근".
 
 ## 할 것
 
