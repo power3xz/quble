@@ -236,7 +236,8 @@ export class ExprInstancePool {
     const previous = instance.lastValue;
     const value = this.run(exprInstanceIndex);
     const { resultLeaf } = instance;
-    if (resultLeaf !== undefined && value !== previous) {
+    // NaN이 그대로면 바뀌지 않은 것이다. !==로 견주면 NaN끼리도 달라 셀 때마다 쓰고 통지한다.
+    if (resultLeaf !== undefined && !Object.is(value, previous)) {
       this.store.write(resultLeaf, value);
       this.changedResultLeaves ??= [];
       this.changedResultLeaves.push(resultLeaf);
