@@ -8,10 +8,7 @@
 
 ## 하는 중
 
-식 인스턴스의 첫 평가가 throw할 때 정리 (`core/web/expr-layer.ts`, `core/web/vm.ts`)
-- 공유 맵에 고아 인스턴스가 남아 다음에 고르면 `undefined`를 값으로 받는다 - `evaluate`가 성공한 뒤 `markShared`
-- 입력을 연결하던 중 throw하면 연결한 입력 인스턴스가 해제되지 않는다 - `inputInstances`를 미리 두고 연결하는 대로 채움
-- 결과가 NaN이면 다시 셀 때마다 write와 notify가 일어난다 - `Object.is`로 비교
+없음
 
 ## 할 것
 
