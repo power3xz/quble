@@ -1,0 +1,10 @@
+component TernaryLinkThrow {
+  props { a: bool, n: number, cursor: number, rows: { x: number }[] }
+  events { APPLY({}) }
+  template {
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      span(class="v") { ${a ? (n > 0 ? rows[cursor].x : 0) : 7} }
+    }
+  }
+}

@@ -1532,10 +1532,10 @@ export class VM {
     let value: unknown;
     if (exprInstanceIndex === NOT_SHARED) {
       exprInstanceIndex = exprInstancePool.create(globalExprIndex, pairs, scopeUid);
+      value = exprInstancePool.evaluateOrFree(exprInstanceIndex);
       if (shared) {
         exprInstancePool.markShared(exprInstanceIndex);
       }
-      value = exprInstancePool.evaluate(exprInstanceIndex);
       exprInstancePool.subscribeInputs(exprInstanceIndex);
     } else {
       value = exprInstancePool.valueOf(exprInstanceIndex);

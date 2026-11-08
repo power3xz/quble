@@ -105,6 +105,17 @@ test("subscribeInputs하면 입력이 바뀔 때 결과 leaf에 쓴다", () => {
   assert.equal(store.get(2), 12);
 });
 
+test("다시 센 값이 NaN 그대로면 결과 leaf를 통지하지 않는다", () => {
+  const { pool, exprInstanceIndex, store } = build({ ...sum(), store: createLeafStoreSubject([Number.NaN, 2, 0]) });
+  pool.subscribeInputs(exprInstanceIndex);
+  const notified: unknown[] = [];
+  store.subscribe(2, (value) => notified.push(value));
+
+  store.set(1, 3);
+
+  assert.deepEqual(notified, []);
+});
+
 test("쉬는 식 인스턴스는 입력이 바뀌어도 세지 않고 바뀐 변수의 비트를 pendingVarMask에 모은다", () => {
   const { pool, exprInstanceIndex, store } = build(sum());
   pool.subscribeInputs(exprInstanceIndex);
