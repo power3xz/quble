@@ -4,7 +4,8 @@ component Orders {
     rate: number,
     tax: number,
     threshold: number,
-    pivot: number
+    pivot: number,
+    net: bool
   }
   events {
     INC({})
@@ -15,6 +16,7 @@ component Orders {
     RATE_AND_TAX({ nextRate: rate + 1, nextTax: tax + 1 })
     RATE_BURST({ first: rate + 1, second: rate + 2, third: rate + 3 })
     BULK_UPDATE({ firstPrice: rows[0].price })
+    NET({ nextNet: !net })
   }
   template {
     div(class="orders") {
@@ -26,6 +28,7 @@ component Orders {
         button(id="btn-rate-tax" @click:RATE_AND_TAX) { "환율+세율 동시 변경" }
         button(id="btn-rate-burst" @click:RATE_BURST) { "환율 연속 3회 변경" }
         button(id="btn-bulk" @click:BULK_UPDATE) { "전체 행 일괄 갱신" }
+        button(id="btn-net" @click:NET) { "표시 전환" }
         span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } " / 기준 " span(class="orders__threshold") { ${threshold} } " / 기준 행 " span(class="orders__pivot") { ${pivot} } }
       }
       div(class="orders__list") {
@@ -35,6 +38,7 @@ component Orders {
             span(class="row__price") { ${row.price} }
             span(class="row__qty") { ${row.qty} }
             span(class="row__amount") { ${(row.price * row.qty - row.discount) * (100 + tax) / 100 * rate} }
+            span(class="row__shown") { ${net ? (row.price * row.qty - row.discount) * rate : row.price * rate} }
             span(class="row__left") { ${row.stock - row.qty} }
             span(class="row__diff") { ${row.price - rows[pivot].price} }
             span(class="row__warn" data-warn={row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold}) { "!" }

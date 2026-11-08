@@ -12,6 +12,7 @@ const App = (props: { data: TData }) => {
   const [threshold, setThreshold] = createSignal(props.data.threshold);
   const [pivot, setPivot] = createSignal(props.data.pivot);
   const [tax, setTax] = createSignal(props.data.tax);
+  const [net, setNet] = createSignal(props.data.net);
   let bumped = false;
   return (
     <div class="orders">
@@ -60,6 +61,9 @@ const App = (props: { data: TData }) => {
         >
           전체 행 일괄 갱신
         </button>
+        <button id="btn-net" onClick={() => setNet((n) => !n)}>
+          표시 전환
+        </button>
         <span class="orders__info">
           환율 <span class="orders__rate">{rate()}</span> / 기준 <span class="orders__threshold">{threshold()}</span> / 기준 행{" "}
           <span class="orders__pivot">{pivot()}</span>
@@ -91,6 +95,7 @@ const App = (props: { data: TData }) => {
                 </div>
               </div>
               <span class="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax())) / 100) * rate()}</span>
+              <span class="row__shown">{net() ? (row.price * row.qty - row.discount) * rate() : row.price * rate()}</span>
               <ul class="row__meta">
                 <li>a</li>
                 <li>b</li>

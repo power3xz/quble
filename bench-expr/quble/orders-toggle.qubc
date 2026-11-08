@@ -4,7 +4,8 @@ component OrdersToggle {
     rowsB: { id: number, price: number, qty: number, discount: number }[],
     showA: bool,
     showB: bool,
-    rate: number
+    rate: number,
+    net: bool
   }
   events {
     SHOW_A({})
@@ -12,6 +13,7 @@ component OrdersToggle {
     SHOW_B({})
     HIDE_B({})
     RATE({ nextRate: 2650 - rate })
+    NET({ nextNet: !net })
   }
   template {
     div(class="orders") {
@@ -21,6 +23,7 @@ component OrdersToggle {
         button(id="btn-show-b" @click:SHOW_B) { "B 켜기" }
         button(id="btn-hide-b" @click:HIDE_B) { "B 끄기" }
         button(id="btn-rate" @click:RATE) { "환율 변경" }
+        button(id="btn-net" @click:NET) { "표시 전환" }
         span(class="orders__info") { "환율 " span(class="orders__rate") { ${rate} } }
       }
       @if (showA) {
@@ -31,6 +34,7 @@ component OrdersToggle {
               span(class="row__price") { ${row.price} }
               span(class="row__qty") { ${row.qty} }
               span(class="row__amount") { ${(row.price * row.qty - row.discount) * rate} }
+              span(class="row__shown") { ${net ? (row.price * row.qty - row.discount) * rate : row.price * rate} }
               span(class="row__total") { ${row.price * row.qty} }
               span(class="row__tag" data-id={row.id} data-warn={row.qty > 0 && row.price * row.qty > 30000}) { "!" }
             }
@@ -45,6 +49,7 @@ component OrdersToggle {
               span(class="row__price") { ${row.price} }
               span(class="row__qty") { ${row.qty} }
               span(class="row__amount") { ${(row.price * row.qty - row.discount) * rate} }
+              span(class="row__shown") { ${net ? (row.price * row.qty - row.discount) * rate : row.price * rate} }
               span(class="row__total") { ${row.price * row.qty} }
               span(class="row__tag" data-id={row.id} data-warn={row.qty > 0 && row.price * row.qty > 30000}) { "!" }
             }
