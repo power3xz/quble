@@ -14,11 +14,11 @@ const ROUNDS = 5;
 // bench-expr-quick.sh다.
 const N = Number(process.env.BENCH_N ?? 1000);
 // 하네스 SCENARIOS, TOGGLE_SCENARIOS와 같은 키와 순서. 표의 열을 padEnd로 맞추므로 라벨도 키 그대로 둔다(한글은 폭이 2칸).
-const ORDERS_SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk"];
+const ORDERS_SCENARIOS = ["inc", "rate", "threshold", "pivot", "pivotPrice", "rateAndTax", "rateBurst", "bulk", "net"];
 const SCENARIOS_OF = {
   orders: ORDERS_SCENARIOS,
   "orders-deep": ORDERS_SCENARIOS,
-  "orders-toggle": ["showA", "showAChanged", "showB", "showBChanged"],
+  "orders-toggle": ["showA", "showAChanged", "showB", "showBChanged", "showANet"],
   "orders-shared": ORDERS_SCENARIOS,
 };
 // 재는 대상. 환경 변수 TARGET(기본 quble)으로 고른다. 페이지 이름은 <대상>.html, orders-deep이면 <대상>-deep.html이다.

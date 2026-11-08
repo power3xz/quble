@@ -317,6 +317,9 @@ mod tests {
             Expr::Binary(op, l, r, _) => {
                 format!("({} {} {})", shape(l), op.sym(), shape(r))
             }
+            Expr::Ternary(cond, then, else_, _) => {
+                format!("({} ? {} : {})", shape(cond), shape(then), shape(else_))
+            }
         }
     }
 
@@ -365,6 +368,36 @@ mod tests {
         assert_eq!(shape(&if_cond("a > 0 && b")), "((a > 0) && b)");
         // == 는 비교보다 나중에 묶인다.
         assert_eq!(shape(&if_cond("a < b == c")), "((a < b) == c)");
+    }
+
+    #[test]
+    fn parse_expr_ternary_binds_after_binary() {
+        // 삼항이 `||`보다 나중에 묶인다 - 조건이 `a || b` 전체다.
+        assert_eq!(shape(&if_cond("a || b ? x : y")), "((a || b) ? x : y)");
+        // 참 갈래와 거짓 갈래도 이항식 전체를 받는다.
+        assert_eq!(shape(&if_cond("a ? b + 1 : c")), "(a ? (b + 1) : c)");
+        assert_eq!(shape(&if_cond("a ? b : c + 1")), "(a ? b : (c + 1))");
+    }
+
+    #[test]
+    fn parse_expr_ternary_is_right_associative() {
+        // JS와 같다 - 거짓 갈래에 이어지는 삼항이 그 갈래로 들어간다.
+        assert_eq!(
+            shape(&if_cond("a ? b : c ? d : e")),
+            "(a ? b : (c ? d : e))"
+        );
+        assert_eq!(
+            shape(&if_cond("a ? b ? c : d : e")),
+            "(a ? (b ? c : d) : e)"
+        );
+    }
+
+    #[test]
+    fn parse_expr_ternary_needs_colon() {
+        assert_eq!(
+            error_message("component C { template { @if (a ? b) { p( /) } } }"),
+            "expected `:`, found `)`"
+        );
     }
 
     #[test]
@@ -467,6 +500,51 @@ mod tests {
         );
     }
 
+    /// 삼항의 조건은 bool - 조건을 탓한다.
+    #[test]
+    fn ternary_cond_must_be_bool() {
+        assert_eq!(
+            if_cond_diagnostic("props { count: number, a: bool, b: bool }", "count ? a : b"),
+            [
+                "`?:` expects bool, found number",
+                " 2 | @if (count ? a : b) { p( /) }",
+                "   |      ^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 삼항의 두 갈래는 같은 타입 - 어느 한쪽을 탓할 수 없어 식 전체를 짚는다.
+    #[test]
+    fn ternary_branches_must_match() {
+        assert_eq!(
+            if_cond_diagnostic(
+                "props { ok: bool, count: number, title: string }",
+                "ok ? count : title"
+            ),
+            [
+                "`?:` needs both sides to be the same type, found number and string",
+                " 2 | @if (ok ? count : title) { p( /) }",
+                "   |      ^^^^^^^^^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// 삼항의 결과 타입은 갈래의 타입이다 - number 갈래의 삼항은 bool 조건 자리에서 걸린다.
+    #[test]
+    fn ternary_result_is_branch_type() {
+        assert_eq!(
+            if_cond_diagnostic("props { ok: bool, a: number, b: number }", "ok ? a : b"),
+            [
+                "expected bool, found number",
+                " 2 | @if (ok ? a : b) { p( /) }",
+                "   |      ^^^^^^^^^^",
+            ]
+            .join("\n")
+        );
+    }
+
     /// `.length`는 배열/문자열에만. 밑줄은 참조 전체를 덮는다 - 조각 하나를 뗀 자리는
     /// 소스에서 셀 수 없고(`count . length`도 파싱된다), 무엇이 문제인지는 메시지가 말한다.
     #[test]
@@ -552,8 +630,24 @@ mod tests {
         );
     }
 
+    /// 입력이 없는 계산 식.
+    fn calc(code: Vec<u8>) -> bytecode::ExprDef {
+        bytecode::ExprDef::Calc {
+            code,
+            inputs: vec![],
+        }
+    }
+
+    /// 계산 식의 후위 바이트. 삼항은 바이트가 없어 실패한다.
+    fn code_of(expr: &bytecode::ExprDef) -> &[u8] {
+        match expr {
+            bytecode::ExprDef::Calc { code, .. } => code,
+            bytecode::ExprDef::Ternary { .. } => panic!("삼항은 바이트가 없다: {expr:?}"),
+        }
+    }
+
     /// `@if` 조건 하나를 컴파일해 그 def의 표현식 테이블을 꺼낸다.
-    fn if_cond_exprs(props: &str, cond: &str) -> Vec<Vec<u8>> {
+    fn if_cond_exprs(props: &str, cond: &str) -> Vec<bytecode::ExprDef> {
         let src = format!("component C {{ {props} template {{ @if ({cond}) {{ p( /) }} }} }}");
         let bytes = compile(&src).expect("컴파일이 성공해야 한다");
         bytecode::decode(&bytes)
@@ -616,7 +710,11 @@ mod tests {
                 vec![LoadVar as u8, 0, 0, LoadSmallInt as u8, 0, Gt as u8],
             ),
         ] {
-            assert_eq!(if_cond_exprs(props, cond), vec![want], "조건 `{cond}`");
+            assert_eq!(
+                if_cond_exprs(props, cond),
+                vec![calc(want)],
+                "조건 `{cond}`"
+            );
         }
     }
 
@@ -710,10 +808,8 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" && ");
         let bytes = compile_ifs(std::iter::once(ok)).expect("251바이트는 된다");
-        assert_eq!(
-            bytecode::decode(&bytes).unwrap().def(0).unwrap().exprs[0].len(),
-            251
-        );
+        let module = bytecode::decode(&bytes).unwrap();
+        assert_eq!(code_of(&module.def(0).unwrap().exprs[0]).len(), 251);
 
         let too_long = std::iter::repeat_n("(n > 0)", 37)
             .collect::<Vec<_>>()
@@ -1361,6 +1457,350 @@ mod tests {
         assert!(code.contains(&(Op::ForEnd as u8)), "ForEnd가 코드에 있어야");
     }
 
+    /// 조건이 leaf 하나인 `@if`와 숫자 prop `@for`는 본문을 그리면 식 인스턴스가 생길 때만 조건을 식으로 낸다.
+    /// 그 식 인스턴스가 본문 식 인스턴스로 가는 간선의 시작점이 된다. 본문에 식 인스턴스가 없으면 지금처럼 슬롯을
+    /// 그대로 읽는다. 템플릿 첫 노드의 opcode가 code[0]이다.
+    fn first_op_and_exprs(src: &str) -> (u8, Vec<bytecode::ExprDef>) {
+        let bytes = compile(src).expect("컴파일이 성공해야 한다");
+        let module = bytecode::decode(&bytes).unwrap();
+        let first_op = def_code(&module, 0)[0];
+        (first_op, module.def(0).unwrap().exprs.clone())
+    }
+
+    /// 템플릿 본문 하나를 컴파일한 모듈.
+    fn compile_template(props: &str, template: &str) -> bytecode::Module {
+        let src = format!("component C {{ props {{ {props} }} template {{ {template} }} }}");
+        bytecode::decode(&compile(&src).expect("컴파일이 성공해야 한다")).unwrap()
+    }
+
+    /// `p() { ${식} }` 하나를 컴파일한 모듈.
+    fn compile_text(props: &str, expr: &str) -> bytecode::Module {
+        compile_template(props, &format!("p() {{ ${{{expr}}} }}"))
+    }
+
+    /// 상수풀에서 그 값을 찾아 삼항의 Const 피연산자로 만든다.
+    fn const_operand(module: &bytecode::Module, value: Const) -> bytecode::TernaryOperand {
+        let index = (0..)
+            .map_while(|index| module.pool.get(index))
+            .position(|constant| *constant == value)
+            .unwrap_or_else(|| panic!("상수풀에 {value:?}가 있어야"));
+        bytecode::TernaryOperand::Const(index as u16)
+    }
+
+    #[test]
+    fn ternary_with_leaf_cond_and_const_branches_is_one_ternary() {
+        use bytecode::{ExprDef, TernaryOperand::Leaf};
+        let module = compile_text("ok: bool", "ok ? 1 : 2");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![ExprDef::Ternary {
+                cond: Leaf(0, 0),
+                then: const_operand(&module, Const::Num(1.0)),
+                else_: const_operand(&module, Const::Num(2.0)),
+            }]
+        );
+    }
+
+    #[test]
+    fn ternary_with_leaf_branches_reads_slots() {
+        use bytecode::{ExprDef, TernaryOperand::Leaf};
+        let module = compile_text(
+            "ok: bool, price: number, count: number",
+            "ok ? price : count",
+        );
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![ExprDef::Ternary {
+                cond: Leaf(0, 0),
+                then: Leaf(1, 0),
+                else_: Leaf(2, 0),
+            }]
+        );
+    }
+
+    /// 식인 조건은 삼항보다 먼저 테이블에 들어가 더 작은 번호를 받는다.
+    #[test]
+    fn ternary_with_expr_cond_points_to_cond_expr() {
+        use bytecode::{ExprDef, ExprOp, TernaryOperand::Expr};
+        let module = compile_text("price: number", "price > 10 ? 1 : 2");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    0,
+                    0,
+                    ExprOp::LoadSmallInt as u8,
+                    10,
+                    ExprOp::Gt as u8
+                ]),
+                ExprDef::Ternary {
+                    cond: Expr(0),
+                    then: const_operand(&module, Const::Num(1.0)),
+                    else_: const_operand(&module, Const::Num(2.0)),
+                },
+            ]
+        );
+    }
+
+    /// 갈래가 식이어도 잎 조건은 잎으로 둔다 - 삼항이 조건 leaf를 직접 구독한다.
+    #[test]
+    fn ternary_with_expr_branch_keeps_leaf_cond() {
+        use bytecode::{
+            ExprDef, ExprOp,
+            TernaryOperand::{Expr, Leaf},
+        };
+        let module = compile_text(
+            "ok: bool, price: number, qty: number, count: number",
+            "ok ? price * qty : count",
+        );
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::LoadVar as u8,
+                    2,
+                    0,
+                    ExprOp::Mul as u8
+                ]),
+                ExprDef::Ternary {
+                    cond: Leaf(0, 0),
+                    then: Expr(0),
+                    else_: Leaf(3, 0),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_ternary_is_an_expr_branch() {
+        use bytecode::{
+            ExprDef,
+            TernaryOperand::{Expr, Leaf},
+        };
+        let module = compile_text("ok: bool, done: bool", "ok ? (done ? 1 : 2) : 3");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                ExprDef::Ternary {
+                    cond: Leaf(1, 0),
+                    then: const_operand(&module, Const::Num(1.0)),
+                    else_: const_operand(&module, Const::Num(2.0)),
+                },
+                ExprDef::Ternary {
+                    cond: Leaf(0, 0),
+                    then: Expr(0),
+                    else_: const_operand(&module, Const::Num(3.0)),
+                },
+            ]
+        );
+    }
+
+    /// 계산 식 안의 삼항은 따로 들어가고, 계산 식은 그 값의 자리를 LoadInput으로 표시한다.
+    #[test]
+    fn calc_with_ternary_loads_it_as_input() {
+        use bytecode::{ExprDef, ExprOp, TernaryOperand::Leaf};
+        let module = compile_text(
+            "ok: bool, price: number, base: number",
+            "base - (ok ? price : 0)",
+        );
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                ExprDef::Ternary {
+                    cond: Leaf(0, 0),
+                    then: Leaf(1, 0),
+                    else_: const_operand(&module, Const::Num(0.0)),
+                },
+                ExprDef::Calc {
+                    code: vec![
+                        ExprOp::LoadVar as u8,
+                        2,
+                        0,
+                        ExprOp::LoadInput as u8,
+                        0,
+                        ExprOp::Sub as u8
+                    ],
+                    inputs: vec![0],
+                },
+            ]
+        );
+    }
+
+    /// 입력 목록은 바이트에서 처음 나오는 순서로 채운다.
+    #[test]
+    fn calc_inputs_follow_first_appearance() {
+        use bytecode::{ExprDef, ExprOp};
+        let module = compile_text(
+            "ok: bool, big: bool, a: number, b: number",
+            "(ok ? a : 0) + (big ? b : 1)",
+        );
+        let exprs = &module.def(0).unwrap().exprs;
+        assert_eq!(exprs.len(), 3);
+        assert_eq!(
+            exprs[2],
+            ExprDef::Calc {
+                code: vec![
+                    ExprOp::LoadInput as u8,
+                    0,
+                    ExprOp::LoadInput as u8,
+                    1,
+                    ExprOp::Add as u8
+                ],
+                inputs: vec![0, 1],
+            }
+        );
+    }
+
+    /// 같은 삼항을 두 번 읽으면 입력 목록에 한 번만 들어가고 같은 위치를 두 번 사용한다.
+    #[test]
+    fn same_ternary_read_twice_is_one_input() {
+        use bytecode::{ExprDef, ExprOp};
+        let module = compile_text(
+            "ok: bool, price: number",
+            "(ok ? price : 0) * (ok ? price : 0)",
+        );
+        let exprs = &module.def(0).unwrap().exprs;
+        assert_eq!(exprs.len(), 2);
+        assert_eq!(
+            exprs[1],
+            ExprDef::Calc {
+                code: vec![
+                    ExprOp::LoadInput as u8,
+                    0,
+                    ExprOp::LoadInput as u8,
+                    0,
+                    ExprOp::Mul as u8
+                ],
+                inputs: vec![0],
+            }
+        );
+    }
+
+    /// code가 같아도 입력이 다르면 다른 식이다 - 중복 제거가 code만 보면 두 보간이 하나로 합쳐진다.
+    #[test]
+    fn calcs_with_same_code_and_different_inputs_are_different_exprs() {
+        let module = compile_template(
+            "ok: bool, price: number, base: number",
+            "p() { ${base - (ok ? price : 0)} } p() { ${base - (ok ? 0 : price)} }",
+        );
+        let exprs = &module.def(0).unwrap().exprs;
+        assert_eq!(exprs.len(), 4); // #0 ok ? price : 0, #1 base - #0, #2 ok ? 0 : price, #3 base - #2
+        assert_eq!(code_of(&exprs[1]), code_of(&exprs[3])); // 둘 다 LoadVar base, LoadInput 0, Sub (LoadInput은 식 번호가 아니라 inputs의 위치)
+        assert_ne!(exprs[1], exprs[3]); // #1의 inputs는 [0], #3의 inputs는 [2]
+    }
+
+    /// 인덱스 안의 삼항도 그 식의 입력이 된다.
+    #[test]
+    fn ternary_in_index_is_an_input() {
+        use bytecode::{ExprDef, ExprOp};
+        let module = compile_text("ok: bool, tags: string[]", "tags[ok ? 0 : 1]");
+        let exprs = &module.def(0).unwrap().exprs;
+        assert_eq!(exprs.len(), 2);
+        match &exprs[1] {
+            ExprDef::Calc { code, inputs } => {
+                assert_eq!(inputs, &vec![0]);
+                assert!(code.contains(&(ExprOp::LoadInput as u8)), "{code:?}");
+            }
+            other => panic!("계산 식이어야: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ternary_constant_true_cond_is_error() {
+        assert_eq!(
+            error_message("component C { template { p() { ${true ? 1 : 2} } } }"),
+            "condition is always true: the false branch is never used"
+        );
+    }
+
+    #[test]
+    fn ternary_constant_false_cond_is_error() {
+        assert_eq!(
+            error_message("component C { template { p() { ${1 > 2 ? 1 : 2} } } }"),
+            "condition is always false: the true branch is never used"
+        );
+    }
+
+    #[test]
+    fn leaf_if_with_expr_in_body_compiles_to_if_expr() {
+        use bytecode::{ExprOp, Op};
+        let (op, exprs) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { p() { ${x + 1} } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+        assert!(
+            exprs.contains(&calc(vec![ExprOp::LoadVar as u8, 0, 0])),
+            "ok 하나를 읽는 식이 표현식 테이블에 있어야"
+        );
+    }
+
+    #[test]
+    fn leaf_if_without_expr_in_body_stays_if() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { p() { ${x} } } } }",
+        );
+        assert_eq!(op, Op::If as u8);
+    }
+
+    #[test]
+    fn leaf_if_with_expr_in_else_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { p( /) } @else { p() { ${x + 1} } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    /// 안쪽 `@if (x > 0)`의 조건 식 인스턴스가 바깥 then 가지에 실린다.
+    #[test]
+    fn leaf_if_with_inner_if_expr_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, x: number } template { @if (ok) { @if (x > 0) { p( /) } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    /// 배열 `@for`의 행은 부모 가지의 간선을 물려받으므로 행의 식 인스턴스도 바깥 조건 아래다.
+    #[test]
+    fn leaf_if_with_expr_in_array_for_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool, rows: number[] } template { @if (ok) { @for (r of rows) { p() { ${r + 1} } } } } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    /// 자식 컴포넌트가 있으면 그 템플릿을 보지 않고 식 인스턴스가 생긴다고 본다. Leaf에는 식이 없지만 IF_EXPR이다.
+    /// 자식 템플릿까지 따라가 판정하도록 고치면 이 테스트는 IF를 기대하게 바뀐다.
+    #[test]
+    fn leaf_if_with_component_in_body_compiles_to_if_expr() {
+        use bytecode::Op;
+        let (op, _) = first_op_and_exprs(
+            "component C { props { ok: bool } template { @if (ok) { Leaf( /) } } }
+             component Leaf { template { p( /) } }",
+        );
+        assert_eq!(op, Op::IfExpr as u8);
+    }
+
+    #[test]
+    fn count_for_with_expr_in_body_compiles_to_for_count_expr() {
+        use bytecode::{ExprOp, Op};
+        let (op, exprs) = first_op_and_exprs(
+            "component C { props { n: number } template { @for (k of n) { p() { ${k + 1} } } } }",
+        );
+        assert_eq!(op, Op::ForCountExpr as u8);
+        assert!(
+            exprs.contains(&calc(vec![ExprOp::LoadVar as u8, 0, 0])),
+            "n 하나를 읽는 식이 표현식 테이블에 있어야"
+        );
+    }
+
     /// `@for (tag of tags)` 스칼라 배열 순회. tags(배열)는 슬롯 1개라 ForArrayVar (scope=0, offset=0).
     /// 회차변수 tag는 props 슬롯 뒤(offset 1)에 앉아 ${tag}가 TextVar 1을 낸다.
     #[test]
@@ -1774,7 +2214,7 @@ mod tests {
         // Expr ref면 (식 바이트의 마지막 명령, 결과 타입 엔트리)를 준다.
         let expr_of = |field: &bytecode::Field| match field.value {
             FieldValue::Expr(i) => (
-                *def.exprs[i as usize].last().unwrap(),
+                *code_of(&def.exprs[i as usize]).last().unwrap(),
                 module.types[field.type_ref as usize].clone(),
             ),
             other => panic!("식 값이라 Expr ref여야: {other:?}"),
@@ -1792,7 +2232,7 @@ mod tests {
         assert!(matches!(ty, TypeEntry::Array(_)));
         // `FieldAt`은 거리 operand 하나가 뒤에 붙어 마지막 바이트가 operand다 - 그 앞을 본다.
         let tags_expr = match fields[3].value {
-            FieldValue::Expr(i) => &def.exprs[i as usize],
+            FieldValue::Expr(i) => code_of(&def.exprs[i as usize]),
             _ => unreachable!(),
         };
         assert_eq!(tags_expr[tags_expr.len() - 2], ExprOp::FieldAt as u8);

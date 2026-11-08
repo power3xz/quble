@@ -23,9 +23,10 @@ store에 놓이는 모양은 `LEAF-STORE-LAYOUT.md`가 맡는다.
 - `[vm]`: 바이트코드를 해석하며 값 자리를 DOM에 걸고, 식 인스턴스를 요청한다.
 - `[region]`: `@if`/`@for` 가지를 붙이고 떼고 반납하면서, 가지가 든 통지 구독과 식 인스턴스를 같이 다룬다.
   순환 `import`를 피하려고 store와 식 인스턴스 풀을 `import`하지 않고 함수 인자로 받는다.
-- `[expr]`: 식 인스턴스를 풀에 두고, 입력 leaf에 파생 구독을 걸고 푼다. 같은 식을 공유한다(4절).
-- `[subscription]`: 구독 층. 통지 구독과 파생 구독을 들고, `set`, `write`, `notify`, batch로 구독을 순서대로
-  호출한다. 값은 `[store]`에 기록한다.
+- `[expr]`: 식 인스턴스를 풀에 두고, 입력 leaf에 파생 구독을 걸고 푼다(구독 표 `deriveSubscribers`). 바뀐 leaf로
+  식을 다시 세는 통지 전 단계(`flush`)를 `[subscription]`에 등록한다. 같은 식을 공유한다(4절).
+- `[subscription]`: 구독 층. 통지 구독과 통지 전 단계 하나를 들고, `set`, `write`, `notify`, batch로 통지 전
+  단계와 통지 구독을 순서대로 호출한다. 값은 `[store]`에 기록한다. 파생 구독과 식은 모른다.
 - `[store]`: leaf 값을 읽고 기록하기만 한다. 구독을 모른다.
 
 `[subscription]`과 `[store]`는 둘 다 `leaf-store.ts`에 있다.
@@ -34,8 +35,8 @@ store에 놓이는 모양은 `LEAF-STORE-LAYOUT.md`가 맡는다.
 
 구독은 두 종류다.
 
-- **파생 구독**(`subscribeDerive`): 입력 leaf에 건다. 바뀐 leaf를 받아 식을 다시 세고 값을 돌려준다. 식 인스턴스마다
-  함수 하나이고, 식이 읽는 입력 leaf 모두에 같은 함수를 건다.
+- **파생 구독**: `[expr]`의 구독 표에 입력 leaf마다 식 인스턴스 번호를 건다. 식이 읽는 입력 leaf 모두에 같은 번호를
+  건다. 입력 leaf가 바뀌면 그 번호의 식을 다시 센다.
 - **통지 구독**(`subscribe`): leaf의 확정된 값을 받아 DOM에 기록하거나 가지를 켜고 끈다. `[vm]`이 만든다.
 
 ```
@@ -50,17 +51,18 @@ store에 놓이는 모양은 `LEAF-STORE-LAYOUT.md`가 맡는다.
 `set(0, 3000)`이 호출되면 이렇게 진행된다.
 
 ```
-  1. [subscription]  [store]의 leaf 0에 3000을 기록한다      값이 같으면 여기서 끝
-  2. [expr]          파생 구독이 `rate * 2`를 다시 세어 6000을 돌려준다
-  3. [subscription]  [store]의 결과 leaf 7에 6000을 기록한다  값이 같으면 기록도 통지도 하지 않는다
-  4. [subscription]  통지 구독을 호출한다                    툴바에 3000, 두 행에 6000
+  1. [subscription]  [store]의 leaf 0에 3000을 기록한다            값이 같으면 여기서 끝
+  2. [subscription]  통지 전 단계에 바뀐 leaf 모음 {0}을 넘긴다
+  3. [expr]          leaf 0을 읽는 `rate * 2`를 다시 세어 6000을 얻는다.  직전 값(5300)과 같으면 기록도 하지 않는다
+                     결과 leaf 7에 기록하고, 값이 바뀐 결과 leaf [7]을 돌려준다
+  4. [subscription]  바뀐 leaf 0, 돌려받은 leaf 7 순으로 통지 구독을 호출한다   툴바에 3000, 두 행에 6000
 ```
 
-- 파생 구독은 값을 돌려주기만 한다. 결과 leaf에 기록하는 것은 `[subscription]`이다.
-- 통지 구독은 파생 구독이 모두 끝난 뒤에 호출되므로 중간 값이 DOM에 닿지 않는다.
+- 결과 leaf에 기록하는 것은 `[expr]`이다. `[subscription]`은 돌려받은 leaf를 통지만 한다.
+- 통지 구독은 통지 전 단계가 끝난 뒤에 호출되므로 중간 값이 DOM에 닿지 않는다.
 
-batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바깥 batch가 끝날 때 위 2~4가 한 번 진행되고, 파생 구독
-함수는 그동안 바뀐 leaf 전체를 받아 한 번만 호출된다.
+batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바깥 batch가 끝날 때 위 2~4가 한 번 진행된다. 통지 전
+단계는 그동안 바뀐 leaf 전체를 받고, 읽는 leaf 여럿이 함께 바뀐 식 인스턴스도 한 번만 센다.
 
 ## 3. 식 인스턴스의 생애
 
@@ -69,15 +71,14 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 | 호출 | 호출하는 쪽, 시점 | 하는 일 |
 |---|---|---|
-| `create`, `evaluate`, `bindResultLeaf` | `[vm]`, 값 자리를 만들 때 | 인스턴스를 만들고 처음 값을 센다. 결과 leaf를 할당해 파생 구독 함수와 연결한다. 구독은 아직 걸지 않는다 |
-| `attach` | `[region]`, 가지가 DOM에 붙을 때 | 입력 leaf마다 파생 구독을 건다. 구독이 풀렸던 적이 있으면 따라잡는다 |
-| `detach` | `[region]`, 가지가 DOM에서 떨어질 때 | 파생 구독을 푼다 |
-| `release` | `[region]`, 가지가 없어질 때 | 결과 leaf와 풀 번호를 반납한다 |
+| `create`, `evaluate`, `bindResultLeaf` | `[vm]`, 값 자리를 만들 때 | 인스턴스를 만들고 처음 값을 센다. 결과 leaf를 할당해 인스턴스에 연결한다 |
+| `subscribeInputs` | `[vm]`, 새로 만든 인스턴스를 처음 센 직후 | 입력 leaf마다 파생 구독을 건다 |
+| `recountPending` | `[region]`, 가지가 DOM에 붙을 때 | 쉬는 동안 바뀐 입력이 있으면 센다(5절) |
+| `releaseByBranch` | `[region]`, 가지가 없어질 때 | 파생 구독을 풀고 결과 leaf와 풀 번호를 반납한다 |
 
-인스턴스는 두 수를 센다. `refCount`는 인스턴스를 든 가지 수, `attachedCount`는 그중 DOM에 붙은 가지 수다.
-구독은 `attachedCount`가 0에서 1이 될 때 걸고 0이 될 때 푼다. 반납은 `refCount`가 0이 될 때 한다. 그래서
-보이지 않는 가지만 든 인스턴스는 입력 leaf에 구독이 하나도 없다. 인스턴스는 구독을 한 번이라도 걸었는지도
-(`everAttached`) 들고, 구독을 다시 걸 때 따라잡을지를 이것으로 정한다.
+인스턴스는 `heldByBranchCount`(인스턴스를 든 가지 수)를 센다. 파생 구독은 인스턴스를 만들 때 걸고 `heldByBranchCount`가 0이 되어
+반납할 때 푼다. 가지가 DOM에서 떨어져도 파생 구독은 그대로다 - 떼고 붙일 때 풀고 거는 것은 가지의 통지 구독뿐이다.
+처음 붙지 않은 가지(`@if`의 고르지 않은 쪽)는 처음 고를 때 만들어지므로 그전에는 인스턴스도 구독도 없다.
 
 ## 4. 공유
 
@@ -85,7 +86,7 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 하나를 사용한다. 값 자리를 만들 때 `[vm]`이 아래 순서로 공유할지, 어느 인스턴스를 사용할지 정한다.
 
 ```
-  level 구하기 -> forDepth와 비교 -> scopeUid 고르기 -> 공유 맵 조회 -> 있으면 retain, 없으면 create + markShared
+  level 구하기 -> forDepth와 비교 -> scopeUid 고르기 -> 공유 맵 조회 -> 있으면 retainByBranch, 없으면 create + markShared
 ```
 
 ### level
@@ -116,13 +117,15 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 
 ### scopeUid
 
-스코프(컴포넌트 RENDER 한 번 또는 `@for` 행 하나)가 열릴 때마다 받는 번호다. `ScopeUidCounter`가 하나씩 올려
-주고 다시 사용하지 않는다. RENDER와 `@for` 행(`buildIteration`)이 열릴 때 `scopeUidStack`에 쌓고 닫힐 때 꺼낸다.
+스코프(컴포넌트 RENDER 한 번 또는 `@for` 행 하나)가 열릴 때마다 받는 번호다. 부모 표 `scopeParentPool`(`Pool<number>`)의
+칸 번호이고, 칸 값은 부모 scope의 scopeUid다(`vm.ts`의 `allocScopeUid`). 번호는 scope를 연 가지의 `scopeUids`에 기록하고,
+`freeBranchTree`(`region.ts`)가 그 가지를 반납할 때 함께 반납해 다시 할당된다. RENDER와 `@for` 행(`buildIteration`)이 열릴 때
+`scopeUidStack`에 쌓고 닫힐 때 꺼낸다.
 나중에 만드는 가지(`@if`의 `lazyBuild`, `@for`가 늘 때)는 만든 시점의 스택을 복사해 두므로 같은 번호를 본다.
 
 공유 키의 `scopeUid`는 `level`이 가리키는 스코프의 번호다. 스택은 컴포넌트를 가로질러 쌓이므로 이 컴포넌트의
 루트 스코프는 맨 위에서 `forDepth`만큼 내려간 자리고, 거기서 `level`만큼 올라간 자리를 고른다
-(`vm.ts`의 `sharedScopeUidOf`).
+(`vm.ts`의 `scopeUidAtLevel`).
 
 ```
   scopeUidStack[length - 1 - forDepth + level]
@@ -137,51 +140,58 @@ batch 안의 `set`은 값만 기록하고 바뀐 leaf를 모은다. 가장 바�
 `ExprInstancePool.shared[globalExprIndex].get(scopeUid)`가 인스턴스 번호다.
 
 - `findShared`: 키로 찾는다. 없으면 `NOT_SHARED`.
-- `markShared`: 새로 만든 인스턴스를 키로 올린다.
-- `release`: `refCount`가 0이 되면 키를 지운다. `scopeUid`를 다시 사용하지 않으므로, 없어진 스코프의 키에 새 스코프가
-  걸리지 않는다.
+- `markShared`: 새로 만든 인스턴스를 자기 `(globalExprIndex, scopeUid)`로 올린다.
+- `freeIfUnheld`: 인스턴스를 반납할 때(`heldByBranchCount`가 0이고 `outputInstances`가 빔) 그 키가 이 인스턴스를 가리키면
+  지운다. 같은 식을 `@for` 안(공유)과 밖(공유 안 함)에서 쓰면 두 인스턴스의 키가 같아, 가리키는지 보지 않으면 공유하지
+  않은 쪽을 반납할 때 공유한 쪽의 항목이 빠진다. `scopeUid`는 반납 뒤 다시 할당되지만, 그 scope의 식 인스턴스는 scope를
+  연 가지와 함께 먼저 반납되므로 옛 키가 새 scope에 걸리지 않는다.
 
 ### 재사용
 
-찾은 인스턴스는 `retain`으로 `refCount`만 올리고, 같은 결과 leaf에 통지 구독을 건다. 식은 다시 세지 않고 결과
-leaf의 값을 읽는다. 그 값이 낡았으면 가지가 붙을 때 `attach`가 따라잡는다.
+찾은 인스턴스는 `retainByBranch`로 `heldByBranchCount`만 올리고, 같은 결과 leaf에 통지 구독을 건다. 식은 다시 세지 않고 결과
+leaf의 값을 읽는다. 그 값이 낡았으면 가지가 붙을 때 `recountPending`이 센다.
 
-## 5. 구독을 다시 걸 때 따라잡기
+## 5. 쉬는 동안 바뀐 입력
 
-구독이 풀린 인스턴스는 입력 leaf에 구독이 없어, 그동안 입력이 바뀌면 결과 leaf가 낡는다. 그래서 `attach`는 붙은
-가지가 0에서 1이 될 때 `everAttached`가 참이면 입력 leaf 전체를 바뀐 leaf로 넘겨 파생 구독 함수를 한 번 직접
-호출해(`refreshDerive`) 결과 leaf를 맞춘다. 처음 걸 때는 `evaluate`가 방금 센 값이 최신이므로 따라잡지 않는다.
+`@if` 가지가 떨어져 쉬는 동안에도 식 인스턴스의 파생 구독은 남는다. 입력이 바뀌면 push가 바뀐 변수의 비트를
+`pendingVarMask`에 켠다. pull은 incoming labeled edge의 시작점(조건 식 인스턴스)의 값이 label과 맞지 않아 그
+인스턴스를 세지 않는다(`docs/flush-push-pull.draft.md`의 pull). 마스크가 이미 0이 아닌 인스턴스는 push가 다시 셀
+목록에 넣지 않으므로, 쉬는 동안 flush가 여러 번 지나가도 비트만 쌓인다. 결과 leaf는 낡은 채 남는다.
 
-입력 leaf마다 따로 호출하지 않는다. 그러면 식을 입력 leaf 수만큼 세고, 나머지 입력이 낡은 채 센 중간 값까지
-결과 leaf에 기록하고 통지한다. 한 번 호출하면 flush와 같이 바뀐 입력을 한꺼번에 반영한다.
+가지가 다시 붙을 때 `[region]`이 가지의 식 인스턴스마다 `recountPending`을 호출한다. `recountPending`은 pull과 같은
+요청으로 incoming edge의 시작점을 먼저 요청하고, 마스크가 남은 인스턴스만 그 마스크로 센다. 값이 바뀌었으면 결과
+leaf에 기록하고 그 leaf를 `notify`한다. 가지가 붙는 것은 flush의 통지 단계라, 값이 바뀐 결과 leaf를 돌려줄 통지
+전 단계가 이미 끝났기 때문이다. 쉬는 동안 입력이 바뀌지 않은 인스턴스는 마스크가 0이라 세지 않는다.
 
-꺼졌던 가지가 다시 붙을 때:
+마스크에는 쉬는 동안 바뀐 변수가 모두 모여 있어 식을 한 번 센다. 바뀐 변수마다 따로 세면 나머지 입력이 낡은 채
+센 중간 값까지 결과 leaf에 기록하고 통지한다.
+
+행이 `@if (show)` 안에 있어 꺼졌던 가지가 다시 붙을 때:
 
 ```
-  꺼진 동안   set(0, 3000)      구독이 없어 아무것도 호출되지 않는다. leaf 7은 5300 그대로
+  꺼진 동안   set(0, 3000)      push가 `rate * 2`의 마스크에 rate 비트를 켠다. show가 false라 pull은 세지 않는다.
+                                leaf 7은 5300 그대로
   다시 붙임   1. 통지 구독을 건다
               2. leaf 7의 낡은 값(5300)으로 DOM을 한 번 맞춘다
-              3. attach: 파생 구독을 걸고 한 번 호출한다 -> leaf 7에 6000을 기록하고 통지 -> DOM 6000
+              3. recountPending: show가 true이고 마스크가 남아 식을 센다 -> leaf 7에 6000을 기록하고 통지 -> DOM 6000
 ```
 
-행이 `@if` 안에 있어 두 행이 모두 꺼진 동안 새 행이 붙을 때:
+꺼진 동안 새 행이 붙으면, 새 행은 `retainByBranch`로 leaf 7의 낡은 값(5300)을 읽어 DOM을 채운다. 새 행의 가지는 부모
+가지의 간선을 물려받아 `recountPending`도 show가 false라 세지 않는다. 행이 모두 보이지 않으므로 낡은 값은 화면에
+나오지 않고, show가 true가 되어 다시 붙을 때 위 3에서 함께 고쳐진다.
 
-```
-  모두 꺼진 동안   set(0, 3000)   leaf 7은 5300 그대로
-  새 행            1. retain, leaf 7의 낡은 값(5300)으로 DOM을 채운다
-                   2. attach: 붙은 가지 0 -> 1, everAttached 참 -> 한 번 호출한다 -> leaf 7에 6000 -> DOM 6000
-```
-
-1과 2는 한 번의 동기 호출(`resizeFor`) 안에서 일어나 낡은 값이 화면에 그려지지 않는다.
-
-새 행은 처음 붙는 가지지만 인스턴스는 구독이 풀렸던 적이 있다. 그래서 따라잡을지는 가지가 아니라 인스턴스가
-정한다.
+셀지는 가지가 아니라 인스턴스의 마스크가 정한다. 새 행은 처음 붙는 가지지만, 공유한 인스턴스는 그전부터 쉬며
+비트를 모았을 수 있다.
 
 ## 6. 남은 것
 
-- **파생 구독이 다른 파생 구독을 입력으로 받는 경우**는 설계하지 않았다. 지금 파생 구독의 입력은 변수 leaf뿐이다.
-  파생 값을 컴포넌트 변수로 선언하는 문법이 생기면 계산 순서, 입력 인스턴스의 `refCount`, `level` 계산을 정해야
-  한다.
+- **식 인스턴스가 다른 식 인스턴스를 입력으로 받는 경우**는 템플릿의 삼항과 삼항을 읽는 계산 식에만 있다. 정적
+  그래프(`TModule.exprInputs`)를 따라 입력 인스턴스를 연결한다(`expr-layer.ts`의 `linkInputInstance`). 입력
+  인스턴스는 입력 식의 `level` 깊이 scope에서 공유하고, 그 값을 읽는 식 인스턴스(`outputInstances`)가 비고 든 가지 수가
+  0이 되면 반납한다. 입력 leaf가 바뀌면 `markOutputInstances`가 활성 간선(삼항의 cond와 고른 갈래, 계산 식의 입력)을
+  따라 위로 표시하고, flush의 pull은 가지가 든 인스턴스부터 세며 입력 인스턴스를 요청한다(docs/expr-graph.draft.md
+  "전파"). 발화 때 평가하는 payload/context 식은 식 인스턴스를 만들지 않고 같은 정적 그래프를 따라 한 번 센다
+  (`evaluateOnce`). 남은 것은 `@if`가 아직 고르기 노드가 아니라는 점이다. 파생 구독의 입력은 지금도 변수 leaf뿐이다.
 - **`[vm]`의 경계**: `vm.ts` 한 파일이 DOM 바인딩과 조립(식 인스턴스, 풀, store 연결)을 함께 맡는다.
 - **`scopeUid` 낭비**: `@for` 행과 `RENDER`마다 번호를 받지만 대부분의 행에는 공유하는 식이 없다.
 - **같은 깊이의 중복**: `forDepth`와 `level`이 같으면 같은 행 안에서 같은 식이 두 번 나와도 공유하지 않는다.

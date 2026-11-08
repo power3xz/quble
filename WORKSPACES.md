@@ -12,7 +12,7 @@ members: `crates/bytecode`, `crates/compiler`, `crates/compiler-wasm`, `crates/r
 | `bytecode` | 없음 |
 | `compiler` | `bytecode` |
 | `compiler-wasm` | `compiler` |
-| `renderer` | `bytecode` |
+| `renderer` | `bytecode`. 단위 테스트에만 `compiler`(dev-dependency) |
 | `quble` (루트) | `compiler` |
 
 ## JS - 루트 `package.json`

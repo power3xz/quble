@@ -11,8 +11,8 @@ use crate::flatten::{FlatComp, Sourced};
 use crate::scope::{expr_display, fixed_ref_of, lookup_field, ForVar, ScopeError, ScopeErrorKind};
 use crate::src_range::SrcRange;
 use bytecode::{
-    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, ExprOp, Field, FieldValue,
-    Module, Op, TypeEntry,
+    encode, tags, CompDef, Const, ConstPool, ContextDef, EventDef, ExprDef, ExprOp, Field,
+    FieldValue, Module, Op, TernaryOperand, TypeEntry,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,6 +54,9 @@ pub enum CodegenErrorKind {
     /// 안 그려진다. 담은 값은 그 조건이 참인지 - 참이면 `@else`가, 거짓이면 then이 죽는다.
     /// 참인데 `@else`가 없으면 죽는 가지가 없어 에러가 아니다(조건을 접고 몸체만 낸다).
     ConstantCondition(bool),
+    /// 삼항의 조건이 소스 리터럴만으로 되어 한쪽 갈래가 절대 쓰이지 않는다. 담은 값은 그 조건이
+    /// 참인지 - 참이면 거짓 갈래가, 거짓이면 참 갈래가 죽는다.
+    ConstantTernaryCondition(bool),
     /// 한 컴포넌트가 쓰는 표현식이 255개를 넘었다 - `expr_count`가 u8이라 그 위는 안 담긴다.
     TooManyExprs,
     /// 식 하나가 255바이트를 넘었다 - 표현식 테이블의 len이 u8이다.
@@ -140,6 +143,10 @@ impl std::fmt::Display for CodegenErrorKind {
                     "condition is always true: the @else branch is never rendered"
                 ),
                 false => write!(f, "condition is always false: this branch is never rendered"),
+            },
+            CodegenErrorKind::ConstantTernaryCondition(value) => match value {
+                true => write!(f, "condition is always true: the false branch is never used"),
+                false => write!(f, "condition is always false: the true branch is never used"),
             },
             CodegenErrorKind::TooManyExprs => {
                 write!(f, "a component can use at most 255 expressions")
@@ -569,7 +576,7 @@ fn arg_to_field(
     props: &[Prop],
     pool: &mut ConstPool,
     types: &mut TypeTable,
-    exprs: &mut Vec<Vec<u8>>,
+    exprs: &mut Vec<ExprDef>,
 ) -> Result<Field, CodegenError> {
     // events/contexts는 컴포넌트 최상위 선언이라 @for 몸체 밖 - 회차변수가 올 수 없다.
     let (type_ref, ref_value) = match value {
@@ -607,23 +614,22 @@ fn expr_field_value(
     props: &[Prop],
     pool: &mut ConstPool,
     types: &mut TypeTable,
-    exprs: &mut Vec<Vec<u8>>,
+    exprs: &mut Vec<ExprDef>,
 ) -> Result<(u16, FieldValue), CodegenError> {
-    // 연산자 식은 결과가 늘 원시다. 참조 경로는 객체/배열에도 도달한다.
+    // 연산자 식과 삼항은 결과가 늘 원시다. 참조 경로는 객체/배열에도 도달한다.
     let ty = match value {
-        Expr::Unary(..) | Expr::Binary(..) => expr_type(value, props, &[])?,
+        Expr::Unary(..) | Expr::Binary(..) | Expr::Ternary(..) => expr_type(value, props, &[])?,
         _ => path_type(value, props, &[])?,
     };
-    let mut bytes = Vec::new();
-    match ty {
-        Type::Bool | Type::Number | Type::String => {
-            emit_expr_postfix(value, props, &[], pool, &mut bytes)?;
-        }
+    let index = match ty {
+        Type::Bool | Type::Number | Type::String => intern_expr(value, props, &[], pool, exprs)?,
         _ => {
-            emit_ref_path(value, props, &[], pool, &mut bytes)?;
+            let mut code = Vec::new();
+            let mut inputs = Vec::new();
+            emit_ref_path(value, props, &[], pool, exprs, &mut inputs, &mut code)?;
+            intern_expr_def(exprs, ExprDef::Calc { code, inputs }, value.range().0)?
         }
-    }
-    let index = intern_expr(exprs, bytes, value.range().0)?;
+    };
     Ok((types.intern(&ty, pool), FieldValue::Expr(index)))
 }
 
@@ -744,6 +750,9 @@ fn fold_expr(expr: &Expr) -> Option<Folded> {
                 _ => unreachable!("타입 검사가 통과시킨 이항 피연산자"),
             })
         }
+
+        // 조건이 리터럴만으로 된 삼항은 방출할 때 ConstantCondition으로 막는다 - 접을 일이 없다.
+        Expr::Ternary(..) => None,
     }
 }
 
@@ -760,12 +769,17 @@ fn folded_eq(a: &Folded, b: &Folded) -> bool {
 /// 식 하나를 후위 표기 바이트로 낸다(BYTECODE.md #4 `<EXPR>`). 왼쪽 -> 오른쪽 -> 연산자 순서로
 /// 밀어서, 런타임이 앞에서 뒤로 한 번 훑으면 스택 계산이 끝난다.
 ///
+/// 식 안의 삼항은 따로 exprs에 넣고, 그 값이 들어갈 자리에 `LoadInput`을 낸다. 삼항의 번호는
+/// inputs(이 식의 입력 목록)에 더한다. 삼항을 먼저 넣으므로 그 번호는 이 식이 나중에 받을 번호보다 작다.
+///
 /// 타입은 이미 맞다고 보고 짠다 - 부르기 전에 `require_expr_type`이 검사를 마쳤다.
 fn emit_expr_postfix(
     expr: &Expr,
     props: &[Prop],
     for_vars: &[ForVar],
     pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+    inputs: &mut Vec<u8>,
     out: &mut Vec<u8>,
 ) -> Result<(), CodegenError> {
     match expr {
@@ -795,13 +809,15 @@ fn emit_expr_postfix(
         Expr::List(..) => unreachable!("배열은 식으로 평가되지 않는다"),
 
         Expr::Var(..) | Expr::Field(..) | Expr::Index(..) => {
-            if let Pushed::LeafIndex = emit_ref_path(expr, props, for_vars, pool, out)? {
+            if let Pushed::LeafIndex =
+                emit_ref_path(expr, props, for_vars, pool, exprs, inputs, out)?
+            {
                 out.push(ExprOp::ReadLeaf as u8);
             }
         }
 
         Expr::Unary(op, operand, _) => {
-            emit_expr_postfix(operand, props, for_vars, pool, out)?;
+            emit_expr_postfix(operand, props, for_vars, pool, exprs, inputs, out)?;
             out.push(match op {
                 UnaryOp::Not => ExprOp::Not as u8,
                 UnaryOp::Neg => ExprOp::Neg as u8,
@@ -809,8 +825,8 @@ fn emit_expr_postfix(
         }
 
         Expr::Binary(op, left, right, _) => {
-            emit_expr_postfix(left, props, for_vars, pool, out)?;
-            emit_expr_postfix(right, props, for_vars, pool, out)?;
+            emit_expr_postfix(left, props, for_vars, pool, exprs, inputs, out)?;
+            emit_expr_postfix(right, props, for_vars, pool, exprs, inputs, out)?;
             out.push(match op {
                 BinaryOp::Add => ExprOp::Add as u8,
                 BinaryOp::Sub => ExprOp::Sub as u8,
@@ -827,8 +843,97 @@ fn emit_expr_postfix(
                 BinaryOp::Or => ExprOp::Or as u8,
             });
         }
+
+        // 삼항은 따로 넣고, 그 값이 들어갈 자리만 표시한다 - 갈래를 고르는 일은 그래프가 한다.
+        Expr::Ternary(cond, then, else_, _) => {
+            let index = intern_ternary(cond, then, else_, props, for_vars, pool, exprs)?;
+            out.push(ExprOp::LoadInput as u8);
+            out.push(intern_input(inputs, index));
+        }
     }
     Ok(())
+}
+
+/// 식 하나를 표현식 테이블에 넣고 expr_index를 준다. 삼항이면 Ternary로, 아니면 후위 바이트와 입력
+/// 목록을 모아 Calc로 넣는다.
+fn intern_expr(
+    expr: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+) -> Result<u8, CodegenError> {
+    match expr {
+        Expr::Ternary(cond, then, else_, _) => {
+            intern_ternary(cond, then, else_, props, for_vars, pool, exprs)
+        }
+        _ => {
+            let mut code = Vec::new();
+            let mut inputs = Vec::new();
+            emit_expr_postfix(expr, props, for_vars, pool, exprs, &mut inputs, &mut code)?;
+            intern_expr_def(exprs, ExprDef::Calc { code, inputs }, expr.range().0)
+        }
+    }
+}
+
+/// 삼항 하나를 Ternary로 표현식 테이블에 넣고 expr_index를 준다. 조건이 리터럴만으로 된 식이면
+/// ConstantTernaryCondition이다.
+fn intern_ternary(
+    cond: &Expr,
+    then: &Expr,
+    else_: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+) -> Result<u8, CodegenError> {
+    if let Some(folded) = fold_expr(cond) {
+        let value = match folded {
+            Folded::Bool(b) => b,
+            _ => unreachable!("bool로 검사가 끝난 조건"),
+        };
+        return Err(CodegenErrorKind::ConstantTernaryCondition(value).at(cond.range().0));
+    }
+    let def = ExprDef::Ternary {
+        cond: build_ternary_operand(cond, props, for_vars, pool, exprs)?,
+        then: build_ternary_operand(then, props, for_vars, pool, exprs)?,
+        else_: build_ternary_operand(else_, props, for_vars, pool, exprs)?,
+    };
+    intern_expr_def(exprs, def, cond.range().0)
+}
+
+/// 삼항 피연산자 하나를 만든다. 리터럴은 Const, 슬롯 하나로 접히는 참조는 Leaf, 그 밖(연산자, 인덱스
+/// 접근, `.length`, 안쪽 삼항)은 intern_expr로 표현식 테이블에 넣고 Expr로 가리킨다.
+fn build_ternary_operand(
+    operand: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+) -> Result<TernaryOperand, CodegenError> {
+    if let Expr::Lit(lit, _) = operand {
+        return Ok(TernaryOperand::Const(pool.intern(lit_to_const(&lit.value))));
+    }
+    if let Expr::Var(..) | Expr::Field(..) = operand {
+        if let Some((scope_index, offset, _)) = fixed_ref_of(operand, props, for_vars)? {
+            return Ok(TernaryOperand::Leaf(scope_index, offset));
+        }
+    }
+    Ok(TernaryOperand::Expr(intern_expr(
+        operand, props, for_vars, pool, exprs,
+    )?))
+}
+
+/// 입력 목록에 expr_index를 넣고 그 위치를 준다. 이미 있으면 그 위치를 준다 - 같은 식을 두 번 읽으면
+/// 같은 위치다. 이 위치가 `LoadInput`의 operand다.
+fn intern_input(inputs: &mut Vec<u8>, expr_index: u8) -> u8 {
+    match inputs.iter().position(|&input| input == expr_index) {
+        Some(position) => position as u8,
+        None => {
+            inputs.push(expr_index);
+            (inputs.len() - 1) as u8
+        }
+    }
 }
 
 /// `emit_ref_path`가 스택에 올린 것. 인덱스 접근을 거치면 leafIndex라 값으로 쓰려면 ReadLeaf가 붙는다.
@@ -848,6 +953,8 @@ fn emit_ref_path(
     props: &[Prop],
     for_vars: &[ForVar],
     pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+    inputs: &mut Vec<u8>,
     out: &mut Vec<u8>,
 ) -> Result<Pushed, CodegenError> {
     // 슬롯 하나로 접히면 경로를 안 걷는다 - 필드 거리가 이미 offset에 누적돼 있다.
@@ -859,8 +966,8 @@ fn emit_ref_path(
     }
     match expr {
         Expr::Index(arr, index, _) => {
-            emit_expr_postfix(arr, props, for_vars, pool, out)?;
-            emit_expr_postfix(index, props, for_vars, pool, out)?;
+            emit_expr_postfix(arr, props, for_vars, pool, exprs, inputs, out)?;
+            emit_expr_postfix(index, props, for_vars, pool, exprs, inputs, out)?;
             out.push(ExprOp::ElemAt as u8);
             Ok(Pushed::LeafIndex)
         }
@@ -869,7 +976,7 @@ fn emit_ref_path(
             match lookup_field(&owner_ty, field, owner, expr) {
                 // 실제 필드가 먼저다 - 왼쪽이 낸 leafIndex에 거리를 더한다.
                 Ok((_, offset)) => {
-                    emit_ref_path(owner, props, for_vars, pool, out)?;
+                    emit_ref_path(owner, props, for_vars, pool, exprs, inputs, out)?;
                     out.push(ExprOp::FieldAt as u8);
                     out.push(offset);
                     Ok(Pushed::LeafIndex)
@@ -902,14 +1009,21 @@ fn is_small_int(n: f64) -> bool {
     n.fract() == 0.0 && (0.0..=255.0).contains(&n)
 }
 
-/// 식 바이트를 이 컴포넌트의 표현식 테이블에 넣고 `expr_index`를 준다. 같은 바이트면 이미 있는
-/// 것을 함께 쓴다 - 중복 제거 기준이 방출된 바이트다(DECISIONS.md "표현식 테이블 - 컴포넌트
-/// 소유 + 후위 표기 채택").
-fn intern_expr(exprs: &mut Vec<Vec<u8>>, bytes: Vec<u8>, at: SrcRange) -> Result<u8, CodegenError> {
-    if bytes.len() > u8::MAX as usize {
-        return Err(CodegenErrorKind::ExprTooLong.at(at));
+/// 만든 식을 이 컴포넌트의 표현식 테이블에 넣고 `expr_index`를 준다. 같은 식이면 이미 있는 것을
+/// 함께 쓴다 - 중복 제거 기준은 ExprDef 전체다. code가 같아도 입력이 다르면 다른 식이다
+/// (`base - (ok ? a : 0)`와 `base - (big ? b : 1)`). DECISIONS.md "표현식 테이블 - 컴포넌트 소유 +
+/// 후위 표기 채택".
+fn intern_expr_def(
+    exprs: &mut Vec<ExprDef>,
+    def: ExprDef,
+    at: SrcRange,
+) -> Result<u8, CodegenError> {
+    if let ExprDef::Calc { code, .. } = &def {
+        if code.len() > u8::MAX as usize {
+            return Err(CodegenErrorKind::ExprTooLong.at(at));
+        }
     }
-    if let Some(index) = exprs.iter().position(|expr| *expr == bytes) {
+    if let Some(index) = exprs.iter().position(|expr| *expr == def) {
         return Ok(index as u8);
     }
     // `expr_count`가 u8이라 테이블에 담기는 것이 255개까지다. `expr_index`는 255를 표현할 수
@@ -917,7 +1031,7 @@ fn intern_expr(exprs: &mut Vec<Vec<u8>>, bytes: Vec<u8>, at: SrcRange) -> Result
     if exprs.len() >= u8::MAX as usize {
         return Err(CodegenErrorKind::TooManyExprs.at(at));
     }
-    exprs.push(bytes);
+    exprs.push(def);
     Ok((exprs.len() - 1) as u8)
 }
 
@@ -935,8 +1049,12 @@ fn emit_node(
     next_slot_placeholder_index: &mut u16,
     // 이 컴포넌트의 표현식 테이블. 연산자가 붙은 조건과 값이 여기 쌓이고 `IF_EXPR`/`TEXT_EXPR`
     // 등이 번호로 가리킨다.
-    exprs: &mut Vec<Vec<u8>>,
-) -> Result<(), CodegenError> {
+    exprs: &mut Vec<ExprDef>,
+) -> Result<bool, CodegenError> {
+    // 이 노드를 그리면 지금 가지에 식 인스턴스가 실리는가 - 식 인스턴스를 만드는 opcode(TEXT_EXPR, ATTR_*_EXPR,
+    // IF_EXPR, FOR_COUNT_EXPR, RENDER)를 냈으면 true다. 조건이 leaf 하나인 @if와 숫자 prop @for가 이 값으로
+    // 조건을 식으로 낼지 정한다 - 본문에 식 인스턴스가 있으면 조건 식 인스턴스가 그 간선의 시작점이 된다.
+    let mut creates_expr_instance = false;
     match node {
         Node::Text(s) => {
             let index = pool.intern_str(s);
@@ -959,11 +1077,10 @@ fn emit_node(
                     code.push(offset);
                 }
                 None => {
-                    let mut bytes = Vec::new();
-                    emit_expr_postfix(expr, props, for_scope.for_vars, pool, &mut bytes)?;
-                    let index = intern_expr(exprs, bytes, expr.range().0)?;
+                    let index = intern_expr(expr, props, for_scope.for_vars, pool, exprs)?;
                     code.push(Op::TextExpr as u8);
                     code.push(index);
+                    creates_expr_instance = true;
                 }
             }
         }
@@ -1064,9 +1181,7 @@ fn emit_node(
                     }
                     // 연산자가 붙은 식만 표현식 테이블을 거친다(@if/보간과 같다).
                     None => {
-                        let mut bytes = Vec::new();
-                        emit_expr_postfix(value, props, for_scope.for_vars, pool, &mut bytes)?;
-                        let index = intern_expr(exprs, bytes, value.range().0)?;
+                        let index = intern_expr(value, props, for_scope.for_vars, pool, exprs)?;
                         let (op, name_operand) = match bytecode::attrs::attr_id(name) {
                             Some(global_id) => (Op::AttrGExpr, global_id),
                             None => (Op::AttrLExpr, pool.intern_str(name)),
@@ -1074,6 +1189,7 @@ fn emit_node(
                         code.push(op as u8);
                         code.extend_from_slice(&name_operand.to_le_bytes());
                         code.push(index);
+                        creates_expr_instance = true;
                     }
                 }
             }
@@ -1083,7 +1199,7 @@ fn emit_node(
             // element는 세그먼트를 안 만든다 - 자식으로 for_scope를 그대로 흘려보낸다
             // (같은 @for 안 중첩 element가 같은 인덱스를 이벤트에 실을 수 있게 pending 유지).
             for child in children {
-                emit_node(
+                creates_expr_instance |= emit_node(
                     child,
                     props,
                     events,
@@ -1273,6 +1389,10 @@ fn emit_node(
             // RENDER는 자식 def(별도 코드)로 넘어간다 - for_scope는 안 흐른다(자식은 자기 ROOT부터).
             code.push(Op::Render as u8);
             code.extend_from_slice(&child_id.to_le_bytes());
+            // 자식 템플릿은 지금 가지 안에서 해석되므로 그 식 인스턴스도 지금 가지에 실린다. 자식 템플릿은 보지 않고
+            // 식 인스턴스가 실린다고 본다 - 자식에 식이 없으면 쓰지 않는 조건 식 인스턴스가 하나 생긴다. 나중에 자식
+            // 템플릿과 슬롯 콘텐츠까지 따라가 판정하도록 고친다(컴포넌트끼리 서로 부르는 순환도 끝나야 한다).
+            creates_expr_instance = true;
         }
         Node::SlotPlaceholderDef { .. } => {
             // 등장 순서가 곧 인덱스 - collect_slot_placeholders와 같은 순회라 사용쪽과 맞는다.
@@ -1296,7 +1416,7 @@ fn emit_node(
                     return Err(CodegenErrorKind::ConstantCondition(value).at(cond.range().0));
                 }
                 for node in then {
-                    emit_node(
+                    creates_expr_instance |= emit_node(
                         node,
                         props,
                         events,
@@ -1309,28 +1429,25 @@ fn emit_node(
                         exprs,
                     )?;
                 }
-                return Ok(());
+                return Ok(creates_expr_instance);
             }
 
-            // 잎 하나짜리 식은 슬롯을 그대로 조건으로 쓴다 - (scope_index, offset)으로.
-            // 연산자가 붙은 식만 표현식 테이블을 거친다 - 잎 하나에 테이블을 쓸 이유가 없다.
-            match fixed_ref_of(cond, props, for_scope.for_vars)? {
-                Some((scope_index, offset, _)) => {
-                    code.push(Op::If as u8);
-                    code.push(scope_index);
-                    code.push(offset);
-                }
-                None => {
-                    let mut bytes = Vec::new();
-                    emit_expr_postfix(cond, props, for_scope.for_vars, pool, &mut bytes)?;
-                    let index = intern_expr(exprs, bytes, cond.range().0)?;
-                    code.push(Op::IfExpr as u8);
-                    code.push(index);
-                }
+            // 연산자가 붙은 조건은 표현식 테이블을 거친다. 잎 하나짜리 조건은 본문을 그리면 식 인스턴스가 실릴
+            // 때만 테이블을 거치고(그 조건 식 인스턴스가 본문 식 인스턴스로 가는 간선의 시작점이다), 아니면 슬롯을
+            // 그대로 조건으로 쓴다 - (scope_index, offset)으로. 그래서 잎 하나짜리 조건은 본문을 먼저 낸 뒤에 고른다.
+            // 바이트코드에 점프가 없어 조건 opcode를 본문 뒤에 정해도 고칠 곳이 없다.
+            let leaf = fixed_ref_of(cond, props, for_scope.for_vars)?;
+            if leaf.is_none() {
+                let index = intern_expr(cond, props, for_scope.for_vars, pool, exprs)?;
+                code.push(Op::IfExpr as u8);
+                code.push(index);
+                creates_expr_instance = true;
             }
 
+            let mut body = Vec::new();
+            let mut body_creates_expr_instance = false;
             for node in then {
-                emit_node(
+                body_creates_expr_instance |= emit_node(
                     node,
                     props,
                     events,
@@ -1338,16 +1455,16 @@ fn emit_node(
                     comp_lookup,
                     for_scope,
                     pool,
-                    code,
+                    &mut body,
                     next_slot_placeholder_index,
                     exprs,
                 )?;
             }
 
             if !else_.is_empty() {
-                code.push(Op::Else as u8);
+                body.push(Op::Else as u8);
                 for node in else_ {
-                    emit_node(
+                    body_creates_expr_instance |= emit_node(
                         node,
                         props,
                         events,
@@ -1355,14 +1472,27 @@ fn emit_node(
                         comp_lookup,
                         for_scope,
                         pool,
-                        code,
+                        &mut body,
                         next_slot_placeholder_index,
                         exprs,
                     )?;
                 }
             }
 
+            if let Some((scope_index, offset, _)) = leaf {
+                if body_creates_expr_instance {
+                    let index = intern_expr(cond, props, for_scope.for_vars, pool, exprs)?;
+                    code.push(Op::IfExpr as u8);
+                    code.push(index);
+                } else {
+                    code.push(Op::If as u8);
+                    code.push(scope_index);
+                    code.push(offset);
+                }
+            }
+            code.extend_from_slice(&body);
             code.push(Op::IfEnd as u8);
+            creates_expr_instance |= body_creates_expr_instance;
         }
         Node::For {
             item,
@@ -1395,6 +1525,9 @@ fn emit_node(
             // loopIndexStack 깊이)으로 계산하므로 operand엔 안 싣는다. item 타입은 count 출처로 가른다:
             // 리터럴/숫자 count면 회차값(Number), 배열이면 요소 타입(inner). index는 항상 Number.
             let base = (props.len() + for_scope.for_vars.len()) as u16;
+            // 숫자 prop count는 여는 opcode를 본문을 낸 뒤에 고른다(@if의 잎 하나짜리 조건과 같다). 본문을 그리면 식
+            // 인스턴스가 실리면 FOR_COUNT_EXPR, 아니면 FOR_COUNT_VAR다.
+            let mut count_var = None;
             let item_type = match count {
                 ForCount::Literal(n) => {
                     code.push(Op::ForRaw as u8);
@@ -1413,9 +1546,7 @@ fn emit_node(
                     };
                     match ty {
                         Type::Number => {
-                            code.push(Op::ForCountVar as u8);
-                            code.push(scope_index);
-                            code.push(offset);
+                            count_var = Some((var, scope_index, offset));
                             Type::Number
                         }
                         Type::Array(inner) => {
@@ -1454,8 +1585,10 @@ fn emit_node(
                 depth_base: for_scope.depth_base + 1,
                 for_vars: &nested_vars,
             };
+            let mut body_code = Vec::new();
+            let mut body_creates_expr_instance = false;
             for node in body {
-                emit_node(
+                body_creates_expr_instance |= emit_node(
                     node,
                     props,
                     events,
@@ -1463,13 +1596,27 @@ fn emit_node(
                     comp_lookup,
                     body_scope,
                     pool,
-                    code,
+                    &mut body_code,
                     next_slot_placeholder_index,
                     exprs,
                 )?;
             }
 
+            if let Some((var, scope_index, offset)) = count_var {
+                if body_creates_expr_instance {
+                    let index = intern_expr(var, props, for_scope.for_vars, pool, exprs)?;
+                    code.push(Op::ForCountExpr as u8);
+                    code.push(index);
+                } else {
+                    code.push(Op::ForCountVar as u8);
+                    code.push(scope_index);
+                    code.push(offset);
+                }
+            }
+            code.extend_from_slice(&body_code);
             code.push(Op::ForEnd as u8);
+            // 리터럴과 배열 @for의 행은 지금 가지의 간선을 물려받으므로 행의 식 인스턴스도 지금 가지에 실린 것으로 본다.
+            creates_expr_instance |= body_creates_expr_instance;
         }
         Node::With { context, children } => {
             // context_index는 이 컴포넌트 contexts에서 이름으로 찾는다(선언 순서 = index,
@@ -1484,7 +1631,7 @@ fn emit_node(
             code.extend_from_slice(&context_index.to_le_bytes());
 
             for node in children {
-                emit_node(
+                creates_expr_instance |= emit_node(
                     node,
                     props,
                     events,
@@ -1502,5 +1649,5 @@ fn emit_node(
             code.push(Op::ExitContext as u8);
         }
     }
-    Ok(())
+    Ok(creates_expr_instance)
 }

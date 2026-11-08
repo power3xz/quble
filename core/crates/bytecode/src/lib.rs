@@ -9,7 +9,9 @@ mod pool;
 mod serialize;
 pub mod tags;
 
-pub use module::{CompDef, ContextDef, EventDef, Field, FieldValue, Module, TypeEntry};
+pub use module::{
+    CompDef, ContextDef, EventDef, ExprDef, Field, FieldValue, Module, TernaryOperand, TypeEntry,
+};
 pub use opcode::{ExprOp, Op};
 pub use pool::{Const, ConstPool};
 pub use serialize::{decode, encode, DecodeError};
@@ -148,29 +150,8 @@ mod tests {
         assert_eq!(back.types, types);
     }
 
-    /// 표현식 테이블이 왕복하는지. 길이가 다른 식 둘을 담아 (len, code) 짝이 어긋나지 않는지까지 본다.
-    #[test]
-    fn roundtrip_exprs() {
-        // `count > 0` - scope 0번 슬롯 offset 0의 값과 작은 정수 0을 올려 비교.
-        let gt = vec![
-            ExprOp::LoadVar as u8,
-            0,
-            0,
-            ExprOp::LoadSmallInt as u8,
-            0,
-            ExprOp::Gt as u8,
-        ];
-        // `!isPaid && isReady` - 길이가 다른 식을 하나 더 둔다.
-        let and = vec![
-            ExprOp::LoadVar as u8,
-            0,
-            1,
-            ExprOp::Not as u8,
-            ExprOp::LoadVar as u8,
-            0,
-            2,
-            ExprOp::And as u8,
-        ];
+    /// 식 테이블 하나를 가진 컴포넌트 하나짜리 모듈.
+    fn module_with_exprs(exprs: Vec<ExprDef>) -> Module {
         let defs = vec![CompDef {
             name_const_index: 0,
             props_type_ref: 0,
@@ -178,11 +159,105 @@ mod tests {
             code_len: 0,
             events: vec![],
             contexts: vec![],
-            exprs: vec![gt.clone(), and.clone()],
+            exprs,
         }];
-        let m = Module::new(ConstPool::new(), vec![], defs, vec![]);
-        let back = decode(&encode(&m)).unwrap();
-        assert_eq!(back.def(0).unwrap().exprs, vec![gt, and]);
+        Module::new(ConstPool::new(), vec![], defs, vec![])
+    }
+
+    // props { ok: bool, price: number, base: number }의 슬롯 0, 1, 2.
+    //   #0 = price > 0                 입력 없는 계산 식
+    //   #1 = ok ? price : 0            삼항 (상수 0은 상수풀 2번이라고 둔다)
+    //   #2 = base - #1                 #1을 입력으로 받는 계산 식
+    fn calc_ternary_calc() -> Vec<ExprDef> {
+        vec![
+            ExprDef::Calc {
+                code: vec![
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::LoadSmallInt as u8,
+                    0,
+                    ExprOp::Gt as u8,
+                ],
+                inputs: vec![],
+            },
+            ExprDef::Ternary {
+                cond: TernaryOperand::Leaf(0, 0),
+                then: TernaryOperand::Leaf(1, 0),
+                else_: TernaryOperand::Const(2),
+            },
+            ExprDef::Calc {
+                code: vec![
+                    ExprOp::LoadVar as u8,
+                    2,
+                    0,
+                    ExprOp::LoadInput as u8,
+                    0,
+                    ExprOp::Sub as u8,
+                ],
+                inputs: vec![1],
+            },
+        ]
+    }
+
+    /// 계산 식, 삼항, 입력이 있는 계산 식이 왕복하는지.
+    #[test]
+    fn roundtrip_exprs() {
+        let m = module_with_exprs(calc_ternary_calc());
+        assert_eq!(decode(&encode(&m)).unwrap(), m);
+    }
+
+    /// 삼항의 세 피연산자 종류(Leaf, Const, Expr)가 왕복하는지.
+    #[test]
+    fn roundtrip_ternary_operands() {
+        let m = module_with_exprs(vec![
+            ExprDef::Calc {
+                code: vec![ExprOp::LoadVar as u8, 0, 0],
+                inputs: vec![],
+            },
+            ExprDef::Ternary {
+                cond: TernaryOperand::Leaf(1, 2),
+                then: TernaryOperand::Expr(0),
+                else_: TernaryOperand::Const(300),
+            },
+        ]);
+        assert_eq!(decode(&encode(&m)).unwrap(), m);
+    }
+
+    /// 표현식 테이블에는 삼항이 len 0으로, 그래프 섹션에는 삼항과 입력이 있는 계산 식만 실린다.
+    #[test]
+    fn expr_inputs_lists_only_ternaries_and_calcs_with_inputs() {
+        let bytes = encode(&module_with_exprs(calc_ternary_calc()));
+        #[rustfmt::skip]
+        let expected_tail = [
+            // exprs: expr_count 3
+            3,
+            6, ExprOp::LoadVar as u8, 1, 0, ExprOp::LoadSmallInt as u8, 0, ExprOp::Gt as u8, // #0
+            0,                                                                               // #1 삼항
+            6, ExprOp::LoadVar as u8, 2, 0, ExprOp::LoadInput as u8, 0, ExprOp::Sub as u8,   // #2
+            // expr_inputs: entry_count 2 - #0은 입력이 없어 싣지 않는다
+            2,
+            1, 255, 0, 0, 0, 0, 1, 0, 1, 2, 0, // #1: TERNARY, Scope(0, 0), Scope(1, 0), Const(2)
+            2, 1, 1,                           // #2: 입력 1개, #1
+            // 코드 길이 u32 0
+            0, 0, 0, 0,
+        ];
+        assert!(
+            bytes.ends_with(&expected_tail),
+            "끝 바이트: {:?}",
+            &bytes[bytes.len() - expected_tail.len()..]
+        );
+    }
+
+    /// 삼항 피연산자에 Raw(tag 2)나 알 수 없는 태그가 오면 BadRefTag로 거부한다.
+    #[test]
+    fn decode_rejects_raw_ternary_operand() {
+        let mut bytes = encode(&module_with_exprs(calc_ternary_calc()));
+        // 끝에서 코드 길이(4), #2 항목(3), 삼항 피연산자 셋(9)을 거슬러 cond의 태그에 닿는다.
+        let cond_tag = bytes.len() - 4 - 3 - 9;
+        assert_eq!(bytes[cond_tag], 0, "cond의 Scope 태그여야 한다");
+        bytes[cond_tag] = 2;
+        assert_eq!(decode(&bytes), Err(DecodeError::BadRefTag(2)));
     }
 
     /// 필드 ref 네 종류가 왕복하는지. 이벤트와 컨텍스트가 같은 인코딩이라 둘 다 싣는다.
@@ -254,6 +329,7 @@ mod tests {
         assert_eq!(Op::from_u8(0x0e), Some(Op::IfEnd));
         assert_eq!(Op::from_u8(0x0f), Some(Op::LoadRes));
         assert_eq!(Op::from_u8(0x1e), Some(Op::IfExpr));
+        assert_eq!(Op::from_u8(0x22), Some(Op::ForCountExpr));
         assert_eq!(Op::from_u8(0xff), None);
     }
 
@@ -264,6 +340,8 @@ mod tests {
         assert_eq!(ExprOp::from_u8(0x06), Some(ExprOp::LoadFalse));
         assert_eq!(ExprOp::from_u8(0x19), Some(ExprOp::Gt));
         assert_eq!(ExprOp::from_u8(0x1e), Some(ExprOp::Neg));
+        assert_eq!(ExprOp::from_u8(0x22), Some(ExprOp::LoadInput));
+        assert_eq!(ExprOp::from_u8(0x23), None);
         // 잎 태그와 연산자 태그 사이는 비어 있다 - 연산자를 늘릴 자리로 남겨 둔다.
         assert_eq!(ExprOp::from_u8(0x07), None);
         assert_eq!(ExprOp::from_u8(0xff), None);

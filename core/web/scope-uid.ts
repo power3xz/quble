@@ -1,24 +1,22 @@
-// 스코프 인스턴스(컴포넌트 RENDER 한 번, @for 행 하나)를 구별하는 번호 발급. 단조 증가하고 반납하지 않는다.
-// 번호가 Smi 범위를 넘으면 공유 맵 조회가 느려지므로, 한도를 처음 넘을 때 경고를 한 번 찍는다.
+// scope(컴포넌트 RENDER 한 번, @for 회차 하나)를 구별하는 scopeUid. vm이 TScopeParentPool로 할당하고 반납한다.
+// 칸에 부모 scope의 scopeUid를 두어, 그리기가 끝나 scope 스택이 없어진 뒤에도 부모를 따라 조상 scope를 찾는다.
+//
+// 자식 scope는 부모 scope를 연 가지 아래 region에서만 생기고, freeBranchTree(region.ts)가 자식 region을 먼저
+// 반납한다. 그래서 부모 scopeUid를 반납할 때 그 scopeUid를 부모로 가진 scope는 이미 모두 반납되어 있다.
 
-// V8이 작은 정수를 힙 할당 없이 담는 범위의 보수적인 상한(포인터 압축을 켠 Chrome 기준).
-export const SCOPE_UID_WARN_LIMIT = 2 ** 30;
+import type { Pool } from "./pool-allocator.ts";
 
-export class ScopeUidCounter {
-  private warnLimit: number;
-  private issuedCount = 0;
-  private hasWarned = false;
+// 칸 번호가 scopeUid이고 칸 값이 그 scope의 부모 scopeUid인 Pool.
+export type TScopeParentPool = Pool<number>;
 
-  constructor(warnLimit: number = SCOPE_UID_WARN_LIMIT) {
-    this.warnLimit = warnLimit;
+// 따라 올라갈 부모가 없는 scope(컴포넌트 RENDER)의 칸에 둔다.
+export const NO_PARENT_SCOPE_UID = -1;
+
+// scopeUid에서 부모를 steps번 따라 올라간 scope의 scopeUid.
+export const ancestorScopeUid = (scopeParentPool: TScopeParentPool, scopeUid: number, steps: number): number => {
+  let ancestor = scopeUid;
+  for (let step = 0; step < steps; step++) {
+    ancestor = scopeParentPool.entries[ancestor];
   }
-
-  next = (): number => {
-    const scopeUid = this.issuedCount++;
-    if (scopeUid >= this.warnLimit && !this.hasWarned) {
-      this.hasWarned = true;
-      console.warn(`quble: scopeUid가 ${this.warnLimit}을 넘었습니다. 식 공유 조회가 조금 느려질 수 있습니다.`);
-    }
-    return scopeUid;
-  };
-}
+  return ancestor;
+};

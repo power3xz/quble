@@ -1,0 +1,32 @@
+component FlushLeavingBody {
+  props {
+    i: number,
+    n: number,
+    ok: bool,
+    c: bool,
+    x: number,
+    rows: number[]
+  }
+  events { SHRINK({ rows }) }
+  template {
+    div() {
+      button(class="shrink" @click:SHRINK) { "-" }
+      p(class="root-x") { ${x + 1} }
+      @if (i < n) {
+        p(class="if-expr") { ${rows[i]} }
+        @for (r of rows) {
+          span(class="in-array") { ${rows[i] + r} }
+        }
+      }
+      @if (ok) {
+        p(class="if-leaf") { ${rows[i] + 0} }
+      }
+      @for (k of n) {
+        p(class="row") { ${rows[k]} }
+      }
+      @if (c) {
+        p(class="if-x") { ${x + 1} }
+      }
+    }
+  }
+}

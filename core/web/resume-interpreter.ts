@@ -21,6 +21,7 @@ import {
   OP_EXIT_CONTEXT,
   OP_FILL_SLOT_PLACEHOLDER,
   OP_FOR_ARRAY_VAR,
+  OP_FOR_COUNT_EXPR,
   OP_FOR_COUNT_VAR,
   OP_FOR_RAW,
   OP_HALT,
@@ -39,7 +40,9 @@ import {
   OP_TEXT_VAR,
   operandLen,
 } from "./opcodes.ts";
+import { NO_EDGE_START } from "./region.ts";
 import { CONST, RAW, STORE, scopeWithIteration, slotKind, slotRef, type TScope } from "./scope.ts";
+import { NO_PARENT_SCOPE_UID } from "./scope-uid.ts";
 import { staticElementEnds } from "./static-spans.ts";
 import { nodesOf, snapshotStacks, type TSlotPlaceholderContent, type TWalkStacks, type VM } from "./vm.ts";
 
@@ -387,7 +390,7 @@ export class ResumeInterpreter {
           const childPrefix = pathPrefix ? `${pathPrefix}.${segment}` : segment;
           segment = null;
           const childDef = vm.module.defs[childCompId];
-          walkStacks.scopeUidStack.push(vm.nextScopeUid());
+          walkStacks.scopeUidStack.push(vm.allocScopeUid(NO_PARENT_SCOPE_UID, startBranchIndex));
           const childTops = this.interpret(
             vm,
             childArgumentSourcePairs,
@@ -478,6 +481,7 @@ export class ResumeInterpreter {
             this.reactiveCountFor(
               vm,
               ref + offset,
+              NO_EDGE_START, // FOR_COUNT_VAR는 본문에 식 인스턴스가 없다(BYTECODE.md #5.2)
               bodyStart,
               forEndPc,
               topsIfTop(),
@@ -489,6 +493,35 @@ export class ResumeInterpreter {
               walkStacks,
             );
           }
+          pc = forEndPc + 1;
+          break;
+        }
+        case OP_FOR_COUNT_EXPR: {
+          // 횟수를 식으로 얻는다. IF_EXPR처럼 식 인스턴스를 부모 가지에 싣고 그 결과 leaf를 횟수 leaf로 구독한다.
+          const localExprIndex = u8at();
+          const bodyStart = pc;
+          const forEndPc = vm.cachedForEnd(bodyStart);
+          const { exprInstanceIndex, value } = vm.addExprInstance(
+            vm.globalExprIndexOf(compId, localExprIndex),
+            argumentSourcePairs,
+            startBranchIndex,
+            walkStacks,
+            loopIndexBase,
+          );
+          this.reactiveCountFor(
+            vm,
+            vm.allocResultLeaf(exprInstanceIndex, value),
+            exprInstanceIndex,
+            bodyStart,
+            forEndPc,
+            topsIfTop(),
+            startBranchIndex,
+            argumentSourcePairs,
+            compId,
+            pathPrefix,
+            loopIndexBase,
+            walkStacks,
+          );
           pc = forEndPc + 1;
           break;
         }
@@ -558,9 +591,11 @@ export class ResumeInterpreter {
   };
 
   // 숫자 count 반응 @for. region과 처음 회차는 SSR 노드에 연결하고, count가 늘 때의 회차는 VM이 노드를 만든다.
+  // edgeStartNode는 runtime-interpreter.ts reactiveCountFor와 같다.
   reactiveCountFor = (
     vm: VM,
     countLeafIndex: number,
+    edgeStartNode: number,
     bodyStart: number,
     forEndPc: number,
     tops: ChildNode[] | null,
@@ -579,7 +614,7 @@ export class ResumeInterpreter {
 
     // 처음 회차는 SSR 노드에서 연결한다.
     const resumeIteration = (i: number) => {
-      const newBranchIndex = vm.appendIteration(forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex, edgeStartNode, i);
       vm.branchAt(newBranchIndex).nodes = vm.buildIteration(
         RAW,
         i,
@@ -593,9 +628,9 @@ export class ResumeInterpreter {
         stacks,
       ) as ChildNode[]; // 이 해석기는 늘 배열을 낸다
     };
-    // count가 늘 때의 회차는 노드를 새로 짓는다.
+    // count가 늘 때의 회차는 노드를 새로 만든다.
     const growIteration = (i: number) => {
-      const newBranchIndex = vm.appendIteration(forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex, edgeStartNode, i);
       vm.branchAt(newBranchIndex).nodes = nodesOf(
         vm.buildIteration(
           RAW,
@@ -647,8 +682,10 @@ export class ResumeInterpreter {
 
     const stacks = snapshotStacks(walkStacks);
 
+    // 배열 @for의 행은 부모 가지의 간선을 물려받는다(runtime-interpreter.ts reactiveArrayFor와 같다).
+    const { edgeStartNode, edgeLabel } = vm.branchAt(branchIndex);
     const resumeIteration = (i: number) => {
-      const newBranchIndex = vm.appendIteration(forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex, edgeStartNode, edgeLabel);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchAt(newBranchIndex).nodes = vm.buildIteration(
         STORE,
@@ -664,7 +701,7 @@ export class ResumeInterpreter {
       ) as ChildNode[]; // 이 해석기는 늘 배열을 낸다
     };
     const growIteration = (i: number) => {
-      const newBranchIndex = vm.appendIteration(forRegionIndex);
+      const newBranchIndex = vm.appendIteration(forRegionIndex, edgeStartNode, edgeLabel);
       const indexLeaf = info.indexLeafIndices[i];
       vm.branchAt(newBranchIndex).nodes = nodesOf(
         vm.buildIteration(
@@ -713,6 +750,7 @@ export class ResumeInterpreter {
       vm,
       pc,
       condLeafIndex,
+      NO_EDGE_START, // IF는 본문에 식 인스턴스가 없다(BYTECODE.md #5.2) - 간선을 걸 대상이 없다
       condIsConst ? vm.module.constpool[condRef] : vm.store.get(condLeafIndex),
       argumentSourcePairs,
       compId,
@@ -742,13 +780,15 @@ export class ResumeInterpreter {
       globalExprIndex,
       argumentSourcePairs,
       branchIndex,
-      vm.sharedScopeUidOf(compId, localExprIndex, walkStacks, loopIndexBase),
+      walkStacks,
+      loopIndexBase,
     );
     const condLeafIndex = vm.allocResultLeaf(exprInstanceIndex, value);
     return this.buildIfRegion(
       vm,
       pc,
       condLeafIndex,
+      exprInstanceIndex,
       vm.store.get(condLeafIndex),
       argumentSourcePairs,
       compId,
@@ -767,6 +807,7 @@ export class ResumeInterpreter {
     vm: VM,
     pc: number,
     condLeafIndex: number,
+    edgeStartNode: number,
     condInitial: unknown,
     argumentSourcePairs: TScope,
     compId: number,
@@ -781,6 +822,7 @@ export class ResumeInterpreter {
     return vm.openIfRegion(
       pc,
       condLeafIndex,
+      edgeStartNode,
       condInitial,
       argumentSourcePairs,
       compId,

@@ -1,0 +1,11 @@
+component TernaryShared {
+  props { ok: bool, price: number, base: number }
+  events { APPLY({}) }
+  template {
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      span(class="a") { ${base - (ok ? price : 0)} }
+      span(class="b") { ${(ok ? price : 0) * (ok ? price : 0)} }
+    }
+  }
+}

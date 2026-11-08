@@ -1,4 +1,5 @@
 {
+  "for_nested_scope": [{ "n": 2, "m": 3 }],
   "expr_level": [
     {
       "a": 2,
@@ -651,6 +652,10 @@
     }
   ],
   "for_expr_free": [{ "nums": [1, 2, 3] }, { "nums": [] }],
+  "flush_leaving_body": [
+    { "i": 2, "n": 3, "ok": false, "c": false, "x": 1, "rows": [10, 20, 30] },
+    { "i": 0, "n": 3, "ok": true, "c": true, "x": 1, "rows": [10, 20, 30] }
+  ],
   "if_text_expr": [{ "cond": true, "a": 1 }, { "cond": false, "a": 1 }],
   "for_array_edit": [
     {
@@ -1248,6 +1253,13 @@
       ]
     }
   ],
+  "payload_ternary": [
+    {
+      "n": 5,
+      "open": true
+    }
+  ],
+  "payload_ternary_lazy": [{ "open": false, "cursor": 5, "rows": [{ "x": 1 }] }],
   "props_beyond_payload": [
     {
       "label": "제목",
@@ -1381,6 +1393,27 @@
       "k": 10
     }
   ],
+  "ternary_attr": [{ "ok": true, "label": "on" }, { "ok": false, "label": "on" }],
+  "ternary_if_cond": [{ "ok": true, "a": 1, "b": 0 }, { "ok": false, "a": 1, "b": 0 }],
+  "ternary_in_if": [{ "show": true, "ok": true, "price": 5 }, { "show": false, "ok": true, "price": 5 }],
+  "ternary_nested": [
+    { "a": true, "b": true, "cursor": 0, "rows": [{ "x": 3 }] },
+    { "a": false, "b": true, "cursor": 5, "rows": [{ "x": 3 }] }
+  ],
+  "ternary_index_input": [
+    { "ok": true, "cursor": 0, "rows": [{ "x": 1 }, { "x": 2 }] },
+    { "ok": false, "cursor": 1, "rows": [{ "x": 1 }, { "x": 2 }] }
+  ],
+  "ternary_in_for": [
+    { "ok": true, "price": 5, "rows": [{ "x": 1 }, { "x": 2 }] },
+    { "ok": false, "price": 5, "rows": [{ "x": 1 }, { "x": 2 }] }
+  ],
+  "ternary_lazy": [
+    { "ok": false, "cursor": 5, "rows": [{ "x": 1 }] },
+    { "ok": true, "cursor": 0, "rows": [{ "x": 1 }] }
+  ],
+  "ternary_shared": [{ "ok": true, "price": 5, "base": 9 }, { "ok": false, "price": 5, "base": 9 }],
+  "ternary_value": [{ "ok": true, "price": 5 }, { "ok": false, "price": 5 }],
   "triple_if": [
     {
       "c1": true,

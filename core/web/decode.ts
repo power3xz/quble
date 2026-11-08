@@ -14,11 +14,17 @@ const TYPE_ARRAY = 2;
 
 export type TField = [number, number];
 export type TType = { tag: "scalar" } | { tag: "object"; fields: TField[] } | { tag: "array"; elemTypeRef: number };
-export type TRef = { kind: number; ref: number; offset: number };
+export type TRef = { tag: number; ref: number; offset: number };
 export type TFieldEntry = { nameConstIndex: number; typeRef: number; ref: TRef };
 export type TEventEntry = { nameConstIndex: number; fields: TFieldEntry[] };
 // 조립 step 하나 - [STEP_*, key, elemSteps?]. STEP_* 상수와 의미는 vm.ts.
 export type TStep = [number, string | null, TStep[]?];
+// 식 하나로 들어오는 입력(BYTECODE.md #5.4). 계산 식은 LoadInput i의 i번째 입력 식 번호(localExprIndex) 목록이고,
+// 삼항은 피연산자 셋이다. 삼항 피연산자는 <REF>와 같은 인코딩이라 TRef(FV_SCOPE, FV_CONST, FV_EXPR)로 읽는다.
+// 갈래 필드를 then으로 두면 객체가 thenable이 되어 await가 Promise로 취급하므로 thenBranch로 둔다.
+export type TExprInputs =
+  | { kind: "calc"; inputs: number[] }
+  | { kind: "ternary"; cond: TRef; thenBranch: TRef; elseBranch: TRef };
 type TComponentDef = {
   nameConstIndex: number;
   propsTypeRef: number;
@@ -27,7 +33,10 @@ type TComponentDef = {
   events: TEventEntry[];
   contexts: TEventEntry[];
   // 이 컴포넌트가 쓰는 표현식들(후위 표기 바이트). IF_EXPR의 expr_index(localExprIndex)가 이 배열의 인덱스.
+  // 삼항은 평가기가 세지 않아 길이 0이다.
   exprBytecodes: Uint8Array[];
+  // 식마다 들어오는 입력. 인덱스가 localExprIndex다. 그래프 섹션에 없는 식은 입력이 없는 계산 식이다.
+  exprInputs: TExprInputs[];
 };
 export type TModule = {
   code: Uint8Array;
@@ -41,6 +50,8 @@ export type TModule = {
   globalExprBase: number[];
   // globalExprIndex -> 식 바이트. defs[].exprBytecodes와 같은 객체다.
   exprBytes: Uint8Array[];
+  // globalExprIndex -> 식의 입력. defs[].exprInputs와 달리 삼항 피연산자와 계산 식 입력의 식 번호가 globalExprIndex다.
+  exprInputs: TExprInputs[];
 };
 
 class Reader {
@@ -123,20 +134,20 @@ const readType = (reader: Reader): TType => {
 // 의미 있어 나머진 0.
 //
 // @param r Reader
-// @returns { kind, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=localExprIndex
+// @returns { tag, ref, offset } - ref: Scope=scopeIndex/Const=상수풀 인덱스/Raw=값/Expr=localExprIndex
 const readRef = (reader: Reader): TRef => {
   const tag = reader.u8();
   if (tag === FV_SCOPE) {
-    return { kind: FV_SCOPE, ref: reader.u8(), offset: reader.u8() };
+    return { tag: FV_SCOPE, ref: reader.u8(), offset: reader.u8() };
   }
   if (tag === FV_CONST) {
-    return { kind: FV_CONST, ref: reader.u16(), offset: 0 };
+    return { tag: FV_CONST, ref: reader.u16(), offset: 0 };
   }
   if (tag === FV_RAW) {
-    return { kind: FV_RAW, ref: reader.u16(), offset: 0 };
+    return { tag: FV_RAW, ref: reader.u16(), offset: 0 };
   }
   if (tag === FV_EXPR) {
-    return { kind: FV_EXPR, ref: reader.u8(), offset: 0 };
+    return { tag: FV_EXPR, ref: reader.u8(), offset: 0 };
   }
   throw new Error(`bad ref tag ${tag}`);
 };
@@ -157,6 +168,54 @@ const readFields = (reader: Reader): TFieldEntry[] => {
   }
   return fields;
 };
+
+// 그래프 섹션 항목의 input_count가 이 값이면 삼항이다(Rust serialize TERNARY_INPUT_COUNT 대칭).
+const TERNARY_INPUT_COUNT = 255;
+
+// 그래프 섹션 - entry_count, [(expr_index, input_count, payload)]을 읽어 식마다 입력 하나로 편다(Rust read_exprs 대칭).
+// input_count가 TERNARY_INPUT_COUNT면 payload는 피연산자 셋, 아니면 입력 식 번호 input_count개다.
+//
+// @param exprCount 이 def의 식 수. 그래프 섹션에 없는 식은 입력이 없는 계산 식으로 채운다
+const readExprInputs = (reader: Reader, exprCount: number): TExprInputs[] => {
+  const exprInputs: TExprInputs[] = [];
+  for (let i = 0; i < exprCount; i++) {
+    exprInputs.push({ kind: "calc", inputs: [] });
+  }
+  const entryCount = reader.u8();
+  for (let i = 0; i < entryCount; i++) {
+    const exprIndex = reader.u8();
+    const inputCount = reader.u8();
+    if (inputCount === TERNARY_INPUT_COUNT) {
+      exprInputs[exprIndex] = {
+        kind: "ternary",
+        cond: readRef(reader),
+        thenBranch: readRef(reader),
+        elseBranch: readRef(reader),
+      };
+    } else {
+      exprInputs[exprIndex] = { kind: "calc", inputs: Array.from(reader.take(inputCount)) };
+    }
+  }
+  return exprInputs;
+};
+
+// def 하나의 exprInputs에서 식 번호를 localExprIndex에서 globalExprIndex로 옮긴 사본. 잎과 상수 피연산자는 그대로다.
+//   globalExprBase가 1이면 { kind: "calc", inputs: [1] } -> { kind: "calc", inputs: [2] }
+const rebaseExprInputs = (exprInputs: TExprInputs[], globalExprBase: number): TExprInputs[] =>
+  exprInputs.map((entry) =>
+    entry.kind === "calc"
+      ? { kind: "calc", inputs: entry.inputs.map((input) => input + globalExprBase) }
+      : {
+          kind: "ternary",
+          cond: rebaseExprRef(entry.cond, globalExprBase),
+          thenBranch: rebaseExprRef(entry.thenBranch, globalExprBase),
+          elseBranch: rebaseExprRef(entry.elseBranch, globalExprBase),
+        },
+  );
+
+// 식을 가리키는 ref면 식 번호에 globalExprBase를 더한 사본, 아니면 그대로.
+const rebaseExprRef = (ref: TRef, globalExprBase: number): TRef =>
+  ref.tag === FV_EXPR ? { tag: FV_EXPR, ref: ref.ref + globalExprBase, offset: 0 } : ref;
 
 // 컴파일된 qubb 바이트. 진입점(mount/resume)과 번들러 플러그인이 같은 타입으로 주고받는다.
 // THandlerMap은 값에 실리지 않는 타입 정보다 - 플러그인이 낸 x.qubc.d.ts가 그 컴포넌트의 핸들러 맵 타입
@@ -192,6 +251,7 @@ export const decode = (bytes: TQubleBytecode): TModule => {
   const defs = [];
   const globalExprBase: number[] = [];
   const exprBytes: Uint8Array[] = [];
+  const globalExprInputs: TExprInputs[] = [];
   for (let i = 0; i < defCount; i++) {
     const nameConstIndex = r.u16();
     // 이 comp props를 묶은 Object 타입(types 인덱스). defs[0]이 진입점 풀필 구조.
@@ -216,9 +276,11 @@ export const decode = (bytes: TQubleBytecode): TModule => {
     for (let i = 0; i < exprCount; i++) {
       exprBytecodes.push(r.take(r.u8()));
     }
+    const exprInputs = readExprInputs(r, exprCount);
     globalExprBase.push(exprBytes.length);
+    globalExprInputs.push(...rebaseExprInputs(exprInputs, exprBytes.length));
     exprBytes.push(...exprBytecodes);
-    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprBytecodes });
+    defs.push({ nameConstIndex, propsTypeRef, codeOff, codeLen, events, contexts, exprBytecodes, exprInputs });
   }
 
   const codeLen = r.u32();
@@ -226,5 +288,15 @@ export const decode = (bytes: TQubleBytecode): TModule => {
   // compiledSteps: type_ref -> 조립 step 열 캐시. 발생 시점에 lazy로 채운다(안 터지는 이벤트의
   // 타입은 컴파일 안 함 - lazy build 결). 같은 type_ref는 한 번만 컴파일(dedup 이점 유지).
   // leafCounts: type_ref -> leaf 칸 수 캐시(refToSourcePairs가 객체를 몇 칸 펼칠지).
-  return { constpool, types, defs, code, compiledSteps: [], leafCounts: [], globalExprBase, exprBytes };
+  return {
+    constpool,
+    types,
+    defs,
+    code,
+    compiledSteps: [],
+    leafCounts: [],
+    globalExprBase,
+    exprBytes,
+    exprInputs: globalExprInputs,
+  };
 };

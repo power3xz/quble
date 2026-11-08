@@ -1,6 +1,6 @@
-// 인스턴스의 snapshot - 루트 props의 지금 값을 mount 때 넘긴 data와 같은 모양으로 다시 짓는다.
+// 인스턴스의 snapshot - 루트 props의 지금 값을 mount 때 넘긴 data와 같은 모양으로 다시 만든다.
 // 핸들러가 store를 바꾼 뒤에도 바뀐 값이 그 모양 그대로 나와야 한다(배열 요소 추가/제거 포함).
-// snapshot(typeRef, base, offset)은 타입과 위치(store의 base + offset)를 받아 그 자리의 값을 짓는다.
+// snapshot(typeRef, base, offset)은 타입과 위치(store의 base + offset)를 받아 그 자리의 값을 만든다.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";

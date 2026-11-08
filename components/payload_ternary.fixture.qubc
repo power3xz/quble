@@ -1,0 +1,21 @@
+component PayloadTernary {
+  props { n: number, open: bool }
+  contexts {
+    PickArea { pick: open ? n : 0 }
+    RestArea { rest: n - (open ? n : 0) }
+  }
+  events {
+    PICK({ pick: open ? n : 0 })
+    REST({ rest: n - (open ? n : 0) })
+  }
+  template {
+    div() {
+      @with PickArea {
+        button(class="pick" @click:PICK) { "pick" }
+      }
+      @with RestArea {
+        button(class="rest" @click:REST) { "rest" }
+      }
+    }
+  }
+}

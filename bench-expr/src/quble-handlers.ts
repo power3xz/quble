@@ -6,7 +6,7 @@ type TCtx = {
   get: (leafIndex: number) => number;
   set: (leafIndex: number, value: unknown) => void;
   setArray: (array: unknown, elems: unknown[]) => void;
-  store: { rows: { qty: number; price: number }[]; rate: number; tax: number; threshold: number; pivot: number };
+  store: { rows: { qty: number; price: number }[]; rate: number; tax: number; threshold: number; pivot: number; net: number };
   $0: number;
 };
 
@@ -35,6 +35,9 @@ export const handlers = {
     ctx.set(ctx.store.rate, data.first);
     ctx.set(ctx.store.rate, data.second);
     ctx.set(ctx.store.rate, data.third);
+  },
+  NET: (data: { nextNet: boolean }, ctx: TCtx) => {
+    ctx.set(ctx.store.net, data.nextNet);
   },
   // 하네스가 받아 둔 두 배열을 번갈아 넘긴다. 첫 행의 현재 가격이 처음 데이터와 같으면 올린 쪽으로 간다.
   BULK_UPDATE: (data: { firstPrice: number }, ctx: TCtx) => {

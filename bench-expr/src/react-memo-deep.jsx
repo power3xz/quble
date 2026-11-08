@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { bulk, nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
 
-const Row = memo(({ row, index, pivotPrice, rate, tax, threshold, onInc }) => (
+const Row = memo(({ row, index, pivotPrice, rate, tax, threshold, net, onInc }) => (
   <div className="row">
     <span className="row__id">{row.id}</span>
     <div className="row__pad">
@@ -29,6 +29,7 @@ const Row = memo(({ row, index, pivotPrice, rate, tax, threshold, onInc }) => (
       </div>
     </div>
     <span className="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax)) / 100) * rate}</span>
+    <span className="row__shown">{net ? (row.price * row.qty - row.discount) * rate : row.price * rate}</span>
     <ul className="row__meta">
       <li>a</li>
       <li>b</li>
@@ -62,6 +63,7 @@ const App = ({ data }) => {
   const [threshold, setThreshold] = useState(data.threshold);
   const [pivot, setPivot] = useState(data.pivot);
   const [tax, setTax] = useState(data.tax);
+  const [net, setNet] = useState(data.net);
   const onInc = useCallback((i) => {
     setRows((rs) => {
       const next = rs.slice();
@@ -117,6 +119,9 @@ const App = ({ data }) => {
         >
           전체 행 일괄 갱신
         </button>
+        <button id="btn-net" onClick={() => setNet((n) => !n)}>
+          표시 전환
+        </button>
         <span className="orders__info">
           환율 <span className="orders__rate">{rate}</span> / 기준 <span className="orders__threshold">{threshold}</span> / 기준 행{" "}
           <span className="orders__pivot">{pivot}</span>
@@ -132,6 +137,7 @@ const App = ({ data }) => {
             rate={rate}
             tax={tax}
             threshold={threshold}
+            net={net}
             onInc={onInc}
           />
         ))}

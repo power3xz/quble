@@ -287,9 +287,26 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// 값 자리의 식 하나. 1 = peek_binary_op 표의 최저 우선순위라 모든 연산자를 받는다.
+    /// 값 자리의 식 하나. 1 = peek_binary_op 표의 최저 우선순위라 모든 이항 연산자를 받는다.
+    ///
+    /// 삼항은 이항 연산자보다 늦게 묶인다 - 이항식을 다 읽은 뒤 `?`가 오면 그것을 조건으로 삼는다
+    /// (`a || b ? x : y`의 조건은 `a || b`). 두 갈래는 자기를 다시 불러 읽어, 거짓 갈래에 이어지는
+    /// 삼항이 그 갈래로 들어간다(`a ? b : c ? d : e` -> `a ? b : (c ? d : e)`). JS와 같다.
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_expr_binary(1)
+        let start = self.here();
+        let cond = self.parse_expr_binary(1)?;
+        if !matches!(self.peek(), Some(Token::Question)) {
+            return Ok(cond);
+        }
+        self.next()?;
+        let then = self.parse_expr()?;
+        self.expect(&Token::Colon)?;
+        let else_ = self.parse_expr()?;
+        let range = NodeRange(SrcRange {
+            start: start.start,
+            end: self.just_read().end,
+        });
+        Ok(Expr::Ternary(Box::new(cond), Box::new(then), Box::new(else_), range))
     }
 
     /// 이항 연산자를 우선순위대로 묶는다. `min`보다 낮은 연산자는 안 먹고 남겨 둔다 - 그걸

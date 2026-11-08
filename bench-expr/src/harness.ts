@@ -9,11 +9,12 @@
 import testVersions from "../tests.json";
 
 export type TRow = { id: number; price: number; qty: number; discount: number; stock: number; url: string };
-export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number };
+// net은 행마다 둔 삼항(row__shown)의 cond다. true면 할인을 뺀 금액, false면 단가에 환율을 곱한 값을 고른다.
+export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number; net: boolean };
 
-// orders-toggle 테스트의 데이터. 켰다 끄는 두 목록(A 100행, B 10행)과 환율.
+// orders-toggle 테스트의 데이터. 켰다 끄는 두 목록(A 100행, B 10행), 환율, 행 삼항의 cond.
 export type TToggleRow = { id: number; price: number; qty: number; discount: number };
-export type TToggleData = { rowsA: TToggleRow[]; rowsB: TToggleRow[]; showA: boolean; showB: boolean; rate: number };
+export type TToggleData = { rowsA: TToggleRow[]; rowsB: TToggleRow[]; showA: boolean; showB: boolean; rate: number; net: boolean };
 
 // 버튼이 오가는 값. 환율은 매번 바꿔 모든 행 금액이 바뀌고, 기준은 1만 움직여 경고가 거의 안 바뀐다.
 export const nextRate = (rate: number) => (rate === 1300 ? 1350 : 1300);
@@ -72,6 +73,7 @@ export const SCENARIOS = [
   { key: "rateAndTax", label: "환율+세율 동시 변경", desc: "한 핸들러가 모든 행의 금액 식이 읽는 두 값을 함께 바꾼다" },
   { key: "rateBurst", label: "환율 연속 3회 변경", desc: "한 핸들러가 같은 값을 세 번 바꾼다" },
   { key: "bulk", label: "전체 행 일괄 갱신", desc: "한 핸들러가 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 한꺼번에 바꾼다" },
+  { key: "net", label: "표시 전환", desc: "모든 행의 삼항이 cond가 뒤집혀 다른 갈래를 고른다" },
 ] as const;
 
 // orders-toggle 테스트의 시나리오. 켜는 클릭을 재고, 그 전에 끄는 버튼(과 환율 변경)은 재지 않는다.
@@ -81,6 +83,7 @@ export const TOGGLE_SCENARIOS = [
   { key: "showAChanged", label: "A 켜기, 환율 바뀜", desc: "꺼진 동안 환율이 바뀐 100행 목록을 켠다", button: "#btn-show-a", before: ["#btn-hide-a", "#btn-rate"] },
   { key: "showB", label: "B 켜기 (10행)", desc: "꺼진 동안 아무것도 안 바뀐 10행 목록을 켠다", button: "#btn-show-b", before: ["#btn-hide-b"] },
   { key: "showBChanged", label: "B 켜기, 환율 바뀜", desc: "꺼진 동안 환율이 바뀐 10행 목록을 켠다", button: "#btn-show-b", before: ["#btn-hide-b", "#btn-rate"] },
+  { key: "showANet", label: "A 켜기, 표시 바뀜", desc: "꺼진 동안 행 삼항의 cond가 뒤집힌 100행 목록을 켠다", button: "#btn-show-a", before: ["#btn-hide-a", "#btn-net"] },
 ] as const;
 
 // 테스트의 시나리오. 비교 표와 측정이 같은 목록을 쓴다.
@@ -238,6 +241,7 @@ const BUTTON_OF: Record<string, string> = {
   rateAndTax: "#btn-rate-tax",
   rateBurst: "#btn-rate-burst",
   bulk: "#btn-bulk",
+  net: "#btn-net",
 };
 const buttonFor = (root: HTMLElement, scenario: TScenario, k: number): HTMLElement => {
   if (scenario.button) {

@@ -29,3 +29,27 @@ export class Pool<T> {
     this.free.length = 0;
   };
 }
+
+// 번호만 내주고 돌려받는 pool. 값은 부르는 쪽이 번호를 인덱스로 하는 배열들(SoA)에 둔다. TId를 브랜드 타입으로
+// 주면 다른 번호와 섞어 넘기는 실수를 컴파일러가 잡는다.
+export class IdPool<TId extends number> {
+  private nextId = 0;
+  private free: TId[] = [];
+
+  // 돌려받은 번호가 있으면 그것을, 없으면 새 번호를 내준다.
+  alloc = (): TId => {
+    if (this.free.length > 0) {
+      return this.free.pop() as TId;
+    }
+    return this.nextId++ as TId;
+  };
+
+  release = (id: TId): void => {
+    this.free.push(id);
+  };
+
+  clear = (): void => {
+    this.nextId = 0;
+    this.free.length = 0;
+  };
+}

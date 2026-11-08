@@ -41,6 +41,7 @@ pub enum Token {
     AmpAmp,   // &&
     PipePipe, // ||
     Bang,     // !
+    Question, // ? (삼항 `ok ? a : b`)
     /// `/` - self-close 표기(`tag(attrs /)`). bool = 직전에 공백이 있었나. 확정 문법이
     /// `/` 앞 공백을 강제하므로(SYNTAX #3.1.1) 렉서가 공백 유무를 실어 파서가 검증한다.
     Slash(bool),
@@ -88,6 +89,7 @@ impl std::fmt::Display for Token {
             Token::AmpAmp => write!(f, "`&&`"),
             Token::PipePipe => write!(f, "`||`"),
             Token::Bang => write!(f, "`!`"),
+            Token::Question => write!(f, "`?`"),
             // 앞 공백 여부(self-close 검증용)는 표기에 안 싣는다 - 보이는 건 `/` 하나다.
             Token::Slash(_) => write!(f, "`/`"),
             Token::At(d) => write!(f, "{d}"),
@@ -370,6 +372,10 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
             ':' => {
                 chars.next();
                 toks.push(Token::Colon);
+            }
+            '?' => {
+                chars.next();
+                toks.push(Token::Question);
             }
             '.' => {
                 chars.next();

@@ -7,6 +7,21 @@
 
 ## 해결됨
 
+- **본문이 떨어지는 flush에서 떠나는 본문(`@if` 본문, 개수 `@for`의 행)의 식을 한 번 셌다** - store의 통지 전
+  단계가 아직 붙어 있는 본문의 식 인스턴스를 다시 센 뒤에, 통지 구독이 본문을 뗐기 때문이다. 화면은 맞게 본문이
+  떨어지지만 그 식이 throw한 에러가 `set`을 부른 쪽(핸들러면 dispatch)으로 올라갔다.
+  - `@if (i < n) { p() { ${rows[i].x} } }`에서 rows 길이와 n이 3이고 i가 2일 때 i를 3으로 바꾸면
+    `RangeError`(`index 3 out of range (length 3)`)였다.
+  - `@for (k of n) { p() { ${rows[k].x} } }`에서 rows 길이와 n이 3일 때, 핸들러 하나가 `removeAt(rows, 2)`와
+    n = 2를 함께 하면(순서 무관) `RangeError`(`index 2 out of range (length 2)`)였다.
+
+  **해결:** 가지가 식 인스턴스를 실을 때 vm이 간선을 건다. `@if` 가지는 조건 식 인스턴스에서 label then/else,
+  개수 `@for`의 행 k는 행 수 식 인스턴스에서 label k, 배열 `@for`의 행은 부모 가지의 간선을 물려받는다
+  (`core/web/expr-graph.ts`, `region.ts`의 `TBranch.edgeStartNode`). 통지 전 단계의 pull은 시작점의 새 값이
+  label과 맞지 않으면 끝점을 평가하지 않는다. 조건이 leaf 하나인 `@if`와 숫자 prop `@for`는 본문에 식
+  인스턴스가 생길 때 컴파일러가 `IF_EXPR`/`FOR_COUNT_EXPR`로 내 시작점이 될 식 인스턴스를 둔다(BYTECODE.md
+  5.2절). 재현은 `flush-leaving-body.test.ts`가 본다.
+
 - **같은 칸을 여러 번 쓰거나 한 행의 여러 칸을 바꾸면 칸마다 통지가 나가 중간 값이 DOM에 쓰였다** -
   핸들러 하나가 같은 칸을 여러 번 `set`하거나 `setArray`로 한 행의 여러 칸을 바꾸면 `leaf-store.ts`의
   `set`이 칸마다 구독자를 바로 불러, 식이 아직 안 바뀐 칸과 섞인 값을 계산해 DOM에 썼다. bench-expr
@@ -125,6 +140,13 @@
   지연 실행 사본만 붙들어 GC가 거둔다(`churn-memory.test.ts`).
 
 ## 미해결
+
+- **해체한 인스턴스를 호출자가 쥐고 있으면 인스턴스당 약 5.2KB가 남는다** - `destroy`는 vm을 가리키는 클로저를
+  끊지만, 인스턴스 객체가 직접 가리키는 그릇은 비우기만 하고 놓지 않는다. 남는 것은 `regionPool`, `branchPool`,
+  `scopeParentPool`, `exprInstances`(각 약 230~290B), `exprGraph`(약 1000B), `snapshot` 클로저(약 170B, `store`와
+  `arrayPool`을 가리킨다)다. 그릇이 비어도 큰 것은 클래스 필드에 화살표 함수를 넣어 객체마다 함수가 따로 생기기
+  때문이다. 그릇을 모두 끊으면 799B가 남는다. 재현: `destroy-memory.test.ts`의 "destroy한 인스턴스를 쥐고 있어도
+  VM을 붙들지 않는다"(todo)가 해체한 `event_toggle` 인스턴스 1000개를 쥐고 인스턴스당 힙을 잰다.
 
 - **공유 식이 없는 행은 식 인스턴스 풀 도입 뒤 main보다 메모리를 더 쓰고 mount가 느리다** - bench-expr
   1000행에서 공유 식이 없는 orders는 heap과 mount가, orders-deep은 heap과 "환율+세율 동시 변경" 클릭이

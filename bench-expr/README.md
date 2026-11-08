@@ -27,7 +27,7 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 - 벤치 앱(페이지, 행 템플릿, 시나리오, `tests.json`)은 지금 작업 트리 것으로 덮는다. 어떤 커밋이든 같은 벤치
   앱으로 재므로 서로 견줄 수 있다. `.qubb`와 데이터도 지금 컴파일러로 만든다.
 - `bench-expr/quick.mjs`가 `quble.html`(orders-deep이면 `quble-deep.html`, orders-toggle이면
-  `quble-toggle.html`, orders-shared면 `quble-shared.html`)을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 여덟(orders-toggle은 넷)의 DOM
+  `quble-toggle.html`, orders-shared면 `quble-shared.html`)을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 아홉(orders-toggle은 다섯)의 DOM
   반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
 - 행 수는 환경 변수 `BENCH_N`(1000, 5000, 10000, 기본 1000)으로 고른다.
 - 기록은 `bench-results/<커밋>.expr.json`(orders), `<커밋>.expr-deep.json`(orders-deep),
@@ -45,7 +45,7 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 
 ## 테스트와 버전
 
-테스트는 셋이다. 각 대상은 테스트마다 자기 페이지가 있고, 같은 테스트의 대상끼리만 견준다.
+테스트는 넷이다. 각 대상은 테스트마다 자기 페이지가 있고, 같은 테스트의 대상끼리만 견준다.
 
 | 테스트 | 행 | 파일 |
 |---|---|---|
@@ -56,9 +56,10 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 모두)를 맞춰 둔다.
 
 `orders-toggle`은 quble만 잰다. 켰다 끄는 두 목록(A 100행, B 10행)을 담고, 가지가 꺼졌다 다시 켜질 때 놓친 값을
-따라잡는 동작(quble 런타임에만 있다)의 비용을 잰다. 행마다 변수 보간, 식 보간, 속성 변수, 속성 식을 하나씩 둔다.
-시나리오는 `A 켜기`, `A 켜기, 환율 바뀜`, `B 켜기`, `B 켜기, 환율 바뀜`의 넷이고, 켜기 전에 끄는 클릭(과 환율
-변경)을 한 번 하되 그 시간은 재지 않는다. 파일은 `quble/orders-toggle.qubc`, `src/quble-toggle.ts`,
+따라잡는 동작(quble 런타임에만 있다)의 비용을 잰다. 행마다 변수 보간, 식 보간, 속성 변수, 속성 식을 하나씩 두고,
+`orders`와 같은 행 삼항(아래 "재는 앱"의 표시)을 하나 둔다. 시나리오는 `A 켜기`, `A 켜기, 환율 바뀜`, `B 켜기`,
+`B 켜기, 환율 바뀜`, `A 켜기, 표시 바뀜`의 다섯이고, 켜기 전에 끄는 클릭(과 환율 변경이나 표시 전환)을 한 번 하되
+그 시간은 재지 않는다. `A 켜기, 표시 바뀜`은 꺼진 동안 행 삼항의 cond가 뒤집힌 목록을 켠다. 파일은 `quble/orders-toggle.qubc`, `src/quble-toggle.ts`,
 `src/quble-toggle-handlers.ts`다.
 
 `orders-shared`도 quble만 잰다. 기본 행에 props만 읽는 식 열 개(`rate * 2`, `rate + tax`, `(100 + tax) * rate / 100`
@@ -73,11 +74,12 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 
 ## 재는 앱
 
-주문 목록 N행(`orders`). 행마다 단순 값 셋(id, 가격, 수량)과 식 넷, 링크(`a`의 `href`가 행의 `url`) 하나를
-둔다.
+주문 목록 N행(`orders`). 행마다 단순 값 셋(id, 가격, 수량)과 식 다섯, 링크(`a`의 `href`가 행의 `url`) 하나를
+둔다. 표시는 삼항이고 두 갈래가 모두 식이다. cond `net`은 루트 값이라 표시 전환 한 번에 모든 행이 다른 갈래를 고른다.
 
 ```
 금액  (row.price * row.qty - row.discount) * (100 + tax) / 100 * rate
+표시  net ? (row.price * row.qty - row.discount) * rate : row.price * rate
 재고  row.stock - row.qty
 비교  row.price - rows[pivot].price
 경고  row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold
@@ -93,7 +95,7 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 - mount 시간과 첫 paint까지의 시간.
 - mount 뒤 JS 힙 - 빠른 측정만 잰다.
 
-**클릭** - 버튼 여덟을 각각 예열 5회 뒤 30회 눌러 중앙값과 p90을 낸다. 값을 바꾸는 버튼은 payload로
+**클릭** - 버튼 아홉을 각각 예열 5회 뒤 30회 눌러 중앙값과 p90을 낸다. 값을 바꾸는 버튼은 payload로
 다음 값을 받아 핸들러에서 쓴다(핸들러가 직접 계산하지 않는다).
 
 | 버튼 | 바뀌는 것 |
@@ -106,6 +108,7 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 | 환율+세율 동시 변경 | 한 핸들러가 환율과 세율을 함께 바꾼다. 금액 식에서 두 값이 서로 다른 하위 식이라, 읽는 leaf 둘이 한꺼번에 바뀌는 경우를 본다 |
 | 환율 연속 3회 변경 | 한 핸들러가 환율을 세 번 바꾼다. 같은 leaf를 여러 번 쓸 때 통지가 한 번인지 본다 |
 | 전체 행 일괄 갱신 | 한 핸들러가 `setArray`로 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 바꾼다. 데이터는 정적 파일(`bulk-<N>.json`)에서 받는다 |
+| 표시 전환 | 표시 삼항의 cond `net`. 모든 행이 다른 갈래를 고른다. 예열에서 두 갈래를 모두 고르므로, 처음 고를 때의 생성 비용이 아니라 갈래를 바꾸는 비용을 잰다 |
 
 클릭마다 세 값을 잰다.
 - **DOM 반영**: 클릭부터 MutationObserver가 불릴 때까지. React와 Svelte가 microtask로 미루는 갱신까지

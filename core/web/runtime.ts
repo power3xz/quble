@@ -3,7 +3,7 @@
 //   compile(bytes)  -> blueprintOf(compId) => Blueprint  (def를 청사진으로)
 //   Blueprint(store, argumentSourcePairs) -> Instance     (청사진 호출 = 인스턴스화. DOM/구독 생성)
 //
-// 바이트코드를 훑어 DOM/구독을 짓는 VM은 vm.ts에 있다.
+// 바이트코드를 해석해 DOM과 구독을 만드는 VM은 vm.ts에 있다.
 
 import type { TArrayInfo } from "./array-info.ts";
 import { decode, type TModule, type TQubleBytecode } from "./decode.ts";
@@ -43,7 +43,7 @@ export const compile = (bytes: TQubleBytecode, resources: string[] = []) => {
     };
 };
 
-// store를 심은 뒤 한 인스턴스를 짓는다. code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 -
+// store를 심은 뒤 한 인스턴스를 만든다. code는 전체 module.code를 그대로 쓰고 pc는 절대 오프셋으로 다룬다 -
 // def/자식 구간마다 subarray 뷰를 새로 할당하지 않는다(자식 RENDER가 많으면 그 할당이 누적된다).
 export const instantiate = (
   module: TModule,

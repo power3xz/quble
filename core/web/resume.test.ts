@@ -1,7 +1,7 @@
 // resume - SSR이 그린 DOM을 노드를 새로 만들지 않고 resume한다.
 //
 // blueprint에 { resumeFrom: host }를 주면 resume 해석기가 host 아래 SSR 노드를 앞순회로 꺼내 쓴다
-// (resume-interpreter.ts). store, region, 구독, 이벤트 바인딩은 처음 그릴 때와 같이 짓는다.
+// (resume-interpreter.ts). store, region, 구독, 이벤트 바인딩은 처음 그릴 때와 같이 만든다.
 //
 // 확인은 둘로 나뉜다.
 //   - 모든 SSR 일치 시드로: SSR 노드를 그대로 쓰는지(새로 만드는 것은 빈 텍스트 자리뿐), resume한
@@ -170,7 +170,7 @@ test("resume한 뒤 인덱스가 바뀌면 텍스트가 갱신된다", () => {
   inst.destroy();
 });
 
-test("resume한 뒤 @if가 바뀌면 SSR이 안 그린 가지를 새로 짓는다", () => {
+test("resume한 뒤 @if가 바뀌면 SSR이 안 그린 가지를 새로 만든다", () => {
   const data = { tags: ["a", "b"], flag: true };
   const { qubb, resmap } = buildFixtureWithResmap("for_if_lazy_slot");
   const host = ssrHost("for_if_lazy_slot", resmap, data);
@@ -182,7 +182,7 @@ test("resume한 뒤 @if가 바뀌면 SSR이 안 그린 가지를 새로 짓는�
   assert.deepEqual(spans(), ["off:off", "off:off"]);
   inst.store.set(1, true);
   assert.deepEqual(spans(), ["on:a", "on:b"]);
-  // 다시 켠 then 가지는 새로 짓지 않고 SSR이 그린 노드를 다시 붙인다.
+  // 다시 켠 then 가지는 새로 만들지 않고 SSR이 그린 노드를 다시 붙인다.
   const now = [...host.querySelectorAll("span")];
   assert.ok(now.length === ssrSpans.length && now.every((s, i) => s === ssrSpans[i]), "SSR이 그린 span이어야 한다");
   inst.destroy();

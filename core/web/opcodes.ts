@@ -34,6 +34,7 @@ export const OP_IF_EXPR = 0x1e;
 export const OP_TEXT_EXPR = 0x1f;
 export const OP_ATTR_G_EXPR = 0x20;
 export const OP_ATTR_L_EXPR = 0x21;
+export const OP_FOR_COUNT_EXPR = 0x22;
 
 // opcode의 operand 바이트 수를 돌려준다.
 //
@@ -56,6 +57,7 @@ export const operandLen = (op: number): number => {
     case OP_PUSH_THROUGH: // scope_index: u8
     case OP_IF_EXPR: // expr_index: u8
     case OP_TEXT_EXPR: // expr_index: u8
+    case OP_FOR_COUNT_EXPR: // expr_index: u8
       return 1;
     case OP_ELEM_OPEN:
     case OP_TEXT:
@@ -133,7 +135,7 @@ export const forBodyEnd = (code: Uint8Array, bodyStart: number): number => {
   while (pc < code.length) {
     const markerPc = pc;
     const op = code[pc++];
-    if (op === OP_FOR_RAW || op === OP_FOR_COUNT_VAR || op === OP_FOR_ARRAY_VAR) {
+    if (op === OP_FOR_RAW || op === OP_FOR_COUNT_VAR || op === OP_FOR_COUNT_EXPR || op === OP_FOR_ARRAY_VAR) {
       depth += 1;
       pc += operandLen(op);
     } else if (op === OP_FOR_END) {

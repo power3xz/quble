@@ -6,7 +6,7 @@
 
 pub mod json;
 
-use bytecode::{Const, DecodeError, ExprOp, Module, Op, TypeEntry};
+use bytecode::{Const, DecodeError, ExprDef, ExprOp, Module, Op, TernaryOperand, TypeEntry};
 use json::Json;
 
 #[derive(Debug, PartialEq)]
@@ -479,7 +479,7 @@ impl Renderer<'_> {
                             v
                         }
                         _ => {
-                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            let v = self.eval_expr(code[pc], pairs, &def.exprs)?;
                             pc += 1;
                             v
                         }
@@ -501,7 +501,7 @@ impl Renderer<'_> {
                     self.text_node(&v.dom_string());
                 }
                 Op::TextExpr => {
-                    let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                    let v = self.eval_expr(code[pc], pairs, &def.exprs)?;
                     pc += 1;
                     self.text_node(&v.dom_string());
                 }
@@ -580,7 +580,7 @@ impl Renderer<'_> {
                             v
                         }
                         _ => {
-                            let v = self.eval(&def.exprs[code[pc] as usize], pairs)?;
+                            let v = self.eval_expr(code[pc], pairs, &def.exprs)?;
                             pc += 1;
                             v
                         }
@@ -604,7 +604,7 @@ impl Renderer<'_> {
                     }
                     pc = if_end + 1;
                 }
-                Op::ForRaw | Op::ForCountVar | Op::ForArrayVar => {
+                Op::ForRaw | Op::ForCountVar | Op::ForCountExpr | Op::ForArrayVar => {
                     // (반응형이라 region이 있는가, 회차 수, 회차마다 요소 시작 leaf)
                     let (reactive, count, elem_starts): (bool, usize, Option<Vec<usize>>) = match op
                     {
@@ -620,6 +620,18 @@ impl Renderer<'_> {
                                 count as usize
                             };
                             (matches!(slot, Slot::Store(_)), count, None)
+                        }
+                        // 런타임은 식 인스턴스의 결과 칸을 구독하는 region을 연다 - 슬롯 kind와 무관하게 반응형이다.
+                        Op::ForCountExpr => {
+                            let v = self.eval_expr(code[pc], pairs, &def.exprs)?;
+                            pc += 1;
+                            let count = v.num();
+                            let count = if count.is_nan() || count < 0.0 {
+                                0
+                            } else {
+                                count as usize
+                            };
+                            (true, count, None)
                         }
                         _ => {
                             let leaf = match pairs[code[pc] as usize] {
@@ -658,56 +670,82 @@ impl Renderer<'_> {
         Ok(())
     }
 
-    /// 후위 식 하나를 센다(런타임 runExpr에서 cache/reads를 뺀 것).
-    fn eval(&self, expr: &[u8], pairs: &[Slot]) -> Result<Val, RenderError> {
+    /// 표현식 테이블의 식 하나를 센다. exprs는 이 식이 든 컴포넌트의 표현식 테이블이다. 삼항이면 조건을
+    /// 센 뒤 고른 갈래만 센다 - 고르지 않은 갈래가 범위 밖을 읽어도 에러가 나지 않는다.
+    fn eval_expr(
+        &self,
+        expr_index: u8,
+        pairs: &[Slot],
+        exprs: &[ExprDef],
+    ) -> Result<Val, RenderError> {
+        match &exprs[expr_index as usize] {
+            ExprDef::Calc { code, inputs } => self.eval_code(code, inputs, pairs, exprs),
+            ExprDef::Ternary { cond, then, else_ } => {
+                let picked = match self.eval_ternary_operand(*cond, pairs, exprs)?.truthy() {
+                    true => then,
+                    false => else_,
+                };
+                self.eval_ternary_operand(*picked, pairs, exprs)
+            }
+        }
+    }
+
+    /// 계산 식의 후위 바이트를 센다(런타임 runExpr에서 cache/reads를 뺀 것). `LoadInput i`는 inputs[i]의
+    /// 식을 eval_expr로 센다.
+    fn eval_code(
+        &self,
+        code: &[u8],
+        inputs: &[u8],
+        pairs: &[Slot],
+        exprs: &[ExprDef],
+    ) -> Result<Val, RenderError> {
         let mut stack: Vec<Val> = Vec::new();
         let mut pc = 0;
         let pop = |stack: &mut Vec<Val>| stack.pop().expect("식 스택");
-        while pc < expr.len() {
-            let byte = expr[pc];
+        while pc < code.len() {
+            let byte = code[pc];
             let op = ExprOp::from_u8(byte).ok_or(RenderError::BadExprOpcode(byte))?;
             pc += 1;
-            match op {
+            let value = match op {
+                ExprOp::LoadInput => {
+                    let v = self.eval_expr(inputs[code[pc] as usize], pairs, exprs)?;
+                    pc += 1;
+                    v
+                }
                 ExprOp::LoadVar => {
-                    stack.push(self.slot_value(pairs[expr[pc] as usize], expr[pc + 1] as usize));
+                    let v = self.slot_value(pairs[code[pc] as usize], code[pc + 1] as usize);
                     pc += 2;
+                    v
                 }
                 ExprOp::LoadArrayLength => {
-                    let leaf = match pairs[expr[pc] as usize] {
-                        Slot::Store(base) => base + expr[pc + 1] as usize,
+                    let leaf = match pairs[code[pc] as usize] {
+                        Slot::Store(base) => base + code[pc + 1] as usize,
                         other => panic!("배열 길이 슬롯은 STORE여야: {other:?}"),
                     };
                     let len = self.store.arrays[self.store.leaves[leaf].num() as usize].len();
-                    stack.push(Val::Num(len as f64));
                     pc += 2;
+                    Val::Num(len as f64)
                 }
                 ExprOp::LoadStringLength => {
-                    let s = self.slot_value(pairs[expr[pc] as usize], expr[pc + 1] as usize);
-                    // JS 문자열 길이는 UTF-16 단위다.
-                    stack.push(Val::Num(s.dom_string().encode_utf16().count() as f64));
+                    let s = self.slot_value(pairs[code[pc] as usize], code[pc + 1] as usize);
                     pc += 2;
+                    // JS 문자열 길이는 UTF-16 단위다.
+                    Val::Num(s.dom_string().encode_utf16().count() as f64)
                 }
                 ExprOp::LoadConst => {
-                    let index = u16::from_le_bytes([expr[pc], expr[pc + 1]]);
-                    stack.push(Val::from_const(
-                        self.module.pool.get(index).expect("상수풀"),
-                    ));
+                    let index = u16::from_le_bytes([code[pc], code[pc + 1]]);
                     pc += 2;
+                    Val::from_const(self.module.pool.get(index).expect("상수풀"))
                 }
                 ExprOp::LoadSmallInt => {
-                    stack.push(Val::Num(expr[pc] as f64));
+                    let v = Val::Num(code[pc] as f64);
                     pc += 1;
+                    v
                 }
-                ExprOp::LoadTrue => stack.push(Val::Bool(true)),
-                ExprOp::LoadFalse => stack.push(Val::Bool(false)),
-                ExprOp::Not => {
-                    let v = pop(&mut stack);
-                    stack.push(Val::Bool(!v.truthy()));
-                }
-                ExprOp::Neg => {
-                    let v = pop(&mut stack);
-                    stack.push(Val::Num(-v.num()));
-                }
+                ExprOp::LoadTrue => Val::Bool(true),
+                ExprOp::LoadFalse => Val::Bool(false),
+                ExprOp::Not => Val::Bool(!pop(&mut stack).truthy()),
+                ExprOp::Neg => Val::Num(-pop(&mut stack).num()),
                 ExprOp::ElemAt => {
                     let index = pop(&mut stack).num();
                     let array = pop(&mut stack).num() as usize;
@@ -720,25 +758,44 @@ impl Renderer<'_> {
                             len: starts.len(),
                         });
                     }
-                    stack.push(Val::Num(starts[index as usize] as f64));
+                    Val::Num(starts[index as usize] as f64)
                 }
                 ExprOp::FieldAt => {
-                    let base = pop(&mut stack).num();
-                    stack.push(Val::Num(base + expr[pc] as f64));
+                    let v = Val::Num(pop(&mut stack).num() + code[pc] as f64);
                     pc += 1;
+                    v
                 }
                 ExprOp::ReadLeaf => {
                     let leaf = pop(&mut stack).num() as usize;
-                    stack.push(self.store.leaves[leaf].clone());
+                    self.store.leaves[leaf].clone()
                 }
                 binary => {
                     let right = pop(&mut stack);
                     let left = pop(&mut stack);
-                    stack.push(apply_binary(binary, left, right));
+                    apply_binary(binary, left, right)
                 }
-            }
+            };
+            stack.push(value);
         }
         Ok(pop(&mut stack))
+    }
+
+    /// 삼항 피연산자 하나를 센다. 잎은 슬롯을 읽고, 상수는 상수풀 값, 식은 eval_expr로 센다.
+    fn eval_ternary_operand(
+        &self,
+        operand: TernaryOperand,
+        pairs: &[Slot],
+        exprs: &[ExprDef],
+    ) -> Result<Val, RenderError> {
+        match operand {
+            TernaryOperand::Leaf(scope_index, offset) => {
+                Ok(self.slot_value(pairs[scope_index as usize], offset as usize))
+            }
+            TernaryOperand::Const(index) => Ok(Val::from_const(
+                self.module.pool.get(index).expect("상수풀"),
+            )),
+            TernaryOperand::Expr(index) => self.eval_expr(index, pairs, exprs),
+        }
     }
 }
 
@@ -802,7 +859,10 @@ fn scan_end(code: &[u8], from: usize, scan: Scan) -> Result<usize, RenderError> 
                 matches!(op, Op::IfEnd) || (matches!(op, Op::Else) && depth == 0),
             ),
             Scan::For => (
-                matches!(op, Op::ForRaw | Op::ForCountVar | Op::ForArrayVar),
+                matches!(
+                    op,
+                    Op::ForRaw | Op::ForCountVar | Op::ForCountExpr | Op::ForArrayVar
+                ),
                 matches!(op, Op::ForEnd),
             ),
             Scan::SlotContent => (
@@ -833,7 +893,7 @@ fn operand_len(op: Op) -> usize {
         | Op::ExitContext
         | Op::ForEnd
         | Op::SlotPlaceholderContentEnd => 0,
-        Op::PushThrough | Op::IfExpr | Op::TextExpr => 1,
+        Op::PushThrough | Op::IfExpr | Op::TextExpr | Op::ForCountExpr => 1,
         Op::ElemOpen
         | Op::Text
         | Op::TextVar
@@ -962,5 +1022,92 @@ mod tests {
         for (n, want) in cases {
             assert_eq!(js_number(n), want, "{n:?}");
         }
+    }
+
+    /// 소스를 컴파일해 data로 렌더하고, 첫 `<p>`의 글을 주석(앵커, 텍스트 경계 표시)을 지우고 돌려준다.
+    fn p_text(src: &str, data: &str) -> Result<String, RenderError> {
+        let out = compiler::compile_src("entry", src, &(|_: &str, _: &str| None)).expect("컴파일");
+        let html = render(&out.bytecode, data, &[])?.html;
+        let start = html.find("<p>").expect("<p>") + "<p>".len();
+        let end = html[start..].find("</p>").expect("</p>") + start;
+        Ok(strip_comments(&html[start..end]))
+    }
+
+    /// 주석(앵커, 텍스트 경계 표시)을 지운다.
+    fn strip_comments(html: &str) -> String {
+        let mut text = html.to_string();
+        while let Some(open) = text.find("<!--") {
+            let close = text[open..].find("-->").expect("-->") + open + "-->".len();
+            text.replace_range(open..close, "");
+        }
+        text
+    }
+
+    #[test]
+    fn ternary_with_leaf_cond_picks_branch() {
+        let src = r#"component C { props { ok: bool } template { p() { ${ok ? "on" : "off"} } } }"#;
+        assert_eq!(p_text(src, r#"{"ok":true}"#), Ok("on".to_string()));
+        assert_eq!(p_text(src, r#"{"ok":false}"#), Ok("off".to_string()));
+    }
+
+    #[test]
+    fn ternary_with_expr_cond_reads_leaf_branch() {
+        let src = "component C { props { price: number, count: number } template { p() { ${price > 10 ? price : count} } } }";
+        assert_eq!(
+            p_text(src, r#"{"price":20,"count":3}"#),
+            Ok("20".to_string())
+        );
+        assert_eq!(p_text(src, r#"{"price":5,"count":3}"#), Ok("3".to_string()));
+    }
+
+    #[test]
+    fn nested_ternary_picks_inner_branch() {
+        let src = r#"component C { props { ok: bool, done: bool } template { p() { ${ok ? (done ? "a" : "b") : "c"} } } }"#;
+        assert_eq!(
+            p_text(src, r#"{"ok":true,"done":false}"#),
+            Ok("b".to_string())
+        );
+        assert_eq!(
+            p_text(src, r#"{"ok":false,"done":true}"#),
+            Ok("c".to_string())
+        );
+    }
+
+    /// 계산 식 안의 삼항은 LoadInput 자리에서 센다.
+    #[test]
+    fn calc_with_ternary_reads_ternary_as_input() {
+        let src = "component C { props { ok: bool, price: number, base: number } template { p() { ${base - (ok ? price : 0)} } } }";
+        assert_eq!(
+            p_text(src, r#"{"ok":true,"price":3,"base":10}"#),
+            Ok("7".to_string())
+        );
+        assert_eq!(
+            p_text(src, r#"{"ok":false,"price":3,"base":10}"#),
+            Ok("10".to_string())
+        );
+    }
+
+    /// code가 같아도 입력이 다른 두 식은 각자 자기 입력을 센다.
+    #[test]
+    fn calcs_with_same_code_read_their_own_inputs() {
+        let src = "component C { props { ok: bool, price: number, base: number } template { p() { ${base - (ok ? price : 0)} } p() { ${base - (ok ? 0 : price)} } } }";
+        let out = compiler::compile_src("entry", src, &(|_: &str, _: &str| None)).expect("컴파일");
+        let html = render(&out.bytecode, r#"{"ok":true,"price":3,"base":10}"#, &[])
+            .unwrap()
+            .html;
+        let texts: Vec<String> = html
+            .split("<p>")
+            .skip(1)
+            .map(|rest| strip_comments(&rest[..rest.find("</p>").expect("</p>")]))
+            .collect();
+        assert_eq!(texts, vec!["7", "10"], "html: {html}");
+    }
+
+    /// 고르지 않은 갈래는 세지 않는다 - i가 범위 밖이어도 `rows[i]`를 읽지 않아 IndexOutOfRange가 나지 않는다.
+    #[test]
+    fn ternary_does_not_eval_unpicked_branch() {
+        let src = "component C { props { rows: number[], i: number } template { p() { ${i < rows.length ? rows[i] : 0} } } }";
+        assert_eq!(p_text(src, r#"{"rows":[1,2],"i":5}"#), Ok("0".to_string()));
+        assert_eq!(p_text(src, r#"{"rows":[1,2],"i":1}"#), Ok("2".to_string()));
     }
 }
