@@ -8,7 +8,6 @@
 import { FV_CONST, FV_EXPR, type TExprInputs, type TRef } from "./decode.ts";
 import { type ExprEvaluator, NO_INPUT_VALUES, SKIP_NOTHING } from "./expr-eval.ts";
 import { ExprGraph, LABEL_ELSE, LABEL_THEN, type TEdgeId } from "./expr-graph.ts";
-import { instrSize } from "./expr-opcode.ts";
 import { buildSkipPastOpsOfVars, type TExprSkipTable } from "./expr-skip-table.ts";
 import type { LeafStoreSubject } from "./leaf-store.ts";
 import { Pool } from "./pool-allocator.ts";
@@ -22,7 +21,7 @@ export type TExprInstance = {
   cache: unknown[] | null;
   // 식이 읽은 leaf이자 구독할 입력 leaf. 건너뛸 부분식이 있는 식은 변수마다 읽는 leafIndex(중복과 -1 포함)고, 없는
   // 계산 식은 중복 없는 목록이다. 삼항은 [cond, 참 갈래, 거짓 갈래] 자리의 leafIndex이고 잎이 아닌 피연산자와 고르지
-  // 않은 갈래의 자리는 -1이다. evaluate가 채우고, READ_LEAF 구독을 다시 걸 때 고친다.
+  // 않은 갈래의 자리는 -1이다. evaluate가 셀 때마다 채운다.
   readLeaves: number[];
   // 직전에 돌려준 값.
   lastValue: unknown;
@@ -330,8 +329,9 @@ export class ExprInstancePool {
   // 삼항과 입력이 있는 계산 식을 evaluate로 처음부터 다시 센다. 세기 전에 pendingVarMask와 inputMarked를 지운다.
   // evaluate가 연결한 입력 인스턴스를 먼저 요청해 이번 flush의 값으로 만든다. 부분 재평가를 하지 않는 이유는
   // LoadInput이 leafOfVar에 자리가 없어 건너뛰기 표가 바뀐 입력을 모르기 때문이다. 다시 센 뒤 읽는 leaf가 바뀌었으면
-  // 구독을 옮긴다. 바뀌는 때는 삼항이 다른 갈래를 골랐을 때와 계산 식의 배열 인덱스가 바뀌었을 때뿐이라 그때만 견준다.
-  // 삼항은 떠나는 갈래의 leaf 하나만 기억해 두면 된다 - 새 갈래의 leaf는 세고 나면 readLeaves의 고른 자리에 있다.
+  // 구독을 옮긴다. 바뀌는 때는 삼항이 다른 갈래를 골랐을 때와 값 읽기 식이 다른 요소를 읽을 때뿐이다. 삼항은 갈래를
+  // 바꿨을 때만 견주고, 떠나는 갈래의 leaf 하나만 기억해 두면 된다 - 새 갈래의 leaf는 세고 나면 readLeaves의 고른
+  // 자리에 있다. 계산 식은 옛 readLeaves와 새 readLeaves를 견준다.
   private runWithInputs = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
     instance.pendingVarMask = 0;
@@ -347,7 +347,7 @@ export class ExprInstancePool {
     }
     const previousReadLeaves = instance.readLeaves;
     const value = this.evaluate(exprInstanceIndex);
-    this.resubscribeChangedVars(exprInstanceIndex, previousReadLeaves);
+    this.resubscribeChangedLeaves(exprInstanceIndex, previousReadLeaves);
     return value;
   };
 
@@ -691,14 +691,11 @@ export class ExprInstancePool {
   };
 
   // 건너뛸 부분식이 있는 식을 다시 센다. pendingVarMask에 든 바뀐 변수 전체로 건너뛰기 표를 골라 한꺼번에 센다.
-  // 변수마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다.
-  //
-  // 마스크는 세기 전에 push가 다 모아 둔 것이라, 세는 도중 다시 걸기가 leafOfVar를 고쳐도 바뀐 변수를 놓치지 않는다.
-  //   ${nums[nums[0]]}, nums = [0, 7]에서 두 READ_LEAF가 nums[0]을 읽는다.
-  //   nums[0]에 1을 쓰면 안쪽 차례에 바깥을 nums[1]로 옮겨, 그 뒤의 leafOfVar로는 바깥이 안 보인다.
+  // 변수마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다. 이 식은 입력이 없어 READ_LEAF가
+  // 없으므로(값 읽기 식은 늘 입력이 있다) 읽는 leaf가 바뀌지 않아 구독을 옮기지 않는다.
   private runPartial = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
-    const { globalExprIndex, pairs, readLeaves: leafOfVar } = instance;
+    const { globalExprIndex, pairs } = instance;
     const expr = this.evaluator.exprBytes[globalExprIndex];
     const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
     const cache = instance.cache as unknown[];
@@ -711,30 +708,8 @@ export class ExprInstancePool {
         ? table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)]
         : buildSkipPastOpsOfVars(table, expr, changedVarMask);
     const value = this.evaluator.reevalExpr(expr, pairs, table, cache, skipPastOps, NO_INPUT_VALUES);
-    if (table.hasIndexAccess) {
-      for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
-        if (changedVarMask & (1 << varNumber)) {
-          this.resubscribeReadLeavesDependingOn(exprInstanceIndex, varNumber);
-        }
-      }
-    }
     instance.lastValue = value;
     return value;
-  };
-
-  // 변수 varNumber가 바뀌어 READ_LEAF가 읽을 leafIndex가 달라졌으면 그 READ_LEAF의 구독을 다시 건다.
-  // READ_LEAF에 leafIndex를 넘긴 연산의 cache 값이 방금 읽은 leafIndex다.
-  private resubscribeReadLeavesDependingOn = (exprInstanceIndex: number, varNumber: number): void => {
-    const instance = this.pool.entries[exprInstanceIndex];
-    const { globalExprIndex } = instance;
-    const expr = this.evaluator.exprBytes[globalExprIndex];
-    const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
-    const cache = instance.cache as unknown[];
-    for (const op of table.readLeafIndexOpsByVar[varNumber]) {
-      const readLeafVar = table.varAt[op + instrSize(expr[op])];
-      const newLeafIndex = cache[table.cacheIndex[op]] as number;
-      this.resubscribeReadLeaf(exprInstanceIndex, readLeafVar, newLeafIndex);
-    }
   };
 
   // 삼항이 다른 갈래를 고른 뒤 갈래 leaf의 구독을 옮긴다. 떠나는 갈래의 leaf(leavingLeaf)는 구독을 풀고 새로 고른
@@ -753,45 +728,21 @@ export class ExprInstancePool {
     }
   };
 
-  // 입력이 있는 계산 식을 다시 센 뒤 배열 인덱스가 바뀌어 읽는 leaf가 달라진 변수 자리만 구독을 옮긴다. 옛 배열
-  // (previousLeafOfVar)을 readLeaves로 되돌린 뒤 자리마다 resubscribeReadLeaf로 새 leafIndex를 기록한다.
-  //
-  // 건너뛸 부분식이 없는 식(cache가 null)은 옛 readLeaves를 그대로 둔다. 입력이 없는 같은 식을 다시 셀 때(run)도
-  // readLeaves를 고치지 않는다.
-  private resubscribeChangedVars = (exprInstanceIndex: number, previousLeafOfVar: number[]): void => {
-    const instance = this.pool.entries[exprInstanceIndex];
-    const leafOfVar = instance.readLeaves;
-    instance.readLeaves = previousLeafOfVar;
-    if (instance.cache === null) {
-      return;
+  // 입력이 있는 계산 식을 다시 센 뒤 읽는 leaf가 달라졌으면 구독을 옮긴다. 옛 readLeaves에만 있는 leaf는 구독을
+  // 풀고 새 readLeaves에만 있는 leaf는 구독한다. 읽는 leaf가 달라지는 식은 값 읽기 식(`LoadInput FieldAt ReadLeaf`)
+  // 뿐이다 - 입력인 주소 식이 새 leafIndex를 내면 다른 leaf를 읽는다.
+  //   rows[pivot].price의 값 읽기 식에서 pivot이 0 -> 1이면 readLeaves [40]이 [43]이 되어 40을 풀고 43에 건다.
+  private resubscribeChangedLeaves = (exprInstanceIndex: number, previousReadLeaves: number[]): void => {
+    const { readLeaves } = this.pool.entries[exprInstanceIndex];
+    for (const leafIndex of previousReadLeaves) {
+      if (leafIndex >= 0 && !readLeaves.includes(leafIndex)) {
+        this.unsubscribeDerive(leafIndex, exprInstanceIndex);
+      }
     }
-    const table = this.evaluator.skipTable(instance.globalExprIndex) as TExprSkipTable;
-    if (!table.hasIndexAccess) {
-      return;
-    }
-    for (let varNumber = 0; varNumber < leafOfVar.length; varNumber++) {
-      this.resubscribeReadLeaf(exprInstanceIndex, varNumber, leafOfVar[varNumber]);
-    }
-  };
-
-  // READ_LEAF 변수(varNumber) 하나가 읽는 leafIndex를 newLeafIndex로 옮긴다. 옛 leafIndex를 읽는 변수가
-  // 더 없으면 구독을 풀고, 새 leafIndex를 읽던 변수가 없었으면 구독한다. leafIndex가 그대로면 아무것도 하지 않는다.
-  //
-  // `${rows[cursor].score + rows[0].score}`에서 cursor가 1 -> 0이면 두 변수가 rows[0].score를 읽게 돼
-  // 구독은 그대로 하나다.
-  private resubscribeReadLeaf = (exprInstanceIndex: number, varNumber: number, newLeafIndex: number): void => {
-    const { readLeaves: leafOfVar } = this.pool.entries[exprInstanceIndex];
-    const oldLeafIndex = leafOfVar[varNumber];
-    if (oldLeafIndex === newLeafIndex) {
-      return;
-    }
-    const newAlreadyRead = leafOfVar.includes(newLeafIndex);
-    leafOfVar[varNumber] = newLeafIndex;
-    if (oldLeafIndex >= 0 && !leafOfVar.includes(oldLeafIndex)) {
-      this.unsubscribeDerive(oldLeafIndex, exprInstanceIndex);
-    }
-    if (!newAlreadyRead) {
-      this.subscribeDerive(newLeafIndex, exprInstanceIndex);
+    for (const leafIndex of readLeaves) {
+      if (leafIndex >= 0 && !previousReadLeaves.includes(leafIndex)) {
+        this.subscribeDerive(leafIndex, exprInstanceIndex);
+      }
     }
   };
 }

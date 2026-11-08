@@ -1145,6 +1145,7 @@
       "b": "B"
     }
   ],
+  "index_read_in_for": [{ "pivot": 0, "rows": [{ "price": 10 }, { "price": 20 }, { "price": 30 }] }],
   "lazy_res_if": [
     {
       "show": false
