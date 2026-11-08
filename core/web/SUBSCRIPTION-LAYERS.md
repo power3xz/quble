@@ -190,8 +190,8 @@ leaf에 기록하고 그 leaf를 `notify`한다. 가지가 붙는 것은 flush�
   인스턴스는 입력 식의 `level` 깊이 scope에서 공유하고, 그 값을 읽는 식 인스턴스(`outputInstances`)가 비고 든 가지 수가
   0이 되면 반납한다. 입력 leaf가 바뀌면 `markOutputInstances`가 활성 간선(삼항의 cond와 고른 갈래, 계산 식의 입력)을
   따라 위로 표시하고, flush의 pull은 가지가 든 인스턴스부터 세며 입력 인스턴스를 요청한다(docs/expr-graph.draft.md
-  "전파"). 남은 것은 둘이다. 발화 때 평가하는 payload/context 식은 식 인스턴스를 거치지 않아 삼항을 셀 수 없고,
-  `@if`는 아직 고르기 노드가 아니다. 파생 구독의 입력은 지금도 변수 leaf뿐이다.
+  "전파"). 발화 때 평가하는 payload/context 식은 식 인스턴스를 만들지 않고 같은 정적 그래프를 따라 한 번 센다
+  (`evaluateOnce`). 남은 것은 `@if`가 아직 고르기 노드가 아니라는 점이다. 파생 구독의 입력은 지금도 변수 leaf뿐이다.
 - **`[vm]`의 경계**: `vm.ts` 한 파일이 DOM 바인딩과 조립(식 인스턴스, 풀, store 연결)을 함께 맡는다.
 - **`scopeUid` 낭비**: `@for` 행과 `RENDER`마다 번호를 받지만 대부분의 행에는 공유하는 식이 없다.
 - **같은 깊이의 중복**: `forDepth`와 `level`이 같으면 같은 행 안에서 같은 식이 두 번 나와도 공유하지 않는다.
