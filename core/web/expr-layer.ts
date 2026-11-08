@@ -37,8 +37,9 @@ export type TExprInstance = {
   heldByBranchCount: number;
   // 입력 식의 인스턴스. evaluate가 처음 셀 때 만든다. 계산 식은 inputs[i]의 인스턴스, 삼항은 [cond, 참 갈래, 거짓
   // 갈래]이고, 삼항에서 잎과 상수 피연산자, 아직 고르지 않은 갈래 자리는 undefined다. 삼항은 피연산자가 모두 잎이어도
-  // 처음 셀 때 배열을 둔다. 입력이 없는 계산 식과 아직 세지 않은 인스턴스는 NO_INPUT_INSTANCES다.
-  inputInstances: readonly (number | undefined)[];
+  // 처음 셀 때 배열을 둔다. 입력이 없는 계산 식과 아직 세지 않은 인스턴스는 NO_INPUT_INSTANCES다. 처음 셀 때 빈 자리로
+  // 만들어 두고 입력을 연결하는 대로 채운다 - 연결하던 중 throw해도 이미 연결한 입력은 여기 있어 반납할 때 놓인다.
+  inputInstances: (number | undefined)[];
   // 계산 식이 셀 때 평가기에 넘기는 입력 값. inputValues[i]가 inputInstances[i]의 값이다. 입력이 없으면 NO_INPUT_VALUES다.
   inputValues: readonly unknown[];
   // 이 식 인스턴스를 입력으로 읽는 식 인스턴스. 한 식이 두 자리에서 읽으면(`x ? x : y`) 두 번 든다. 읽는 식이 없으면
@@ -56,8 +57,9 @@ const needsRecount = (instance: TExprInstance): boolean => instance.pendingVarMa
 // 공유 맵에 없다는 뜻. 식 인스턴스 번호를 돌려주는 findShared가 쓴다.
 export const NOT_SHARED = -1;
 
-// 입력 식이 없는 식 인스턴스의 inputInstances. 인스턴스마다 빈 배열을 만들지 않고 이것을 함께 쓴다.
-const NO_INPUT_INSTANCES: readonly (number | undefined)[] = [];
+// 입력 식이 없는 식 인스턴스의 inputInstances. 인스턴스마다 빈 배열을 만들지 않고 이것을 함께 쓴다. 자리를 채우지
+// 않는다 - 입력을 연결하기 전에 새 배열로 바꾼다.
+const NO_INPUT_INSTANCES: (number | undefined)[] = [];
 
 // 삼항 inputInstances의 자리.
 const COND_POSITION = 0;
@@ -376,19 +378,31 @@ export class ExprInstancePool {
     return value;
   };
 
+  // 방금 만든 식 인스턴스를 처음 센다. throw하면 인스턴스와 그때까지 연결한 입력 인스턴스를 반납하고 다시 throw한다.
+  // 아직 아무도 붙들지 않아 남겨 두면 반납되지 않고, 공유 맵에 올린 뒤라면 다음에 찾은 쪽이 세지 않은 값을 읽는다.
+  // 그래서 공유 맵에는 센 뒤에 올린다.
+  evaluateOrFree = (exprInstanceIndex: number): unknown => {
+    try {
+      return this.evaluate(exprInstanceIndex);
+    } catch (error) {
+      this.freeIfUnheld(exprInstanceIndex);
+      throw error;
+    }
+  };
+
   // 계산 식의 입력 식 인스턴스를 처음 셀 때 한 번 연결하고, 그 뒤로는 셀 때마다 요청한다. 셀 때마다 그 값을
   // inputValues에 담는다.
   //   #1 = base - #0, inputs [0]이면 inputInstances [#0의 인스턴스], inputValues [#0의 값]
   private linkCalcInputs = (exprInstanceIndex: number, inputs: readonly number[]): void => {
     const instance = this.pool.entries[exprInstanceIndex];
     if (instance.inputInstances === NO_INPUT_INSTANCES) {
-      instance.inputInstances = inputs.map((input) => this.linkInputInstance(exprInstanceIndex, input));
-    } else {
-      for (const input of instance.inputInstances) {
-        this.request(input as number);
-      }
+      instance.inputInstances = inputs.map(() => undefined);
     }
-    instance.inputValues = instance.inputInstances.map((input) => this.pool.entries[input as number].lastValue);
+    const linked = instance.inputInstances;
+    for (let i = 0; i < inputs.length; i++) {
+      linked[i] = this.requestOrLinkInput(exprInstanceIndex, inputs[i], linked[i]);
+    }
+    instance.inputValues = linked.map((input) => this.pool.entries[input as number].lastValue);
   };
 
   // 삼항을 센다. cond를 읽고, cond 값으로 고른 갈래만 읽는다. 식인 cond와 식인 갈래는 처음 읽을 때 인스턴스를
@@ -401,47 +415,43 @@ export class ExprInstancePool {
     exprInputs: Extract<TExprInputs, { kind: "ternary" }>,
   ): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
+    // 피연산자가 모두 잎이어도 처음 셀 때 배열을 둔다. run이 NO_INPUT_INSTANCES인지만 보고 입력이 있는 식을 가린다.
+    if (instance.inputInstances === NO_INPUT_INSTANCES) {
+      instance.inputInstances = [undefined, undefined, undefined];
+    }
     const linked = instance.inputInstances;
     const reads: number[] = [];
-    const condInstance = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.cond, linked[COND_POSITION]);
-    const cond = this.readOperand(instance, exprInputs.cond, condInstance, reads);
-    let thenInstance = linked[THEN_POSITION];
-    let elseInstance = linked[ELSE_POSITION];
-    let value: unknown;
-    if (cond) {
-      thenInstance = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.thenBranch, thenInstance);
-      value = this.readOperand(instance, exprInputs.thenBranch, thenInstance, reads);
-      instance.chosenPosition = THEN_POSITION;
-    } else {
-      elseInstance = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.elseBranch, elseInstance);
-      value = this.readOperand(instance, exprInputs.elseBranch, elseInstance, reads);
-      instance.chosenPosition = ELSE_POSITION;
-    }
-    // 피연산자가 모두 잎이어도 처음 셀 때 배열을 둔다. run이 NO_INPUT_INSTANCES인지만 보고 입력이 있는 식을 가린다.
-    if (
-      linked === NO_INPUT_INSTANCES ||
-      condInstance !== linked[COND_POSITION] ||
-      thenInstance !== linked[THEN_POSITION] ||
-      elseInstance !== linked[ELSE_POSITION]
-    ) {
-      instance.inputInstances = [condInstance, thenInstance, elseInstance];
-    }
+    linked[COND_POSITION] = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.cond, linked[COND_POSITION]);
+    const cond = this.readOperand(instance, exprInputs.cond, linked[COND_POSITION], reads);
+    const chosenPosition = cond ? THEN_POSITION : ELSE_POSITION;
+    const branch = cond ? exprInputs.thenBranch : exprInputs.elseBranch;
+    linked[chosenPosition] = this.requestOrLinkOperand(exprInstanceIndex, branch, linked[chosenPosition]);
+    const value = this.readOperand(instance, branch, linked[chosenPosition], reads);
+    instance.chosenPosition = chosenPosition;
     instance.readLeaves = uniqueLeavesOf(reads);
     return value;
   };
 
-  // 삼항 피연산자가 식이면 그 인스턴스 번호를 돌려준다. 이미 연결했으면(linkedInstance) 요청해 다시 셀 인스턴스면
-  // 세고, 아직이면 연결한다. 잎이나 상수면 undefined.
+  // 삼항 피연산자가 식이면 requestOrLinkInput으로 그 인스턴스 번호를 돌려준다. 잎이나 상수면 undefined.
   private requestOrLinkOperand = (
     exprInstanceIndex: number,
     operand: TRef,
     linkedInstance: number | undefined,
-  ): number | undefined => {
+  ): number | undefined =>
+    operand.tag === FV_EXPR ? this.requestOrLinkInput(exprInstanceIndex, operand.ref, linkedInstance) : undefined;
+
+  // 입력 식의 인스턴스 번호를 돌려준다. 이미 연결했으면(linkedInstance) 요청해 다시 셀 인스턴스면 세고, 아직이면
+  // 연결한다.
+  private requestOrLinkInput = (
+    exprInstanceIndex: number,
+    inputGlobalExprIndex: number,
+    linkedInstance: number | undefined,
+  ): number => {
     if (linkedInstance !== undefined) {
       this.request(linkedInstance);
       return linkedInstance;
     }
-    return operand.tag === FV_EXPR ? this.linkInputInstance(exprInstanceIndex, operand.ref) : undefined;
+    return this.linkInputInstance(exprInstanceIndex, inputGlobalExprIndex);
   };
 
   // 삼항 피연산자의 값. 상수는 상수풀, 식은 연결한 인스턴스의 값, 잎은 슬롯의 값이다. 잎이 store leaf면 reads에
@@ -463,7 +473,7 @@ export class ExprInstancePool {
 
   // 식 인스턴스(소비자)가 입력 식(inputGlobalExprIndex)의 인스턴스를 연결한다. 입력 인스턴스는 입력 식의 level 깊이
   // scope에 있고, 그 scope는 소비자 scope에서 부모를 (소비자 level - 입력 level)번 올라가 얻는다. 그 (식, scope)로
-  // 공유 중이면 요청해(쉬는 동안 표시가 남았으면 센다) 재사용하고, 없으면 만들어 공유 맵에 올리고 세고 구독을 건다.
+  // 공유 중이면 요청해(쉬는 동안 표시가 남았으면 센다) 재사용하고, 없으면 만들어 세고 공유 맵에 올리고 구독을 건다.
   // 어느 쪽이든 retainByExpr로 붙든다.
   //   @for (row of rows) { ${ok ? price * 2 : row.x} }에서 행의 삼항(level 1)이 price * 2(level 0)를 연결하면
   //   행 scope에서 한 번 올라간 root scope의 인스턴스 하나를 모든 행이 함께 쓴다.
@@ -477,8 +487,8 @@ export class ExprInstancePool {
     let input = this.findShared(inputGlobalExprIndex, inputScopeUid);
     if (input === NOT_SHARED) {
       input = this.create(inputGlobalExprIndex, pairs, inputScopeUid);
+      this.evaluateOrFree(input);
       this.markShared(input);
-      this.evaluate(input);
       this.subscribeInputs(input);
     } else {
       this.request(input);

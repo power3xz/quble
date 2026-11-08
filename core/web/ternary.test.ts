@@ -26,6 +26,7 @@ document.defaultView?.addEventListener("error", (e) => {
 // 픽스처 components/<fixture>.fixture.qubc의 첫 컴포넌트를 data로 그려, 클래스 cls인 요소들의 텍스트와 살아 있는 식
 // 인스턴스 수를 읽는 함수를 돌려준다. 루트 props는 늘 첫 컴포넌트(defs[0])의 props 타입으로 심기므로 경우마다
 // 픽스처를 따로 둔다. apply(act)는 픽스처의 apply 버튼을 눌러 APPLY 핸들러 안에서 act를 실행한다.
+// applyThrowing(act)은 같은 일을 하되 그 flush에서 식이 RangeError를 throw해야 한다.
 const render = (fixture: string, data: unknown, handlers: THandlers = {}) => {
   let act: (ctx: TCtx) => void = () => {};
   const inst = compile(buildFixture(fixture))(0)(data, {
@@ -33,15 +34,22 @@ const render = (fixture: string, data: unknown, handlers: THandlers = {}) => {
     APPLY: (_data, ctx) => act(ctx as unknown as TCtx),
   });
   const host = mount(inst);
+  const clickApply = (next: (ctx: TCtx) => void) => {
+    act = next;
+    handlerError = null;
+    (host.querySelector(".apply") as HTMLButtonElement).click();
+  };
   return {
     host,
     textsOf: (cls: string) => [...host.querySelectorAll(`.${cls}`)].map((el) => el.textContent),
     liveExprInstances: () => inst.exprInstances.entries.length - inst.exprInstances.free.length,
     apply: (next: (ctx: TCtx) => void) => {
-      act = next;
-      handlerError = null;
-      (host.querySelector(".apply") as HTMLButtonElement).click();
+      clickApply(next);
       assert.equal(handlerError, null);
+    },
+    applyThrowing: (next: (ctx: TCtx) => void) => {
+      clickApply(next);
+      assert.ok(handlerError instanceof RangeError);
     },
   };
 };
@@ -140,6 +148,38 @@ test("처음 고르는 식 갈래는 그때 인스턴스를 만든다", () => {
   apply((ctx) => ctx.set(ctx.props.ok, true));
   assert.deepEqual(textsOf("v"), ["1"]);
   assert.equal(liveExprInstances(), 2); // 삼항 하나, 참 갈래 하나
+});
+
+test("처음 고른 식 갈래가 throw하면 그 인스턴스를 반납해, 다시 고를 때 새로 센다", () => {
+  // 참 갈래 rows[cursor].x는 cursor 5가 범위 밖이라 처음 셀 때 RangeError다.
+  const { textsOf, liveExprInstances, apply, applyThrowing } = render("ternary_lazy", {
+    ok: false,
+    cursor: 5,
+    rows: [{ x: 1 }],
+  });
+  applyThrowing((ctx) => ctx.set(ctx.props.ok, true));
+  assert.equal(liveExprInstances(), 1, "삼항 하나 - 참 갈래는 반납했다");
+  apply((ctx) => ctx.set(ctx.props.cursor, 0));
+  apply((ctx) => ctx.set(ctx.props.ok, false));
+  apply((ctx) => ctx.set(ctx.props.ok, true));
+  assert.deepEqual(textsOf("v"), ["1"]);
+});
+
+test("입력을 연결하던 중 throw하면 이미 연결한 입력 인스턴스도 반납한다", () => {
+  // 바깥 삼항이 안쪽 삼항을 처음 셀 때 cond n > 0을 연결한 뒤 갈래 rows[cursor].x에서 RangeError다.
+  const { textsOf, liveExprInstances, apply, applyThrowing } = render("ternary_link_throw", {
+    a: false,
+    n: 1,
+    cursor: 5,
+    rows: [{ x: 1 }],
+  });
+  applyThrowing((ctx) => ctx.set(ctx.props.a, true));
+  assert.equal(liveExprInstances(), 1, "바깥 삼항 하나 - 안쪽 삼항과 그 cond, 갈래는 반납했다");
+  apply((ctx) => ctx.set(ctx.props.cursor, 0));
+  apply((ctx) => ctx.set(ctx.props.a, false));
+  apply((ctx) => ctx.set(ctx.props.a, true));
+  assert.deepEqual(textsOf("v"), ["1"]);
+  assert.equal(liveExprInstances(), 4); // 바깥 삼항, 안쪽 삼항, n > 0, rows[cursor].x
 });
 
 test("cond가 떠나는 갈래를 고르지 않게 바뀌면 그 갈래를 세지 않는다", () => {
