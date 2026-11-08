@@ -7,6 +7,7 @@ import {
   EXPR_FIELD_AT,
   EXPR_GT,
   EXPR_LOAD_ARRAY_LENGTH,
+  EXPR_LOAD_INPUT,
   EXPR_LOAD_SMALL_INT,
   EXPR_LOAD_STRING_LENGTH,
   EXPR_LOAD_TRUE,
@@ -130,6 +131,36 @@ test("READ_LEAF는 둘이 같은 칸을 읽을 수 있어도 명령마다 따로
   );
 });
 
+test("입력 식의 값을 올리는 명령(LOAD_INPUT)도 변수로 치고, 같은 입력 자리는 같은 변수다", () => {
+  // (a * b + #1) - (#0 + #1)   (#i는 i번 입력 식의 값)
+  //   위치  0          3          6    7            9    10           12           14   15
+  //         LOAD_VAR a LOAD_VAR b MUL  LOAD_INPUT 1 ADD  LOAD_INPUT 0 LOAD_INPUT 1 ADD  SUB
+  const table = tableOf(
+    bytes(
+      v(0),
+      v(1),
+      EXPR_MUL,
+      EXPR_LOAD_INPUT,
+      1,
+      EXPR_ADD,
+      EXPR_LOAD_INPUT,
+      0,
+      EXPR_LOAD_INPUT,
+      1,
+      EXPR_ADD,
+      EXPR_SUB,
+    ),
+  );
+  // a=0, b=1, #1=2, #0=3
+  assert.deepEqual(
+    table.varNumberToInstrPoses,
+    [[0], [3], [7, 12], [10]].map((p) => Uint8Array.from(p)),
+  );
+  assert.deepEqual(table.inputPositionToVarNumber, Uint8Array.from([3, 2]));
+  // #0만 바뀌면 a * b + #1(0~9)을 건너뛴다.
+  assert.deepEqual(table.varNumberToSkipPastOps[3], { 0: 9 });
+});
+
 test("칸을 읽는 명령을 변수로 묶어 번호를 매긴다", () => {
   const table = tableOf(MIXED);
   assert.deepEqual(
@@ -183,15 +214,13 @@ test("변수가 여러 위치에서 읽히면 모든 위치가 함께 바뀐 것
   assert.deepEqual(table.varNumberToSkipPastOps[2], { 0: 6 });
 });
 
-test("어느 변수가 바뀌어도 건너뛸 부분식이 없으면 표를 만들지 않는다", () => {
+test("어느 변수가 바뀌어도 건너뛸 부분식이 없어도 표를 만든다", () => {
   // a - b: 어느 쪽이 바뀌어도 식 전체를 다시 센다. 잎은 읽는 비용이 cache와 같아 건너뛰지 않는다.
-  assert.equal(buildSkipTable(bytes(v(0), v(1), EXPR_SUB)), null);
+  assert.deepEqual(tableOf(bytes(v(0), v(1), EXPR_SUB)).varNumberToSkipPastOps, [{}, {}]);
   // a > 50: 변수가 하나라 모든 연산이 그 변수를 품는다.
-  assert.equal(buildSkipTable(bytes(v(0), EXPR_LOAD_SMALL_INT, 50, EXPR_GT)), null);
+  assert.deepEqual(tableOf(bytes(v(0), EXPR_LOAD_SMALL_INT, 50, EXPR_GT)).varNumberToSkipPastOps, [{}]);
   // 연산이 없는 식
-  assert.equal(buildSkipTable(bytes(v(0))), null);
-  // (a + b) * (a - c): a가 바뀌면 건너뛸 것이 없지만 b가 바뀌면 a - c를 건너뛰어 표가 있다.
-  assert.notEqual(buildSkipTable(bytes(v(0), v(1), EXPR_ADD, v(0), v(2), EXPR_SUB, EXPR_MUL)), null);
+  assert.deepEqual(tableOf(bytes(v(0))).varNumberToSkipPastOps, [{}]);
 });
 
 test("서로 다른 변수가 같은 칸을 가리키면 위치를 합쳐 표를 만든다", () => {

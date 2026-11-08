@@ -99,7 +99,7 @@ export class ExprEvaluator {
     this.arrayPool = arrayPool;
   }
 
-  // 식 정의당 건너뛰기 표 하나. 같은 globalExprIndex면 같은 표를 돌려준다. 건너뛸 부분식이 없는 식은
+  // 식 정의당 건너뛰기 표 하나. 같은 globalExprIndex면 같은 표를 돌려준다. 변수가 32개를 넘는 식은
   // null이고, 그것도 담아 두어 다시 판정하지 않는다.
   skipTable = (globalExprIndex: number): TExprSkipTable | null => {
     let table = this.exprTables[globalExprIndex];
@@ -140,15 +140,17 @@ export class ExprEvaluator {
     return { value, varNumberToLeafIndex };
   };
 
-  // 식을 다시 센다. skipPastOps에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다.
+  // 식을 다시 센다. skipPastOps에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다. 실제로 실행한
+  // 읽기 명령의 leafIndex와 위치를 reads에 이어 붙인다(runExpr). 건너뛴 부분식 안의 명령은 넣지 않는다.
   reevalExpr = (
     expr: Uint8Array,
     pairs: TScope,
     table: TExprSkipTable,
     cache: unknown[],
     skipPastOps: TSkipPastOps,
+    reads: number[],
     inputValues: readonly unknown[],
-  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOps, null, inputValues);
+  ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOps, reads, inputValues);
 
   // 식을 후위 표기로 센다(BYTECODE.md #4 <EXPR>). evalExpr와 reevalExpr가 함께 쓰는 본체다.
   //
@@ -157,9 +159,10 @@ export class ExprEvaluator {
   //   - 잎 명령 위치 at에 skipPastOps[at]이 있으면, 그 연산까지를 계산하지 않고 cache에 든 그 연산의
   //     지난번 값을 올린 뒤 그 연산 다음 명령으로 간다.
   //   - 연산 결과는 cache[table.opInstrPosToCacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
-  //     건너뛸 부분식이 없는 식은 표도 cache도 없어(null) 쓰지 않는다.
+  //     표가 없는 식(변수가 32개를 넘는 식)은 cache도 없어(null) 쓰지 않는다.
   //   - reads가 있으면 store 칸을 읽을 때마다 leafIndex와 읽은 명령의 위치를 이어 붙인다. a + b에서
-  //     a, b가 칸 20, 21이면 [20, 0, 21, 3]. 다시 셀 때는 구독이 이미 걸려 있어 null을 넘긴다.
+  //     a, b가 칸 20, 21이면 [20, 0, 21, 3]. 식 층이 읽은 leaf를 구독하고, 다시 센 뒤 읽은 leaf가 바뀌었으면
+  //     구독을 옮기는 데 쓴다.
   //   - inputValues[i]는 식의 inputs[i]번 입력 식의 값이다. 식 층이 세기 전에 모아 넘기고, LOAD_INPUT i가
   //     그 값을 올린다. store 칸을 읽지 않아 reads에 넣지 않는다.
   runExpr = (

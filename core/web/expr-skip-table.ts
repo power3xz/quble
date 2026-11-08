@@ -1,6 +1,7 @@
 import {
   arityOf,
   EXPR_LOAD_ARRAY_LENGTH,
+  EXPR_LOAD_INPUT,
   EXPR_LOAD_STRING_LENGTH,
   EXPR_LOAD_VAR,
   EXPR_READ_LEAF,
@@ -59,6 +60,8 @@ export type TExprSkipTable = {
   //     칸을 읽어 같은 변수이고, LOAD_ARRAY_LENGTH a는 a 배열의 길이 칸을 읽어 다른 변수다.
   //   - READ_LEAF(배열 인덱스 접근 a[i].b에서 요소 칸을 읽는 명령)는 하나하나가 따로 변수다. 어느
   //     칸을 읽는지는 i에 따라 실행 중에 정해지지만, 읽는 명령의 위치는 바이트에 고정돼 있다.
+  //   - LOAD_INPUT(입력 식의 값을 올리는 명령)도 변수다. 칸을 읽지 않지만, 입력 식의 값이 바뀌면 칸이
+  //     바뀐 것처럼 그 입력을 품지 않은 부분식을 건너뛴다. 같은 입력 자리를 읽으면 같은 변수다.
   //
   // 위 식에서 a=0, b=1, c=2, d=3, e=4.
   // 변수 번호 -> 그 변수를 읽는 위치들(오름차순). [[0], [3], [7], [11], [14]]
@@ -66,6 +69,10 @@ export type TExprSkipTable = {
   // 읽는 명령의 위치 -> 변수 번호. 0 -> 0, 3 -> 1, 7 -> 2, 11 -> 3, 14 -> 4. 런타임이 식을 세며
   // 어느 칸을 어느 변수가 읽었는지 모을 때 쓴다.
   instrPosToVarNumber: Uint8Array;
+  // 입력 자리(LOAD_INPUT의 operand, 식의 inputs 순번) -> 변수 번호. 입력 식의 값이 바뀌면 식 층이 이
+  // 번호의 비트를 켠다. 입력 자리와 변수 번호는 식에 나오는 순서에 따라 어긋난다 - #0 + a + #1이면
+  // 변수는 #0=0, a=1, #1=2라 [0, 2]다.
+  inputPositionToVarNumber: Uint8Array;
   // 변수 번호 -> 그 변수가 바뀌었을 때의 skipPastOps. 변수가 식에 여러 번 나오면 그 위치들이 함께
   // 바뀐 것으로 본다. c(2)는 { 0: 6, 11: 17 }.
   varNumberToSkipPastOps: TSkipPastOps[];
@@ -75,25 +82,32 @@ export type TExprSkipTable = {
   varMaskToSkipPastOps: Map<number, TSkipPastOps>;
 };
 
-// store 칸을 읽는 명령인가. 이 명령들만 변수로 묶는다. LOAD_CONST, LOAD_SMALL_INT, LOAD_TRUE,
-// LOAD_FALSE는 값이 바이트에 박혀 있어 바뀌지 않는다.
+// 변수로 묶는 명령인가 - store 칸을 읽는 명령과 입력 식의 값을 올리는 LOAD_INPUT. LOAD_CONST,
+// LOAD_SMALL_INT, LOAD_TRUE, LOAD_FALSE는 값이 바이트에 박혀 있어 바뀌지 않는다.
 const readsCell = (opcode: number) =>
   opcode === EXPR_LOAD_VAR ||
   opcode === EXPR_LOAD_STRING_LENGTH ||
   opcode === EXPR_LOAD_ARRAY_LENGTH ||
-  opcode === EXPR_READ_LEAF;
+  opcode === EXPR_READ_LEAF ||
+  opcode === EXPR_LOAD_INPUT;
 
-// varKey가 같으면 같은 변수다. 슬롯을 읽는 명령(LOAD_VAR, LOAD_STRING_LENGTH, LOAD_ARRAY_LENGTH)에만
-// 쓴다. 같은 슬롯이라도 값 칸과 길이 칸은 다른 변수라 칸 종류까지 넣는다.
+// varKey가 같으면 같은 변수다. 슬롯을 읽는 명령(LOAD_VAR, LOAD_STRING_LENGTH, LOAD_ARRAY_LENGTH)과
+// LOAD_INPUT에 쓴다. 같은 슬롯이라도 값 칸과 길이 칸은 다른 변수라 칸 종류까지 넣는다.
 //
 // 칸 종류, scope_index, offset을 한 바이트씩 이어 붙인다: 종류 << 16 | scope << 8 | offset
 //   LOAD_VAR           scope 0, offset 2  -> 0x00_00_02    a의 값 칸
 //   LOAD_STRING_LENGTH scope 0, offset 2  -> 0x00_00_02    문자열 길이는 값 칸을 읽어 위와 같다
 //   LOAD_ARRAY_LENGTH  scope 0, offset 2  -> 0x01_00_02    배열 길이는 길이 칸을 읽어 다르다
 //   LOAD_VAR           scope 1, offset 2  -> 0x00_01_02    scope가 달라 다르다
+// LOAD_INPUT은 operand가 입력 자리 하나라 종류 << 16 | 입력 자리다.
+//   LOAD_INPUT         입력 자리 1        -> 0x02_00_01
 const VALUE_CELL = 0;
 const LENGTH_CELL = 1;
+const INPUT = 2;
 const varKey = (expr: Uint8Array, pc: number) => {
+  if (expr[pc] === EXPR_LOAD_INPUT) {
+    return (INPUT << 16) | expr[pc + 1];
+  }
   const cell = expr[pc] === EXPR_LOAD_ARRAY_LENGTH ? LENGTH_CELL : VALUE_CELL;
   return (cell << 16) | (expr[pc + 1] << 8) | expr[pc + 2];
 };
@@ -101,23 +115,22 @@ const varKey = (expr: Uint8Array, pc: number) => {
 // 바뀐 변수 조합을 비트마스크로 다루므로 표를 만들 수 있는 변수 수의 상한이다.
 const MAX_VARS = 32;
 
-// 어느 변수가 바뀌어도 건너뛸 부분식이 없으면 null이다. 런타임은 그런 식을 cache 없이 처음부터
-// 다시 센다.
-//   a - b     어느 쪽이 바뀌어도 a - b 전체를 다시 센다
-//   big > 50  변수가 big 하나라 모든 연산이 big을 품는다
-// 서로 다른 변수가 같은 칸을 가리켜 함께 바뀌어도 바뀐 위치가 늘 뿐이라 여전히 건너뛸 것이 없다.
-// 변수가 32개를 넘는 식도 null이다. 바뀐 변수를 번호를 비트로 모은 32비트 정수로 다루기 때문이다.
+// 어느 변수가 바뀌어도 건너뛸 부분식이 없는 식(a - b, big > 50)도 표를 만든다. 그 표의 skipPastOps는
+// 모두 비어 처음부터 센다. 식 층이 계산 식의 읽은 leaf를 늘 변수 순서로 두려고 instrPosToVarNumber가
+// 필요하다.
+// 변수가 32개를 넘는 식만 null이다. 바뀐 변수를 번호를 비트로 모은 32비트 정수로 다루기 때문이다.
 export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
   const len = expr.length;
   const sameStartOpChain = new Uint8Array(len).fill(CHAIN_END);
   const opInstrPosToCacheIndex = new Uint8Array(len);
   const instrPosToVarNumber = new Uint8Array(len);
+  const inputPositionToVarNumber: number[] = [];
   const positions: number[][] = [];
   let opCount = 0;
 
   // pc의 명령이 읽는 칸의 변수 번호. 처음 나온 칸이면 새 번호를 준다.
   //   READ_LEAF는 읽는 칸이 실행 중에 정해져 서로 비교할 수 없으므로 늘 새 번호다.
-  //   슬롯을 읽는 명령은 varKey가 같으면 같은 번호다.
+  //   슬롯을 읽는 명령과 LOAD_INPUT은 varKey가 같으면 같은 번호다.
   const varNumberByKey = new Map<number, number>();
   const newVar = () => {
     positions.push([]);
@@ -161,6 +174,9 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
       const varNumber = varNumberOf(pc);
       positions[varNumber].push(pc);
       instrPosToVarNumber[pc] = varNumber;
+      if (opcode === EXPR_LOAD_INPUT) {
+        inputPositionToVarNumber[expr[pc + 1]] = varNumber;
+      }
     }
 
     const arity = arityOf(opcode);
@@ -187,13 +203,11 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     opCount,
     varNumberToInstrPoses: positions.map((p) => Uint8Array.from(p)),
     instrPosToVarNumber,
+    inputPositionToVarNumber: Uint8Array.from(inputPositionToVarNumber),
     varNumberToSkipPastOps: [],
     varMaskToSkipPastOps: new Map(),
   };
   table.varNumberToSkipPastOps = table.varNumberToInstrPoses.map((p) => buildSkipPastOps(table, expr, p));
-  if (table.varNumberToSkipPastOps.every((skipPastOp) => Object.keys(skipPastOp).length === 0)) {
-    return null;
-  }
   return table;
 };
 

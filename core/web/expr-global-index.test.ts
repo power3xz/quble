@@ -19,8 +19,12 @@ before(() => {
 
 const load = (slot: number) => [EXPR_LOAD_VAR, slot, 0];
 
-// a + b. 건너뛸 부분식이 없어 표가 null이다.
+// a + b
 const sum = () => new Uint8Array([...load(0), ...load(1), EXPR_ADD]);
+
+// 슬롯 0~32를 모두 더하는 식. 변수가 33개라 바뀐 변수를 32비트 마스크로 담지 못해 표가 null이다.
+const sumOf33 = () =>
+  new Uint8Array([...load(0), ...Array.from({ length: 32 }, (_, i) => [...load(i + 1), EXPR_ADD]).flat()]);
 
 // (a + b) * (c - d). 건너뛸 부분식이 있어 표가 있다.
 const product = () => new Uint8Array([...load(0), ...load(1), EXPR_ADD, ...load(2), ...load(3), EXPR_SUB, EXPR_MUL]);
@@ -59,8 +63,8 @@ test("skipTable은 같은 globalExprIndex에 같은 표를 돌려준다", () => 
   assert.equal(evaluator.skipTable(1), table);
 });
 
-test("건너뛸 부분식이 없는 식의 skipTable은 null이다", () => {
-  const evaluator = evaluatorOf([sum(), product()]);
+test("변수가 32개를 넘는 식의 skipTable은 null이다", () => {
+  const evaluator = evaluatorOf([sumOf33()]);
   assert.equal(evaluator.skipTable(0), null);
   assert.equal(evaluator.skipTable(0), null, "다시 물어도 같다");
 });

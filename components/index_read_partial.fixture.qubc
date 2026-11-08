@@ -1,0 +1,6 @@
+component IndexReadPartial {
+  props { a: number, b: number, pivot: number, rows: { price: number }[] }
+  template {
+    p(class="v") { ${a * b + rows[pivot].price} }
+  }
+}

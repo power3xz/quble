@@ -1146,6 +1146,7 @@
     }
   ],
   "index_read_in_for": [{ "pivot": 0, "rows": [{ "price": 10 }, { "price": 20 }, { "price": 30 }] }],
+  "index_read_partial": [{ "a": 2, "b": 3, "pivot": 0, "rows": [{ "price": 10 }, { "price": 20 }] }],
   "lazy_res_if": [
     {
       "show": false
