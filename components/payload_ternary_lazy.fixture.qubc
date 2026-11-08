@@ -1,0 +1,9 @@
+component PayloadTernaryLazy {
+  props { open: bool, cursor: number, rows: { x: number }[] }
+  events {
+    PICK({ x: open ? rows[cursor].x : 0 })
+  }
+  template {
+    button(class="pick" @click:PICK) { "pick" }
+  }
+}

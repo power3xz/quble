@@ -36,7 +36,7 @@ import {
   type TType,
 } from "./decode.ts";
 import { ATTRS, DOM_EVENTS, setAttributeSafely } from "./dom-tables.ts";
-import { ExprEvaluator, NO_INPUT_VALUES, SKIP_NOTHING } from "./expr-eval.ts";
+import { ExprEvaluator } from "./expr-eval.ts";
 import { LABEL_ELSE, LABEL_THEN } from "./expr-graph.ts";
 import { ExprInstancePool, NOT_SHARED } from "./expr-layer.ts";
 import { exprLevelsOf } from "./expr-level.ts";
@@ -455,10 +455,10 @@ export const plantRoot = (module: TModule, rootValue: unknown, arrayPool: Pool<T
 };
 
 // 발생 시점에 조립할 준비물(payload/컨텍스트 공용) - field.refs를 바인딩 때 flat sourcePairs로 미리 푼 것.
-// 식 필드는 식 바이트와 바인딩 때의 슬롯을 들고 발생 시점에 평가한다.
+// 식 필드는 식의 globalExprIndex와 바인딩 때의 슬롯을 들고 발생 시점에 평가한다.
 type TAssembled =
   | { name: string; typeRef: number; fieldSourcePairs: number[] }
-  | { name: string; typeRef: number; expr: Uint8Array; pairs: TScope };
+  | { name: string; typeRef: number; globalExprIndex: number; pairs: TScope };
 // 핸들러 맵(fullName -> 핸들러). 핸들러 인자 계약은 dispatchBinding이 조립해 넘긴다.
 export type THandlers = Record<
   string,
@@ -1043,8 +1043,8 @@ export class VM {
   toAssembled = (compId: number, field: TFieldEntry, argumentSourcePairs: TScope): TAssembled => {
     const name = this.module.constpool[field.nameConstIndex] as string;
     if (field.ref.tag === FV_EXPR) {
-      const expr = this.module.defs[compId].exprBytecodes[field.ref.ref];
-      return { name, typeRef: field.typeRef, expr, pairs: argumentSourcePairs };
+      const globalExprIndex = this.globalExprIndexOf(compId, field.ref.ref);
+      return { name, typeRef: field.typeRef, globalExprIndex, pairs: argumentSourcePairs };
     }
     const leafCount = leafCountOf(this.module, field.typeRef);
     return {
@@ -1054,14 +1054,14 @@ export class VM {
     };
   };
 
-  // 발생 시점에 필드 하나의 값을 낸다. 식 필드는 여기서 평가한다 - 결과가 원시면 그 값,
-  // 객체/배열이면 그 시작 leafIndex부터 조립한다.
+  // 발생 시점에 필드 하나의 값을 낸다. 식 필드는 여기서 식 인스턴스 없이 한 번 센다(evaluateOnce) - 결과가 원시면
+  // 그 값, 객체/배열이면 그 시작 leafIndex부터 조립한다.
   assembledValue = (p: TAssembled): unknown => {
     const steps = compiledStepsOf(this.module, p.typeRef);
-    if (!("expr" in p)) {
+    if (!("globalExprIndex" in p)) {
       return assemble(steps, p.fieldSourcePairs, this.store, this.module, this.arrayPool);
     }
-    const result = this.evaluator.runExpr(p.expr, p.pairs, null, null, SKIP_NOTHING, null, NO_INPUT_VALUES);
+    const result = this.exprInstancePool.evaluateOnce(p.globalExprIndex, p.pairs);
     if (this.module.types[p.typeRef].tag === "scalar") {
       return result;
     }

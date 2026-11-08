@@ -487,6 +487,35 @@ export class ExprInstancePool {
     return input;
   };
 
+  // 식(globalExprIndex)을 인스턴스 없이 pairs로 한 번 센다. 구독하지 않고 store에 쓰지 않는다. 삼항은 cond를 센 뒤
+  // 고른 갈래만 세고, 입력이 있는 계산 식은 입력 식을 먼저 같은 방식으로 세어 inputValues로 넘긴다. 발화 때 payload와
+  // context 값을 낼 때 VM이 호출한다 - 그 값은 발화 순간 한 번만 필요해 구독으로 최신을 유지하지 않는다.
+  //   n - (open ? n : 0) 에서 open이 false면 삼항이 거짓 갈래 0을 내고, 계산 식이 inputValues [0]으로 n - 0을 센다.
+  evaluateOnce = (globalExprIndex: number, pairs: TScope): unknown => {
+    const exprInputs = this.exprInputs[globalExprIndex];
+    if (exprInputs.kind === "ternary") {
+      const cond = this.readOperandOnce(exprInputs.cond, pairs);
+      return this.readOperandOnce(cond ? exprInputs.thenBranch : exprInputs.elseBranch, pairs);
+    }
+    const inputValues =
+      exprInputs.inputs.length === 0
+        ? NO_INPUT_VALUES
+        : exprInputs.inputs.map((input) => this.evaluateOnce(input, pairs));
+    const expr = this.evaluator.exprBytes[globalExprIndex];
+    return this.evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, null, inputValues);
+  };
+
+  // evaluateOnce가 삼항 피연산자의 값을 낸다. 상수는 상수풀, 식은 evaluateOnce로 센 값, 잎은 슬롯의 값이다.
+  private readOperandOnce = (operand: TRef, pairs: TScope): unknown => {
+    if (operand.tag === FV_CONST) {
+      return this.evaluator.constpool[operand.ref];
+    }
+    if (operand.tag === FV_EXPR) {
+      return this.evaluateOnce(operand.ref, pairs);
+    }
+    return this.evaluator.slotValue(pairs, operand.ref, operand.offset, 0, null);
+  };
+
   // 식 인스턴스의 직전 값. 공유 중인 인스턴스를 찾은 VM이 읽는다 - 입력으로만 쓰이던 인스턴스는 결과 leaf가 없다.
   valueOf = (exprInstanceIndex: number): unknown => this.pool.entries[exprInstanceIndex].lastValue;
 

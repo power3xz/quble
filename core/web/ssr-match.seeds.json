@@ -1259,6 +1259,7 @@
       "open": true
     }
   ],
+  "payload_ternary_lazy": [{ "open": false, "cursor": 5, "rows": [{ "x": 1 }] }],
   "props_beyond_payload": [
     {
       "label": "제목",
