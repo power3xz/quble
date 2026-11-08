@@ -328,7 +328,7 @@ export class ExprInstancePool {
 
   // 삼항과 입력이 있는 계산 식을 evaluate로 처음부터 다시 센다. 세기 전에 pendingVarMask와 inputMarked를 지운다.
   // evaluate가 연결한 입력 인스턴스를 먼저 요청해 이번 flush의 값으로 만든다. 부분 재평가를 하지 않는 이유는
-  // LoadInput이 leafOfVar에 자리가 없어 건너뛰기 표가 바뀐 입력을 모르기 때문이다. 다시 센 뒤 읽는 leaf가 바뀌었으면
+  // LoadInput이 varNumberToLeafIndex에 자리가 없어 건너뛰기 표가 바뀐 입력을 모르기 때문이다. 다시 센 뒤 읽는 leaf가 바뀌었으면
   // 구독을 옮긴다. 바뀌는 때는 삼항이 다른 갈래를 골랐을 때와 값 읽기 식이 다른 요소를 읽을 때뿐이다. 삼항은 갈래를
   // 바꿨을 때만 견주고, 떠나는 갈래의 leaf 하나만 기억해 두면 된다 - 새 갈래의 leaf는 세고 나면 readLeaves의 고른
   // 자리에 있다. 계산 식은 옛 readLeaves와 새 readLeaves를 견준다.
@@ -379,7 +379,7 @@ export class ExprInstancePool {
       const table = this.evaluator.skipTable(globalExprIndex) as TExprSkipTable;
       const evaluated = this.evaluator.evalExpr(expr, pairs, table, cache, instance.inputValues);
       value = evaluated.value;
-      instance.readLeaves = evaluated.leafOfVar;
+      instance.readLeaves = evaluated.varNumberToLeafIndex;
     }
     instance.lastValue = value;
     return value;
@@ -705,7 +705,7 @@ export class ExprInstancePool {
     // 표를 만든다(부모가 같은 칸을 두 prop으로 넘긴 경우도 여기다).
     const skipPastOps =
       (changedVarMask & (changedVarMask - 1)) === 0
-        ? table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)]
+        ? table.varNumberToSkipPastOps[31 - Math.clz32(changedVarMask)]
         : buildSkipPastOpsOfVars(table, expr, changedVarMask);
     const value = this.evaluator.reevalExpr(expr, pairs, table, cache, skipPastOps, NO_INPUT_VALUES);
     instance.lastValue = value;

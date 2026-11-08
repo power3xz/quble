@@ -108,7 +108,7 @@ store의 leaf 배치다. rows 필드 leaf에는 요소가 아니라 arrayInfoInd
 |---|---|---|---|---|
 | cache | 2 | 3 | 10 | 20 |
 
-**reads** - 읽은 leaf와 읽은 명령의 위치. 처음 셀 때만 모은다. 여기서 변수마다 읽은 leaf(`leafOfVar`)가
+**reads** - 읽은 leaf와 읽은 명령의 위치. 처음 셀 때만 모은다. 여기서 변수마다 읽은 leaf(`varNumberToLeafIndex`)가
 나온다. 못 읽은 변수(범위 밖 에러로 식이 중간에 멈춘 경우)는 -1이다.
 
 | 읽은 leaf | 0 | 1 | 3 |
@@ -148,7 +148,7 @@ leaf 2, 3을 조립해 `{ title: "A", score: 10 }`을 넘긴다.
 | 명령 | `a` | `b` | ADD | `c` | `d` | SUB | MUL |
 | c가 바뀌면 | 건너뜀 | 건너뜀 | cache 값을 올림 | 읽음 | 읽음 | 계산 | 계산 |
 
-건너뛸 곳은 변수마다 미리 정해 둔다(`skipPastOpsByVar`). 키는 부분식이 시작하는 잎 위치, 값은 그
+건너뛸 곳은 변수마다 미리 정해 둔다(`varNumberToSkipPastOps`). 키는 부분식이 시작하는 잎 위치, 값은 그
 부분식의 끝 연산 위치다.
 
 | 바뀐 변수 | 건너뛸 표 | 건너뛰는 부분식 |
@@ -194,10 +194,10 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 
 | 무엇 | 사용처 |
 |---|---|
-| `skipPastOpsByVar` | 변수마다 건너뛸 표 |
-| `skipPastOpsByVarSet` | 둘 이상의 변수가 함께 바뀔 때의 표. 바뀐 변수 조합이 처음 나올 때 만들어 담는다(4절) |
-| `cacheIndex`, `opCount` | 연산 위치 -> cache 칸 번호, 연산 수 |
-| `positionsByVar`, `varAt` | 변수 -> 읽는 위치, 위치 -> 변수. 처음 셀 때 어느 leaf를 어느 변수가 읽었는지 모은다 |
+| `varNumberToSkipPastOps` | 변수마다 건너뛸 표 |
+| `varMaskToSkipPastOps` | 둘 이상의 변수가 함께 바뀔 때의 표. 바뀐 변수 조합이 처음 나올 때 만들어 담는다(4절) |
+| `opInstrPosToCacheIndex`, `opCount` | 연산 위치 -> cache 칸 번호, 연산 수 |
+| `varNumberToInstrPoses`, `instrPosToVarNumber` | 변수 -> 읽는 위치, 위치 -> 변수. 처음 셀 때 어느 leaf를 어느 변수가 읽었는지 모은다 |
 | `readLeafIndexOpsByVar` | 인덱스 접근의 구독을 다시 건다(5절) |
 | `sameStartOpChain` | 위의 표를 만들 때만 사용한다 |
 
@@ -207,7 +207,7 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 |---|---|
 | cache | 연산 수 |
 | 구독 함수 | 하나(4절) |
-| `leafOfVar` | 변수 수. 변수마다 읽는 leafIndex |
+| `varNumberToLeafIndex` | 변수 수. 변수마다 읽는 leafIndex |
 | 지난번 결과 | 값 하나. 바뀐 leaf를 읽는 변수가 없을 때 그대로 돌려준다 |
 
 인스턴스는 leaf 기준(leaf마다 읽는 변수 목록과 건너뛸 표)이 아니라 변수 기준으로 든다. 변수 수는 식
@@ -246,13 +246,13 @@ leaf마다 함수를 따로 두면 많은 행에서 함수가 수만 개 늘어,
 부모가 x, y로 같은 leaf 23을 넘기면
 
 ```
-leafOfVar   [23, 23]    x, y
+varNumberToLeafIndex   [23, 23]    x, y
 ```
 
 leaf 23은 한 번만 구독한다. leaf 23이 바뀌면 x, y가 함께 바뀌므로, 두 변수를 하나도 품지 않은 부분식의
 표를 쓴다(아래 "한 flush에서 읽는 leaf 여럿이 바뀔 때"와 같은 표다).
 
-**한 flush에서 읽는 leaf 여럿이 바뀔 때** - 함수가 받은 `changedLeaves`에서 `leafOfVar`로 식이 읽는 변수를
+**한 flush에서 읽는 leaf 여럿이 바뀔 때** - 함수가 받은 `changedLeaves`에서 `varNumberToLeafIndex`로 식이 읽는 변수를
 모두 모아, 그 변수들을 하나도 품지 않은 부분식만 건너뛰며 한꺼번에 센다. 구독 층이 함수를 flush마다 한
 번만 호출하므로 같은 flush에서 다시 세는 일은 없다.
 
@@ -262,10 +262,10 @@ a와 c가 함께 바뀌면            { 11: 17 }   d + e(위치 11~17)만 건너
 a와 d가 함께 바뀌면            {}           건너뛸 부분식이 없어 처음부터 센다
 ```
 
-변수마다의 표(`skipPastOpsByVar`)를 합친 것이다. 바뀐 변수는 변수 번호를 비트로 모은 정수(a=0, c=2가
+변수마다의 표(`varNumberToSkipPastOps`)를 합친 것이다. 바뀐 변수는 변수 번호를 비트로 모은 정수(a=0, c=2가
 바뀌면 `0b101`)로 다루고, 같은 식을 쓰는 모든 인스턴스가 조합이 같으면 같은 표를 쓰므로
-`skipPastOpsByVarSet`에 그 정수를 키로 담아 둔다. 조합이 처음 나올 때 한 번만 계산한다. 행마다 하는
-일은 `leafOfVar`를 훑어 정수를 만드는 것과 표를 찾는 것뿐이라 배열을 만들지 않는다. 변수가 32개를
+`varMaskToSkipPastOps`에 그 정수를 키로 담아 둔다. 조합이 처음 나올 때 한 번만 계산한다. 행마다 하는
+일은 `varNumberToLeafIndex`를 훑어 정수를 만드는 것과 표를 찾는 것뿐이라 배열을 만들지 않는다. 변수가 32개를
 넘는 식은 정수에 담을 수 없어 표를 만들지 않고(`buildSkipTable`이 `null`), 처음부터 센다.
 
 **가지를 떼고 붙일 때** - 파생 구독은 가지가 아니라 식 인스턴스가 든다. 가지는 식 인스턴스 번호만 들고,
@@ -278,7 +278,7 @@ branch.updateFns             [fn]           그 leaf의 통지 구독 함수
 branch.exprInstanceIndices   [2 ]           식 인스턴스 번호
                               |
                               v
-식 인스턴스 2의 leafOfVar     [0, 1, 3]      파생 구독을 걸 입력 leaf (rows, cursor, score)
+식 인스턴스 2의 varNumberToLeafIndex     [0, 1, 3]      파생 구독을 걸 입력 leaf (rows, cursor, score)
 ```
 
 - 가지를 떼면 통지 구독을 푼다. 식 인스턴스는 그 인스턴스를 든 가지가 모두 떨어졌을 때 입력 leaf의
@@ -287,7 +287,7 @@ branch.exprInstanceIndices   [2 ]           식 인스턴스 번호
   넘겨 함수를 한 번 호출해 풀린 동안 놓친 값을 따라잡는다. 바뀐 변수를 한꺼번에 세는 것은 "한 flush에서 읽는
   leaf 여럿이 바뀔 때"와 같다.
 
-따라잡는 호출이 인덱스 접근의 구독을 다시 걸면 `leafOfVar`가 바뀐다. 그래서 `attach`는 호출하기 전에 입력
+따라잡는 호출이 인덱스 접근의 구독을 다시 걸면 `varNumberToLeafIndex`가 바뀐다. 그래서 `attach`는 호출하기 전에 입력
 leaf를 모아 둔다. 함수가 받은 leaf를 읽는 변수가 없으면 지난번 결과를 그대로 돌려준다.
 
 ## 5. 인덱스 접근과 구독 다시 걸기
@@ -319,7 +319,7 @@ leaf를 모아 둔다. 함수가 받은 leaf를 읽는 변수가 없으면 지�
 1. cursor 변수의 건너뛸 표로 다시 센다. `cache[FIELD_AT]`이 5가 된다.
 2. `readLeafIndexOpsByVar[cursor]`가 `[7]`이다.
 3. `cache[FIELD_AT(7)]`의 5가 `READ_LEAF`가 방금 읽은 leafIndex다.
-4. `resubscribeReadLeaf`가 `leafOfVar[READ_LEAF]`의 3과 5를 비교한다. 다르므로 5로 바꾸고
+4. `resubscribeReadLeaf`가 `varNumberToLeafIndex[READ_LEAF]`의 3과 5를 비교한다. 다르므로 5로 바꾸고
    - 3을 읽는 변수가 더 없으니 3의 구독을 푼다.
    - 5는 처음 읽으니 5에 구독을 건다.
 

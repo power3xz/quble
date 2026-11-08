@@ -110,7 +110,7 @@ export class ExprEvaluator {
     return table;
   };
 
-  // 식을 처음부터 센다. 값과 함께, 변수(expr-skip-table.ts)마다 읽은 leafIndex(leafOfVar)를 낸다.
+  // 식을 처음부터 센다. 값과 함께, 변수(expr-skip-table.ts)마다 읽은 leafIndex(varNumberToLeafIndex)를 낸다.
   // 연산 결과는 cache에 써 둔다.
   //
   // 읽은 leafIndex는 구독할 칸이다. 세어 보지 않고는 알 수 없어 값과 함께 나온다 - 인덱스 접근은
@@ -118,9 +118,9 @@ export class ExprEvaluator {
   // 변수는 -1이다.
   //
   // ((a + b) * c) - (d + e)에서 a~e가 leafIndex 20~24를 읽는 인스턴스
-  //   leafOfVar [20, 21, 22, 23, 24]
+  //   varNumberToLeafIndex [20, 21, 22, 23, 24]
   // 부모가 d와 e에 같은 칸 23을 넘긴 인스턴스
-  //   leafOfVar [20, 21, 22, 23, 23]
+  //   varNumberToLeafIndex [20, 21, 22, 23, 23]
   //
   // leaf 기준(leaf마다 읽는 변수 목록)이 아니라 변수 기준이라, 길이가 식 정의로 정해져 처음부터 맞게
   // 잡는다. 빈 배열에 push로 채우면 V8이 늘어날 몫까지 잡아 1만 행에서 쓰지 않는 용량이 크게 남는다.
@@ -130,14 +130,14 @@ export class ExprEvaluator {
     table: TExprSkipTable,
     cache: unknown[],
     inputValues: readonly unknown[],
-  ): { value: unknown; leafOfVar: number[] } => {
+  ): { value: unknown; varNumberToLeafIndex: number[] } => {
     const reads: number[] = [];
     const value = this.runExpr(expr, pairs, table, cache, SKIP_NOTHING, reads, inputValues);
-    const leafOfVar: number[] = new Array(table.positionsByVar.length).fill(-1);
+    const varNumberToLeafIndex: number[] = new Array(table.varNumberToInstrPoses.length).fill(-1);
     for (let i = 0; i < reads.length; i += 2) {
-      leafOfVar[table.varAt[reads[i + 1]]] = reads[i];
+      varNumberToLeafIndex[table.instrPosToVarNumber[reads[i + 1]]] = reads[i];
     }
-    return { value, leafOfVar };
+    return { value, varNumberToLeafIndex };
   };
 
   // 식을 다시 센다. skipPastOps에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다.
@@ -156,7 +156,7 @@ export class ExprEvaluator {
   //
   //   - 잎 명령 위치 at에 skipPastOps[at]이 있으면, 그 연산까지를 계산하지 않고 cache에 든 그 연산의
   //     지난번 값을 올린 뒤 그 연산 다음 명령으로 간다.
-  //   - 연산 결과는 cache[table.cacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
+  //   - 연산 결과는 cache[table.opInstrPosToCacheIndex[연산 위치]]에 써 둔다. 다음에 건너뛸 때 이 값을 쓴다.
   //     건너뛸 부분식이 없는 식은 표도 cache도 없어(null) 쓰지 않는다.
   //   - reads가 있으면 store 칸을 읽을 때마다 leafIndex와 읽은 명령의 위치를 이어 붙인다. a + b에서
   //     a, b가 칸 20, 21이면 [20, 0, 21, 3]. 다시 셀 때는 구독이 이미 걸려 있어 null을 넘긴다.
@@ -178,7 +178,7 @@ export class ExprEvaluator {
       const at = pc;
       const skipPastOpsAt = skipPastOps[at];
       if (skipPastOpsAt !== undefined && table !== null && cache !== null) {
-        exprStack[sp++] = cache[table.cacheIndex[skipPastOpsAt]];
+        exprStack[sp++] = cache[table.opInstrPosToCacheIndex[skipPastOpsAt]];
         pc = skipPastOpsAt + instrSize(expr[skipPastOpsAt]);
         continue;
       }
@@ -269,7 +269,7 @@ export class ExprEvaluator {
       // 연산 결과를 스택에 올리고, cache가 있으면 거기에도 써 둔다.
       exprStack[sp++] = result;
       if (table !== null && cache !== null) {
-        cache[table.cacheIndex[at]] = result;
+        cache[table.opInstrPosToCacheIndex[at]] = result;
       }
     }
     return exprStack[0];

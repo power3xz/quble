@@ -50,7 +50,7 @@ export type TExprSkipTable = {
   sameStartOpChain: Uint8Array;
   // 연산 위치 -> 캐시 배열 번호. 캐시 배열을 식 길이가 아니라 연산 수만큼만 잡으려고 둔다.
   // 위 식에서 ADD(6) -> 0, MUL(10) -> 1, ADD(17) -> 2, SUB(18) -> 3. 연산 위치에서만 읽는다.
-  cacheIndex: Uint8Array;
+  opInstrPosToCacheIndex: Uint8Array;
   // 연산 수. 위 식은 4.
   opCount: number;
   // 변수는 store 칸을 읽는 명령을 "같은 칸을 읽는가"로 묶은 것이다. 번호는 식에 처음 나오는
@@ -62,17 +62,17 @@ export type TExprSkipTable = {
   //
   // 위 식에서 a=0, b=1, c=2, d=3, e=4.
   // 변수 번호 -> 그 변수를 읽는 위치들(오름차순). [[0], [3], [7], [11], [14]]
-  positionsByVar: Uint8Array[];
+  varNumberToInstrPoses: Uint8Array[];
   // 읽는 명령의 위치 -> 변수 번호. 0 -> 0, 3 -> 1, 7 -> 2, 11 -> 3, 14 -> 4. 런타임이 식을 세며
   // 어느 칸을 어느 변수가 읽었는지 모을 때 쓴다.
-  varAt: Uint8Array;
+  instrPosToVarNumber: Uint8Array;
   // 변수 번호 -> 그 변수가 바뀌었을 때의 skipPastOps. 변수가 식에 여러 번 나오면 그 위치들이 함께
   // 바뀐 것으로 본다. c(2)는 { 0: 6, 11: 17 }.
-  skipPastOpsByVar: TSkipPastOps[];
+  varNumberToSkipPastOps: TSkipPastOps[];
   // 둘 이상의 변수가 함께 바뀌었을 때의 skipPastOps. 키는 바뀐 변수 번호를 비트로 모은 정수(변수 a=0, c=2가
   // 바뀌면 0b101). 같은 식을 쓰는 인스턴스(@for 행마다 하나씩)가 같은 조합이면 같은 표를 쓰도록, 조합이
   // 처음 나올 때 buildSkipPastOpsOfVars가 담는다.
-  skipPastOpsByVarSet: Map<number, TSkipPastOps>;
+  varMaskToSkipPastOps: Map<number, TSkipPastOps>;
 };
 
 // store 칸을 읽는 명령인가. 이 명령들만 변수로 묶는다. LOAD_CONST, LOAD_SMALL_INT, LOAD_TRUE,
@@ -110,8 +110,8 @@ const MAX_VARS = 32;
 export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
   const len = expr.length;
   const sameStartOpChain = new Uint8Array(len).fill(CHAIN_END);
-  const cacheIndex = new Uint8Array(len);
-  const varAt = new Uint8Array(len);
+  const opInstrPosToCacheIndex = new Uint8Array(len);
+  const instrPosToVarNumber = new Uint8Array(len);
   const positions: number[][] = [];
   let opCount = 0;
 
@@ -160,7 +160,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     if (readsCell(opcode)) {
       const varNumber = varNumberOf(pc);
       positions[varNumber].push(pc);
-      varAt[pc] = varNumber;
+      instrPosToVarNumber[pc] = varNumber;
     }
 
     const arity = arityOf(opcode);
@@ -174,7 +174,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
       startStack.pop();
     }
     addToChain(startStack[startStack.length - 1], pc);
-    cacheIndex[pc] = opCount++;
+    opInstrPosToCacheIndex[pc] = opCount++;
   }
 
   if (positions.length > MAX_VARS) {
@@ -183,15 +183,15 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
 
   const table: TExprSkipTable = {
     sameStartOpChain,
-    cacheIndex,
+    opInstrPosToCacheIndex,
     opCount,
-    positionsByVar: positions.map((p) => Uint8Array.from(p)),
-    varAt,
-    skipPastOpsByVar: [],
-    skipPastOpsByVarSet: new Map(),
+    varNumberToInstrPoses: positions.map((p) => Uint8Array.from(p)),
+    instrPosToVarNumber,
+    varNumberToSkipPastOps: [],
+    varMaskToSkipPastOps: new Map(),
   };
-  table.skipPastOpsByVar = table.positionsByVar.map((p) => buildSkipPastOps(table, expr, p));
-  if (table.skipPastOpsByVar.every((skipPastOp) => Object.keys(skipPastOp).length === 0)) {
+  table.varNumberToSkipPastOps = table.varNumberToInstrPoses.map((p) => buildSkipPastOps(table, expr, p));
+  if (table.varNumberToSkipPastOps.every((skipPastOp) => Object.keys(skipPastOp).length === 0)) {
     return null;
   }
   return table;
@@ -244,8 +244,8 @@ export const buildSkipPastOps = (
 };
 
 // 바뀐 변수들(changedVarMask)을 하나도 품지 않은 부분식의 skipPastOps를 만든다. 바뀐 변수는 변수 번호를
-// 비트로 모은 정수다(변수 a=0, c=2가 바뀌면 0b101). 변수가 하나면 미리 만들어 둔 table.skipPastOpsByVar의
-// 것을 그대로 돌려주고, 둘 이상이면 조합마다 한 번만 만들어 table.skipPastOpsByVarSet에 담는다.
+// 비트로 모은 정수다(변수 a=0, c=2가 바뀌면 0b101). 변수가 하나면 미리 만들어 둔 table.varNumberToSkipPastOps의
+// 것을 그대로 돌려주고, 둘 이상이면 조합마다 한 번만 만들어 table.varMaskToSkipPastOps에 담는다.
 //
 // 위 식에서 변수 번호는 a=0, b=1, c=2, d=3, e=4다.
 //   바뀐 변수  changedVarMask  skipPastOps
@@ -260,19 +260,19 @@ export const buildSkipPastOpsOfVars = (
 ): TSkipPastOps => {
   // 비트가 하나뿐인가. 최상위 비트(31)만 켜진 음수에서도 changedVarMask - 1이 32비트로 감겨 맞다.
   if ((changedVarMask & (changedVarMask - 1)) === 0) {
-    return table.skipPastOpsByVar[31 - Math.clz32(changedVarMask)];
+    return table.varNumberToSkipPastOps[31 - Math.clz32(changedVarMask)];
   }
-  const found = table.skipPastOpsByVarSet.get(changedVarMask);
+  const found = table.varMaskToSkipPastOps.get(changedVarMask);
   if (found !== undefined) {
     return found;
   }
   const positions: number[] = [];
-  for (let varNumber = 0; varNumber < table.positionsByVar.length; varNumber++) {
+  for (let varNumber = 0; varNumber < table.varNumberToInstrPoses.length; varNumber++) {
     if (changedVarMask & (1 << varNumber)) {
-      positions.push(...table.positionsByVar[varNumber]);
+      positions.push(...table.varNumberToInstrPoses[varNumber]);
     }
   }
   const skipPastOps = buildSkipPastOps(table, expr, Uint8Array.from(positions));
-  table.skipPastOpsByVarSet.set(changedVarMask, skipPastOps);
+  table.varMaskToSkipPastOps.set(changedVarMask, skipPastOps);
   return skipPastOps;
 };
