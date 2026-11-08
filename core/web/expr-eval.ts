@@ -74,7 +74,8 @@ const applyBinary = (op: number, left: unknown, right: unknown): unknown => {
 export const SKIP_NOTHING: TSkipPastOps = {};
 
 // 입력 식이 없는 식을 셀 때 runExpr에 넘기는 inputValues. 셀 때마다 빈 배열을 새로 만들지 않고 이것을 함께 쓴다.
-export const NO_INPUT_VALUES: readonly unknown[] = [];
+// 자리를 채우지 않는다 - 입력이 있는 식은 처음 셀 때 자기 배열로 바꾼다(expr-layer.ts linkCalcInputs).
+export const NO_INPUT_VALUES: unknown[] = [];
 
 // 식 평가 스택. runExpr마다 새로 만들지 않고 이것을 다시 쓴다. 식 평가는 동기이고 runExpr가 다시 부르지
 // 않아 런타임 인스턴스가 여럿이어도 하나를 함께 쓴다.

@@ -42,7 +42,8 @@ export type TExprInstance = {
   // 만들어 두고 입력을 연결하는 대로 채운다 - 연결하던 중 throw해도 이미 연결한 입력은 여기 있어 반납할 때 놓인다.
   inputInstances: (number | undefined)[];
   // 계산 식이 셀 때 평가기에 넘기는 입력 값. inputValues[i]가 inputInstances[i]의 값이다. 입력이 없으면 NO_INPUT_VALUES다.
-  inputValues: readonly unknown[];
+  // 처음 셀 때 한 번 만들고 셀 때마다 자리를 덮어쓴다.
+  inputValues: unknown[];
   // 이 식 인스턴스를 입력으로 읽는 식 인스턴스. 한 식이 두 자리에서 읽으면(`x ? x : y`) 두 번 든다. 읽는 식이 없으면
   // null이다. heldByBranchCount가 0이고 이것도 비면 반납한다.
   outputInstances: number[] | null;
@@ -403,12 +404,14 @@ export class ExprInstancePool {
     const instance = this.pool.entries[exprInstanceIndex];
     if (instance.inputInstances === NO_INPUT_INSTANCES) {
       instance.inputInstances = inputs.map(() => undefined);
+      instance.inputValues = inputs.map(() => undefined);
     }
     const linked = instance.inputInstances;
+    const values = instance.inputValues;
     for (let i = 0; i < inputs.length; i++) {
       linked[i] = this.requestOrLinkInput(exprInstanceIndex, inputs[i], linked[i]);
+      values[i] = this.pool.entries[linked[i] as number].lastValue;
     }
-    instance.inputValues = linked.map((input) => this.pool.entries[input as number].lastValue);
   };
 
   // 삼항을 센다. cond를 읽고, cond 값으로 고른 갈래만 읽는다. 식인 cond와 식인 갈래는 처음 읽을 때 인스턴스를
