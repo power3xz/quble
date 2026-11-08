@@ -1,0 +1,12 @@
+component TernaryIfCond {
+  props { ok: bool, a: number, b: number }
+  events { APPLY({}) }
+  template {
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      @if (ok ? a > 0 : b > 0) {
+        span(class="v") { "shown" }
+      }
+    }
+  }
+}

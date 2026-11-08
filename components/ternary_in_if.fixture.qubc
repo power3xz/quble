@@ -1,0 +1,12 @@
+component TernaryInIf {
+  props { show: bool, ok: bool, price: number }
+  events { APPLY({}) }
+  template {
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      @if (show) {
+        span(class="v") { ${ok ? price * 2 : 0} }
+      }
+    }
+  }
+}

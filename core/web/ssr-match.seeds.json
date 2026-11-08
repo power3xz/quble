@@ -1392,6 +1392,13 @@
       "k": 10
     }
   ],
+  "ternary_attr": [{ "ok": true, "label": "on" }, { "ok": false, "label": "on" }],
+  "ternary_if_cond": [{ "ok": true, "a": 1, "b": 0 }, { "ok": false, "a": 1, "b": 0 }],
+  "ternary_in_if": [{ "show": true, "ok": true, "price": 5 }, { "show": false, "ok": true, "price": 5 }],
+  "ternary_nested": [
+    { "a": true, "b": true, "cursor": 0, "rows": [{ "x": 3 }] },
+    { "a": false, "b": true, "cursor": 5, "rows": [{ "x": 3 }] }
+  ],
   "ternary_index_input": [
     { "ok": true, "cursor": 0, "rows": [{ "x": 1 }, { "x": 2 }] },
     { "ok": false, "cursor": 1, "rows": [{ "x": 1 }, { "x": 2 }] }

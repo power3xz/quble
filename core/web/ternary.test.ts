@@ -152,6 +152,65 @@ test("cond가 떠나는 갈래를 고르지 않게 바뀌면 그 갈래를 세�
   assert.deepEqual(textsOf("v"), ["0"]);
 });
 
+test("속성값의 삼항은 cond가 바뀌면 새 갈래의 값으로 속성을 바꾼다", () => {
+  const { host, apply } = render("ternary_attr", { ok: true, label: "on" });
+  const titleOf = () => (host.querySelector(".v") as HTMLElement).getAttribute("title");
+  assert.equal(titleOf(), "on");
+  apply((ctx) => ctx.set(ctx.props.ok, false));
+  assert.equal(titleOf(), "none");
+  apply((ctx) => {
+    ctx.set(ctx.props.label, "again");
+    ctx.set(ctx.props.ok, true);
+  });
+  assert.equal(titleOf(), "again");
+});
+
+test("@if 조건의 삼항은 고른 갈래의 식으로 본문을 붙이고 뗀다", () => {
+  const { textsOf, apply } = render("ternary_if_cond", { ok: true, a: 1, b: 0 });
+  assert.deepEqual(textsOf("v"), ["shown"]);
+  apply((ctx) => ctx.set(ctx.props.b, 1));
+  assert.deepEqual(textsOf("v"), ["shown"], "고르지 않은 갈래 b > 0이 바뀌어도 그대로다");
+  apply((ctx) => ctx.set(ctx.props.a, 0));
+  assert.deepEqual(textsOf("v"), []);
+  apply((ctx) => ctx.set(ctx.props.ok, false));
+  assert.deepEqual(textsOf("v"), ["shown"], "b > 0을 고른다");
+});
+
+test("@if 본문의 삼항은 떼어진 동안 바뀐 입력을 다시 붙을 때 센다", () => {
+  const { textsOf, apply } = render("ternary_in_if", { show: true, ok: true, price: 5 });
+  assert.deepEqual(textsOf("v"), ["10"]);
+  apply((ctx) => ctx.set(ctx.props.show, false));
+  apply((ctx) => ctx.set(ctx.props.price, 6));
+  apply((ctx) => ctx.set(ctx.props.show, true));
+  assert.deepEqual(textsOf("v"), ["12"], "떼어진 동안 바뀐 갈래 price * 2");
+  apply((ctx) => ctx.set(ctx.props.show, false));
+  apply((ctx) => ctx.set(ctx.props.ok, false));
+  apply((ctx) => ctx.set(ctx.props.show, true));
+  assert.deepEqual(textsOf("v"), ["0"], "떼어진 동안 바뀐 cond");
+  apply((ctx) => ctx.set(ctx.props.price, 7));
+  apply((ctx) => ctx.set(ctx.props.ok, true));
+  assert.deepEqual(textsOf("v"), ["14"], "쉬던 갈래를 다시 고른다");
+});
+
+test("중첩 삼항은 바깥 cond가 고른 쪽만 세어, 떠나는 안쪽 삼항을 세지 않는다", () => {
+  const { textsOf, apply } = render("ternary_nested", { a: true, b: true, cursor: 0, rows: [{ x: 3 }] });
+  assert.deepEqual(textsOf("v"), ["6"]);
+  // 한 flush에서 a와 cursor가 함께 바뀐다. 안쪽 삼항의 rows[cursor].x를 세면 cursor 5가 범위 밖이라 RangeError다.
+  apply((ctx) => {
+    ctx.set(ctx.props.a, false);
+    ctx.set(ctx.props.cursor, 5);
+  });
+  assert.deepEqual(textsOf("v"), ["7"]);
+  apply((ctx) => {
+    ctx.set(ctx.props.cursor, 0);
+    ctx.set(ctx.props.b, false);
+    ctx.set(ctx.props.a, true);
+  });
+  assert.deepEqual(textsOf("v"), ["0"], "쉬는 동안 바뀐 안쪽 cond");
+  apply((ctx) => ctx.set(ctx.props.b, true));
+  assert.deepEqual(textsOf("v"), ["6"]);
+});
+
 test("@for 안 삼항이 함께 쓰는 level 0 갈래가 바뀌면 모든 행이 다시 센다", () => {
   const { textsOf, apply } = render("ternary_in_for", { ok: true, price: 5, rows: [{ x: 1 }, { x: 2 }] });
   apply((ctx) => ctx.set(ctx.props.price, 6));
