@@ -288,4 +288,10 @@ export class ExprEvaluator {
     reads?.push(ref + offset, at);
     return this.store.get(ref + offset);
   };
+
+  // 슬롯 하나가 가리키는 leafIndex. STORE면 store 칸의 leafIndex(ref + offset)고, CONST와 RAW는 store를 읽지 않아 -1이다.
+  slotLeafIndex = (pairs: TScope, scopeIndex: number, offset: number): number => {
+    const kind = slotKind(pairs, scopeIndex);
+    return kind === CONST || kind === RAW ? -1 : slotRef(pairs, scopeIndex) + offset;
+  };
 }

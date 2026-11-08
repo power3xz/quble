@@ -21,7 +21,8 @@ export type TExprInstance = {
   // 건너뛸 부분식이 있는 식만 갖는다. 없는 식은 cache가 null이다.
   cache: unknown[] | null;
   // 식이 읽은 leaf이자 구독할 입력 leaf. 건너뛸 부분식이 있는 식은 변수마다 읽는 leafIndex(중복과 -1 포함)고, 없는
-  // 식은 중복 없는 목록이다. evaluate가 채우고, READ_LEAF 구독을 다시 걸 때 고친다.
+  // 계산 식은 중복 없는 목록이다. 삼항은 [cond, 참 갈래, 거짓 갈래] 자리의 leafIndex이고 잎이 아닌 피연산자와 고르지
+  // 않은 갈래의 자리는 -1이다. evaluate가 채우고, READ_LEAF 구독을 다시 걸 때 고친다.
   readLeaves: number[];
   // 직전에 돌려준 값.
   lastValue: unknown;
@@ -329,19 +330,23 @@ export class ExprInstancePool {
   // evaluate가 연결한 입력 인스턴스를 먼저 요청해 이번 flush의 값으로 만든다. 부분 재평가를 하지 않는 이유는
   // LoadInput이 leafOfVar에 자리가 없어 건너뛰기 표가 바뀐 입력을 모르기 때문이다. 다시 센 뒤 읽는 leaf가 바뀌었으면
   // 구독을 옮긴다. 바뀌는 때는 삼항이 다른 갈래를 골랐을 때와 계산 식의 배열 인덱스가 바뀌었을 때뿐이라 그때만 견준다.
+  // 삼항은 떠나는 갈래의 leaf 하나만 기억해 두면 된다 - 새 갈래의 leaf는 세고 나면 readLeaves의 고른 자리에 있다.
   private runWithInputs = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
-    const exprInputs = this.exprInputs[instance.globalExprIndex];
     instance.pendingVarMask = 0;
     instance.inputMarked = false;
-    const previousReadLeaves = instance.readLeaves;
-    const previousChosenPosition = instance.chosenPosition;
-    const value = this.evaluate(exprInstanceIndex);
-    if (exprInputs.kind !== "ternary") {
-      this.resubscribeChangedVars(exprInstanceIndex, previousReadLeaves);
-    } else if (instance.chosenPosition !== previousChosenPosition) {
-      this.resubscribeBranchLeaf(exprInstanceIndex, previousReadLeaves);
+    if (this.exprInputs[instance.globalExprIndex].kind === "ternary") {
+      const previousChosenPosition = instance.chosenPosition;
+      const leavingLeaf = instance.readLeaves[previousChosenPosition];
+      const value = this.evaluate(exprInstanceIndex);
+      if (instance.chosenPosition !== previousChosenPosition) {
+        this.resubscribeBranchLeaf(exprInstanceIndex, leavingLeaf);
+      }
+      return value;
     }
+    const previousReadLeaves = instance.readLeaves;
+    const value = this.evaluate(exprInstanceIndex);
+    this.resubscribeChangedVars(exprInstanceIndex, previousReadLeaves);
     return value;
   };
 
@@ -408,9 +413,9 @@ export class ExprInstancePool {
 
   // 삼항을 센다. cond를 읽고, cond 값으로 고른 갈래만 읽는다. 식인 cond와 식인 갈래는 처음 읽을 때 인스턴스를
   // 연결하고 그 뒤로는 요청하며, 고르지 않은 갈래는 연결하지도 요청하지도 않는다. 잎인 cond와 고른 잎 갈래는
-  // readLeaves에 넣어 구독 대상으로 둔다.
+  // readLeaves의 제 자리에 leafIndex를 기록해 구독 대상으로 두고, 고르지 않은 갈래의 자리는 -1로 둔다.
   //   ok ? price * 2 : row.x 에서 ok가 true면 inputInstances [undefined, price * 2의 인스턴스, undefined],
-  //   readLeaves [ok의 leaf]
+  //   readLeaves [ok의 leaf, -1, -1]
   private evaluateTernary = (
     exprInstanceIndex: number,
     exprInputs: Extract<TExprInputs, { kind: "ternary" }>,
@@ -419,17 +424,17 @@ export class ExprInstancePool {
     // 피연산자가 모두 잎이어도 처음 셀 때 배열을 둔다. run이 NO_INPUT_INSTANCES인지만 보고 입력이 있는 식을 가린다.
     if (instance.inputInstances === NO_INPUT_INSTANCES) {
       instance.inputInstances = [undefined, undefined, undefined];
+      instance.readLeaves = [-1, -1, -1];
     }
     const linked = instance.inputInstances;
-    const reads: number[] = [];
     linked[COND_POSITION] = this.requestOrLinkOperand(exprInstanceIndex, exprInputs.cond, linked[COND_POSITION]);
-    const cond = this.readOperand(instance, exprInputs.cond, linked[COND_POSITION], reads);
+    const cond = this.readOperand(instance, exprInputs.cond, linked[COND_POSITION], COND_POSITION);
     const chosenPosition = cond ? THEN_POSITION : ELSE_POSITION;
     const branch = cond ? exprInputs.thenBranch : exprInputs.elseBranch;
     linked[chosenPosition] = this.requestOrLinkOperand(exprInstanceIndex, branch, linked[chosenPosition]);
-    const value = this.readOperand(instance, branch, linked[chosenPosition], reads);
+    const value = this.readOperand(instance, branch, linked[chosenPosition], chosenPosition);
+    instance.readLeaves[chosenPosition === THEN_POSITION ? ELSE_POSITION : THEN_POSITION] = -1;
     instance.chosenPosition = chosenPosition;
-    instance.readLeaves = uniqueLeavesOf(reads);
     return value;
   };
 
@@ -455,13 +460,13 @@ export class ExprInstancePool {
     return this.linkInputInstance(exprInstanceIndex, inputGlobalExprIndex);
   };
 
-  // 삼항 피연산자의 값. 상수는 상수풀, 식은 연결한 인스턴스의 값, 잎은 슬롯의 값이다. 잎이 store leaf면 reads에
-  // 이어 붙인다.
+  // 삼항 피연산자의 값. 상수는 상수풀, 식은 연결한 인스턴스의 값, 잎은 슬롯의 값이다. 잎이면 그 leafIndex(store
+  // leaf가 아니면 -1)를 readLeaves[position]에 기록한다.
   private readOperand = (
     instance: TExprInstance,
     operand: TRef,
     operandInstance: number | undefined,
-    reads: number[],
+    position: number,
   ): unknown => {
     if (operand.tag === FV_CONST) {
       return this.evaluator.constpool[operand.ref];
@@ -469,7 +474,9 @@ export class ExprInstancePool {
     if (operand.tag === FV_EXPR) {
       return this.pool.entries[operandInstance as number].lastValue;
     }
-    return this.evaluator.slotValue(instance.pairs, operand.ref, operand.offset, 0, reads);
+    const { pairs } = instance;
+    instance.readLeaves[position] = this.evaluator.slotLeafIndex(pairs, operand.ref, operand.offset);
+    return this.evaluator.slotValue(pairs, operand.ref, operand.offset, 0, null);
   };
 
   // 식 인스턴스(소비자)가 입력 식(inputGlobalExprIndex)의 인스턴스를 연결한다. 입력 인스턴스는 입력 식의 level 깊이
@@ -670,7 +677,8 @@ export class ExprInstancePool {
   };
 
   // readLeaves[readLeafPosition]이 구독할 입력 leaf인가 - 유효하고(0 이상) 같은 leaf를 앞에서 이미 읽지 않았다.
-  // 건너뛸 부분식이 없는 식의 readLeaves는 evaluate가 중복 없이 채우므로 앞 검사를 하지 않는다.
+  // 건너뛸 부분식이 없는 식은 앞 검사를 하지 않는다. 계산 식은 evaluate가 중복 없이 채우고, 삼항은 같은 leaf가 두
+  // 자리에 들 수 있지만(`ok ? ok : x`) 같은 인스턴스를 두 번 구독하거나 풀어도 결과가 같다.
   private isInputLeaf = (instance: TExprInstance, readLeafPosition: number): boolean => {
     const { readLeaves } = instance;
     return (
@@ -726,21 +734,19 @@ export class ExprInstancePool {
     }
   };
 
-  // 삼항이 다른 갈래를 고른 뒤 읽는 leaf의 구독을 옮긴다. previousReadLeaves(세기 전)에만 있는 leaf는 구독을 풀고
-  // readLeaves(지금)에만 있는 leaf는 구독한다. 둘 다 cond leaf와 갈래 leaf까지 많아야 둘이다. 떠나는 갈래와 cond가
-  // 같은 leaf면(`ok ? ok : x`) 지금도 읽어 풀지 않는다.
-  //   ok ? price : 0 에서 ok가 false -> true면 [ok의 leaf]가 [ok의 leaf, price의 leaf]가 되어 price를 구독한다.
-  private resubscribeBranchLeaf = (exprInstanceIndex: number, previousReadLeaves: readonly number[]): void => {
-    const { readLeaves } = this.pool.entries[exprInstanceIndex];
-    for (const leafIndex of previousReadLeaves) {
-      if (!readLeaves.includes(leafIndex)) {
-        this.unsubscribeDerive(leafIndex, exprInstanceIndex);
-      }
+  // 삼항이 다른 갈래를 고른 뒤 갈래 leaf의 구독을 옮긴다. 떠나는 갈래의 leaf(leavingLeaf)는 구독을 풀고 새로 고른
+  // 갈래의 leaf는 구독한다. 잎이 아닌 갈래는 -1이라 건너뛴다. cond와 같은 leaf는 계속 읽으므로 풀지도 다시 걸지도
+  // 않고(`ok ? ok : x`), 두 갈래가 같은 leaf면 그대로 둔다.
+  //   ok ? price : 0 에서 ok가 false -> true면 readLeaves [ok, -1, -1]이 [ok, price, -1]이 되어 price를 구독한다.
+  private resubscribeBranchLeaf = (exprInstanceIndex: number, leavingLeaf: number): void => {
+    const { readLeaves, chosenPosition } = this.pool.entries[exprInstanceIndex];
+    const condLeaf = readLeaves[COND_POSITION];
+    const chosenLeaf = readLeaves[chosenPosition];
+    if (leavingLeaf >= 0 && leavingLeaf !== condLeaf && leavingLeaf !== chosenLeaf) {
+      this.unsubscribeDerive(leavingLeaf, exprInstanceIndex);
     }
-    for (const leafIndex of readLeaves) {
-      if (!previousReadLeaves.includes(leafIndex)) {
-        this.subscribeDerive(leafIndex, exprInstanceIndex);
-      }
+    if (chosenLeaf >= 0 && chosenLeaf !== condLeaf && chosenLeaf !== leavingLeaf) {
+      this.subscribeDerive(chosenLeaf, exprInstanceIndex);
     }
   };
 

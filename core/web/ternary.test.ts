@@ -110,6 +110,18 @@ test("cond leaf가 바뀌면 새로 고른 갈래의 값을 그린다", () => {
   assert.deepEqual(textsOf("v"), ["5"]);
 });
 
+test("cond와 같은 leaf인 갈래를 떠나도 cond 구독은 남는다", () => {
+  const { textsOf, apply } = render("ternary_cond_branch_same", { ok: true, other: false });
+  assert.deepEqual(textsOf("v"), ["true"]);
+  apply((ctx) => ctx.set(ctx.props.ok, false));
+  assert.deepEqual(textsOf("v"), ["false"]); // other
+  apply((ctx) => ctx.set(ctx.props.ok, true));
+  assert.deepEqual(textsOf("v"), ["true"], "떠난 참 갈래가 cond와 같은 leaf라 구독을 풀지 않았다");
+  apply((ctx) => ctx.set(ctx.props.ok, false));
+  apply((ctx) => ctx.set(ctx.props.other, true));
+  assert.deepEqual(textsOf("v"), ["true"], "다시 고른 거짓 갈래를 구독한다");
+});
+
 test("고르지 않은 잎 갈래가 바뀌어도 값은 그대로고, 다시 고르면 바뀐 값을 그린다", () => {
   const { textsOf, apply } = render("ternary_value", { ok: false, price: 5 });
   apply((ctx) => ctx.set(ctx.props.price, 7));
