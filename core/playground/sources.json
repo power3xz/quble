@@ -14,5 +14,9 @@
   "badge.qubc",
   "badge.qubc.handlers.js",
   "badge.css",
-  "badge.data.json"
+  "badge.data.json",
+  "pivot.qubc",
+  "pivot.qubc.handlers.js",
+  "pivot.css",
+  "pivot.data.json"
 ]

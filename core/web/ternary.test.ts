@@ -159,7 +159,7 @@ test("처음 고르는 식 갈래는 그때 인스턴스를 만든다", () => {
   assert.equal(liveExprInstances(), 1); // 삼항 하나
   apply((ctx) => ctx.set(ctx.props.ok, true));
   assert.deepEqual(textsOf("v"), ["1"]);
-  assert.equal(liveExprInstances(), 2); // 삼항 하나, 참 갈래 하나
+  assert.equal(liveExprInstances(), 3); // 삼항 하나, 참 갈래 rows[cursor].x의 주소 식과 값 읽기 식
 });
 
 test("처음 고른 식 갈래가 throw하면 그 인스턴스를 반납해, 다시 고를 때 새로 센다", () => {
@@ -191,7 +191,7 @@ test("입력을 연결하던 중 throw하면 이미 연결한 입력 인스턴�
   apply((ctx) => ctx.set(ctx.props.a, false));
   apply((ctx) => ctx.set(ctx.props.a, true));
   assert.deepEqual(textsOf("v"), ["1"]);
-  assert.equal(liveExprInstances(), 4); // 바깥 삼항, 안쪽 삼항, n > 0, rows[cursor].x
+  assert.equal(liveExprInstances(), 5); // 바깥 삼항, 안쪽 삼항, n > 0, rows[cursor].x의 주소 식과 값 읽기 식
 });
 
 test("cond가 떠나는 갈래를 고르지 않게 바뀌면 그 갈래를 세지 않는다", () => {

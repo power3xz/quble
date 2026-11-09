@@ -9,7 +9,7 @@
 | expr-opcode.ts | opcode와 명령 크기 |
 | expr-skip-table.ts | 식 정의마다 한 번 만드는 표(`buildSkipTable`) |
 | expr-eval.ts | 평가(`runExpr`, `evalExpr`, `reevalExpr`) |
-| expr-layer.ts | 식 인스턴스와 파생 구독(`ExprInstancePool`), 구독 다시 걸기(`resubscribeReadLeaf`) |
+| expr-layer.ts | 식 인스턴스와 파생 구독(`ExprInstancePool`), 구독 옮기기(`resubscribeMovedLeaves`) |
 | region.ts | 가지를 떼고 붙일 때 식 인스턴스를 떼고 붙이기(`teardownBranchSubs`, `restoreBranchSubs`) |
 
 ## 1. 식의 모양 - 트리와 후위 바이트
@@ -81,40 +81,51 @@ store의 leaf 배치다. rows 필드 leaf에는 요소가 아니라 arrayInfoInd
 | 값 | 0 | 0 | "A" | 10 | "B" | 20 | "C" | 30 |
 | 뜻 | rows(arrayInfoIndex) | cursor | rows[0].title | rows[0].score | rows[1].title | rows[1].score | rows[2].title | rows[2].score |
 
-식의 바이트다.
+컴파일러는 인덱스 접근을 떼어 내 이 식을 셋으로 나눈다. `#k`는 그 식의 입력 자리 k에 든 식의 값을 올리는
+`LOAD_INPUT k`다.
 
-| 위치 | 0 | 3 | 6 | 7 | 9 | 10 | 12 |
-|---|---|---|---|---|---|---|---|
-| 명령 | LOAD_VAR rows | LOAD_VAR cursor | ELEM_AT | FIELD_AT 1 | READ_LEAF | LOAD_SMALL_INT 2 | MUL |
-
-스택에는 값이 오르는데, **인덱스 접근만 값 대신 leafIndex를 올린다.** 요소 위치는 인덱스를 세어 봐야
-정해지기 때문이다.
-
-| 명령 | 스택 | 비고 |
+| 식 | 하는 일 | 명령(위치) |
 |---|---|---|
-| LOAD_VAR rows | [0] | rows 필드 leaf의 값 = arrayInfoIndex 0 |
-| LOAD_VAR cursor | [0, 0] | cursor |
-| ELEM_AT | [2] | `elemStartLeafIndices[0]` = 2 |
-| FIELD_AT 1 | [3] | 2 + score의 offset 1 |
-| READ_LEAF | [10] | leaf 3의 값 |
-| LOAD_SMALL_INT 2 | [10, 2] | |
-| MUL | [20] | |
+| 주소 식 `rows[cursor]` | 요소가 시작하는 leafIndex를 낸다 | LOAD_VAR rows(0), LOAD_VAR cursor(3), ELEM_AT(6) |
+| 값 읽기 식 `#0.score` | 주소에 필드 거리를 더해 그 leaf를 읽는다. 입력 0은 주소 식 | LOAD_INPUT 0(0), FIELD_AT 1(2), READ_LEAF(4) |
+| 바깥 식 `#0 * 2` | 입력 0은 값 읽기 식 | LOAD_INPUT 0(0), LOAD_SMALL_INT 2(2), MUL(4) |
+
+같은 scope에서 `rows[cursor].title`도 읽으면 두 값 읽기 식이 주소 식 하나를 함께 입력으로 받는다. 식 전체가
+인덱스 접근 하나(`${rows[cursor].score}`)면 값 읽기 식이 곧 그 식이다.
+
+스택에는 값이 오르는데, **주소 식과 값 읽기 식의 앞부분은 값 대신 leafIndex를 올린다.** 요소 위치는 인덱스를
+세어 봐야 정해지기 때문이다.
+
+| 식 | 명령 | 스택 | 비고 |
+|---|---|---|---|
+| 주소 | LOAD_VAR rows | [0] | rows 필드 leaf의 값 = arrayInfoIndex 0 |
+| 주소 | LOAD_VAR cursor | [0, 0] | cursor |
+| 주소 | ELEM_AT | [2] | `elemStartLeafIndices[0]` = 2 |
+| 값 읽기 | LOAD_INPUT 0 | [2] | 주소 식의 값 |
+| 값 읽기 | FIELD_AT 1 | [3] | 2 + score의 offset 1 |
+| 값 읽기 | READ_LEAF | [10] | leaf 3의 값 |
+| 바깥 | LOAD_INPUT 0 | [10] | 값 읽기 식의 값 |
+| 바깥 | LOAD_SMALL_INT 2 | [10, 2] | |
+| 바깥 | MUL | [20] | |
 
 평가하며 두 가지를 모은다.
 
-**cache** - 연산마다 결과 한 칸. 식 길이가 아니라 연산 수만큼 잡는다.
+**cache** - 연산마다 결과 한 칸. 식 길이가 아니라 연산 수만큼 잡는다. 건너뛸 부분식이 생길 수 있거나
+`READ_LEAF`가 있는 식의 인스턴스만 둔다(3절 끝). 위 셋 가운데 값 읽기 식만 둔다.
 
-| 연산 | ELEM_AT(6) | FIELD_AT(7) | READ_LEAF(9) | MUL(12) |
-|---|---|---|---|---|
-| cache | 2 | 3 | 10 | 20 |
+| 값 읽기 식의 연산 | FIELD_AT(2) | READ_LEAF(4) |
+|---|---|---|
+| cache | 3 | 10 |
 
-**reads** - 읽은 leaf와 읽은 명령의 위치. 처음 셀 때만 모은다. 여기서 변수마다 읽은 leaf(`leafOfVar`)가
-나온다. 못 읽은 변수(범위 밖 에러로 식이 중간에 멈춘 경우)는 -1이다.
+**reads** - 읽은 leaf와 읽은 명령의 위치. 인스턴스는 여기서 구독할 leaf(`readLeaves`)를 얻는다. cache가 있는
+인스턴스는 변수마다 읽은 leaf(`varNumberToLeafIndex`)를 들고, 못 읽은 변수(범위 밖 에러로 식이 중간에 멈춘
+경우)와 `LOAD_INPUT` 변수는 leaf를 읽지 않아 -1이다. cache가 없는 인스턴스는 읽은 leaf를 중복 없이 든다.
 
-| 읽은 leaf | 0 | 1 | 3 |
+| 식 | 읽은 leaf | 읽은 위치 | `readLeaves` |
 |---|---|---|---|
-| 읽은 위치 | 0 | 3 | 9 |
-| 변수 | rows | cursor | READ_LEAF |
+| 주소 | 0, 1 | 0, 3 | [0, 1] |
+| 값 읽기 | 3 | 4 | [-1, 3] - 변수 LOAD_INPUT, READ_LEAF 순 |
+| 바깥 | 없음 | | [] |
 
 ### payload/context 값
 
@@ -148,7 +159,7 @@ leaf 2, 3을 조립해 `{ title: "A", score: 10 }`을 넘긴다.
 | 명령 | `a` | `b` | ADD | `c` | `d` | SUB | MUL |
 | c가 바뀌면 | 건너뜀 | 건너뜀 | cache 값을 올림 | 읽음 | 읽음 | 계산 | 계산 |
 
-건너뛸 곳은 변수마다 미리 정해 둔다(`skipPastOpsByVar`). 키는 부분식이 시작하는 잎 위치, 값은 그
+건너뛸 곳은 변수마다 미리 정해 둔다(`varNumberToSkipPastOps`). 키는 부분식이 시작하는 잎 위치, 값은 그
 부분식의 끝 연산 위치다.
 
 | 바뀐 변수 | 건너뛸 표 | 건너뛰는 부분식 |
@@ -176,15 +187,19 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 | `a + a` | a는 한 변수 - 두 위치가 늘 함께 바뀐다 |
 | `s + s.length` | `LOAD_VAR s`와 `LOAD_STRING_LENGTH s`는 둘 다 s의 값 leaf를 읽어 한 변수 |
 | `xs[0] + xs.length` | `LOAD_ARRAY_LENGTH xs`는 길이 leaf(`sizeLeafIndex`)를 읽어 `LOAD_VAR xs`와 다른 변수 |
-| `rows[i].t + rows[j].t` | `READ_LEAF` 둘은 각각 따로 변수 - 읽는 leaf는 실행 중에 정해지지만 명령 위치는 고정 |
+| `READ_LEAF`가 둘인 식 | 각각 따로 변수 - 읽는 leaf는 실행 중에 정해지지만 명령 위치는 고정 |
+| `(a * b) + #0` | `LOAD_INPUT`도 변수 - 입력 식이 다시 셀 인스턴스가 되면 그 변수가 바뀐 것으로 보고 `a * b`를 건너뛴다. 같은 입력 자리를 두 번 읽으면 한 변수 |
 
-`${rows[cursor].score * 2}`에서 score leaf만 바뀌면 leafIndex를 내는 앞부분은 건너뛴다. `READ_LEAF`
-변수의 건너뛸 표는 `{ 0: 7 }`이다.
+입력 자리와 변수 번호는 식에 나오는 순서에 따라 어긋난다. `#0 + a + #1`이면 변수는 #0=0, a=1, #1=2다. 표의
+`inputPositionToVarNumber`가 입력 자리 -> 변수 번호(`[0, 2]`)를 든다.
 
-| 위치 | 0 | 3 | 6 | 7 | 9 | 10 | 12 |
-|---|---|---|---|---|---|---|---|
-| 명령 | LOAD_VAR rows | LOAD_VAR cursor | ELEM_AT | FIELD_AT 1 | READ_LEAF | LOAD_SMALL_INT 2 | MUL |
-| score가 바뀌면 | 건너뜀 | 건너뜀 | 건너뜀 | cache 값 3을 올림 | 다시 읽음 | 읽음 | 계산 |
+`${rows[cursor].score * 2}`에서 score leaf만 바뀌면 값 읽기 식이 leafIndex를 내는 앞부분을 건너뛴다. `READ_LEAF`
+변수의 건너뛸 표는 `{ 0: 2 }`이다.
+
+| 위치 | 0 | 2 | 4 |
+|---|---|---|---|
+| 명령 | LOAD_INPUT 0 | FIELD_AT 1 | READ_LEAF |
+| score가 바뀌면 | 건너뜀 | cache 값 3을 올림 | 다시 읽음 |
 
 ### 식 정의당 한 번과 인스턴스마다
 
@@ -194,11 +209,13 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 
 | 무엇 | 사용처 |
 |---|---|
-| `skipPastOpsByVar` | 변수마다 건너뛸 표 |
-| `skipPastOpsByVarSet` | 둘 이상의 변수가 함께 바뀔 때의 표. 바뀐 변수 조합이 처음 나올 때 만들어 담는다(4절) |
-| `cacheIndex`, `opCount` | 연산 위치 -> cache 칸 번호, 연산 수 |
-| `positionsByVar`, `varAt` | 변수 -> 읽는 위치, 위치 -> 변수. 처음 셀 때 어느 leaf를 어느 변수가 읽었는지 모은다 |
-| `readLeafIndexOpsByVar` | 인덱스 접근의 구독을 다시 건다(5절) |
+| `varNumberToSkipPastOps` | 변수마다 건너뛸 표 |
+| `varMaskToSkipPastOps` | 둘 이상의 변수가 함께 바뀔 때의 표. 바뀐 변수 조합이 처음 나올 때 만들어 담는다(4절) |
+| `opInstrPosToCacheIndex`, `opCount` | 연산 위치 -> cache 칸 번호, 연산 수 |
+| `varNumberToInstrPoses`, `instrPosToVarNumber` | 변수 -> 읽는 위치, 위치 -> 변수. 어느 leaf를 어느 변수가 읽었는지 모은다 |
+| `inputPositionToVarNumber` | 입력 자리 -> 변수 번호. 입력 식이 다시 셀 인스턴스가 되면 이 번호의 비트를 켠다 |
+| `hasIndexAccess` | 식에 `READ_LEAF`가 있는가. 다시 셀 때 읽은 leaf를 모아 구독을 옮길지 정한다(5절) |
+| `mightSkip` | 바뀐 변수에 따라 건너뛸 부분식이 생길 수 있는가 |
 | `sameStartOpChain` | 위의 표를 만들 때만 사용한다 |
 
 **인스턴스마다**
@@ -207,7 +224,7 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 |---|---|
 | cache | 연산 수 |
 | 구독 함수 | 하나(4절) |
-| `leafOfVar` | 변수 수. 변수마다 읽는 leafIndex |
+| `readLeaves` | 변수 수. 변수마다 읽는 leafIndex(`varNumberToLeafIndex`) |
 | 지난번 결과 | 값 하나. 바뀐 leaf를 읽는 변수가 없을 때 그대로 돌려준다 |
 
 인스턴스는 leaf 기준(leaf마다 읽는 변수 목록과 건너뛸 표)이 아니라 변수 기준으로 든다. 변수 수는 식
@@ -215,8 +232,11 @@ store leaf를 읽는 명령을 "같은 leaf를 읽는가"로 묶은 것이 변�
 읽는 leafIndex뿐이다. leaf 기준으로 들면 leaf마다 작은 배열이 생기고, 빈 배열에 push로 채운 배열은
 V8이 늘어날 몫까지 잡아 많은 행에서 쓰지 않는 용량이 크게 남는다.
 
-어느 변수가 바뀌어도 건너뛸 부분식이 없으면(`a - b`, `big > 50`) 표가 null이다. 이런 식의 파생 구독
-함수는 cache도 건너뛸 표도 없이, leaf가 바뀌면 처음부터 센다.
+어느 변수가 바뀌어도 건너뛸 부분식이 없는 식(`a - b`, `big > 50`, 위의 주소 식과 바깥 식)도 표는 만들고
+`mightSkip`이 false다. 이런 식의 인스턴스는 `READ_LEAF`가 없으면 cache를 두지 않고, 다시 셀 때 읽기를 모으지 않고
+처음부터 센다(`runFromScratch`). 읽는 leaf가 scope로 정해져 바뀌지 않기 때문이다. `READ_LEAF`가 있으면 건너뛸
+것이 없어도(`#0 ReadLeaf`) cache를 두고 `runPartial`로 세어 구독을 옮긴다(5절). 표가 null인 것은 변수가 32개를
+넘는 식뿐이다(4절).
 
 ## 4. 구독
 
@@ -246,13 +266,13 @@ leaf마다 함수를 따로 두면 많은 행에서 함수가 수만 개 늘어,
 부모가 x, y로 같은 leaf 23을 넘기면
 
 ```
-leafOfVar   [23, 23]    x, y
+varNumberToLeafIndex   [23, 23]    x, y
 ```
 
 leaf 23은 한 번만 구독한다. leaf 23이 바뀌면 x, y가 함께 바뀌므로, 두 변수를 하나도 품지 않은 부분식의
 표를 쓴다(아래 "한 flush에서 읽는 leaf 여럿이 바뀔 때"와 같은 표다).
 
-**한 flush에서 읽는 leaf 여럿이 바뀔 때** - 함수가 받은 `changedLeaves`에서 `leafOfVar`로 식이 읽는 변수를
+**한 flush에서 읽는 leaf 여럿이 바뀔 때** - 함수가 받은 `changedLeaves`에서 `varNumberToLeafIndex`로 식이 읽는 변수를
 모두 모아, 그 변수들을 하나도 품지 않은 부분식만 건너뛰며 한꺼번에 센다. 구독 층이 함수를 flush마다 한
 번만 호출하므로 같은 flush에서 다시 세는 일은 없다.
 
@@ -262,10 +282,10 @@ a와 c가 함께 바뀌면            { 11: 17 }   d + e(위치 11~17)만 건너
 a와 d가 함께 바뀌면            {}           건너뛸 부분식이 없어 처음부터 센다
 ```
 
-변수마다의 표(`skipPastOpsByVar`)를 합친 것이다. 바뀐 변수는 변수 번호를 비트로 모은 정수(a=0, c=2가
+변수마다의 표(`varNumberToSkipPastOps`)를 합친 것이다. 바뀐 변수는 변수 번호를 비트로 모은 정수(a=0, c=2가
 바뀌면 `0b101`)로 다루고, 같은 식을 쓰는 모든 인스턴스가 조합이 같으면 같은 표를 쓰므로
-`skipPastOpsByVarSet`에 그 정수를 키로 담아 둔다. 조합이 처음 나올 때 한 번만 계산한다. 행마다 하는
-일은 `leafOfVar`를 훑어 정수를 만드는 것과 표를 찾는 것뿐이라 배열을 만들지 않는다. 변수가 32개를
+`varMaskToSkipPastOps`에 그 정수를 키로 담아 둔다. 조합이 처음 나올 때 한 번만 계산한다. 행마다 하는
+일은 `varNumberToLeafIndex`를 훑어 정수를 만드는 것과 표를 찾는 것뿐이라 배열을 만들지 않는다. 변수가 32개를
 넘는 식은 정수에 담을 수 없어 표를 만들지 않고(`buildSkipTable`이 `null`), 처음부터 센다.
 
 **가지를 떼고 붙일 때** - 파생 구독은 가지가 아니라 식 인스턴스가 든다. 가지는 식 인스턴스 번호만 들고,
@@ -278,7 +298,7 @@ branch.updateFns             [fn]           그 leaf의 통지 구독 함수
 branch.exprInstanceIndices   [2 ]           식 인스턴스 번호
                               |
                               v
-식 인스턴스 2의 leafOfVar     [0, 1, 3]      파생 구독을 걸 입력 leaf (rows, cursor, score)
+식 인스턴스 2의 varNumberToLeafIndex     [0, 1, 3]      파생 구독을 걸 입력 leaf (rows, cursor, score)
 ```
 
 - 가지를 떼면 통지 구독을 푼다. 식 인스턴스는 그 인스턴스를 든 가지가 모두 떨어졌을 때 입력 leaf의
@@ -287,61 +307,50 @@ branch.exprInstanceIndices   [2 ]           식 인스턴스 번호
   넘겨 함수를 한 번 호출해 풀린 동안 놓친 값을 따라잡는다. 바뀐 변수를 한꺼번에 세는 것은 "한 flush에서 읽는
   leaf 여럿이 바뀔 때"와 같다.
 
-따라잡는 호출이 인덱스 접근의 구독을 다시 걸면 `leafOfVar`가 바뀐다. 그래서 `attach`는 호출하기 전에 입력
+따라잡는 호출이 인덱스 접근의 구독을 옮기면 `readLeaves`가 바뀐다. 그래서 `attach`는 호출하기 전에 입력
 leaf를 모아 둔다. 함수가 받은 leaf를 읽는 변수가 없으면 지난번 결과를 그대로 돌려준다.
 
-## 5. 인덱스 접근과 구독 다시 걸기
+## 5. 인덱스 접근과 구독 옮기기
 
-`cursor`가 바뀌면 `READ_LEAF`가 읽는 leaf 자체가 바뀐다. 구독도 새 leaf에 다시 걸어야 한다.
+`cursor`가 바뀌면 값 읽기 식의 `READ_LEAF`가 읽는 leaf 자체가 바뀐다. 구독도 새 leaf로 옮겨야 한다.
 
-| cursor | ELEM_AT | FIELD_AT | READ_LEAF가 읽는 leaf | 구독하는 leaf |
+| cursor | 주소 식(ELEM_AT) | 값 읽기 식(FIELD_AT) | READ_LEAF가 읽는 leaf | 값 읽기 식이 구독하는 leaf |
 |---|---|---|---|---|
-| 0 | 2 | 3 | 3 (10) | 0, 1, 3 |
-| 1 | 4 | 5 | 5 (20) | 0, 1, 5 |
+| 0 | 2 | 3 | 3 (10) | 3 |
+| 1 | 4 | 5 | 5 (20) | 5 |
 
-**어느 변수가 이 leafIndex를 정하는지는 표를 만들 때 정해진다.** `READ_LEAF`를 만나면, 그 바로 앞
-연산(leafIndex를 넘기는 연산)의 부분식 구간 안에서 읽히는 변수마다 그 연산 위치를 단다
-(`readLeafIndexOpsByVar`).
+**읽는 leaf가 실행 중에 바뀌는 것은 `READ_LEAF`뿐이다.** 다른 명령이 읽는 leaf는 scope로 정해진다 - 배열 조작은
+값을 옮기지 leaf 자리를 옮기지 않는다(DECISIONS.md "배열 항목 식별자(key) - 도입 안 함"). 주소 식의 rows,
+cursor와 바깥 식은 읽는 leaf가 그대로라 구독을 옮길 일이 없다. 컴파일러가 `READ_LEAF`를 값 읽기 식에만 두므로
+구독을 옮기는 식도 값 읽기 식뿐이다.
 
-| 위치 | 0 | 3 | 6 | 7 | 9 | 10 | 12 |
-|---|---|---|---|---|---|---|---|
-| 명령 | LOAD_VAR rows | LOAD_VAR cursor | ELEM_AT | FIELD_AT 1 | READ_LEAF | LOAD_SMALL_INT 2 | MUL |
-| FIELD_AT(7)의 구간 | = | = | = | = | | | |
+**다시 셀 때 실행한 읽기 명령을 모아 견준다.** 표의 `hasIndexAccess`가 true인 식만 `runPartial`이 reads를 모은다.
+reads는 `[leafIndex, 명령 위치, ...]` 쌍이다. 쌍마다 `instrPosToVarNumber`로 변수 번호를 찾아 `readLeaves`의 그
+자리와 견준다(`resubscribeMovedLeaves`). 건너뛴 부분식 안의 명령은 실행되지 않아 reads에 없고, 읽는 leaf도
+그대로다. cursor가 0에서 1로 바뀌면
 
-| 변수 | `readLeafIndexOpsByVar` | |
-|---|---|---|
-| rows | [7] | 구간 안 - 인덱스 쪽만이 아니라 배열 쪽도 든다 |
-| cursor | [7] | 구간 안 |
-| READ_LEAF | [] | |
-
-**다시 센 뒤 구독을 다시 건다.** cursor가 0에서 1로 바뀌면
-
-1. cursor 변수의 건너뛸 표로 다시 센다. `cache[FIELD_AT]`이 5가 된다.
-2. `readLeafIndexOpsByVar[cursor]`가 `[7]`이다.
-3. `cache[FIELD_AT(7)]`의 5가 `READ_LEAF`가 방금 읽은 leafIndex다.
-4. `resubscribeReadLeaf`가 `leafOfVar[READ_LEAF]`의 3과 5를 비교한다. 다르므로 5로 바꾸고
+1. 주소 식이 cursor 변수가 바뀐 것으로 처음부터 세어 4를 낸다. 값 읽기 식은 입력 0의 변수(`inputPositionToVarNumber[0]`
+   = 0)가 바뀐 것으로 표시된다.
+2. 값 읽기 식이 변수 0의 건너뛸 표(`{}`)로 다시 센다. `FIELD_AT`이 5를 내고 `READ_LEAF`가 leaf 5를 읽는다. reads는
+   `[5, 4]`다.
+3. 위치 4는 변수 1이다. `readLeaves[1]`의 3과 5가 다르므로 5로 바꾸고
    - 3을 읽는 변수가 더 없으니 3의 구독을 푼다.
-   - 5는 처음 읽으니 5에 구독을 건다.
+   - 5에 구독을 건다. 같은 인스턴스를 같은 leaf에 두 번 걸어도 하나다.
 
-새 leaf를 이미 다른 변수가 읽고 있으면 구독을 새로 걸지 않는다(`${rows[cursor].score + rows[0].score}`에서
-cursor가 0이 된 경우). 그 leaf가 바뀌면 두 변수의 위치를 합친 표로 센다(4절).
+`hasIndexAccess`가 false인 식은 reads를 모으지 않는다. 모으면 leaf를 읽을 때마다 배열에 push해 다시 세기가
+느려졌다.
 
-**중첩은 따로 다룰 것이 없다.** 안쪽 부분식이 바깥 구간에 통째로 들어가, 안쪽을 정하는 변수는 두
-연산에 모두 달린다.
+**중첩은 따로 다룰 것이 없다.** `${columns[lane].cards[seat].title}`은 인덱스 접근마다 주소 식과 값 읽기 식이 생기고,
+안쪽 값 읽기 식이 바깥 주소 식의 입력이 된다.
 
-```
-${columns[lane].cards[seat].title}
-```
-
-| 명령 | LOAD_VAR columns | LOAD_VAR lane | ELEM_AT | FIELD_AT(cards) | READ_LEAF | LOAD_VAR seat | ELEM_AT | FIELD_AT(title) | READ_LEAF |
-|---|---|---|---|---|---|---|---|---|---|
-| 안쪽 FIELD_AT의 구간 | = | = | = | = | | | | | |
-| 바깥 FIELD_AT의 구간 | = | = | = | = | = | = | = | = | |
-
-| 변수 | `readLeafIndexOpsByVar` |
+| 식 | 명령 |
 |---|---|
-| columns, lane | 안쪽 FIELD_AT, 바깥 FIELD_AT |
-| 안쪽 READ_LEAF, seat | 바깥 FIELD_AT |
+| 주소 1 | LOAD_VAR columns, LOAD_VAR lane, ELEM_AT |
+| 값 읽기 1 | LOAD_INPUT(주소 1), FIELD_AT(cards), READ_LEAF - cards 배열 필드 leaf를 읽는다 |
+| 주소 2 | LOAD_INPUT(값 읽기 1), LOAD_VAR seat, ELEM_AT |
+| 값 읽기 2 | LOAD_INPUT(주소 2), FIELD_AT(title), READ_LEAF |
+
+lane이 바뀌면 값 읽기 1이 cards leaf의 구독을, 그 값이 바뀌어 값 읽기 2가 title leaf의 구독을 각자 옮긴다.
 
 ### 배열 조작
 
@@ -356,13 +365,13 @@ leaf 0 (rows)          0          ->  0
 
 cursor 0이 가리키는 요소는 A에서 B로 바뀌었지만, 식이 읽는 leaf(0, 1, 3)는 하나도 값이 바뀌지 않았다.
 `set`은 값이 같으면 구독 함수를 호출하지 않으므로, `removeArrayElementAt`이 rows 필드 leaf에 `notify`를
-호출한다. 식은 rows 변수가 바뀐 것으로 받아 위와 같은 경로로 다시 세고 구독을 다시 건다.
+호출한다. 주소 식이 rows 변수가 바뀐 것으로 받아 위와 같은 경로로 다시 세고, 값 읽기 식이 구독을 옮긴다.
 
 ```
 notify(leaf 0)
-  -> reeval with skip table of rows    ELEM_AT 4, FIELD_AT 5
-  -> readLeafIndexOpsByVar[rows] = [7]
-  -> resubscribe 3 -> 5
+  -> 주소 식이 처음부터 셈           ELEM_AT 4
+  -> 값 읽기 식이 다시 셈            FIELD_AT 5, READ_LEAF가 leaf 5를 읽음
+  -> resubscribeMovedLeaves 3 -> 5
 ```
 
 | 조작 | 처리 |
@@ -373,7 +382,7 @@ notify(leaf 0)
 | `swapAt` | 두 요소 leaf에 값을 맞바꿔 기록한다. 구독 중인 leaf에 새 값이 들어와 따로 할 일이 없다 |
 | `push` | 꼬리에 붙여 기존 인덱스가 가리키는 요소가 안 바뀐다 |
 
-`notify`는 다시 셀 식이 있을 때만 호출한다. 배열 필드 leaf를 구독하는 것은 그 배열을 인덱스로 읽는 식뿐이라,
+`notify`는 다시 셀 식이 있을 때만 호출한다. 배열 필드 leaf를 구독하는 것은 그 배열을 인덱스로 읽는 주소 식뿐이라,
 호출할 때마다 그 식이 모두 다시 센다.
 
 **범위 밖 인덱스는 에러다.** 요소가 없는 인덱스(범위 밖, 음수, 정수 아님)면 `ELEM_AT`이 `RangeError`를
@@ -402,6 +411,8 @@ notify(leaf 0)
 | 건너뛸 표를 인스턴스마다 식 길이의 배열로 | 조회는 객체와 같거나 느렸고, 인스턴스마다 배열이 늘어 메모리만 커졌다 |
 | 컴파일러가 명령어에 건너뛸 자리를 표시한다 - 부분식 앞에 `SKIP`(건너뛸 곳, cache 번호), 뒤에 `STORE` | 런타임 분석은 없어지지만 갱신 속도 이득이 없다. 건너뛸 것이 없을 때 처음부터 세기로 돌아가지 못해 최악의 경우 크게 느리다 |
 | 결합/분배 법칙으로 식 모양 바꾸기 - `((a + b) + c) + d`를 `(a + b) + (c + d)`로, `x*b0 + x*b1`을 `x*(b0 + b1)`로 | number가 부동소수점이라 묶는 순서를 바꾸면 값이 달라진다(`(0.1 + 0.2) + 0.3` 대 `0.1 + (0.2 + 0.3)`) |
+| `READ_LEAF`마다 그 leafIndex를 정하는 연산 위치를 표에 달아(`readLeafIndexOpsByVar`), 다시 센 뒤 그 연산의 cache에서 새 leafIndex를 꺼낸다 | 인덱스 접근을 주소 식과 값 읽기 식으로 떼어 내 `READ_LEAF`가 값 읽기 식에만 남았다. 실행한 읽기 명령을 `readLeaves`와 견주는 쪽이 표 없이 같은 일을 하고, 입력이 있는 식의 부분 재평가와도 한 경로가 된다 |
+| 다시 셀 때 모든 식이 읽은 leaf를 모아 견준다 | 읽는 leaf가 바뀌지 않는 식까지 leaf를 읽을 때마다 push해 다시 세기가 느려졌다. `READ_LEAF`가 있는 식(`hasIndexAccess`)만 모은다 |
 | `ELEM_AT`에 인덱스 쪽 부분식 길이를 operand로 싣는다 | 포맷이 바뀌어 BYTECODE.md, codegen, 런타임, qubb 인스펙터가 함께 바뀌는데, 런타임이 표를 만들 때 이미 식을 훑고 있어 얻을 것이 없다 |
 
 **보류** - 식 평가를 wasm으로. wasm 해석기가 JS 해석기보다 빨랐지만, 지금 병목은 식 계산이 아니라

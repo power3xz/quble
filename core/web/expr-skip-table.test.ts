@@ -7,6 +7,7 @@ import {
   EXPR_FIELD_AT,
   EXPR_GT,
   EXPR_LOAD_ARRAY_LENGTH,
+  EXPR_LOAD_INPUT,
   EXPR_LOAD_SMALL_INT,
   EXPR_LOAD_STRING_LENGTH,
   EXPR_LOAD_TRUE,
@@ -55,7 +56,12 @@ test("같은 위치에서 시작하는 부분식들을 바깥부터 잇는다", 
 test("연산마다 캐시 번호를 매기고 연산 수를 센다", () => {
   const table = tableOf(MIXED);
   assert.deepEqual(
-    [table.cacheIndex[6], table.cacheIndex[10], table.cacheIndex[17], table.cacheIndex[18]],
+    [
+      table.opInstrPosToCacheIndex[6],
+      table.opInstrPosToCacheIndex[10],
+      table.opInstrPosToCacheIndex[17],
+      table.opInstrPosToCacheIndex[18],
+    ],
     [0, 1, 2, 3],
   );
   assert.equal(table.opCount, 4);
@@ -89,55 +95,25 @@ test("배열 인덱스 접근의 요소 칸을 읽는 명령(READ_LEAF)도 변�
   const table = tableOf(bytes(v(0), v(1), EXPR_ELEM_AT, EXPR_FIELD_AT, 0, EXPR_READ_LEAF, v(2), EXPR_ADD));
   // 변수는 a(0), i(1), READ_LEAF(2), x(3)
   assert.deepEqual(
-    table.positionsByVar,
+    table.varNumberToInstrPoses,
     [[0], [3], [9], [10]].map((p) => Uint8Array.from(p)),
   );
   // i(3)가 바뀌면 a[i].b 전체와 루트가 i를 품어 건너뛸 것이 없다.
-  assert.deepEqual(table.skipPastOpsByVar[1], {});
+  assert.deepEqual(table.varNumberToSkipPastOps[1], {});
   // READ_LEAF가 읽는 요소 칸(9)이 바뀌면, 그 칸의 leafIndex를 내는 a[i].b의 앞부분(0~7)은 그대로라
   // 지난번 leafIndex를 쓰고 READ_LEAF만 다시 읽는다.
-  assert.deepEqual(table.skipPastOpsByVar[2], { 0: 7 });
+  assert.deepEqual(table.varNumberToSkipPastOps[2], { 0: 7 });
   // x(10)가 바뀌면 a[i].b(0~9)를 건너뛴다.
-  assert.deepEqual(table.skipPastOpsByVar[3], { 0: 9 });
+  assert.deepEqual(table.varNumberToSkipPastOps[3], { 0: 9 });
 });
 
-test("READ_LEAF가 읽을 leafIndex를 정하는 데 쓰인 변수에 그 leafIndex를 넘기는 연산을 단다", () => {
-  // a[i].b + x
-  //   위치  0          3          6       7          9         10         13
-  //         LOAD_VAR a LOAD_VAR i ELEM_AT FIELD_AT 0 READ_LEAF LOAD_VAR x ADD
-  // READ_LEAF(9)는 FIELD_AT(7)이 넘긴 leafIndex의 leaf를 읽는다. 그 leafIndex는 a, i로 계산된다.
-  const table = tableOf(bytes(v(0), v(1), EXPR_ELEM_AT, EXPR_FIELD_AT, 0, EXPR_READ_LEAF, v(2), EXPR_ADD));
-  // 변수는 a(0), i(1), READ_LEAF(2), x(3). READ_LEAF 자신과 x는 읽을 leafIndex를 바꾸지 않는다.
-  assert.deepEqual(
-    table.readLeafIndexOpsByVar,
-    [[7], [7], [], []].map((p) => Uint8Array.from(p)),
-  );
+test("mightSkip은 바뀐 변수에 따라 건너뛸 부분식이 생길 수 있을 때만 참이다", () => {
+  assert.equal(tableOf(MIXED).mightSkip, true);
+  // a - b: 어느 쪽이 바뀌어도 식 전체를 다시 센다.
+  assert.equal(tableOf(bytes(v(0), v(1), EXPR_SUB)).mightSkip, false);
 });
 
-test("중첩된 인덱스 접근은 안쪽이 바뀌면 바깥 READ_LEAF가 읽을 leafIndex도 바뀐다", () => {
-  // a[b[k]].q
-  //   위치  0          3          6          9       10        11      12         14
-  //         LOAD_VAR a LOAD_VAR b LOAD_VAR k ELEM_AT READ_LEAF ELEM_AT FIELD_AT 0 READ_LEAF
-  // 안쪽 READ_LEAF(10)는 ELEM_AT(9)이, 바깥 READ_LEAF(14)는 FIELD_AT(12)이 leafIndex를 넘긴다.
-  const table = tableOf(
-    bytes(v(0), v(1), v(2), EXPR_ELEM_AT, EXPR_READ_LEAF, EXPR_ELEM_AT, EXPR_FIELD_AT, 0, EXPR_READ_LEAF),
-  );
-  // 변수는 a(0), b(1), k(2), 안쪽 READ_LEAF(3), 바깥 READ_LEAF(4). 안쪽 READ_LEAF가 읽은 값은 바깥의
-  // 인덱스라, 그 leaf가 바뀌면 바깥이 읽을 leafIndex가 바뀐다.
-  assert.deepEqual(
-    table.readLeafIndexOpsByVar,
-    [[12], [9, 12], [9, 12], [12], []].map((p) => Uint8Array.from(p)),
-  );
-});
-
-test("배열 인덱스 접근이 없는 식은 READ_LEAF가 읽을 leafIndex를 바꾸는 변수가 없다", () => {
-  assert.deepEqual(
-    tableOf(MIXED).readLeafIndexOpsByVar,
-    [[], [], [], [], []].map((p) => Uint8Array.from(p)),
-  );
-});
-
-test("hasIndexAccess는 READ_LEAF가 읽을 leafIndex를 바꾸는 변수가 있을 때만 참이다", () => {
+test("hasIndexAccess는 식에 READ_LEAF가 있을 때만 참이다", () => {
   // a[i].b + x
   const indexed = tableOf(bytes(v(0), v(1), EXPR_ELEM_AT, EXPR_FIELD_AT, 0, EXPR_READ_LEAF, v(2), EXPR_ADD));
   assert.equal(indexed.hasIndexAccess, true);
@@ -153,7 +129,7 @@ test("operand가 붙은 FIELD_AT에서 끝나는 부분식을 건너뛰면 그 o
   );
   // READ_LEAF가 읽는 요소 칸(9)이 바뀌면 a[i].b의 leafIndex(0~7)를 건너뛰고 9로 간다. 8은 FIELD_AT의
   // operand 1이라 명령으로 읽으면 안 된다. 이어서 c + d(10~16)도 건너뛴다.
-  assert.deepEqual(table.skipPastOpsByVar[2], { 0: 7, 10: 16 });
+  assert.deepEqual(table.varNumberToSkipPastOps[2], { 0: 7, 10: 16 });
 });
 
 test("READ_LEAF는 둘이 같은 칸을 읽을 수 있어도 명령마다 따로 변수다", () => {
@@ -163,18 +139,57 @@ test("READ_LEAF는 둘이 같은 칸을 읽을 수 있어도 명령마다 따로
   const table = tableOf(bytes(...one, ...one, EXPR_ADD));
   // a와 i는 두 번씩 나와 한 변수로 묶이고, READ_LEAF 둘은 따로다.
   assert.deepEqual(
-    table.positionsByVar,
+    table.varNumberToInstrPoses,
     [[0, 10], [3, 13], [9], [19]].map((p) => Uint8Array.from(p)),
   );
+});
+
+test("입력 식의 값을 올리는 명령(LOAD_INPUT)도 변수로 치고, 같은 입력 자리는 같은 변수다", () => {
+  // (a * b + #1) - (#0 + #1)   (#i는 i번 입력 식의 값)
+  //   위치  0          3          6    7            9    10           12           14   15
+  //         LOAD_VAR a LOAD_VAR b MUL  LOAD_INPUT 1 ADD  LOAD_INPUT 0 LOAD_INPUT 1 ADD  SUB
+  const table = tableOf(
+    bytes(
+      v(0),
+      v(1),
+      EXPR_MUL,
+      EXPR_LOAD_INPUT,
+      1,
+      EXPR_ADD,
+      EXPR_LOAD_INPUT,
+      0,
+      EXPR_LOAD_INPUT,
+      1,
+      EXPR_ADD,
+      EXPR_SUB,
+    ),
+  );
+  // a=0, b=1, #1=2, #0=3
+  assert.deepEqual(
+    table.varNumberToInstrPoses,
+    [[0], [3], [7, 12], [10]].map((p) => Uint8Array.from(p)),
+  );
+  assert.deepEqual(table.inputPositionToVarNumber, Uint8Array.from([3, 2]));
+  // #0만 바뀌면 a * b + #1(0~9)을 건너뛴다.
+  assert.deepEqual(table.varNumberToSkipPastOps[3], { 0: 9 });
 });
 
 test("칸을 읽는 명령을 변수로 묶어 번호를 매긴다", () => {
   const table = tableOf(MIXED);
   assert.deepEqual(
-    table.positionsByVar,
+    table.varNumberToInstrPoses,
     [[0], [3], [7], [11], [14]].map((p) => Uint8Array.from(p)),
   );
-  assert.deepEqual([table.varAt[0], table.varAt[3], table.varAt[7], table.varAt[11], table.varAt[14]], [0, 1, 2, 3, 4]);
+  assert.deepEqual(
+    [
+      table.instrPosToVarNumber[0],
+      table.instrPosToVarNumber[3],
+      table.instrPosToVarNumber[7],
+      table.instrPosToVarNumber[11],
+      table.instrPosToVarNumber[14],
+    ],
+    [0, 1, 2, 3, 4],
+  );
 });
 
 test("같은 슬롯이라도 값 칸과 길이 칸은 다른 변수다", () => {
@@ -184,7 +199,7 @@ test("같은 슬롯이라도 값 칸과 길이 칸은 다른 변수다", () => {
   // LOAD_VAR와 LOAD_STRING_LENGTH는 a의 값 칸을, LOAD_ARRAY_LENGTH는 길이 칸을 읽는다.
   const table = tableOf(bytes(v(0), EXPR_LOAD_STRING_LENGTH, 0, 0, EXPR_ADD, EXPR_LOAD_ARRAY_LENGTH, 0, 0, EXPR_ADD));
   assert.deepEqual(
-    table.positionsByVar,
+    table.varNumberToInstrPoses,
     [[0, 3], [7]].map((p) => Uint8Array.from(p)),
   );
 });
@@ -192,11 +207,11 @@ test("같은 슬롯이라도 값 칸과 길이 칸은 다른 변수다", () => {
 test("변수마다 바뀐 잎에서 루트로 가는 길 옆의 부분식을 건너뛰는 표를 만든다", () => {
   const table = tableOf(MIXED);
   // a(0)가 바뀌면 길은 ADD(6), MUL(10), SUB(18)이다. 옆의 d + e(11~17)를 건너뛴다.
-  assert.deepEqual(table.skipPastOpsByVar[0], { 11: 17 });
+  assert.deepEqual(table.varNumberToSkipPastOps[0], { 11: 17 });
   // c(7)가 바뀌면 길은 MUL(10), SUB(18)이다. 옆의 a + b(0~6), d + e(11~17)를 건너뛴다.
-  assert.deepEqual(table.skipPastOpsByVar[2], { 0: 6, 11: 17 });
+  assert.deepEqual(table.varNumberToSkipPastOps[2], { 0: 6, 11: 17 });
   // d(11)가 바뀌면 길은 ADD(17), SUB(18)이다. 옆의 (a + b) * c(0~10)를 건너뛴다.
-  assert.deepEqual(table.skipPastOpsByVar[3], { 0: 10 });
+  assert.deepEqual(table.varNumberToSkipPastOps[3], { 0: 10 });
 });
 
 test("변수가 여러 위치에서 읽히면 모든 위치가 함께 바뀐 것으로 본다", () => {
@@ -205,22 +220,20 @@ test("변수가 여러 위치에서 읽히면 모든 위치가 함께 바뀐 것
   //         LOAD_VAR a LOAD_VAR b ADD  LOAD_VAR a LOAD_VAR c SUB  MUL
   const table = tableOf(bytes(v(0), v(1), EXPR_ADD, v(0), v(2), EXPR_SUB, EXPR_MUL));
   // a는 위치 0과 7에서 읽는다. 두 길이 ADD, SUB, MUL을 모두 지나 건너뛸 것이 없다.
-  assert.deepEqual(table.skipPastOpsByVar[0], {});
+  assert.deepEqual(table.varNumberToSkipPastOps[0], {});
   // b(3)만 바뀌면 a - c(7~13)를 건너뛴다.
-  assert.deepEqual(table.skipPastOpsByVar[1], { 7: 13 });
+  assert.deepEqual(table.varNumberToSkipPastOps[1], { 7: 13 });
   // c(10)만 바뀌면 a + b(0~6)를 건너뛴다.
-  assert.deepEqual(table.skipPastOpsByVar[2], { 0: 6 });
+  assert.deepEqual(table.varNumberToSkipPastOps[2], { 0: 6 });
 });
 
-test("어느 변수가 바뀌어도 건너뛸 부분식이 없으면 표를 만들지 않는다", () => {
+test("어느 변수가 바뀌어도 건너뛸 부분식이 없어도 표를 만든다", () => {
   // a - b: 어느 쪽이 바뀌어도 식 전체를 다시 센다. 잎은 읽는 비용이 cache와 같아 건너뛰지 않는다.
-  assert.equal(buildSkipTable(bytes(v(0), v(1), EXPR_SUB)), null);
+  assert.deepEqual(tableOf(bytes(v(0), v(1), EXPR_SUB)).varNumberToSkipPastOps, [{}, {}]);
   // a > 50: 변수가 하나라 모든 연산이 그 변수를 품는다.
-  assert.equal(buildSkipTable(bytes(v(0), EXPR_LOAD_SMALL_INT, 50, EXPR_GT)), null);
+  assert.deepEqual(tableOf(bytes(v(0), EXPR_LOAD_SMALL_INT, 50, EXPR_GT)).varNumberToSkipPastOps, [{}]);
   // 연산이 없는 식
-  assert.equal(buildSkipTable(bytes(v(0))), null);
-  // (a + b) * (a - c): a가 바뀌면 건너뛸 것이 없지만 b가 바뀌면 a - c를 건너뛰어 표가 있다.
-  assert.notEqual(buildSkipTable(bytes(v(0), v(1), EXPR_ADD, v(0), v(2), EXPR_SUB, EXPR_MUL)), null);
+  assert.deepEqual(tableOf(bytes(v(0))).varNumberToSkipPastOps, [{}]);
 });
 
 test("서로 다른 변수가 같은 칸을 가리키면 위치를 합쳐 표를 만든다", () => {
@@ -247,7 +260,7 @@ test("바뀐 변수가 여럿이면 그 변수들을 하나도 품지 않은 부
 
 test("바뀐 변수가 하나면 미리 만든 그 변수의 표를 그대로 돌려준다", () => {
   const table = tableOf(MIXED);
-  assert.equal(buildSkipPastOpsOfVars(table, MIXED, maskOf(2)), table.skipPastOpsByVar[2]);
+  assert.equal(buildSkipPastOpsOfVars(table, MIXED, maskOf(2)), table.varNumberToSkipPastOps[2]);
 });
 
 test("같은 위치에서 끝 연산이 다르면 안쪽(작은) 끝 연산을 쓴다", () => {
@@ -257,18 +270,18 @@ test("같은 위치에서 끝 연산이 다르면 안쪽(작은) 끝 연산을 �
   // c가 바뀌면 { 0: 6 }, d가 바뀌면 { 0: 10 }이다. 둘이 함께 바뀌면 (a + b) + c는 c를 품어 다시 센다.
   const expr = bytes(v(0), v(1), EXPR_ADD, v(2), EXPR_ADD, v(3), EXPR_ADD);
   const table = tableOf(expr);
-  assert.deepEqual(table.skipPastOpsByVar[2], { 0: 6 });
-  assert.deepEqual(table.skipPastOpsByVar[3], { 0: 10 });
+  assert.deepEqual(table.varNumberToSkipPastOps[2], { 0: 6 });
+  assert.deepEqual(table.varNumberToSkipPastOps[3], { 0: 10 });
   assert.deepEqual(buildSkipPastOpsOfVars(table, expr, maskOf(2, 3)), { 0: 6 });
 });
 
 test("변수 둘 이상의 모든 조합이 변수별 표를 모두 건너뛰는 부분식만 남긴 것과 같다", () => {
   const table = tableOf(MIXED);
-  const varCount = table.positionsByVar.length;
+  const varCount = table.varNumberToInstrPoses.length;
   const intersect = (varNumbers: number[]) => {
     const result: Record<number, number> = {};
-    for (const position of Object.keys(table.skipPastOpsByVar[varNumbers[0]])) {
-      const ends = varNumbers.map((n) => table.skipPastOpsByVar[n][Number(position)]);
+    for (const position of Object.keys(table.varNumberToSkipPastOps[varNumbers[0]])) {
+      const ends = varNumbers.map((n) => table.varNumberToSkipPastOps[n][Number(position)]);
       if (ends.every((end) => end !== undefined)) {
         result[Number(position)] = Math.min(...ends);
       }
@@ -297,7 +310,7 @@ const sumTimesLast = (varCount: number) => {
 test("변수가 32개까지는 마지막 비트(31)까지 써서 표를 만든다", () => {
   const expr = sumTimesLast(32);
   const table = tableOf(expr);
-  assert.equal(table.positionsByVar.length, 32);
+  assert.equal(table.varNumberToInstrPoses.length, 32);
   // v0과 v31이 바뀌면 곱 전체를 다시 세고 건너뛸 부분식이 없다.
   assert.deepEqual(buildSkipPastOpsOfVars(table, expr, maskOf(0, 31)), {});
   // v31 하나만 바뀌면 합 전체(위치 0부터)를 건너뛴다.
@@ -315,11 +328,11 @@ test("같은 변수 조합은 담아 둔 같은 표를 돌려준다", () => {
   const first = buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 2));
   assert.equal(buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 2)), first);
   assert.notEqual(buildSkipPastOpsOfVars(table, MIXED, maskOf(0, 3)), first, "다른 조합은 다른 표");
-  assert.equal(table.skipPastOpsByVarSet.size, 2);
+  assert.equal(table.varMaskToSkipPastOps.size, 2);
 });
 
 test("변수가 하나면 담아 두지 않고 변수별 표를 쓴다", () => {
   const table = tableOf(MIXED);
   buildSkipPastOpsOfVars(table, MIXED, maskOf(2));
-  assert.equal(table.skipPastOpsByVarSet.size, 0);
+  assert.equal(table.varMaskToSkipPastOps.size, 0);
 });

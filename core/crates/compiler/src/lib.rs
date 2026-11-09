@@ -1693,20 +1693,213 @@ mod tests {
         assert_ne!(exprs[1], exprs[3]); // #1의 inputs는 [0], #3의 inputs는 [2]
     }
 
-    /// 인덱스 안의 삼항도 그 식의 입력이 된다.
+    /// 인덱스 안의 삼항은 주소 식의 입력이 된다.
     #[test]
     fn ternary_in_index_is_an_input() {
         use bytecode::{ExprDef, ExprOp};
         let module = compile_text("ok: bool, tags: string[]", "tags[ok ? 0 : 1]");
         let exprs = &module.def(0).unwrap().exprs;
-        assert_eq!(exprs.len(), 2);
-        match &exprs[1] {
-            ExprDef::Calc { code, inputs } => {
-                assert_eq!(inputs, &vec![0]);
-                assert!(code.contains(&(ExprOp::LoadInput as u8)), "{code:?}");
+        assert_eq!(exprs.len(), 3); // #0 삼항, #1 주소, #2 값 읽기
+        assert!(matches!(exprs[0], ExprDef::Ternary { .. }));
+        assert_eq!(
+            exprs[1],
+            ExprDef::Calc {
+                code: vec![
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::LoadInput as u8,
+                    0,
+                    ExprOp::ElemAt as u8
+                ],
+                inputs: vec![0],
             }
-            other => panic!("계산 식이어야: {other:?}"),
+        );
+        assert_eq!(exprs[2], elem_read(1, &[]));
+    }
+
+    /// 값 읽기 식 - 주소 식(address)의 leafIndex에 필드 거리(field_offsets)를 차례로 더해 그 leaf를 읽는다.
+    fn elem_read(address: u8, field_offsets: &[u8]) -> bytecode::ExprDef {
+        use bytecode::ExprOp;
+        let mut code = vec![ExprOp::LoadInput as u8, 0];
+        for offset in field_offsets {
+            code.extend([ExprOp::FieldAt as u8, *offset]);
         }
+        code.push(ExprOp::ReadLeaf as u8);
+        bytecode::ExprDef::Calc {
+            code,
+            inputs: vec![address],
+        }
+    }
+
+    /// 인덱스 접근은 주소 식과 값 읽기 식으로 떼어 내고, 감싼 식은 값 읽기 식을 LoadInput으로 읽는다.
+    #[test]
+    fn index_access_splits_into_address_and_read() {
+        use bytecode::{ExprDef, ExprOp};
+        // rows 0, pivot 1, x 2. 요소는 { price, qty }라 price 거리 0, qty 거리 1.
+        let module = compile_text(
+            "rows: { price: number, qty: number }[], pivot: number, x: number",
+            "rows[pivot].qty - x",
+        );
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    0,
+                    0,
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::ElemAt as u8
+                ]),
+                elem_read(0, &[1]),
+                ExprDef::Calc {
+                    code: vec![
+                        ExprOp::LoadInput as u8,
+                        0,
+                        ExprOp::LoadVar as u8,
+                        2,
+                        0,
+                        ExprOp::Sub as u8
+                    ],
+                    inputs: vec![1],
+                },
+            ]
+        );
+    }
+
+    /// 식 전체가 인덱스 접근 하나면 값 읽기 식이 곧 그 식이다 - LoadInput 하나뿐인 식으로 감싸지 않는다.
+    #[test]
+    fn bare_index_access_is_the_read_expr() {
+        use bytecode::ExprOp;
+        let module = compile_text("tags: string[], i: number", "tags[i]");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    0,
+                    0,
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::ElemAt as u8
+                ]),
+                elem_read(0, &[]),
+            ]
+        );
+    }
+
+    /// 같은 요소의 두 필드를 읽으면 주소 식 하나를 두 값 읽기 식이 함께 입력으로 받는다.
+    #[test]
+    fn fields_of_same_element_share_address() {
+        let module = compile_template(
+            "rows: { price: number, qty: number }[], pivot: number",
+            "p() { ${rows[pivot].price} } p() { ${rows[pivot].qty} }",
+        );
+        let exprs = &module.def(0).unwrap().exprs;
+        assert_eq!(exprs.len(), 3); // #0 주소, #1 price 읽기, #2 qty 읽기
+        assert_eq!(exprs[1], elem_read(0, &[0]));
+        assert_eq!(exprs[2], elem_read(0, &[1]));
+    }
+
+    /// 연산자로 된 인덱스는 주소 식 바이트에 그대로 들어간다 - 따로 떼지 않는다.
+    #[test]
+    fn operator_index_stays_in_address() {
+        use bytecode::ExprOp;
+        let module = compile_text("tags: string[], i: number", "tags[i + 1]");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    0,
+                    0,
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::LoadSmallInt as u8,
+                    1,
+                    ExprOp::Add as u8,
+                    ExprOp::ElemAt as u8
+                ]),
+                elem_read(0, &[]),
+            ]
+        );
+    }
+
+    /// 인덱스 자리의 인덱스 접근은 안쪽부터 떼어 낸다. 바깥 주소 식이 안쪽 값 읽기 식을 입력으로 받는다.
+    #[test]
+    fn index_inside_index_is_an_input_of_address() {
+        use bytecode::{ExprDef, ExprOp};
+        // nums 0, i 1. nums[nums[i]]
+        let module = compile_text("nums: number[], i: number", "nums[nums[i]]");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    0,
+                    0,
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::ElemAt as u8
+                ]),
+                elem_read(0, &[]),
+                ExprDef::Calc {
+                    code: vec![
+                        ExprOp::LoadVar as u8,
+                        0,
+                        0,
+                        ExprOp::LoadInput as u8,
+                        0,
+                        ExprOp::ElemAt as u8
+                    ],
+                    inputs: vec![1],
+                },
+                elem_read(2, &[]),
+            ]
+        );
+    }
+
+    /// 요소 안의 배열을 다시 인덱스로 읽으면 그 배열 필드의 값 읽기 식이 다음 주소 식의 입력이 된다.
+    #[test]
+    fn nested_array_index_reads_array_field_first() {
+        use bytecode::{ExprDef, ExprOp};
+        // rows 0, i 1, j 2. 요소는 { id, tags }라 tags 거리 1.
+        let module = compile_text(
+            "rows: { id: number, tags: string[] }[], i: number, j: number",
+            "rows[i].tags[j]",
+        );
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    0,
+                    0,
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::ElemAt as u8
+                ]),
+                elem_read(0, &[1]),
+                ExprDef::Calc {
+                    code: vec![
+                        ExprOp::LoadInput as u8,
+                        0,
+                        ExprOp::LoadVar as u8,
+                        2,
+                        0,
+                        ExprOp::ElemAt as u8
+                    ],
+                    inputs: vec![1],
+                },
+                elem_read(2, &[]),
+            ]
+        );
     }
 
     #[test]
@@ -2236,6 +2429,14 @@ mod tests {
             _ => unreachable!(),
         };
         assert_eq!(tags_expr[tags_expr.len() - 2], ExprOp::FieldAt as u8);
+        // `rows[cursor]`(fields[1])는 주소 식이고, title(fields[2])의 값 읽기 식이 그것을 입력으로 받는다.
+        match (fields[1].value, fields[2].value) {
+            (FieldValue::Expr(row), FieldValue::Expr(title)) => match &def.exprs[title as usize] {
+                bytecode::ExprDef::Calc { inputs, .. } => assert_eq!(inputs, &vec![row]),
+                other => panic!("값 읽기 식은 계산 식이어야: {other:?}"),
+            },
+            _ => unreachable!(),
+        }
         assert_eq!(
             expr_of(&def.contexts[0].fields[0]),
             (ExprOp::Not as u8, TypeEntry::Scalar)

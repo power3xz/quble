@@ -40,24 +40,24 @@ commit에서 본문을 뗀다. 세 단계는 한 flush 안에서 이어서 돈�
 
 **식 안의 부분 재평가에 사용할 바뀐 변수는 push가 인스턴스의 `pendingVarMask`에 누적한다.** 변수 번호는 식 정의가
 정하므로 같은 식의 인스턴스가 모두 같은 번호를 사용하고, 건너뛰기 표도 식 정의마다 하나다. 인스턴스마다 다른 것은
-변수 번호에서 leafIndex로 가는 대응(`leafOfVar`)뿐이다.
+변수 번호에서 leafIndex로 가는 대응(`varNumberToLeafIndex`)뿐이다.
 
-`(a + 1) * (b + 2)`에서 a가 leaf 20, b가 leaf 21이면 `leafOfVar = [20, 21]`이다.
+`(a + 1) * (b + 2)`에서 a가 leaf 20, b가 leaf 21이면 `varNumberToLeafIndex = [20, 21]`이다.
 
 | 때 | 하는 일 |
 |---|---|
-| push | 바뀐 leaf 20의 구독을 따라 인스턴스에 닿으면 `leafOfVar`를 차례로 비교해 20인 자리(0번)의 비트를 켠다. `pendingVarMask \|= 0b01` |
+| push | 바뀐 leaf 20의 구독을 따라 인스턴스에 닿으면 `varNumberToLeafIndex`를 차례로 비교해 20인 자리(0번)의 비트를 켠다. `pendingVarMask \|= 0b01` |
 | 평가 | `pendingVarMask`로 건너뛰기 표를 고르고(0b01이면 `b + 2`를 건너뜀), 평가한 뒤 0으로 지운다 |
 
 OR로 켜기만 하므로 평가하기 전에 같은 leaf가 다시 바뀌어도 비트는 그대로고, 다른 변수가 바뀌면 그 비트가 더해진다.
-지금은 `runPartial`이 평가할 때마다 바뀐 leaf 모음과 `leafOfVar`를 비교해 지역 변수로 같은 마스크를 만든다. 그
-비교를 push로 옮기고 결과를 인스턴스에 남기는 것이다. 비교는 push 때의 `leafOfVar`로 하므로, 인덱스 접근이 읽는
+지금은 `runPartial`이 평가할 때마다 바뀐 leaf 모음과 `varNumberToLeafIndex`를 비교해 지역 변수로 같은 마스크를 만든다. 그
+비교를 push로 옮기고 결과를 인스턴스에 남기는 것이다. 비교는 push 때의 `varNumberToLeafIndex`로 하므로, 인덱스 접근이 읽는
 leaf를 옮겨도 따로 고칠 것이 없다.
 
 leafIndex에서 마스크로 가는 표를 인스턴스마다 두지 않고 비교하는 이유는 측정이다. 인스턴스 10000개, 한 번 찾는
 시간이다.
 
-| 식의 입력 수 | `leafOfVar` 비교 | 객체 | `Map` |
+| 식의 입력 수 | `varNumberToLeafIndex` 비교 | 객체 | `Map` |
 |---|---|---|---|
 | 1 | 2.1ns | 20.9ns | 5.9ns |
 | 2 | 5.7ns | 32.3ns | 6.4ns |

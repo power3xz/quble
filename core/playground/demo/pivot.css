@@ -1,0 +1,41 @@
+/* 행마다 pivot 요소와의 price 차이를 보인다. 숫자가 바뀌는 것을 보는 데모라 숫자를 고정폭으로 맞춘다. */
+.pivot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  font-size: 13px;
+  color: #1c2024;
+}
+
+.pivot__bar {
+  display: flex;
+  gap: 6px;
+}
+
+.pivot__button {
+  padding: 4px 10px;
+  border: 1px solid #e8e8ec;
+  border-radius: 4px;
+  background: #fff;
+  color: #1c2024;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pivot__button:hover {
+  border-color: #c9cacd;
+}
+
+.pivot__state {
+  color: #60646c;
+  font-size: 12px;
+}
+
+.pivot__row {
+  padding: 6px 10px;
+  border: 1px solid #e8e8ec;
+  border-radius: 6px;
+  background: #fff;
+  font-variant-numeric: tabular-nums;
+}

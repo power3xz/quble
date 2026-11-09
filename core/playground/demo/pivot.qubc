@@ -1,0 +1,18 @@
+use "./pivot.css"
+
+component Pivot {
+  props { pivot: number, rows: { price: number }[] }
+  events { NEXT_PIVOT({ pivot }) BUMP({ pivot, price: rows[pivot].price }) }
+  template {
+    div(class="pivot") {
+      div(class="pivot__bar") {
+        button(class="pivot__button" @click:NEXT_PIVOT) { "pivot +1" }
+        button(class="pivot__button" @click:BUMP) { "pivot 요소 price +5" }
+      }
+      span(class="pivot__state") { "pivot=${pivot}, price=${rows[pivot].price}" }
+      @for (row of rows) {
+        div(class="pivot__row") { ${row.price - rows[pivot].price} }
+      }
+    }
+  }
+}

@@ -30,13 +30,13 @@ test("같은 입력을 두 번 읽으면 두 번 모두 같은 inputValues[i]를
   assert.equal(evaluator.runExpr(expr, pairs, null, null, SKIP_NOTHING, null, [4]), 8);
 });
 
-test("LoadInput은 store 칸을 읽지 않아 leafOfVar에 자리를 차지하지 않는다", () => {
-  // (a + b) * (c - #0). 변수는 a, b, c 셋이다.
+test("LoadInput은 변수지만 store 칸을 읽지 않아 그 자리의 leafIndex는 -1이다", () => {
+  // (a + b) * (c - #0). 변수는 a, b, c, #0 넷이다.
   const expr = new Uint8Array([...load(0), ...load(1), EXPR_ADD, ...load(2), ...loadInput(0), EXPR_SUB, EXPR_MUL]);
   const evaluator = evaluatorOf([expr]);
   const table = evaluator.skipTable(0) as TExprSkipTable;
   const cache = new Array(table.opCount);
-  const { value, leafOfVar } = evaluator.evalExpr(expr, pairs, table, cache, [5]);
+  const { value, varNumberToLeafIndex } = evaluator.evalExpr(expr, pairs, table, cache, [5]);
   assert.equal(value, 750); // (10 + 20) * (30 - 5)
-  assert.deepEqual(leafOfVar, [0, 1, 2]); // a, b, c가 읽은 leafIndex
+  assert.deepEqual(varNumberToLeafIndex, [0, 1, 2, -1]); // a, b, c가 읽은 leafIndex와 #0
 });

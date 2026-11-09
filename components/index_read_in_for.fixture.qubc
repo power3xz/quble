@@ -1,0 +1,12 @@
+component IndexReadInFor {
+  props { pivot: number, rows: { price: number }[] }
+  events { APPLY({}) }
+  template {
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      @for (row of rows) {
+        span(class="v") { ${row.price - rows[pivot].price} }
+      }
+    }
+  }
+}
