@@ -83,9 +83,9 @@ export type TExprSkipTable = {
   // 식에 READ_LEAF가 있는가. READ_LEAF는 읽는 leaf가 실행 중에 정해지는 유일한 명령이라, 이 식만 다시 셀 때
   // 읽은 leaf가 바뀌었는지 견주어 구독을 옮긴다. 다른 명령이 읽는 leaf는 scope로 정해져 바뀌지 않는다.
   hasIndexAccess: boolean;
-  // 어느 변수가 바뀌었을 때 건너뛸 부분식이 있는가. a - b나 big > 50은 없다. 없는 식은 인스턴스가 cache를 두지 않고
-  // 처음부터 센다.
-  hasSkippable: boolean;
+  // 바뀐 변수에 따라 건너뛸 부분식이 생길 수 있는가. 어느 변수가 바뀌어도 건너뛸 것이 없는 식(a - b, big > 50)은
+  // false고, 인스턴스가 cache를 두지 않고 처음부터 센다.
+  mightSkip: boolean;
 };
 
 // 변수로 묶는 명령인가 - store 칸을 읽는 명령과 입력 식의 값을 올리는 LOAD_INPUT. LOAD_CONST,
@@ -122,7 +122,7 @@ const varKey = (expr: Uint8Array, pc: number) => {
 const MAX_VARS = 32;
 
 // 어느 변수가 바뀌어도 건너뛸 부분식이 없는 식(a - b, big > 50)도 표를 만든다. 그 표의 skipPastOps는
-// 모두 비어 있고 hasSkippable이 false다. 식 층은 표로 그 식에 READ_LEAF가 없는지(hasIndexAccess) 보고 읽기를
+// 모두 비어 있고 mightSkip이 false다. 식 층은 표로 그 식에 READ_LEAF가 없는지(hasIndexAccess) 보고 읽기를
 // 모으지 않고 센다.
 // 변수가 32개를 넘는 식만 null이다. 바뀐 변수를 번호를 비트로 모은 32비트 정수로 다루기 때문이다.
 export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
@@ -217,10 +217,10 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     varNumberToSkipPastOps: [],
     varMaskToSkipPastOps: new Map(),
     hasIndexAccess,
-    hasSkippable: false,
+    mightSkip: false,
   };
   table.varNumberToSkipPastOps = table.varNumberToInstrPoses.map((p) => buildSkipPastOps(table, expr, p));
-  table.hasSkippable = table.varNumberToSkipPastOps.some((skipPastOps) => Object.keys(skipPastOps).length > 0);
+  table.mightSkip = table.varNumberToSkipPastOps.some((skipPastOps) => Object.keys(skipPastOps).length > 0);
   return table;
 };
 

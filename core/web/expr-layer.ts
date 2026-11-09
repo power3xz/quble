@@ -127,16 +127,18 @@ export class ExprInstancePool {
   // 식 인스턴스를 만든다. 아직 가지도 식도 붙들지 않았다 - 붙드는 쪽이 retainByBranch나 retainByExpr를 호출한다. 식은
   // 아직 세지 않았으며 구독도 걸지 않는다 - evaluate가 세고, subscribeInputs가 건다.
   //
-  // cache는 건너뛸 부분식이 있거나 READ_LEAF가 있는 계산 식만 둔다. 둘 다 없는 식(row.price - #R)과 삼항, 표가 없는
-  // 계산 식은 처음부터 센다. 같은 flush에서 읽는 leaf 여럿이 바뀌어도 flush가 인스턴스당 한 번만 세므로 한 번이면
-  // 된다. 삼항은 평가기를 거치지 않아(evaluateTernary) 표를 보지 않는다.
+  // cache는 건너뛸 부분식이 생길 수 있거나(mightSkip) READ_LEAF가 있는(hasIndexAccess) 계산 식만 둔다. READ_LEAF가
+  // 있어도 주소가 잎 하나면(#A ReadLeaf, nums[pivot]) 건너뛸 것이 없는데, 구독을 옮기는 runPartial로 세려고 cache를
+  // 둔다. 둘 다 없는 식(row.price - #R)과 삼항, 표가 없는 계산 식은 처음부터 센다. 같은 flush에서 읽는 leaf 여럿이
+  // 바뀌어도 flush가 인스턴스당 한 번만 세므로 한 번이면 된다. 삼항은 평가기를 거치지 않아(evaluateTernary) 표를
+  // 보지 않는다.
   create = (globalExprIndex: number, pairs: TScope, scopeUid: number): number => {
     const table =
       this.exprInputs[globalExprIndex].kind === "ternary" ? null : this.evaluator.skipTable(globalExprIndex);
     const instance: TExprInstance = {
       globalExprIndex,
       pairs,
-      cache: table !== null && (table.hasSkippable || table.hasIndexAccess) ? new Array(table.opCount) : null,
+      cache: table !== null && (table.mightSkip || table.hasIndexAccess) ? new Array(table.opCount) : null,
       readLeaves: [],
       lastValue: undefined,
       pendingVarMask: 0,
