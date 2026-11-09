@@ -28,6 +28,7 @@ const render = () => {
   return {
     texts: () => [...host.querySelectorAll(".v")].map((el) => el.textContent),
     liveExprInstances: () => inst.exprInstances.entries.length - inst.exprInstances.free.length,
+    cachedExprInstances: () => inst.exprInstances.entries.filter((entry) => entry.cache !== null).length,
     subscriberCount: (leafIndex: number) => {
       const slot = inst.deriveSubscribers[leafIndex];
       return slot === undefined ? 0 : typeof slot === "number" ? 1 : slot.size;
@@ -43,6 +44,13 @@ test("@for 안의 rows[pivot].price는 root의 주소 식과 값 읽기 식을 �
   const { texts, liveExprInstances } = render();
   assert.deepEqual(texts(), ["0", "10", "20"]);
   assert.equal(liveExprInstances(), 5); // 주소 식 하나, 값 읽기 식 하나, 행마다 감싼 식 하나
+});
+
+test("건너뛸 부분식도 READ_LEAF도 없는 식의 인스턴스는 cache를 두지 않는다", () => {
+  const { cachedExprInstances } = render();
+  // 값 읽기 식만 READ_LEAF가 있어 cache를 둔다. 주소 식(rows[pivot])과 행마다 감싼 식(row.price - #R)은 연산이
+  // 하나라 건너뛸 것이 없다.
+  assert.equal(cachedExprInstances(), 1);
 });
 
 test("pivot이 바뀌면 모든 행이 새 요소의 값으로 다시 센다", () => {

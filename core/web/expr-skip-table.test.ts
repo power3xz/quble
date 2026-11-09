@@ -107,6 +107,12 @@ test("배열 인덱스 접근의 요소 칸을 읽는 명령(READ_LEAF)도 변�
   assert.deepEqual(table.varNumberToSkipPastOps[3], { 0: 9 });
 });
 
+test("hasSkippable은 어느 변수가 바뀌었을 때 건너뛸 부분식이 있을 때만 참이다", () => {
+  assert.equal(tableOf(MIXED).hasSkippable, true);
+  // a - b: 어느 쪽이 바뀌어도 식 전체를 다시 센다.
+  assert.equal(tableOf(bytes(v(0), v(1), EXPR_SUB)).hasSkippable, false);
+});
+
 test("hasIndexAccess는 식에 READ_LEAF가 있을 때만 참이다", () => {
   // a[i].b + x
   const indexed = tableOf(bytes(v(0), v(1), EXPR_ELEM_AT, EXPR_FIELD_AT, 0, EXPR_READ_LEAF, v(2), EXPR_ADD));
