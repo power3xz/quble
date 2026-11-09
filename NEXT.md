@@ -8,11 +8,15 @@
 
 ## 하는 중
 
-배열 인덱스 접근을 주소 식(`rows[pivot]`)과 값 읽기 식(`LoadInput FieldAt ReadLeaf`)으로 떼어 내 바깥 식이
-`LoadInput`으로 읽게 한다. `@for` 안에서 바깥 배열을 인덱스로 읽는 식이 root 인스턴스를 함께 사용한다. 바이트코드
-형식은 그대로다. 런타임에서 건너뛰기 표의 `readLeafIndexOpsByVar`, `hasIndexAccess`와 READ_LEAF 구독 다시 걸기를
-readLeaves 전후 비교로 줄인다. docs/expr-graph.draft.md "배열 접근".
+없음
 
 ## 할 것
 
-없음
+- **입력 식의 값이 그대로면 전파를 끊는다.** 지금은 입력 인스턴스가 다시 셀 인스턴스가 되면 그 값을 읽는 식에도
+  값이 바뀌었는지 모른 채 표시를 올린다(expr-layer.ts `markOutputInstances`). 그래서 입력을 다시 셌더니 값이 같아도
+  출력 식이 다시 센다. 예를 들어 삼항의 cond 식이 true 그대로인데 삼항이 다시 센다. pull에서 표시된 입력을 먼저
+  요청해 `lastValue`가 바뀌지 않았으면 그 입력의 변수 비트를 지우고, 남은 비트가 없으면 다시 세지 않는다.
+- **`&&`/`||`의 왼쪽이 결과를 정하면 오른쪽 변수의 변경으로 다시 세지 않는다.** 바뀐 leaf가 결과에 영향을 주지
+  않아도 그 leaf를 읽는 식은 다시 센다(expr-layer.ts `markChanged`). 예를 들어
+  `row.qty > 0 && ... && row.price * row.qty > threshold`는 왼쪽이 false인 행도 threshold가 바뀌면 다시 센다. bench-expr orders 1000행의 threshold 시나리오에서는
+  1000행 가운데 776행이 이 경우다. 단락으로 쉬는 변수의 비트를 인스턴스에 두고 `markChanged`가 걸러 낸다.
