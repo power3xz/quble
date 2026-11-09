@@ -78,19 +78,14 @@ const App = (props: { data: TData }) => {
       </div>
       <div class="orders__list">
         <For each={rows}>
-          {(row, i) => {
-            // 금액과 표시가 함께 사용하는 값과 등급의 cond를 memo로 뺀다. 다시 센 값이 같으면 그 값을 읽는 쪽을 다시
-            // 돌리지 않는다.
-            const base = createMemo(() => row.price * row.qty - row.discount);
-            const high = createMemo(() => row.price * row.qty > limit());
-            return (
+          {(row, i) => (
             <div class="row">
               <span class="row__id">{row.id}</span>
               <span class="row__price">{row.price}</span>
               <span class="row__qty">{row.qty}</span>
-              <span class="row__amount">{((base() * (100 + tax())) / 100) * rate()}</span>
-              <span class="row__shown">{net() ? base() * rate() : row.price * rate()}</span>
-              <span class="row__tier">{high() ? row.price : row.qty}</span>
+              <span class="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax())) / 100) * rate()}</span>
+              <span class="row__shown">{net() ? (row.price * row.qty - row.discount) * rate() : row.price * rate()}</span>
+              <span class="row__tier">{row.price * row.qty > limit() ? row.price : row.qty}</span>
               <span class="row__left">{row.stock - row.qty}</span>
               <span class="row__diff">{row.price - pivotPrice()}</span>
               <span class="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold())}>
@@ -103,8 +98,7 @@ const App = (props: { data: TData }) => {
                 +1
               </button>
             </div>
-            );
-          }}
+          )}
         </For>
       </div>
     </div>
