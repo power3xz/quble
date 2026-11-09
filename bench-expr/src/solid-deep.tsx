@@ -1,9 +1,9 @@
 // Solid에 deep 행(quble/orders-deep.qubc와 같은 DOM)을 그린다. 값 자리 사이에 정적 하위 트리, 깊은 값 자리,
 // 정적 형제 줄이 낀다. 행은 solid.tsx처럼 컴포넌트 없이 For 안에 바로 쓴다. 결과는 solid와 따로 쌓인다.
-import { batch, createSignal, For } from "solid-js";
+import { batch, createMemo, createSignal, For } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { render } from "solid-js/web";
-import { bulk, nextPivot, nextRate, nextThreshold, runTarget, type TData } from "./harness.ts";
+import { bulk, nextLimit, nextPivot, nextRate, nextThreshold, runTarget, type TData } from "./harness.ts";
 
 const App = (props: { data: TData }) => {
   // store가 넘긴 객체를 직접 바꾸므로 bulk가 비교하는 data.rows를 건드리지 않게 복사한다.
@@ -13,6 +13,9 @@ const App = (props: { data: TData }) => {
   const [pivot, setPivot] = createSignal(props.data.pivot);
   const [tax, setTax] = createSignal(props.data.tax);
   const [net, setNet] = createSignal(props.data.net);
+  const [limit, setLimit] = createSignal(props.data.limit);
+  // 기준 행 가격을 한 번만 읽어 모든 행의 비교 식이 함께 사용한다.
+  const pivotPrice = createMemo(() => rows[pivot()].price);
   let bumped = false;
   return (
     <div class="orders">
@@ -64,14 +67,22 @@ const App = (props: { data: TData }) => {
         <button id="btn-net" onClick={() => setNet((n) => !n)}>
           표시 전환
         </button>
+        <button id="btn-limit" onClick={() => setLimit(nextLimit)}>
+          한도 변경
+        </button>
         <span class="orders__info">
-          환율 <span class="orders__rate">{rate()}</span> / 기준 <span class="orders__threshold">{threshold()}</span> / 기준 행{" "}
+          환율 <span class="orders__rate">{rate()}</span> / 기준 <span class="orders__threshold">{threshold()}</span> / 한도 <span class="orders__limit">{limit()}</span> / 기준 행{" "}
           <span class="orders__pivot">{pivot()}</span>
         </span>
       </div>
       <div class="orders__list">
         <For each={rows}>
-          {(row, i) => (
+          {(row, i) => {
+            // 금액과 표시가 함께 사용하는 값과 등급의 cond를 memo로 뺀다. 다시 센 값이 같으면 그 값을 읽는 쪽을 다시
+            // 돌리지 않는다.
+            const base = createMemo(() => row.price * row.qty - row.discount);
+            const high = createMemo(() => row.price * row.qty > limit());
+            return (
             <div class="row">
               <span class="row__id">{row.id}</span>
               <div class="row__pad">
@@ -94,8 +105,9 @@ const App = (props: { data: TData }) => {
                   </div>
                 </div>
               </div>
-              <span class="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax())) / 100) * rate()}</span>
-              <span class="row__shown">{net() ? (row.price * row.qty - row.discount) * rate() : row.price * rate()}</span>
+              <span class="row__amount">{((base() * (100 + tax())) / 100) * rate()}</span>
+              <span class="row__shown">{net() ? base() * rate() : row.price * rate()}</span>
+              <span class="row__tier">{high() ? row.price : row.qty}</span>
               <ul class="row__meta">
                 <li>a</li>
                 <li>b</li>
@@ -110,7 +122,7 @@ const App = (props: { data: TData }) => {
                 <li>{row.discount}</li>
               </ul>
               <span class="row__left">{row.stock - row.qty}</span>
-              <span class="row__diff">{row.price - rows[pivot()].price}</span>
+              <span class="row__diff">{row.price - pivotPrice()}</span>
               <span class="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold())}>
                 !
               </span>
@@ -121,7 +133,8 @@ const App = (props: { data: TData }) => {
                 +1
               </button>
             </div>
-          )}
+            );
+          }}
         </For>
       </div>
     </div>

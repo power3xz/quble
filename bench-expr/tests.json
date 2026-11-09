@@ -1,6 +1,6 @@
 {
-  "orders": { "version": 2 },
-  "orders-deep": { "version": 2 },
+  "orders": { "version": 3 },
+  "orders-deep": { "version": 3 },
   "orders-toggle": { "version": 2 },
-  "orders-shared": { "version": 3 }
+  "orders-shared": { "version": 4 }
 }

@@ -1,21 +1,23 @@
 // React 모범 사례 모양. Row를 memo로 감싸고, 클릭 핸들러를 useCallback으로 고정하고, 바뀐 행만
-// 새 객체로 바꾼다. 그래서 행 +1은 그 행만 다시 렌더된다. 환율/기준은 모든 Row의 props가 바뀌어
-// memo가 소용없다. 기준 행은 배열 대신 그 가격 값만 넘겨 memo가 값으로 비교하게 한다.
+// 새 객체로 바꾼다. 그래서 행 +1은 그 행만 다시 렌더된다. 환율은 모든 Row의 props가 바뀌어 memo가
+// 소용없다. 기준 행은 배열 대신 그 가격 값만 넘기고, 경고와 등급은 기준과 한도 대신 부모가 센 boolean을 넘겨
+// memo가 값으로 비교하게 한다 - 기준이나 한도가 바뀌어도 결과가 그대로인 행은 다시 렌더되지 않는다.
 import { memo, useCallback, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { bulk, nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
+import { bulk, nextLimit, nextPivot, nextRate, nextThreshold, runTarget } from "./harness.ts";
 
-const Row = memo(({ row, index, pivotPrice, rate, tax, threshold, net, onInc }) => (
+const Row = memo(({ row, index, pivotPrice, rate, tax, warn, net, high, onInc }) => (
   <div className="row">
     <span className="row__id">{row.id}</span>
     <span className="row__price">{row.price}</span>
     <span className="row__qty">{row.qty}</span>
     <span className="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax)) / 100) * rate}</span>
     <span className="row__shown">{net ? (row.price * row.qty - row.discount) * rate : row.price * rate}</span>
+    <span className="row__tier">{high ? row.price : row.qty}</span>
     <span className="row__left">{row.stock - row.qty}</span>
     <span className="row__diff">{row.price - pivotPrice}</span>
-    <span className="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold)}>
+    <span className="row__warn" data-warn={String(warn)}>
       !
     </span>
     <a className="row__link" href={row.url}>
@@ -34,6 +36,7 @@ const App = ({ data }) => {
   const [pivot, setPivot] = useState(data.pivot);
   const [tax, setTax] = useState(data.tax);
   const [net, setNet] = useState(data.net);
+  const [limit, setLimit] = useState(data.limit);
   const onInc = useCallback((i) => {
     setRows((rs) => {
       const next = rs.slice();
@@ -92,8 +95,11 @@ const App = ({ data }) => {
         <button id="btn-net" onClick={() => setNet((n) => !n)}>
           표시 전환
         </button>
+        <button id="btn-limit" onClick={() => setLimit(nextLimit)}>
+          한도 변경
+        </button>
         <span className="orders__info">
-          환율 <span className="orders__rate">{rate}</span> / 기준 <span className="orders__threshold">{threshold}</span> / 기준 행{" "}
+          환율 <span className="orders__rate">{rate}</span> / 기준 <span className="orders__threshold">{threshold}</span> / 한도 <span className="orders__limit">{limit}</span> / 기준 행{" "}
           <span className="orders__pivot">{pivot}</span>
         </span>
       </div>
@@ -106,8 +112,9 @@ const App = ({ data }) => {
             pivotPrice={pivotPrice}
             rate={rate}
             tax={tax}
-            threshold={threshold}
+            warn={row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold}
             net={net}
+            high={row.price * row.qty > limit}
             onInc={onInc}
           />
         ))}

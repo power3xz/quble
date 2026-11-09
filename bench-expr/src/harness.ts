@@ -10,7 +10,8 @@ import testVersions from "../tests.json";
 
 export type TRow = { id: number; price: number; qty: number; discount: number; stock: number; url: string };
 // net은 행마다 둔 삼항(row__shown)의 cond다. true면 할인을 뺀 금액, false면 단가에 환율을 곱한 값을 고른다.
-export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number; net: boolean };
+// limit은 행마다 둔 등급 삼항(row__tier)의 cond 식 `row.price * row.qty > limit`이 읽는 한도다.
+export type TData = { rows: TRow[]; rate: number; tax: number; threshold: number; pivot: number; net: boolean; limit: number };
 
 // orders-toggle 테스트의 데이터. 켰다 끄는 두 목록(A 100행, B 10행), 환율, 행 삼항의 cond.
 export type TToggleRow = { id: number; price: number; qty: number; discount: number };
@@ -20,6 +21,8 @@ export type TToggleData = { rowsA: TToggleRow[]; rowsB: TToggleRow[]; showA: boo
 export const nextRate = (rate: number) => (rate === 1300 ? 1350 : 1300);
 export const nextThreshold = (threshold: number) => (threshold === 30000 ? 30001 : 30000);// 기준 행은 매번 다음 행으로 옮겨, 모든 행의 비교 식(row.price - rows[pivot].price)이 다른 행을 읽게 한다.
 export const nextPivot = (pivot: number, length: number) => (pivot + 1) % length;
+// 한도도 1만 움직여, 모든 행의 등급 cond 식을 다시 세지만 그 값은 거의 그대로다.
+export const nextLimit = (limit: number) => (limit === 50000 ? 50001 : 50000);
 
 // 전체 행 일괄 갱신이 번갈아 넘기는 두 배열 - 처음 데이터와 모든 행의 네 값이 1씩 크고 url이 다른 데이터.
 // runTarget이 로드와 네트워크 집계를 마친 뒤 채우므로 로드 지표에 들어가지 않는다.
@@ -74,6 +77,7 @@ export const SCENARIOS = [
   { key: "rateBurst", label: "환율 연속 3회 변경", desc: "한 핸들러가 같은 값을 세 번 바꾼다" },
   { key: "bulk", label: "전체 행 일괄 갱신", desc: "한 핸들러가 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 한꺼번에 바꾼다" },
   { key: "net", label: "표시 전환", desc: "모든 행의 삼항이 cond가 뒤집혀 다른 갈래를 고른다" },
+  { key: "limit", label: "한도 변경", desc: "모든 행의 등급 삼항의 cond 식을 다시 세지만 그 값은 거의 그대로" },
 ] as const;
 
 // orders-toggle 테스트의 시나리오. 켜는 클릭을 재고, 그 전에 끄는 버튼(과 환율 변경)은 재지 않는다.
@@ -242,6 +246,7 @@ const BUTTON_OF: Record<string, string> = {
   rateBurst: "#btn-rate-burst",
   bulk: "#btn-bulk",
   net: "#btn-net",
+  limit: "#btn-limit",
 };
 const buttonFor = (root: HTMLElement, scenario: TScenario, k: number): HTMLElement => {
   if (scenario.button) {
