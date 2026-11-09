@@ -140,15 +140,15 @@ export class ExprEvaluator {
     return { value, varNumberToLeafIndex };
   };
 
-  // 식을 다시 센다. skipPastOps에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다. 실제로 실행한
-  // 읽기 명령의 leafIndex와 위치를 reads에 이어 붙인다(runExpr). 건너뛴 부분식 안의 명령은 넣지 않는다.
+  // 식을 다시 센다. skipPastOps에 적힌 부분식은 계산하지 않고 cache의 지난번 값을 쓴다. reads가 있으면 실제로
+  // 실행한 읽기 명령의 leafIndex와 위치를 이어 붙인다(runExpr). 건너뛴 부분식 안의 명령은 넣지 않는다.
   reevalExpr = (
     expr: Uint8Array,
     pairs: TScope,
     table: TExprSkipTable,
     cache: unknown[],
     skipPastOps: TSkipPastOps,
-    reads: number[],
+    reads: number[] | null,
     inputValues: readonly unknown[],
   ): unknown => this.runExpr(expr, pairs, table, cache, skipPastOps, reads, inputValues);
 

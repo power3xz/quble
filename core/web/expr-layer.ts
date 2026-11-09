@@ -690,8 +690,9 @@ export class ExprInstancePool {
 
   // 표가 있는 계산 식을 다시 센다. pendingVarMask에 든 바뀐 변수(leaf와 입력) 전체로 건너뛰기 표를 골라 한꺼번에
   // 센다. 변수마다 따로 세면 먼저 센 쪽이 다른 부분식의 cache에 든 옛 값을 섞어 쓴다. 입력이 있으면 세기 전에 연결한
-  // 입력 인스턴스를 요청해 inputValues를 이번 flush의 값으로 만든다. 다시 세며 실행한 읽기 명령이 지난번과 다른 leaf를
-  // 읽었으면 구독을 옮긴다(resubscribeMovedLeaves).
+  // 입력 인스턴스를 요청해 inputValues를 이번 flush의 값으로 만든다. READ_LEAF가 있는 식(hasIndexAccess)만 다시 세며
+  // 실행한 읽기 명령을 모아, 지난번과 다른 leaf를 읽었으면 구독을 옮긴다(resubscribeMovedLeaves). 다른 식은 읽는
+  // leaf가 바뀌지 않아 모으지 않는다 - 모으면 slotValue가 읽을 때마다 push해 다시 세기가 느려진다.
   private runPartial = (exprInstanceIndex: number): unknown => {
     const instance = this.pool.entries[exprInstanceIndex];
     const { globalExprIndex, pairs } = instance;
@@ -711,6 +712,18 @@ export class ExprInstancePool {
       (changedVarMask & (changedVarMask - 1)) === 0
         ? table.varNumberToSkipPastOps[31 - Math.clz32(changedVarMask)]
         : buildSkipPastOpsOfVars(table, expr, changedVarMask);
+    if (!table.hasIndexAccess) {
+      instance.lastValue = this.evaluator.reevalExpr(
+        expr,
+        pairs,
+        table,
+        cache,
+        skipPastOps,
+        null,
+        instance.inputValues,
+      );
+      return instance.lastValue;
+    }
     // 입력을 요청하다 다른 인스턴스의 runPartial이 이 배열을 사용했을 수 있어, 입력을 요청한 뒤에 비운다.
     const reads = this.partialReads;
     reads.length = 0;

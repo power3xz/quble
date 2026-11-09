@@ -80,6 +80,9 @@ export type TExprSkipTable = {
   // 바뀌면 0b101). 같은 식을 쓰는 인스턴스(@for 행마다 하나씩)가 같은 조합이면 같은 표를 쓰도록, 조합이
   // 처음 나올 때 buildSkipPastOpsOfVars가 담는다.
   varMaskToSkipPastOps: Map<number, TSkipPastOps>;
+  // 식에 READ_LEAF가 있는가. READ_LEAF는 읽는 leaf가 실행 중에 정해지는 유일한 명령이라, 이 식만 다시 셀 때
+  // 읽은 leaf가 바뀌었는지 견주어 구독을 옮긴다. 다른 명령이 읽는 leaf는 scope로 정해져 바뀌지 않는다.
+  hasIndexAccess: boolean;
 };
 
 // 변수로 묶는 명령인가 - store 칸을 읽는 명령과 입력 식의 값을 올리는 LOAD_INPUT. LOAD_CONST,
@@ -168,8 +171,12 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
   //
   //   위 식에서 위치 6(ADD)에 오면 스택은 [0, 3]이다. b의 3을 꺼내면 0이 남고, a + b는 0에서 시작한다.
   const startStack: number[] = [];
+  let hasIndexAccess = false;
   for (let pc = 0; pc < len; pc += instrSize(expr[pc])) {
     const opcode = expr[pc];
+    if (opcode === EXPR_READ_LEAF) {
+      hasIndexAccess = true;
+    }
     if (readsCell(opcode)) {
       const varNumber = varNumberOf(pc);
       positions[varNumber].push(pc);
@@ -206,6 +213,7 @@ export const buildSkipTable = (expr: Uint8Array): TExprSkipTable | null => {
     inputPositionToVarNumber: Uint8Array.from(inputPositionToVarNumber),
     varNumberToSkipPastOps: [],
     varMaskToSkipPastOps: new Map(),
+    hasIndexAccess,
   };
   table.varNumberToSkipPastOps = table.varNumberToInstrPoses.map((p) => buildSkipPastOps(table, expr, p));
   return table;
