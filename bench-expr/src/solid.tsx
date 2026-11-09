@@ -1,10 +1,10 @@
 // Solid. 행은 createStore의 프록시라 row.qty를 바꾸면 그 값을 읽은 자리만 다시 센다. 값 자리 하나가 효과
 // 하나이고, 식이 읽는 값 중 하나라도 바뀌면 그 식을 처음부터 센다. 행은 컴포넌트 없이 For 안에 바로 쓴다
 // (quble의 @for, Svelte의 each와 같은 조건). 한 핸들러에서 여러 번 쓰는 곳은 batch로 묶는다.
-import { batch, createSignal, For } from "solid-js";
+import { batch, createMemo, createSignal, For } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { render } from "solid-js/web";
-import { bulk, nextPivot, nextRate, nextThreshold, runTarget, type TData } from "./harness.ts";
+import { bulk, nextLimit, nextPivot, nextRate, nextThreshold, runTarget, type TData } from "./harness.ts";
 
 const App = (props: { data: TData }) => {
   // store가 넘긴 객체를 직접 바꾸므로 bulk가 비교하는 data.rows를 건드리지 않게 복사한다.
@@ -14,6 +14,9 @@ const App = (props: { data: TData }) => {
   const [pivot, setPivot] = createSignal(props.data.pivot);
   const [tax, setTax] = createSignal(props.data.tax);
   const [net, setNet] = createSignal(props.data.net);
+  const [limit, setLimit] = createSignal(props.data.limit);
+  // 기준 행 가격을 한 번만 읽어 모든 행의 비교 식이 함께 사용한다.
+  const pivotPrice = createMemo(() => rows[pivot()].price);
   let bumped = false;
   return (
     <div class="orders">
@@ -65,8 +68,11 @@ const App = (props: { data: TData }) => {
         <button id="btn-net" onClick={() => setNet((n) => !n)}>
           표시 전환
         </button>
+        <button id="btn-limit" onClick={() => setLimit(nextLimit)}>
+          한도 변경
+        </button>
         <span class="orders__info">
-          환율 <span class="orders__rate">{rate()}</span> / 기준 <span class="orders__threshold">{threshold()}</span> / 기준 행{" "}
+          환율 <span class="orders__rate">{rate()}</span> / 기준 <span class="orders__threshold">{threshold()}</span> / 한도 <span class="orders__limit">{limit()}</span> / 기준 행{" "}
           <span class="orders__pivot">{pivot()}</span>
         </span>
       </div>
@@ -79,8 +85,9 @@ const App = (props: { data: TData }) => {
               <span class="row__qty">{row.qty}</span>
               <span class="row__amount">{(((row.price * row.qty - row.discount) * (100 + tax())) / 100) * rate()}</span>
               <span class="row__shown">{net() ? (row.price * row.qty - row.discount) * rate() : row.price * rate()}</span>
+              <span class="row__tier">{row.price * row.qty > limit() ? row.price : row.qty}</span>
               <span class="row__left">{row.stock - row.qty}</span>
-              <span class="row__diff">{row.price - rows[pivot()].price}</span>
+              <span class="row__diff">{row.price - pivotPrice()}</span>
               <span class="row__warn" data-warn={String(row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold())}>
                 !
               </span>

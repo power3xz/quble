@@ -27,7 +27,7 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 - 벤치 앱(페이지, 행 템플릿, 시나리오, `tests.json`)은 지금 작업 트리 것으로 덮는다. 어떤 커밋이든 같은 벤치
   앱으로 재므로 서로 견줄 수 있다. `.qubb`와 데이터도 지금 컴파일러로 만든다.
 - `bench-expr/quick.mjs`가 `quble.html`(orders-deep이면 `quble-deep.html`, orders-toggle이면
-  `quble-toggle.html`, orders-shared면 `quble-shared.html`)을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 아홉(orders-toggle은 다섯)의 DOM
+  `quble-toggle.html`, orders-shared면 `quble-shared.html`)을 5회 연다. 페이지마다 하네스가 잰 mount 시간과 클릭 열(orders-toggle은 다섯)의 DOM
   반영 시간(30회 중앙값)을 읽고, mount 뒤 GC를 강제해 JS 힙을 읽는다.
 - 행 수는 환경 변수 `BENCH_N`(1000, 5000, 10000, 기본 1000)으로 고른다.
 - 기록은 `bench-results/<커밋>.expr.json`(orders), `<커밋>.expr-deep.json`(orders-deep),
@@ -74,12 +74,14 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 
 ## 재는 앱
 
-주문 목록 N행(`orders`). 행마다 단순 값 셋(id, 가격, 수량)과 식 다섯, 링크(`a`의 `href`가 행의 `url`) 하나를
+주문 목록 N행(`orders`). 행마다 단순 값 셋(id, 가격, 수량)과 식 여섯, 링크(`a`의 `href`가 행의 `url`) 하나를
 둔다. 표시는 삼항이고 두 갈래가 모두 식이다. cond `net`은 루트 값이라 표시 전환 한 번에 모든 행이 다른 갈래를 고른다.
+등급도 삼항이고, cond가 식이며 두 갈래는 행의 값이다.
 
 ```
 금액  (row.price * row.qty - row.discount) * (100 + tax) / 100 * rate
 표시  net ? (row.price * row.qty - row.discount) * rate : row.price * rate
+등급  row.price * row.qty > limit ? row.price : row.qty
 재고  row.stock - row.qty
 비교  row.price - rows[pivot].price
 경고  row.qty > 0 && row.stock - row.qty < 5 && row.price * row.qty > threshold
@@ -95,7 +97,7 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 - mount 시간과 첫 paint까지의 시간.
 - mount 뒤 JS 힙 - 빠른 측정만 잰다.
 
-**클릭** - 버튼 아홉을 각각 예열 5회 뒤 30회 눌러 중앙값과 p90을 낸다. 값을 바꾸는 버튼은 payload로
+**클릭** - 버튼 열을 각각 예열 5회 뒤 30회 눌러 중앙값과 p90을 낸다. 값을 바꾸는 버튼은 payload로
 다음 값을 받아 핸들러에서 쓴다(핸들러가 직접 계산하지 않는다).
 
 | 버튼 | 바뀌는 것 |
@@ -109,6 +111,7 @@ orders-deep을 잰다(orders-toggle, orders-shared는 이름을 줘야 잰다). 
 | 환율 연속 3회 변경 | 한 핸들러가 환율을 세 번 바꾼다. 같은 leaf를 여러 번 쓸 때 통지가 한 번인지 본다 |
 | 전체 행 일괄 갱신 | 한 핸들러가 `setArray`로 모든 행의 가격, 수량, 할인, 재고, 링크 주소를 바꾼다. 데이터는 정적 파일(`bulk-<N>.json`)에서 받는다 |
 | 표시 전환 | 표시 삼항의 cond `net`. 모든 행이 다른 갈래를 고른다. 예열에서 두 갈래를 모두 고르므로, 처음 고를 때의 생성 비용이 아니라 갈래를 바꾸는 비용을 잰다 |
+| 한도 변경 | 등급 삼항의 cond 식이 읽는 `limit`. 50000과 50001을 오가 모든 행의 cond 식을 다시 세지만 그 값은 거의 그대로다. cond 값이 그대로일 때 삼항까지 다시 세는지 본다 |
 
 클릭마다 세 값을 잰다.
 - **DOM 반영**: 클릭부터 MutationObserver가 불릴 때까지. React와 Svelte가 microtask로 미루는 갱신까지
