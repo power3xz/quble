@@ -4,6 +4,7 @@
 
 mod ast;
 mod codegen;
+mod derived;
 mod diagnostic;
 mod dts;
 mod expr_type;
@@ -24,6 +25,7 @@ pub use react::{
     react_native_tsx, react_native_tsx_from_path, react_tsx, react_tsx_from_path, NativeError,
 };
 
+pub use derived::{DerivedError, DerivedErrorKind};
 pub use diagnostic::{locate_utf16, Utf16Location};
 pub use dts::{handler_names, handlers_dts, handlers_dts_from_path};
 pub use flatten::{FlattenError, SourceLoader, TypeError, TypeErrorKind, UseError, UseErrorKind};
@@ -119,6 +121,10 @@ fn blame<'a>(entry_path: &'a str, entry_src: &'a str, err: &'a CompileError) -> 
         }
         // prop 타입 표기 안의 자리를 안다 - 참조 이름, 키, 유틸 표기(ast.rs `Type` 그림).
         CompileError::Flatten(FlattenError::Type(e)) => {
+            (e.path.as_str(), e.src.as_str(), Some(e.err.range))
+        }
+        // derived 이름/순환/회차변수 충돌의 자리를 안다(DerivedErrorKind).
+        CompileError::Flatten(FlattenError::Derived(e)) => {
             (e.path.as_str(), e.src.as_str(), Some(e.err.range))
         }
         // 아직 위치를 안 붙인 에러(ISSUES.md). 팔을 다 적어 두면 FlattenError에 variant를
@@ -339,6 +345,421 @@ mod tests {
             ),
             "derived"
         );
+    }
+
+    /// derived를 쓴 소스와 그 식을 손으로 펼쳐 쓴 소스가 같은 바이트코드를 내는지.
+    fn assert_same_bytes(with_derived: &str, hand_written: &str) {
+        assert_eq!(
+            compile(with_derived).unwrap(),
+            compile(hand_written).unwrap()
+        );
+    }
+
+    #[test]
+    fn derived_in_if_is_the_same_as_the_hand_written_expr() {
+        assert_same_bytes(
+            r#"component C {
+                props { priority: number, completed: bool }
+                derived { urgent = priority > 3 && !completed }
+                template { @if (urgent) { p( /) } }
+            }"#,
+            r#"component C {
+                props { priority: number, completed: bool }
+                template { @if (priority > 3 && !completed) { p( /) } }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_in_interpolation_and_attr_is_the_same_as_the_hand_written_expr() {
+        assert_same_bytes(
+            r#"component C {
+                props { price: number, qty: number }
+                derived { total = price * qty }
+                template { p(title={total}) { ${total} } }
+            }"#,
+            r#"component C {
+                props { price: number, qty: number }
+                template { p(title={price * qty}) { ${price * qty} } }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_reading_derived_is_expanded_through_the_chain() {
+        assert_same_bytes(
+            r#"component C {
+                props { n: number, flag: bool }
+                derived { big = n > 1, both = big && flag }
+                template { @if (both) { p( /) } }
+            }"#,
+            r#"component C {
+                props { n: number, flag: bool }
+                template { @if (n > 1 && flag) { p( /) } }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_declared_after_its_reader_is_expanded() {
+        assert_same_bytes(
+            r#"component C {
+                props { n: number, flag: bool }
+                derived { both = big && flag, big = n > 1 }
+                template { @if (both) { p( /) } }
+            }"#,
+            r#"component C {
+                props { n: number, flag: bool }
+                template { @if (n > 1 && flag) { p( /) } }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_in_contexts_and_events_is_the_same_as_the_hand_written_expr() {
+        assert_same_bytes(
+            r#"component C {
+                props { n: number }
+                derived { big = n > 1 }
+                contexts { Area { flag: big } }
+                events { PING({ big }) }
+                template { p( /) }
+            }"#,
+            r#"component C {
+                props { n: number }
+                contexts { Area { flag: n > 1 } }
+                events { PING({ big: n > 1 }) }
+                template { p( /) }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_read_inside_for_body_is_expanded() {
+        assert_same_bytes(
+            r#"component C {
+                props { n: number, rows: string[] }
+                derived { big = n > 1 }
+                template { @for (row of rows) { @if (big) { p( /) } } }
+            }"#,
+            r#"component C {
+                props { n: number, rows: string[] }
+                template { @for (row of rows) { @if (n > 1) { p( /) } } }
+            }"#,
+        );
+    }
+
+    /// derived 에러의 (종류, 탓한 소스 조각).
+    fn derived_error(src: &str) -> (DerivedErrorKind, String) {
+        match compile(src) {
+            Err(CompileError::Flatten(FlattenError::Derived(e))) => (
+                e.err.kind,
+                src[e.err.range.start as usize..e.err.range.end as usize].to_string(),
+            ),
+            other => panic!("derived 에러를 기대했다: {:?}", other.map(|_| ())),
+        }
+    }
+
+    #[test]
+    fn derived_duplicate_name_blames_the_second() {
+        assert_eq!(
+            derived_error(
+                "component C { props { a: bool } derived { x = a, x = a } template { p( /) } }"
+            ),
+            (DerivedErrorKind::DuplicateName("x".to_string()), "x".to_string())
+        );
+    }
+
+    #[test]
+    fn derived_with_prop_name_blames_the_derived_name() {
+        assert_eq!(
+            derived_error(
+                "component C { props { a: bool } derived { a = !a } template { p( /) } }"
+            ),
+            (DerivedErrorKind::NameTakenByProp("a".to_string()), "a".to_string())
+        );
+    }
+
+    #[test]
+    fn derived_cycle_blames_the_reference_that_closes_it() {
+        // x = y, y = x: x를 펼치다 y를 읽고, y 본문의 x가 고리를 닫는다.
+        assert_eq!(
+            derived_error(
+                "component C { props { a: bool } derived { x = y, y = x } template { p( /) } }"
+            ),
+            (DerivedErrorKind::Cycle("x".to_string()), "x".to_string())
+        );
+    }
+
+    #[test]
+    fn derived_reading_itself_is_a_cycle() {
+        assert_eq!(
+            derived_error(
+                "component C { props { a: bool } derived { x = x && a } template { p( /) } }"
+            ),
+            (DerivedErrorKind::Cycle("x".to_string()), "x".to_string())
+        );
+    }
+
+    #[test]
+    fn for_binding_shadowing_a_read_derived_blames_the_binding() {
+        assert_eq!(
+            derived_error(
+                "component C { props { n: number, rows: string[] } derived { row = n > 1 } \
+                 template { @for (row of rows) { @if (row) { p( /) } } } }"
+            ),
+            (
+                DerivedErrorKind::ForBindingShadows("row".to_string()),
+                "row".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn for_index_binding_shadowing_a_read_derived_blames_the_index() {
+        assert_eq!(
+            derived_error(
+                "component C { props { n: number, rows: string[] } derived { i = n > 1 } \
+                 template { @for (row, i of rows) { @if (i) { p( /) } } } }"
+            ),
+            (
+                DerivedErrorKind::ForBindingShadows("i".to_string()),
+                "i".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn derived_error_message_and_location_in_diagnostic() {
+        let src = "component C {\n  props { a: bool }\n  derived { x = y, y = x }\n  template { div( /) }\n}";
+        assert_eq!(
+            diagnostic_of(src),
+            [
+                "entry:3:24: error: derived `x` reads itself through a cycle",
+                " 3 |   derived { x = y, y = x }",
+                "   |                        ^",
+            ]
+            .join("\n")
+        );
+    }
+
+    /// derived 본문의 에러는 펼친 식에서 나지만 derived 본문 자리를 가리킨다.
+    #[test]
+    fn unknown_name_in_derived_body_blames_the_body() {
+        let src = "component C { props { a: bool } derived { x = nope } template { @if (x) { p( /) } } }";
+        assert_eq!(codegen_error_snippet(src), "nope");
+    }
+
+    /// 펼치기는 텍스트 치환이 아니라 AST 치환이라 derived 본문이 묶인 채 들어간다.
+    #[test]
+    fn derived_keeps_its_grouping_when_read_inside_a_larger_expr() {
+        let with_derived = r#"component C {
+            props { a: number, b: number }
+            derived { s = a + b }
+            template { @if (s * 2 > 1) { p( /) } }
+        }"#;
+        assert_same_bytes(
+            with_derived,
+            r#"component C {
+                props { a: number, b: number }
+                template { @if ((a + b) * 2 > 1) { p( /) } }
+            }"#,
+        );
+        // 묶음이 풀리면 나오는 `a + b * 2`와는 다른 식이다.
+        let ungrouped = r#"component C {
+            props { a: number, b: number }
+            template { @if (a + b * 2 > 1) { p( /) } }
+        }"#;
+        assert_ne!(compile(with_derived).unwrap(), compile(ungrouped).unwrap());
+    }
+
+    #[test]
+    fn derived_path_alias_is_the_same_as_the_hand_written_path() {
+        assert_same_bytes(
+            r#"component C {
+                props { user: { name: string } }
+                derived { who = user.name }
+                template { p() { ${who} } }
+            }"#,
+            r#"component C {
+                props { user: { name: string } }
+                template { p() { ${user.name} } }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_object_alias_in_payload_is_the_same_as_the_hand_written_prop() {
+        assert_same_bytes(
+            r#"component C {
+                props { owner: { name: string } }
+                derived { o = owner }
+                events { E({ o }) }
+                template { p( /) }
+            }"#,
+            r#"component C {
+                props { owner: { name: string } }
+                events { E({ o: owner }) }
+                template { p( /) }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_index_alias_is_the_same_as_the_hand_written_index() {
+        assert_same_bytes(
+            r#"component C {
+                props { rows: { v: number }[] }
+                derived { first = rows[0].v }
+                template { p() { ${first} } }
+            }"#,
+            r#"component C {
+                props { rows: { v: number }[] }
+                template { p() { ${rows[0].v} } }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_array_alias_as_for_count_is_the_same_as_the_hand_written_prop() {
+        assert_same_bytes(
+            r#"component C {
+                props { tags: string[] }
+                derived { list = tags }
+                template { @for (t of list) { p() { ${t} } } }
+            }"#,
+            r#"component C {
+                props { tags: string[] }
+                template { @for (t of tags) { p() { ${t} } } }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn derived_read_twice_is_the_same_as_the_hand_written_expr_twice() {
+        assert_same_bytes(
+            r#"component C {
+                props { n: number }
+                derived { big = n > 1 }
+                template { @if (big) { p( /) } @if (big) { em( /) } }
+            }"#,
+            r#"component C {
+                props { n: number }
+                template { @if (n > 1) { p( /) } @if (n > 1) { em( /) } }
+            }"#,
+        );
+    }
+
+    /// 같은 이름의 derived가 컴포넌트마다 따로이고, `use`로 가져온 컴포넌트의 derived도 펼쳐진다.
+    #[test]
+    fn derived_is_per_component_and_expanded_across_use() {
+        let entry_with = r#"
+            use Badge from "./parts.qubc"
+            component Card {
+              props { n: number, role: string }
+              derived { ok = n > 1 }
+              template { @if (ok) { Badge(text={role} /) } }
+            }
+        "#;
+        let parts_with = r#"
+            component Badge {
+              props { text: string }
+              derived { ok = text == "x" }
+              template { @if (ok) { span() { ${text} } } }
+            }
+        "#;
+        let entry_hand = r#"
+            use Badge from "./parts.qubc"
+            component Card {
+              props { n: number, role: string }
+              template { @if (n > 1) { Badge(text={role} /) } }
+            }
+        "#;
+        let parts_hand = r#"
+            component Badge {
+              props { text: string }
+              template { @if (text == "x") { span() { ${text} } } }
+            }
+        "#;
+        assert_eq!(
+            compile_map(entry_with, &[("./parts.qubc", parts_with)]).unwrap(),
+            compile_map(entry_hand, &[("./parts.qubc", parts_hand)]).unwrap()
+        );
+    }
+
+    #[test]
+    fn empty_derived_block_compiles() {
+        assert!(compile("component C { derived { } template { p( /) } }").is_ok());
+    }
+
+    /// 상수로 접히는 derived를 `@if`가 읽으면 손으로 그 상수를 쓴 것과 같은 에러다.
+    #[test]
+    fn constant_derived_read_by_if_is_the_constant_condition_error() {
+        let out = diagnostic_of(
+            "component C { derived { off = false } template { @if (off) { p( /) } } }",
+        );
+        assert!(
+            out.contains("condition is always false: this branch is never rendered"),
+            "{out}"
+        );
+    }
+
+    /// 아무도 읽지 않는 derived도 본문을 검사한다.
+    #[test]
+    fn unread_derived_body_is_checked() {
+        let unknown = "component C { props { a: bool } derived { x = nope } template { p( /) } }";
+        assert_eq!(codegen_error_snippet(unknown), "nope");
+        let mistyped = "component C { props { n: number } derived { x = n && n } template { p( /) } }";
+        assert_eq!(codegen_error_snippet(mistyped), "n");
+    }
+
+    #[test]
+    fn type_error_in_derived_body_blames_the_body() {
+        let src = "component C { props { n: number } derived { x = n && n } template { @if (x) { p( /) } } }";
+        assert_eq!(codegen_error_snippet(src), "n");
+    }
+
+    #[test]
+    fn derived_as_composition_arg_is_expanded() {
+        assert_same_bytes(
+            r#"component Outer {
+                props { flag: bool }
+                derived { shown = flag }
+                template { Inner(on={shown} /) }
+            }
+            component Inner { props { on: bool } template { p( /) } }"#,
+            r#"component Outer {
+                props { flag: bool }
+                template { Inner(on={flag} /) }
+            }
+            component Inner { props { on: bool } template { p( /) } }"#,
+        );
+    }
+
+    #[test]
+    fn derived_in_slot_content_is_expanded() {
+        assert_same_bytes(
+            r#"component Outer {
+                props { price: number, qty: number }
+                derived { total = price * qty }
+                template { Inner() { ${total} } }
+            }
+            component Inner { template { section() { @slot() } } }"#,
+            r#"component Outer {
+                props { price: number, qty: number }
+                template { Inner() { ${price * qty} } }
+            }
+            component Inner { template { section() { @slot() } } }"#,
+        );
+    }
+
+    #[test]
+    fn for_binding_with_a_derived_name_is_fine_when_the_body_does_not_read_it() {
+        assert!(compile(
+            "component C { props { n: number, rows: string[] } derived { row = n > 1 } \
+             template { @for (row of rows) { p( /) } } }"
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4629,6 +5050,23 @@ component B { props { a: A } template { div( /) } }"#;
             (
                 "component C {\n  props { s: Omit<string, 'a'> }\n  template { div( /) }\n}",
                 "Omit<string, 'a'>",
+            ),
+            // derived
+            (
+                "component C {\n  props { a: bool }\n  derived { x = a, x = a }\n  template { div( /) }\n}",
+                "x",
+            ),
+            (
+                "component C {\n  props { a: bool }\n  derived { a = !a }\n  template { div( /) }\n}",
+                "a",
+            ),
+            (
+                "component C {\n  props { a: bool }\n  derived { x = y, y = x }\n  template { div( /) }\n}",
+                "x",
+            ),
+            (
+                "component C {\n  props { rows: string[] }\n  derived { row = true }\n  template { @for (row of rows) { @if (row) { p( /) } } }\n}",
+                "row",
             ),
             // codegen
             (

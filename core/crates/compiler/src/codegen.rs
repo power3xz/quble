@@ -426,6 +426,10 @@ fn generate_comp(
         // 같은 수명이다(DECISIONS.md "표현식 테이블 - 컴포넌트 소유 + 후위 표기 채택").
         let mut next_slot_placeholder_index = 0u16;
         let mut exprs = Vec::new();
+        // derived는 사용처에 펼쳐져 어디서도 안 읽히면 코드에 안 닿는다 - 본문 오류를 놓치지 않게 따로 본다.
+        for derived in &comp.derived {
+            check_derived_body(&derived.expr, &comp.props)?;
+        }
         for node in &comp.template {
             emit_node(
                 node,
@@ -605,6 +609,20 @@ fn arg_to_field(
         type_ref,
         value: ref_value,
     })
+}
+
+/// 펼친 derived 본문의 이름과 타입을 검사한다. 값은 어디에도 싣지 않는다.
+fn check_derived_body(value: &Expr, props: &[Prop]) -> Result<(), CodegenError> {
+    match value {
+        Expr::Lit(..) | Expr::List(..) => {}
+        Expr::Unary(..) | Expr::Binary(..) | Expr::Ternary(..) => {
+            expr_type(value, props, &[])?;
+        }
+        _ => {
+            path_type(value, props, &[])?;
+        }
+    }
+    Ok(())
 }
 
 /// 슬롯 하나로 접히지 않는 값(연산자, 인덱스 접근, `.length`)을 표현식 테이블에 싣는다.
