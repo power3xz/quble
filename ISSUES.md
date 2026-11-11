@@ -225,11 +225,21 @@
   `dt`/`dd`끼리 겹침, `h1`~`h6` 안의 `h1`~`h6`처럼 파서가 형제로 바꾸는 중첩은 통과해 resume이 실패한다.
   호출한 컴포넌트가 다시 슬롯에 넘기는 내용도 바깥 조상에는 견주지 않는다.
 
-- **삼항이 고른 갈래를 처음 셀 때 throw하면 입력을 고쳐도 값이 안 돌아온다** - 고른 갈래의 식 인스턴스를 연결하다
-  throw하면 그 인스턴스를 반납한다(`evaluateOrFree`). 삼항은 cond만 구독하고 있어 갈래가 읽던 leaf의 변경을 못 받고,
-  cond를 다시 뒤집어야 갈래를 새로 연결한다. `&&`/`||`는 오른쪽이 식이면 삼항으로 나가므로 같다.
-  - 재현: rows 길이가 3인 `${ok && rows[cursor].x > 0}`에서 ok가 true인 채 cursor를 5로 올리면 `RangeError`
-    (`index 5 out of range (length 3)`)다. 이어서 cursor를 0으로 되돌려도 값이 false로 남는다(맞는 값은 true).
-    ok를 한 번 더 뒤집으면 true가 된다. `${ok ? rows[cursor].x : 0}`도 같다.
-  - `ternary.test.ts`의 "처음 고른 식 갈래가 throw하면 그 인스턴스를 반납해, 다시 고를 때 새로 센다"도 cond를 다시
-    뒤집어 복구한다. `&&`가 식 하나(Calc)로 나가던 때는 cursor를 구독해 바로 복구됐다.
+- **표현식을 세다 throw한 뒤 입력을 되돌려도 화면이 고쳐지지 않는 경우가 있다** - 삼항에서 확인했다(`&&`/`||`는
+  오른쪽이 식이면 삼항으로 나가므로 같다). throw한 뒤 표현식 평가가 어떤 상태로 남아야 하는지 정해져 있지 않다.
+  아래는 모두 `rows`가 `[{ x: 1 }, { x: 5 }, { x: 3 }]`(길이 3)이고 화면에 `${ok && rows[cursor].x > 0}`을 그리는
+  컴포넌트다. `ok`와 `cursor`는 핸들러가 바꾸는 props다.
+
+  재현 1 - `ok`가 false, `cursor`가 5인 상태로 시작한다. 화면은 false다(`ok`가 false라 `rows[5]`를 읽지 않는다).
+  1. `ok`를 true로 바꾼다. `rows[5]`를 읽어 `RangeError`(`index 5 out of range (length 3)`)가 나고, 화면은 false
+     그대로다.
+  2. `cursor`를 0으로 바꾼다. `rows[0].x`가 1이라 화면이 true가 되어야 하는데 false 그대로다.
+
+  재현 2 - `ok`가 true, `cursor`가 1인 상태로 시작한다. 화면은 true다(`rows[1].x`가 5).
+  1. `ok`를 false로 바꾼다. 화면은 false다.
+  2. `cursor`를 5로 바꾼다. `ok`가 false라 `rows[5]`를 읽지 않아 에러 없이 화면은 false 그대로다.
+  3. `ok`를 true로 바꾼다. `rows[5]`를 읽어 `RangeError`가 나고, 화면은 false 그대로다.
+  4. `cursor`를 0으로 바꾼다. 화면이 true가 되어야 하는데 false 그대로다.
+
+  두 재현 모두 `ok`를 한 번 더 뒤집으면 맞는 값이 된다. `ok`가 true인 채로 `cursor`만 범위 밖으로 갔다 돌아오는 경우는
+  돌아온다. `&&`가 식 하나로 나가던 때(오른쪽을 삼항으로 내리기 전)는 재현 1의 2단계에서 화면이 true가 됐다.
