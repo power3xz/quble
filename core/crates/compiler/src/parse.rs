@@ -10,7 +10,7 @@
 //! ATTR    = IDENT = STRING   (콤마 구분 허용)
 
 use crate::ast::{
-    BinaryOp, Component, Context, Event, Expr, ForCount, Ident, Lit, LitValue, Node, Prop,
+    BinaryOp, Component, Context, Derived, Event, Expr, ForCount, Ident, Lit, LitValue, Node, Prop,
     SlotPlaceholderContent, SourceFile, Type, UnaryOp, Use,
 };
 use crate::lexer::{Directive, Lexed, Token};
@@ -568,21 +568,29 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LBrace)?;
 
         // props 블록은 선택적이며 template 앞에 온다.
-        let props = if matches!(self.peek(), Some(Token::Ident(s)) if s == "props") {
+        let props = if matches!(self.peek(), Some(Token::Ident(keyword)) if keyword == "props") {
             self.parse_props()?
         } else {
             Vec::new()
         };
 
-        // contexts 블록도 선택적이며 props 다음, events 앞에 온다(SYNTAX.md #1).
-        let contexts = if matches!(self.peek(), Some(Token::Ident(s)) if s == "contexts") {
+        // derived 블록도 선택적이며 props 다음, contexts 앞에 온다(SYNTAX.md #1).
+        let derived = if matches!(self.peek(), Some(Token::Ident(keyword)) if keyword == "derived")
+        {
+            self.parse_derived()?
+        } else {
+            Vec::new()
+        };
+
+        // contexts 블록도 선택적이며 derived 다음, events 앞에 온다(SYNTAX.md #1).
+        let contexts = if matches!(self.peek(), Some(Token::Ident(keyword)) if keyword == "contexts") {
             self.parse_contexts()?
         } else {
             Vec::new()
         };
 
         // events 블록도 선택적이며 contexts 다음, template 앞에 온다.
-        let events = if matches!(self.peek(), Some(Token::Ident(s)) if s == "events") {
+        let events = if matches!(self.peek(), Some(Token::Ident(keyword)) if keyword == "events") {
             self.parse_events()?
         } else {
             Vec::new()
@@ -596,10 +604,31 @@ impl<'a> Parser<'a> {
         Ok(Component {
             name,
             props,
+            derived,
             events,
             contexts,
             template,
         })
+    }
+
+    // derived { IDENT = EXPR (, IDENT = EXPR)* }
+    fn parse_derived(&mut self) -> Result<Vec<Derived>, ParseError> {
+        self.expect_keyword("derived")?;
+        self.expect(&Token::LBrace)?;
+        let mut derived = Vec::new();
+        // 구분자 콤마 필수, 마지막 항목 뒤만 생략 가능(props와 동일 규칙).
+        while !matches!(self.peek(), Some(Token::RBrace) | None) {
+            let name = self.parse_ident_ranged()?;
+            self.expect(&Token::Eq)?;
+            let expr = self.parse_expr()?;
+            derived.push(Derived { name, expr });
+            if matches!(self.peek(), Some(Token::RBrace)) {
+                break;
+            }
+            self.expect(&Token::Comma)?;
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(derived)
     }
 
     // props { IDENT : TYPE (, IDENT : TYPE)* }

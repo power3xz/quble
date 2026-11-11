@@ -271,6 +271,82 @@ mod tests {
         }
     }
 
+    /// 소스를 파싱해 첫 컴포넌트를 꺼낸다 - 블록 파싱 결과(AST)를 보려는 것.
+    fn parse_first_component(src: &str) -> ast::Component {
+        let lexed = lexer::lex(src).unwrap();
+        parse::parse(&lexed, src.len()).unwrap().comps.remove(0)
+    }
+
+    #[test]
+    fn derived_block_parses_names_and_exprs_in_order() {
+        let comp = parse_first_component(
+            r#"component C {
+                props { priority: number, completed: bool }
+                derived {
+                    urgent = priority > 3 && !completed,
+                    badge = urgent ? "urgent" : "normal"
+                }
+                template { p( /) }
+            }"#,
+        );
+        let names: Vec<&str> = comp.derived.iter().map(|d| d.name.name.as_str()).collect();
+        assert_eq!(names, ["urgent", "badge"]);
+        assert!(matches!(
+            comp.derived[0].expr,
+            Expr::Binary(ast::BinaryOp::And, ..)
+        ));
+        assert!(matches!(comp.derived[1].expr, Expr::Ternary(..)));
+    }
+
+    #[test]
+    fn derived_allows_trailing_comma() {
+        let comp = parse_first_component(
+            "component C { props { a: bool } derived { x = a, } template { p( /) } }",
+        );
+        assert_eq!(comp.derived.len(), 1);
+    }
+
+    #[test]
+    fn derived_missing_comma_between_items_is_error() {
+        // 두 번째 항목 이름 `y` 앞에 쉼표가 없다.
+        assert_eq!(
+            error_snippet("component C { props { a: bool } derived { x = a y = a } template { p( /) } }"),
+            "y"
+        );
+    }
+
+    #[test]
+    fn derived_sits_between_props_and_contexts() {
+        let comp = parse_first_component(
+            r#"component C {
+                props { a: bool }
+                derived { x = a }
+                contexts { Area { flag: a } }
+                events { PING({ a }) }
+                template { p( /) }
+            }"#,
+        );
+        assert_eq!(comp.derived.len(), 1);
+        assert_eq!(comp.contexts.len(), 1);
+        assert_eq!(comp.events.len(), 1);
+    }
+
+    #[test]
+    fn derived_after_contexts_is_error() {
+        assert_eq!(
+            error_snippet(
+                "component C { props { a: bool } contexts { Area { flag: a } } derived { x = a } template { p( /) } }"
+            ),
+            "derived"
+        );
+    }
+
+    #[test]
+    fn component_without_derived_has_empty_derived() {
+        let comp = parse_first_component("component C { template { p( /) } }");
+        assert!(comp.derived.is_empty());
+    }
+
     #[test]
     fn lex_dot_between_idents() {
         use lexer::Token;
