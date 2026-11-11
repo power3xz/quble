@@ -133,6 +133,12 @@ test("qubc - 선언 블록과 디렉티브가 모두 키워드다", () => {
   ]);
 });
 
+test("qubc - derived도 선언 블록 키워드다", () => {
+  const lines = tokenize("component X {\n  derived { a = b }\n}", "a.qubc");
+
+  assert.deepEqual(textsOf(lines, "keyword"), ["component", "derived"]);
+});
+
 test("qubc - 타입과 유틸 타입을 가른다", () => {
   const lines = tokenize(QUBC, "a.qubc");
 

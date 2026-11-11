@@ -52,7 +52,7 @@
       }
     },
     "block-keyword": {
-      "match": "\\b(props|contexts|events|template)\\b",
+      "match": "\\b(props|derived|contexts|events|template)\\b",
       "name": "keyword.other.block.quble"
     },
     "directive": {
