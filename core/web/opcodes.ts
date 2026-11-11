@@ -35,6 +35,7 @@ export const OP_TEXT_EXPR = 0x1f;
 export const OP_ATTR_G_EXPR = 0x20;
 export const OP_ATTR_L_EXPR = 0x21;
 export const OP_FOR_COUNT_EXPR = 0x22;
+export const OP_PUSH_EXPR = 0x23;
 
 // opcode의 operand 바이트 수를 돌려준다.
 //
@@ -55,6 +56,7 @@ export const operandLen = (op: number): number => {
     case OP_SLOT_PLACEHOLDER_CONTENT_END:
       return 0;
     case OP_PUSH_THROUGH: // scope_index: u8
+    case OP_PUSH_EXPR: // expr_index: u8
     case OP_IF_EXPR: // expr_index: u8
     case OP_TEXT_EXPR: // expr_index: u8
     case OP_FOR_COUNT_EXPR: // expr_index: u8

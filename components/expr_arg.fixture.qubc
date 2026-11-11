@@ -1,0 +1,21 @@
+component ExprArg {
+  props { price: number, qty: number, limit: number }
+  events { APPLY({}) }
+  template {
+    div() {
+      button(class="apply" @click:APPLY) { "apply" }
+      Total(total={price * qty} limit={limit} /)
+    }
+  }
+}
+
+component Total {
+  props { total: number, limit: number }
+  template {
+    div(class="total") {
+      span(class="text") { ${total} }
+      span(class="plus") { ${total + 1} }
+      @if (total > limit) { b(class="over") { "over" } }
+    }
+  }
+}

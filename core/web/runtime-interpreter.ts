@@ -22,6 +22,7 @@ import {
   OP_IF_EXPR,
   OP_LOAD_RES,
   OP_PUSH_ARG_LIT,
+  OP_PUSH_EXPR,
   OP_PUSH_FIELD,
   OP_PUSH_PATH_INDEX_SEGMENT,
   OP_PUSH_PATH_SEGMENT,
@@ -538,6 +539,19 @@ export class RuntimeInterpreter {
           // 리터럴 인자(불변): 상수풀 인덱스를 CONST 슬롯으로 자식에 넘긴다. store에 심지
           // 않는다 - 소비 지점(bindVar)이 CONST를 보고 pool을 직접 읽고 구독을 스킵한다.
           args.push(CONST, u16at());
+          break;
+        }
+        case OP_PUSH_EXPR: {
+          // 식으로 넘긴 인자. 식 인스턴스를 부모 가지에 싣고 그 결과 leaf를 STORE 슬롯으로 자식에 넘긴다. 자식은 일반
+          // leaf처럼 읽고 구독한다 - 식이 바뀌면 결과 leaf에 쓰이고, 자식 식이 읽으면 flush가 이어서 센다.
+          const { exprInstanceIndex, value } = vm.addExprInstance(
+            vm.globalExprIndexOf(compId, u8at()),
+            argumentSourcePairs,
+            startBranchIndex,
+            walkStacks,
+            loopIndexBase,
+          );
+          args.push(STORE, vm.allocResultLeaf(exprInstanceIndex, value));
           break;
         }
         case OP_PUSH_PATH_SEGMENT: {

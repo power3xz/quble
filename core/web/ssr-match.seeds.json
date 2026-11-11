@@ -651,6 +651,7 @@
       "nums": [0, 7]
     }
   ],
+  "expr_arg": [{ "price": 4, "qty": 5, "limit": 10 }, { "price": 1, "qty": 2, "limit": 10 }],
   "for_expr_free": [{ "nums": [1, 2, 3] }, { "nums": [] }],
   "flush_leaving_body": [
     { "i": 2, "n": 3, "ok": false, "c": false, "x": 1, "rows": [10, 20, 30] },
