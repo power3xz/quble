@@ -1,8 +1,8 @@
 //! AST -> 바이트코드 Module. 여러 컴포넌트 정의, 합성(컴포넌트 호출), props 변수 보간.
 
 use crate::ast::{
-    BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, Node, Prop, SlotPlaceholderContent, Type,
-    UnaryOp,
+    BinaryOp, Context, Event, Expr, ForCount, Ident, Lit, LitValue, Node, Prop,
+    SlotPlaceholderContent, Type, UnaryOp,
 };
 use crate::expr_type::{
     expr_type, path_type, require_expr_type, type_name, ExprTypeError, ExprTypeErrorKind,
@@ -821,6 +821,16 @@ fn emit_expr_postfix(
         }
 
         Expr::Binary(op, left, right, _) => {
+            // 논리 연산은 삼항으로 내릴 수 있으면 따로 넣고 그 값의 자리만 표시한다.
+            if matches!(op, BinaryOp::And | BinaryOp::Or) {
+                if let Some(index) =
+                    lower_logical_to_ternary(op, left, right, props, for_vars, pool, exprs)?
+                {
+                    out.push(ExprOp::LoadInput as u8);
+                    out.push(intern_input(inputs, index));
+                    return Ok(());
+                }
+            }
             emit_expr_postfix(left, props, for_vars, pool, exprs, inputs, out)?;
             emit_expr_postfix(right, props, for_vars, pool, exprs, inputs, out)?;
             out.push(match op {
@@ -861,15 +871,62 @@ fn intern_expr(
 ) -> Result<u8, CodegenError> {
     match expr {
         Expr::Ternary(cond, then, else_, _) => {
-            intern_ternary(cond, then, else_, props, for_vars, pool, exprs)
+            return intern_ternary(cond, then, else_, props, for_vars, pool, exprs);
         }
-        _ => {
-            let mut code = Vec::new();
-            let mut inputs = Vec::new();
-            emit_expr_postfix(expr, props, for_vars, pool, exprs, &mut inputs, &mut code)?;
-            intern_expr_def(exprs, ExprDef::Calc { code, inputs }, expr.range().0)
+        Expr::Binary(op @ (BinaryOp::And | BinaryOp::Or), left, right, _) => {
+            if let Some(index) =
+                lower_logical_to_ternary(op, left, right, props, for_vars, pool, exprs)?
+            {
+                return Ok(index);
+            }
         }
+        _ => {}
     }
+    let mut code = Vec::new();
+    let mut inputs = Vec::new();
+    emit_expr_postfix(expr, props, for_vars, pool, exprs, &mut inputs, &mut code)?;
+    intern_expr_def(exprs, ExprDef::Calc { code, inputs }, expr.range().0)
+}
+
+/// `&&`/`||`를 삼항으로 내려 표현식 테이블에 넣고 expr_index를 준다. 왼쪽이 결과를 정하면 오른쪽을
+/// 세지 않으려는 것이다 - 삼항은 고른 갈래만 읽고 구독한다.
+///   a && b -> Ternary(a, b, false)
+///   a || b -> Ternary(a, true, b)
+/// 내리지 않으면 None이다. 오른쪽이 잎이나 리터럴이면 건너뛸 계산이 없고, 왼쪽이 리터럴만으로 접히면
+/// 삼항이 ConstantTernaryCondition을 낸다.
+fn lower_logical_to_ternary(
+    op: &BinaryOp,
+    left: &Expr,
+    right: &Expr,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+) -> Result<Option<u8>, CodegenError> {
+    let right_is_leaf = match right {
+        Expr::Lit(..) => true,
+        Expr::Var(..) | Expr::Field(..) => fixed_ref_of(right, props, for_vars)?.is_some(),
+        _ => false,
+    };
+    if right_is_leaf || fold_expr(left).is_some() {
+        return Ok(None);
+    }
+    let range = right.range();
+    let literal = |value: bool| {
+        Expr::Lit(
+            LitValue {
+                value: Lit::Bool(value),
+                range,
+            },
+            range,
+        )
+    };
+    let index = match op {
+        BinaryOp::And => intern_ternary(left, right, &literal(false), props, for_vars, pool, exprs)?,
+        BinaryOp::Or => intern_ternary(left, &literal(true), right, props, for_vars, pool, exprs)?,
+        _ => unreachable!("논리 연산자만 내린다"),
+    };
+    Ok(Some(index))
 }
 
 /// 삼항 하나를 Ternary로 표현식 테이블에 넣고 expr_index를 준다. 조건이 리터럴만으로 된 식이면

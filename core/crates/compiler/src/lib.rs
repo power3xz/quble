@@ -673,15 +673,15 @@ mod tests {
             ),
             (
                 "props { a: bool, b: bool }",
-                "a && !b",
+                "!a && b",
                 vec![
                     LoadVar as u8,
                     0,
                     0,
+                    Not as u8,
                     LoadVar as u8,
                     1,
                     0,
-                    Not as u8,
                     And as u8,
                 ],
             ),
@@ -802,18 +802,19 @@ mod tests {
     /// 식 하나는 255바이트까지다 - 표현식 테이블의 `len`이 u8이다.
     #[test]
     fn if_expr_too_long_errors() {
-        // 잎(LoadVar) 3바이트 + 연산자 1바이트. `n > 0`이 6바이트고 `&& (n > 0)`마다 7바이트씩
-        // 붙는다 - 36번이면 6 + 35*7 = 251, 37번이면 258로 넘어간다.
+        // 잎(LoadVar) 3바이트 + 연산자 1바이트. `n > 0`이 6바이트고 `== (n > 0)`마다 7바이트씩
+        // 붙는다 - 36번이면 6 + 35*7 = 251, 37번이면 258로 넘어간다. `&&`는 오른쪽이 식이면 삼항으로
+        // 나가 한 식의 바이트 한도를 못 보므로 `==`로 잇는다.
         let ok = std::iter::repeat_n("(n > 0)", 36)
             .collect::<Vec<_>>()
-            .join(" && ");
+            .join(" == ");
         let bytes = compile_ifs(std::iter::once(ok)).expect("251바이트는 된다");
         let module = bytecode::decode(&bytes).unwrap();
         assert_eq!(code_of(&module.def(0).unwrap().exprs[0]).len(), 251);
 
         let too_long = std::iter::repeat_n("(n > 0)", 37)
             .collect::<Vec<_>>()
-            .join(" && ");
+            .join(" == ");
         assert_eq!(
             compile_ifs(std::iter::once(too_long)).unwrap_err(),
             "an expression is too long: split it into smaller ones"
@@ -1627,6 +1628,127 @@ mod tests {
                     inputs: vec![0],
                 },
             ]
+        );
+    }
+
+    /// `&&`의 오른쪽이 식이면 `a && b`를 `a ? b : false` 삼항으로 낸다 - 왼쪽이 false일 때 오른쪽을 세지 않으려는 것이다.
+    #[test]
+    fn and_with_expr_right_is_a_ternary_with_false_else() {
+        use bytecode::{
+            ExprDef, ExprOp,
+            TernaryOperand::{Expr, Leaf},
+        };
+        let module = compile_text("ok: bool, price: number", "ok && price > 10");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::LoadSmallInt as u8,
+                    10,
+                    ExprOp::Gt as u8
+                ]),
+                ExprDef::Ternary {
+                    cond: Leaf(0, 0),
+                    then: Expr(0),
+                    else_: const_operand(&module, Const::Bool(false)),
+                },
+            ]
+        );
+    }
+
+    /// `||`는 `a ? true : b`다.
+    #[test]
+    fn or_with_expr_right_is_a_ternary_with_true_then() {
+        use bytecode::{
+            ExprDef, ExprOp,
+            TernaryOperand::{Expr, Leaf},
+        };
+        let module = compile_text("ok: bool, price: number", "ok || price > 10");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![
+                calc(vec![
+                    ExprOp::LoadVar as u8,
+                    1,
+                    0,
+                    ExprOp::LoadSmallInt as u8,
+                    10,
+                    ExprOp::Gt as u8
+                ]),
+                ExprDef::Ternary {
+                    cond: Leaf(0, 0),
+                    then: const_operand(&module, Const::Bool(true)),
+                    else_: Expr(0),
+                },
+            ]
+        );
+    }
+
+    /// 오른쪽이 잎이면 건너뛸 계산이 없어 Calc 하나로 둔다.
+    #[test]
+    fn logical_with_leaf_right_stays_calc() {
+        use bytecode::ExprOp;
+        let module = compile_text("ok: bool, done: bool", "ok && done");
+        assert_eq!(
+            module.def(0).unwrap().exprs,
+            vec![calc(vec![
+                ExprOp::LoadVar as u8,
+                0,
+                0,
+                ExprOp::LoadVar as u8,
+                1,
+                0,
+                ExprOp::And as u8
+            ])]
+        );
+    }
+
+    /// `a && b && c`는 `(a && b) && c`다. 안쪽 `a && b`가 바깥 삼항의 조건이 되고, 바깥 오른쪽 `c`는 따로 들어간다.
+    #[test]
+    fn and_chain_nests_ternaries() {
+        use bytecode::{ExprDef, TernaryOperand::Expr};
+        let module = compile_text(
+            "ok: bool, price: number, qty: number",
+            "ok && price > 10 && qty > 5",
+        );
+        let exprs = &module.def(0).unwrap().exprs;
+        assert_eq!(exprs.len(), 4); // #0 price > 10, #1 ok && #0, #2 qty > 5, #3 #1 && #2
+        assert_eq!(
+            exprs[3],
+            ExprDef::Ternary {
+                cond: Expr(1),
+                then: Expr(2),
+                else_: const_operand(&module, Const::Bool(false)),
+            }
+        );
+    }
+
+    /// 다른 식 안의 `&&`도 따로 들어가고, 그 식은 값의 자리를 LoadInput으로 표시한다.
+    #[test]
+    fn logical_inside_calc_loads_it_as_input() {
+        use bytecode::{ExprDef, ExprOp};
+        let module = compile_text(
+            "ok: bool, price: number, done: bool",
+            "(ok && price > 10) == done",
+        );
+        let exprs = &module.def(0).unwrap().exprs;
+        assert_eq!(exprs.len(), 3); // #0 price > 10, #1 ok && #0, #2 #1 == done
+        assert_eq!(
+            exprs[2],
+            ExprDef::Calc {
+                code: vec![
+                    ExprOp::LoadInput as u8,
+                    0,
+                    ExprOp::LoadVar as u8,
+                    2,
+                    0,
+                    ExprOp::Eq as u8
+                ],
+                inputs: vec![1],
+            }
         );
     }
 
