@@ -15,8 +15,7 @@
 
 ## 하는 중
 
-- derived (파생 값) - 컴포넌트 정의부에 이름 붙인 식을 선언하고 template, contexts, events에서
-  읽는다. 진행은 ROADMAP.md의 derived 항목.
+없음
 
 ## 할 것
 
