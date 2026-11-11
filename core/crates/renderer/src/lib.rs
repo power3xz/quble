@@ -63,6 +63,7 @@ pub fn render_value(
         loaded_res: Vec::new(),
         next_region: 0,
         last_was_text: false,
+        derived: Vec::new(),
     };
     // 루트도 region 하나다(런타임 compile의 rootRegion) - 앵커가 루트 노드들 맨 앞에 선다.
     r.region_anchor();
@@ -248,6 +249,9 @@ enum Slot {
     Const(u16),
     /// 개수 반복의 회차 번호 - 번호 자체가 값이다.
     Raw(usize),
+    /// PUSH_EXPR가 센 파생 값. Renderer.derived의 인덱스다. 클라이언트는 식 인스턴스의 결과 leaf로 읽지만 서버는 값만
+    /// 있으면 되고, store에 넣으면 resume용 데이터(flat_data_json)에 실려 달라지므로 따로 둔다.
+    Derived(usize),
 }
 
 /// 고정부 뒤로 미룬 배열 하나(런타임 TDeferredArray).
@@ -364,6 +368,8 @@ struct Renderer<'m> {
     next_region: usize,
     /// 바로 앞에 낸 노드가 텍스트인가 - 이어서 텍스트를 내면 경계 표시를 끼운다.
     last_was_text: bool,
+    /// PUSH_EXPR가 센 파생 값들(Slot::Derived가 인덱스로 가리킨다). 합성마다 쌓이고 비우지 않는다.
+    derived: Vec<Val>,
 }
 
 /// 이웃한 두 텍스트 노드 사이의 경계. HTML 파서는 붙은 텍스트를 하나로 합치므로, resume이 노드를
@@ -406,6 +412,7 @@ impl Renderer<'_> {
             Slot::Const(i) => Val::from_const(self.module.pool.get(i).expect("상수풀 인덱스")),
             Slot::Raw(v) => Val::Num(v as f64),
             Slot::Store(base) => self.store.leaves[base + offset].clone(),
+            Slot::Derived(i) => self.derived[i].clone(),
         }
     }
 
@@ -527,6 +534,13 @@ impl Renderer<'_> {
                     pc += 2;
                 }
                 Op::PushArgLit => args.push(Slot::Const(u16at(&mut pc))),
+                // 식을 센 값을 자식에 넘긴다. 클라이언트는 식 인스턴스의 결과 leaf(STORE)를 넘기므로 자식에게는 반응형 슬롯이다.
+                Op::PushExpr => {
+                    let v = self.eval_expr(code[pc], pairs, &def.exprs)?;
+                    pc += 1;
+                    self.derived.push(v);
+                    args.push(Slot::Derived(self.derived.len() - 1));
+                }
                 // 경로 세그먼트와 컨텍스트는 이벤트(클라 전용)를 위한 것 - operand만 소비한다.
                 Op::PushPathSegment | Op::PushPathIndexSegment | Op::EnterContext => pc += 2,
                 Op::ExitContext => {}
@@ -619,7 +633,7 @@ impl Renderer<'_> {
                             } else {
                                 count as usize
                             };
-                            (matches!(slot, Slot::Store(_)), count, None)
+                            (matches!(slot, Slot::Store(_) | Slot::Derived(_)), count, None)
                         }
                         // 런타임은 식 인스턴스의 결과 칸을 구독하는 region을 연다 - 슬롯 kind와 무관하게 반응형이다.
                         Op::ForCountExpr => {
@@ -893,7 +907,7 @@ fn operand_len(op: Op) -> usize {
         | Op::ExitContext
         | Op::ForEnd
         | Op::SlotPlaceholderContentEnd => 0,
-        Op::PushThrough | Op::IfExpr | Op::TextExpr | Op::ForCountExpr => 1,
+        Op::PushThrough | Op::PushExpr | Op::IfExpr | Op::TextExpr | Op::ForCountExpr => 1,
         Op::ElemOpen
         | Op::Text
         | Op::TextVar
@@ -1041,6 +1055,57 @@ mod tests {
             text.replace_range(open..close, "");
         }
         text
+    }
+
+    /// 식으로 넘긴 합성 인자는 부모가 센 값을 자식이 읽는다(PUSH_EXPR).
+    #[test]
+    fn expr_comp_arg_is_read_by_the_child() {
+        let src = r#"
+            component C { props { price: number, qty: number } template { Card(total={price * qty} /) } }
+            component Card { props { total: number } template { p() { ${total} } } }
+        "#;
+        assert_eq!(
+            p_text(src, r#"{"price":4,"qty":5}"#),
+            Ok("20".to_string())
+        );
+    }
+
+    #[test]
+    fn expr_comp_arg_is_read_by_a_child_expr() {
+        let src = r#"
+            component C { props { price: number, qty: number } template { Card(total={price * qty} /) } }
+            component Card { props { total: number } template { p() { ${total + 1} } } }
+        "#;
+        assert_eq!(
+            p_text(src, r#"{"price":4,"qty":5}"#),
+            Ok("21".to_string())
+        );
+    }
+
+    #[test]
+    fn bool_expr_comp_arg_picks_the_child_branch() {
+        let src = r#"
+            component C { props { price: number, limit: number } template { Card(over={price > limit} /) } }
+            component Card { props { over: bool } template { p() { ${over ? "over" : "ok"} } } }
+        "#;
+        assert_eq!(
+            p_text(src, r#"{"price":9,"limit":5}"#),
+            Ok("over".to_string())
+        );
+        assert_eq!(
+            p_text(src, r#"{"price":3,"limit":5}"#),
+            Ok("ok".to_string())
+        );
+    }
+
+    #[test]
+    fn ternary_comp_arg_picks_the_branch_for_the_child() {
+        let src = r#"
+            component C { props { ok: bool } template { Card(label={ok ? "yes" : "no"} /) } }
+            component Card { props { label: string } template { p() { ${label} } } }
+        "#;
+        assert_eq!(p_text(src, r#"{"ok":true}"#), Ok("yes".to_string()));
+        assert_eq!(p_text(src, r#"{"ok":false}"#), Ok("no".to_string()));
     }
 
     #[test]

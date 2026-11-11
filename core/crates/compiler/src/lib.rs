@@ -4310,15 +4310,119 @@ component B { props { a: A } template { div( /) } }"#;
         ));
     }
 
-    /// `.length`는 읽는 쪽이 계산하는 값이라 넘길 leaf 주소가 없다 - 합성 인자로는 패닉이 아니라 에러.
+    /// `.length`는 읽는 쪽이 계산하는 값이라 넘길 leaf 주소가 없다 - 식으로 넘긴다(`PUSH_EXPR`).
     #[test]
-    fn length_in_comp_arg_rejected() {
+    fn length_in_comp_arg_is_a_push_expr() {
+        use bytecode::{decode, Op};
+
         let src = r#"
-            component Card { props { n: number } template { p() { ${n} } } }
             component C {
               props { items: string[] }
               template { Card(n={items.length} /) }
             }
+            component Card { props { n: number } template { p() { ${n} } } }
+        "#;
+        let module = decode(&compile(src).unwrap()).unwrap();
+        let caller = def_code(&module, 0);
+
+        let push = op_positions(caller, Op::PushExpr);
+        assert_eq!(push.len(), 1);
+        assert_eq!(caller[push[0] + 1], 0, "표현식 테이블 0번");
+        assert!(op_positions(caller, Op::PushThrough).is_empty());
+        assert!(op_positions(caller, Op::PushField).is_empty());
+    }
+
+    #[test]
+    fn operator_in_comp_arg_is_a_push_expr_in_child_prop_order() {
+        use bytecode::{decode, Op};
+
+        // 자식 props 순서(on, total)대로 인자를 낸다 - 앞이 부모 슬롯 통과, 뒤가 식이다.
+        let src = r#"
+            component C {
+              props { flag: bool, price: number, qty: number }
+              template { Card(total={price * qty} on={flag} /) }
+            }
+            component Card { props { on: bool, total: number } template { p() { ${total} } } }
+        "#;
+        let module = decode(&compile(src).unwrap()).unwrap();
+        let caller = def_code(&module, 0);
+
+        let through = op_positions(caller, Op::PushThrough);
+        let push = op_positions(caller, Op::PushExpr);
+        assert_eq!((through.len(), push.len()), (1, 1));
+        assert!(through[0] < push[0], "on(PushThrough) 다음 total(PushExpr)");
+    }
+
+    #[test]
+    fn ternary_in_comp_arg_is_a_push_expr() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { ok: bool }
+              template { Card(label={ok ? "yes" : "no"} /) }
+            }
+            component Card { props { label: string } template { p() { ${label} } } }
+        "#;
+        let module = decode(&compile(src).unwrap()).unwrap();
+
+        assert_eq!(op_positions(def_code(&module, 0), Op::PushExpr).len(), 1);
+    }
+
+    #[test]
+    fn comp_arg_expr_type_must_match_the_child_prop() {
+        let src = r#"
+            component C {
+              props { price: number, qty: number }
+              template { Card(on={price * qty} /) }
+            }
+            component Card { props { on: bool } template { p( /) } }
+        "#;
+        assert_eq!(codegen_error_snippet(src), "price * qty");
+    }
+
+    #[test]
+    fn object_valued_comp_arg_expr_is_rejected() {
+        let src = r#"
+            component C {
+              props { rows: { v: number }[] }
+              template { Card(row={rows[0]} /) }
+            }
+            component Card { props { row: { v: number } } template { p( /) } }
+        "#;
+        assert!(matches!(
+            compile(src),
+            Err(CompileError::Codegen(flatten::Sourced {
+                err: codegen::CodegenError {
+                    kind: codegen::CodegenErrorKind::ExprType(_),
+                    ..
+                },
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn comp_arg_expr_inside_for_reads_the_loop_variable() {
+        use bytecode::{decode, Op};
+
+        let src = r#"
+            component C {
+              props { rows: { price: number }[] }
+              template { @for (row of rows) { Card(total={row.price * 2} /) } }
+            }
+            component Card { props { total: number } template { p() { ${total} } } }
+        "#;
+        let module = decode(&compile(src).unwrap()).unwrap();
+
+        assert_eq!(op_positions(def_code(&module, 0), Op::PushExpr).len(), 1);
+    }
+
+    #[test]
+    fn comp_arg_list_literal_is_rejected() {
+        let src = r#"
+            component C { template { Card(tags={["a"]} /) } }
+            component Card { props { tags: string[] } template { p( /) } }
         "#;
         assert!(matches!(
             compile(src),

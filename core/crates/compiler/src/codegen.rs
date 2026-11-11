@@ -611,6 +611,35 @@ fn arg_to_field(
     })
 }
 
+/// 슬롯 하나로 접히지 않는 합성 인자(연산자, 인덱스 접근, `.length`)를 식으로 낸다. 식을 표현식 테이블에 싣고
+/// `PUSH_EXPR expr_index`를 낸다 - 런타임이 식 인스턴스를 만들어 그 결과 leaf를 자식에 넘긴다. 결과는 원시여야 하고
+/// 자식 prop 타입과 같아야 한다. 객체/배열을 내는 식(`rows[i]`)은 `expr_type`이 거절한다.
+fn push_expr_arg(
+    arg_value: &Expr,
+    comp: &str,
+    child_prop: &Prop,
+    props: &[Prop],
+    for_vars: &[ForVar],
+    pool: &mut ConstPool,
+    exprs: &mut Vec<ExprDef>,
+    code: &mut Vec<u8>,
+) -> Result<(), CodegenError> {
+    let got = expr_type(arg_value, props, for_vars)?;
+    if !types_match(&got, &child_prop.type_) {
+        return Err(CodegenErrorKind::PropTypeMismatch {
+            comp: comp.to_string(),
+            prop: child_prop.name.clone(),
+            want: Box::new(child_prop.type_.clone()),
+            got: Box::new(got),
+        }
+        .at(arg_value.range().0));
+    }
+    let index = intern_expr(arg_value, props, for_vars, pool, exprs)?;
+    code.push(Op::PushExpr as u8);
+    code.push(index);
+    Ok(())
+}
+
 /// 펼친 derived 본문의 이름과 타입을 검사한다. 값은 어디에도 싣지 않는다.
 fn check_derived_body(value: &Expr, props: &[Prop]) -> Result<(), CodegenError> {
     match value {
@@ -1388,13 +1417,21 @@ fn emit_node(
                         path_type(arg_value, props, for_scope.for_vars)?;
                         // 도달 타입이 자식 prop 타입과 구조가 같아야 한다.
                         let found = fixed_ref_of(arg_value, props, for_scope.for_vars)?;
-                        // 경로는 맞는데 슬롯으로 안 접히는 것(`.length`)은 식이라 아직 못 넘긴다.
+                        // 경로는 맞는데 슬롯으로 안 접히는 것(`.length`)은 식으로 넘긴다.
                         let (scope_index, offset, reached_ty) = match found {
                             Some(found) => found,
                             None => {
-                                return Err(
-                                    CodegenErrorKind::UnsupportedValueExpr.at(arg_value.range().0)
-                                );
+                                push_expr_arg(
+                                    arg_value,
+                                    &name.name,
+                                    child_prop,
+                                    props,
+                                    for_scope.for_vars,
+                                    pool,
+                                    exprs,
+                                    code,
+                                )?;
+                                continue;
                             }
                         };
                         if !types_match(reached_ty, &child_prop.type_) {
@@ -1437,8 +1474,21 @@ fn emit_node(
                         code.push(Op::PushArgLit as u8);
                         code.extend_from_slice(&value_index.to_le_bytes());
                     }
-                    // 연산자가 붙은 식은 값 자리에서 아직 안 된다.
-                    _ => return Err(CodegenErrorKind::UnsupportedValueExpr.at(arg_value.range().0)),
+                    // 배열 리터럴은 합성 인자로 못 넘긴다.
+                    Expr::List(..) => {
+                        return Err(CodegenErrorKind::UnsupportedValueExpr.at(arg_value.range().0));
+                    }
+                    // 연산자, 인덱스 접근은 식으로 넘긴다.
+                    _ => push_expr_arg(
+                        arg_value,
+                        &name.name,
+                        child_prop,
+                        props,
+                        for_scope.for_vars,
+                        pool,
+                        exprs,
+                        code,
+                    )?,
                 }
             }
 
