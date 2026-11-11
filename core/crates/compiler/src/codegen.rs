@@ -45,7 +45,7 @@ pub enum CodegenErrorKind {
         want: Box<Type>,
         got: Box<Type>,
     },
-    /// @for 회차변수 이름이 prop 또는 바깥 회차변수와 겹친다. 섀도잉을 막아 이름 조회를
+    /// @for 회차변수 이름이 prop 또는 바깥 회차변수와 겹친다. shadowing을 막아 이름 조회를
     /// 순서 무관하게(매치 최대 하나) 유지한다 - 다른 이름을 쓰라는 컴파일 에러.
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
@@ -698,7 +698,8 @@ struct ForScope<'a> {
     pending: &'a [u16],
     depth_base: u16,
     /// 이 지점에서 보이는 @for 회차변수들(바깥->안쪽 누적). props와 별개 scope 층 -
-    /// 이름 조회는 props보다 먼저 봐(안쪽 우선/섀도잉), 값 kind는 다르다(회차값은 런타임 RAW).
+    /// 이름 조회는 props보다 먼저 보지만 이름이 겹치면 shadowing이라 에러(DuplicateBinding)여서 순서는
+    /// 결과를 바꾸지 않는다. 값 kind는 다르다(회차값은 런타임 RAW).
     /// 컴포넌트 경계(RENDER)에서 소멸 - 자식 def는 자기 ROOT부터(pending과 동일 수명).
     for_vars: &'a [ForVar],
 }
@@ -1625,7 +1626,7 @@ fn emit_node(
             count,
             body,
         } => {
-            // 이름 충돌 검사(섀도잉 금지 - 조회를 순서 무관하게 유지). item/index 둘 다 props/바깥 회차변수와
+            // 이름 충돌 검사(shadowing 금지 - 조회를 순서 무관하게 유지). item/index 둘 다 props/바깥 회차변수와
             // 안 겹쳐야 한다. item==index도 금지(같은 이름 두 슬롯).
             let mut names: Vec<&Ident> = vec![item];
             if let Some(idx) = index {

@@ -2709,7 +2709,7 @@ mod tests {
         ));
     }
 
-    /// 회차변수 이름이 prop과 겹치면 에러(섀도잉 금지).
+    /// 회차변수 이름이 prop과 겹치면 에러(shadowing 금지).
     #[test]
     fn for_item_name_collision_is_error() {
         let src = r#"
@@ -2766,7 +2766,7 @@ mod tests {
         }
     }
 
-    /// 인덱스변수 이름이 회차변수(item)와 같으면 에러 - 같은 이름이 두 슬롯을 가질 수 없다(섀도잉 금지).
+    /// 인덱스변수 이름이 회차변수(item)와 같으면 에러 - 같은 헤더에서 같은 이름이 두 슬롯을 가질 수 없다.
     #[test]
     fn for_index_var_same_as_item_is_error() {
         let src = r#"

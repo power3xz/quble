@@ -23,7 +23,8 @@ pub enum DerivedErrorKind {
     NameTakenByProp(String),
     /// derived가 자기 자신으로 돌아오는 고리를 이룸. 고리를 닫는 참조를 탓한다.
     Cycle(String),
-    /// `@for` 몸체가 회차변수에 shadowing된 derived 이름을 읽음. 그 회차변수 이름을 탓한다.
+    /// `@for` 회차변수가 같은 이름의 derived를 shadowing하는데 몸체가 그 이름을 읽음. 그 회차변수
+    /// 이름을 탓한다.
     ForBindingShadows(String),
 }
 
