@@ -224,3 +224,12 @@
 - **HTML 중첩 검사가 놓치는 구조 변경** - `nesting.rs`는 SYNTAX.md 3.1.2의 규칙만 본다. `li` 안의 `li`,
   `dt`/`dd`끼리 겹침, `h1`~`h6` 안의 `h1`~`h6`처럼 파서가 형제로 바꾸는 중첩은 통과해 resume이 실패한다.
   호출한 컴포넌트가 다시 슬롯에 넘기는 내용도 바깥 조상에는 견주지 않는다.
+
+- **삼항이 고른 갈래를 처음 셀 때 throw하면 입력을 고쳐도 값이 안 돌아온다** - 고른 갈래의 식 인스턴스를 연결하다
+  throw하면 그 인스턴스를 반납한다(`evaluateOrFree`). 삼항은 cond만 구독하고 있어 갈래가 읽던 leaf의 변경을 못 받고,
+  cond를 다시 뒤집어야 갈래를 새로 연결한다. `&&`/`||`는 오른쪽이 식이면 삼항으로 나가므로 같다.
+  - 재현: rows 길이가 3인 `${ok && rows[cursor].x > 0}`에서 ok가 true인 채 cursor를 5로 올리면 `RangeError`
+    (`index 5 out of range (length 3)`)다. 이어서 cursor를 0으로 되돌려도 값이 false로 남는다(맞는 값은 true).
+    ok를 한 번 더 뒤집으면 true가 된다. `${ok ? rows[cursor].x : 0}`도 같다.
+  - `ternary.test.ts`의 "처음 고른 식 갈래가 throw하면 그 인스턴스를 반납해, 다시 고를 때 새로 센다"도 cond를 다시
+    뒤집어 복구한다. `&&`가 식 하나(Calc)로 나가던 때는 cursor를 구독해 바로 복구됐다.
