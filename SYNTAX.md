@@ -15,6 +15,7 @@ use "./Card.module.css"             // 에셋 - 이름 없이 경로만
 
 component IDENT {
   props    { ... }   // 선택
+  derived  { ... }   // 선택
   contexts { ... }   // 선택
   events   { ... }   // 선택
   template { ... }   // 필수
@@ -78,7 +79,33 @@ Util   = ("Omit" | "Pick") "<" Type "," 키 ("|" 키)* ">"   // 키는 '작은�
 나열한 키만 고른 것(유니온 키). 키는 **작은따옴표**로 쓴다(값 리터럴과 자리가 다르다).
 나열한 키가 안쪽에 없으면 컴파일 에러.
 
-### 2.2 `contexts`
+### 2.2 `derived`
+
+```
+props {
+  title: string,
+  completed: bool,
+  priority: number
+}
+derived {
+  urgent = priority > 3 && !completed,
+  badge = urgent ? "urgent" : "normal"
+}
+template {
+  span { ${badge} }
+}
+```
+
+식에 이름을 붙이는 블록이다. `이름 = 표현식` 목록이고 구분자 쉼표는 항목 사이에 **필수**, 마지막 항목
+뒤는 생략하거나 trailing 쉼표를 둔다(#2.1과 같은 규칙). 타입은 적지 않으며 표현식(#5.2)의 타입 검사
+결과로 정해진다.
+
+- 본문에서 props와 다른 derived를 읽는다. 선언 순서는 상관없다. 회차변수(`@for`)는 읽을 수 없다.
+- derived끼리 서로를 읽는 순환 참조, props와 같은 이름은 컴파일 에러.
+- template 보간, `contexts` 값, `events` 페이로드 값에서 props처럼 읽는다. 읽기 전용이라 핸들러가 쓸 수 없다.
+- 의미는 사용처에 정의한 식을 그대로 쓴 것과 같다. 이름만 붙을 뿐 계산이나 구독이 따로 생기지 않는다.
+
+### 2.3 `contexts`
 
 ```
 contexts {
@@ -93,7 +120,7 @@ props 참조(`assignee`, `priority`)가 오며, **객체 prop을 통째로** 넘
 페이로드와 같음 - `PlanContext { plan, general }`의 `general`이 객체면 핸들러가
 `context.PlanContext.general`을 중첩 객체로 받는다). `@with`로 활성화된다.
 
-### 2.3 `events`
+### 2.4 `events`
 
 ```
 events {
