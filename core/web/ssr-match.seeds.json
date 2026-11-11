@@ -1154,6 +1154,12 @@
   ],
   "lit_arg": [{}],
   "lit_bool_if": [{}],
+  "logical_and": [{ "ok": true, "price": 5, "qty": 3 }, { "ok": false, "price": 5, "qty": 3 }],
+  "logical_and_lazy": [
+    { "ok": false, "cursor": 5, "rows": [{ "x": 1 }] },
+    { "ok": true, "cursor": 0, "rows": [{ "x": 1 }] }
+  ],
+  "logical_or": [{ "ok": true, "price": 1, "qty": 3 }, { "ok": false, "price": 5, "qty": 3 }],
   "nested_context": [
     {
       "userId": 7
