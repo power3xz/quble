@@ -77,6 +77,8 @@ Quble의 피처 진행 상황을 도메인별로 묶었다. (일상 리팩토링
   - [x] leafIndex 할당기 / free list - 배열 항목 제거 시 회수하고 다음 할당이 재사용.
   - [x] 통지 배치 - 핸들러 안의 쓰기를 모아 끝날 때 leaf마다 한 번 통지(core/web/LEAF-STORE-LAYOUT.md).
     한 flush에서 바뀐 leaf 전체를 구독 함수가 받아, 식이 읽는 leaf 여럿이 바뀌어도 한 번에 다시 센다(core/web/EXPR-EVAL.md).
+- [ ] derived (파생 값) - 컴포넌트 정의부에서 props로부터 계산되는 값을 선언하고, 다른 파생 값의 계산에도
+  쓴다. 순환 참조는 컴파일 에러다. 파킹한 아이디어는 IDEAS.md "컴포넌트 정의부의 derived (파생 값)".
 
 ## 합성 / 이벤트
 
