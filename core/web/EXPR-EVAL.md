@@ -254,6 +254,12 @@ leaf 3 (score)   --/       changedVarMask = changedLeaves를 읽는 변수의 �
 
 다시 센 값이 결과 leaf의 값과 같으면 구독 층이 기록도 통지도 하지 않는다.
 
+**식이 다른 식의 결과 leaf를 읽을 때** - 합성 인자로 식을 넘기면(`Comp(x={a * b})`, `PUSH_EXPR`) 자식 식이 부모 식의
+결과 leaf를 입력 leaf처럼 읽는다. 둘 사이에 그래프 간선이 없고, 그 결과 leaf는 flush가 받은 `changedLeaves`에 없어서
+표시되지 못한다. 그래서 `flush`는 바뀐 leaf로 push와 pull을 돈 뒤, 이번에 기록한 결과 leaf를 읽는 식을 같은 방식으로 한 번 더
+표시하고 센다(`flushResultLeafReaders`). 센 결과가 또 결과 leaf를 기록하면 더 없을 때까지 이어서 돈다. 식의 의존에 순환이 없어
+끝난다. 읽는 leaf가 바뀌고 앞 식의 결과 leaf도 바뀐 식은 한 flush에서 두 번 센다(값은 나중 것이 맞다).
+
 leaf마다 함수를 따로 두면 많은 행에서 함수가 수만 개 늘어, 명령 수가 아니라 메모리가 CPU 캐시를
 넘쳐 다시 세기가 처음부터 세기보다 느려졌다. 같은 이유로 함수가 잡는 변수도 줄인다 - 건너뛸 부분식이
 없는 식에는 cache도 표도 잡지 않고 처음부터 세는 함수를 따로 만든다(`ExprInstancePool.create`).
@@ -274,7 +280,7 @@ leaf 23은 한 번만 구독한다. leaf 23이 바뀌면 x, y가 함께 바뀌�
 
 **한 flush에서 읽는 leaf 여럿이 바뀔 때** - 함수가 받은 `changedLeaves`에서 `varNumberToLeafIndex`로 식이 읽는 변수를
 모두 모아, 그 변수들을 하나도 품지 않은 부분식만 건너뛰며 한꺼번에 센다. 구독 층이 함수를 flush마다 한
-번만 호출하므로 같은 flush에서 다시 세는 일은 없다.
+번만 호출하므로 같은 flush에서 다시 세는 일은 없다(앞 식의 결과 leaf를 읽는 식은 예외다 - 위 문단).
 
 ```
 ((a + b) * c) - (d + e)       변수 a=0, b=1, c=2, d=3, e=4
