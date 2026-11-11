@@ -415,14 +415,10 @@ const html = toHTML(document.body)
 (`experiments/react/adapter/README.md`). 남은 길: svelte/vue 어댑터, 비동기 로드(지연 import, 런타임 fetch),
 다른 프레임워크가 quble 안에 들어오는 방향. ROADMAP.md "마이크로프론트엔드"와 이어진다.
 
-### 컴포넌트 정의부의 derived (파생 값)
+### 표현식의 공통 하위식 추출
 
-컴포넌트 정의부에 props에서 계산되는 값을 선언하는 `derived` 블록.
-
-파생 값을 다른 파생 값의 계산에 쓸 수 있다. 이 계산은 결국 표현식이고, 표현식은 컴포넌트 표현식 테이블에
-intern하고 있어(core/BYTECODE.md) 그 위에서 최적화할 여지가 있다.
-
-파생 값끼리 서로를 읽는 순환 참조는 컴파일 에러로 검사해야 한다.
+컴포넌트의 표현식들을 모아 겹치는 하위식을 별도 표현식으로 낸다. 지금은 산술 식이 다른 식 안에 합쳐지면
+(`price * qty`와 `price * qty + 1`) 같은 하위식을 따로 계산하고 인스턴스도 공유하지 못한다.
 
 ### resume 불일치 복구
 
