@@ -203,7 +203,10 @@ export class ExprInstancePool {
       for (; scanned < roundEnd; scanned++) {
         this.markReaders(resultLeaves[scanned]);
       }
-      this.recountMarked(onError);
+      // 결과 leaf를 읽는 식이 없으면(합성 인자가 없는 평소) 표시된 인스턴스가 없어 셀 것이 없다.
+      if (this.recountExprInstanceIndices.length > 0) {
+        this.recountMarked(onError);
+      }
     }
   };
 
