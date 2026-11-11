@@ -279,6 +279,7 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
 | `ATTR_G_EXPR`     | 0x20 | name:u16, expr_index:u8 | name=전역, value=표현식 테이블 | ` name="..."` 출력. name은 전역 상수풀 ID, 값은 식을 세어 얻는다(`id={count * 10}`). |
 | `ATTR_L_EXPR`     | 0x21 | name:u16, expr_index:u8 | name=컴포넌트 상수풀, value=표현식 테이블 | 위와 같고 name만 컴포넌트 상수풀 인덱스. |
 | `FOR_COUNT_EXPR`  | 0x22 | expr_index: u8        | 컴포넌트 표현식 테이블     | 횟수를 식으로 얻는 반복(`@for (x of n)`). 식의 값이 횟수다. 숫자 prop count인데 본문을 그리면 식 인스턴스가 생길 때 `FOR_COUNT_VAR` 대신 온다(#5.2). 이후는 `FOR_COUNT_VAR`의 STORE 경우와 같다. |
+| `PUSH_EXPR`       | 0x23 | expr_index: u8        | 컴포넌트 표현식 테이블     | 식으로 넘긴 합성 인자(`Comp(x={a * b})`). 식 인스턴스를 부모 가지에 싣고 그 결과 leaf를 `(STORE, 결과 leaf)`로 자식 인자 버퍼에 push한다. 슬롯 하나로 접히는 인자는 `PUSH_THROUGH`/`PUSH_FIELD`로 간다. 뒤따르는 `RENDER`가 소비. |
 
 설계 메모:
 
@@ -299,6 +300,11 @@ opcode = `u8`. operand는 뒤에 가변으로 붙는다. **operand가 어느 풀
       `base+offset`으로 내려가 `(kind, base+offset)`을 넘긴다. kind는 그대로 전파, **위치만**
       넘기고 결과 타입은 자식이 자기 선언으로 안다(array면 자식이 `arrayPool[store.get()]`).
     - `Comp(x="lit")`(리터럴) -> `PUSH_ARG_LIT const_index`: 부모 슬롯과 분리된 독립 const.
+    - `Comp(x={a * b})`(슬롯 하나로 안 접히는 식: 연산자, 인덱스 접근, `.length`) -> `PUSH_EXPR expr_index`:
+      식 인스턴스를 만들어 그 결과 leaf를 `(STORE, 결과 leaf)`로 넘긴다. 결과는 원시여야 하고 자식 prop 타입과 같아야
+      한다. 자식이 이 슬롯을 자기 식 안에서 읽으면 부모 식과 자식 식 사이에 그래프 간선이 없어, flush가 이번에
+      기록한 결과 leaf를 입력으로 읽는 식도 이어서 센다(core/web/EXPR-EVAL.md). SSR 렌더러는 센 값을 store에 넣지
+      않는다 - resume용 데이터에 실리지 않게 따로 둔다.
   - **싣는 건 값이 아니라 부모 scope의 (kind, index)**다. 같은 컴포넌트가 use-site마다 다른
     값을 받을 수 있어(# 정의 vs 사용) 전역 leafIndex가 아니라 부모 슬롯을 한 단계 풀어 준다.
   - 인자는 **자식 scope index 0,1,2... 순서**로 쌓는다. 지금은 use-site가 자식 props를 **전부**

@@ -29,6 +29,7 @@ import {
   OP_IF_EXPR,
   OP_LOAD_RES,
   OP_PUSH_ARG_LIT,
+  OP_PUSH_EXPR,
   OP_PUSH_FIELD,
   OP_PUSH_PATH_INDEX_SEGMENT,
   OP_PUSH_PATH_SEGMENT,
@@ -319,6 +320,17 @@ export class ResumeInterpreter {
         }
         case OP_PUSH_ARG_LIT: {
           args.push(CONST, u16at());
+          break;
+        }
+        case OP_PUSH_EXPR: {
+          const { exprInstanceIndex, value } = vm.addExprInstance(
+            vm.globalExprIndexOf(compId, u8at()),
+            argumentSourcePairs,
+            startBranchIndex,
+            walkStacks,
+            loopIndexBase,
+          );
+          args.push(STORE, vm.allocResultLeaf(exprInstanceIndex, value));
           break;
         }
         case OP_PUSH_PATH_SEGMENT: {

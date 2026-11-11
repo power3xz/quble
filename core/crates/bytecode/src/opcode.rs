@@ -95,6 +95,10 @@ pub enum Op {
     /// ForCountVar와 같다. 컴파일러는 본문을 그리면 식 인스턴스가 생길 때 ForCountVar 대신 이것을 낸다 - 그
     /// 식 인스턴스가 행의 식 인스턴스로 가는 간선의 시작점이 된다.
     ForCountExpr = 0x22,
+    /// 식을 합성 인자로 넘긴다(`Comp(total={price * qty})`). operand: expr_index u8. 런타임이 식 인스턴스를 만들어
+    /// 그 결과 leaf를 `(STORE, 결과 leaf)`로 자식 인자 버퍼에 push한다. 슬롯 하나로 접히는 인자(`{a}`, `{user.name}`)는
+    /// PushThrough/PushField로 간다. 뒤따르는 RENDER가 소비.
+    PushExpr = 0x23,
 }
 
 impl Op {
@@ -136,6 +140,7 @@ impl Op {
             0x20 => Op::AttrGExpr,
             0x21 => Op::AttrLExpr,
             0x22 => Op::ForCountExpr,
+            0x23 => Op::PushExpr,
             _ => return None,
         })
     }

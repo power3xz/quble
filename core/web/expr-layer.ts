@@ -167,20 +167,52 @@ export class ExprInstancePool {
   // 걸어 파생 구독 슬롯이 바뀌어도 push는 이미 끝나 순회가 깨지지 않는다.
   // `${big > 50}`에서 big이 100 -> 200이면 true 그대로라 결과 leaf의 값이 같아 쓰지 않는다.
   flush = (changed: ReadonlySet<number>, onError: (error: unknown) => void): number[] | null => {
-    const { recountExprInstanceIndices } = this;
     for (const leafIndex of changed) {
-      const derives = this.deriveSubscribers[leafIndex];
-      if (derives === undefined) {
-        continue;
-      }
-      if (typeof derives === "number") {
-        this.markChanged(derives, leafIndex);
-      } else {
-        for (const exprInstanceIndex of derives) {
-          this.markChanged(exprInstanceIndex, leafIndex);
-        }
+      this.markReaders(leafIndex);
+    }
+    this.recountMarked(onError);
+    const resultLeaves = this.changedResultLeaves;
+    if (resultLeaves !== null) {
+      this.flushResultLeafReaders(resultLeaves, onError);
+    }
+    this.changedResultLeaves = null;
+    return resultLeaves;
+  };
+
+  // leafIndex를 파생 구독한 식 인스턴스마다 그 leaf가 바뀐 것을 표시한다.
+  private markReaders = (leafIndex: number): void => {
+    const derives = this.deriveSubscribers[leafIndex];
+    if (derives === undefined) {
+      return;
+    }
+    if (typeof derives === "number") {
+      this.markChanged(derives, leafIndex);
+    } else {
+      for (const exprInstanceIndex of derives) {
+        this.markChanged(exprInstanceIndex, leafIndex);
       }
     }
+  };
+
+  // 이번 flush에서 쓴 결과 leaf를 입력으로 읽는 식 인스턴스를 센다. 합성 인자로 넘긴 식의 결과를 자식 식이 읽으면 둘 사이에
+  // 그래프 간선이 없어, flush가 받은 changed에 이 leaf가 없어 표시하지 못한다. 센 결과가 또 결과 leaf를 쓰면 resultLeaves
+  // 뒤에 더해져 이어서 훑는다. 식의 의존은 순환이 없어 끝난다.
+  private flushResultLeafReaders = (resultLeaves: number[], onError: (error: unknown) => void): void => {
+    for (let scanned = 0; scanned < resultLeaves.length; ) {
+      const roundEnd = resultLeaves.length;
+      for (; scanned < roundEnd; scanned++) {
+        this.markReaders(resultLeaves[scanned]);
+      }
+      // 결과 leaf를 읽는 식이 없으면(합성 인자가 없는 평소) 표시된 인스턴스가 없어 셀 것이 없다.
+      if (this.recountExprInstanceIndices.length > 0) {
+        this.recountMarked(onError);
+      }
+    }
+  };
+
+  // recountExprInstanceIndices에 모인 식 인스턴스를 센다. 세고 나면 모음을 비운다.
+  private recountMarked = (onError: (error: unknown) => void): void => {
+    const { recountExprInstanceIndices } = this;
     const { graph } = this;
     for (const exprInstanceIndex of recountExprInstanceIndices) {
       const instance = this.pool.entries[exprInstanceIndex];
@@ -202,9 +234,6 @@ export class ExprInstancePool {
       }
     }
     recountExprInstanceIndices.length = 0;
-    const resultLeaves = this.changedResultLeaves;
-    this.changedResultLeaves = null;
-    return resultLeaves;
   };
 
   // 식 인스턴스가 평가 대상이면 true를 돌려준다. incoming labeled edge가 있으면 시작점을 먼저 요청하고, 시작점이 평가

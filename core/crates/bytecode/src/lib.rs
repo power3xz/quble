@@ -330,6 +330,7 @@ mod tests {
         assert_eq!(Op::from_u8(0x0f), Some(Op::LoadRes));
         assert_eq!(Op::from_u8(0x1e), Some(Op::IfExpr));
         assert_eq!(Op::from_u8(0x22), Some(Op::ForCountExpr));
+        assert_eq!(Op::from_u8(0x23), Some(Op::PushExpr));
         assert_eq!(Op::from_u8(0xff), None);
     }
 
