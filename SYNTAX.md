@@ -370,6 +370,9 @@ p() { "여러
 p() { ${count * 2} }
 p() { ${note.length} }
 span(id={count * 10})
+
+Total(total={price * qty} limit={limit} /)   // 식을 합성 인자로 넘긴다
+Label(text={ok ? "yes" : "no"} /)
 ```
 
 **연산자.** 우선순위와 결합은 JS와 같다.
