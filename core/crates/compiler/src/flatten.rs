@@ -6,6 +6,7 @@
 //! esbuild/rollup의 resolve(importer, specifier) -> 정규화 경로 패턴의 최소 버전이다.
 
 use crate::ast::{Component, Ident, Prop, Type};
+use crate::derived::{expand_derived, DerivedError};
 use crate::lexer;
 use crate::parse;
 use crate::src_range::SrcRange;
@@ -123,6 +124,8 @@ pub enum FlattenError {
     DuplicateComponent(String),
     /// prop 타입 표기 안에 탓할 자리가 있는 에러. 자리는 kind마다 다르다(TypeErrorKind).
     Type(Sourced<TypeError>),
+    /// derived 이름 충돌/순환 등 탓할 자리가 있는 에러(DerivedErrorKind).
+    Derived(Sourced<DerivedError>),
 }
 
 /// prop 타입 표기에서 난 에러와 그 안의 탓할 자리(ast.rs `Type` 그림).
@@ -178,6 +181,7 @@ impl std::fmt::Display for FlattenError {
             FlattenError::Parse(e) => write!(f, "{}", e.err.kind),
             FlattenError::Use(e) => write!(f, "{}", e.err.kind),
             FlattenError::Type(e) => write!(f, "{}", e.err.kind),
+            FlattenError::Derived(e) => write!(f, "{}", e.err.kind),
             FlattenError::DuplicateComponent(name) => {
                 write!(f, "component `{name}` is defined in more than one file")
             }
@@ -202,6 +206,7 @@ pub fn flatten(
     // 엔트리는 want=None - 자기 파일 컴포넌트 전부.
     collect(entry_path, entry_src, None, loader, &mut ctx)?;
     expand_type_refs(&mut ctx.acc)?;
+    expand_derived(&mut ctx.acc)?;
     Ok(ctx.acc)
 }
 

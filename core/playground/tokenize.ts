@@ -23,6 +23,7 @@ const QUBC_KEYWORDS = new Set([
   "from",
   "component",
   "props",
+  "derived",
   "contexts",
   "events",
   "template",

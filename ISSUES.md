@@ -100,7 +100,7 @@
 
 - **DOM 입력값을 핸들러가 못 읽음** - `@input:EDIT`으로 이벤트는 걸리는데 그 요소의 현재 값
   (React의 `e.target.value`)에 도달할 길이 없었다. payload 식은 props 변수/리터럴만 참조해
-  (SYNTAX.md #2.3) 선언 시점 store 값에 묶이고, 타이핑한 값은 어디에도 안 실렸다. **해결:**
+  (SYNTAX.md #2.4) 선언 시점 store 값에 묶이고, 타이핑한 값은 어디에도 안 실렸다. **해결:**
   payload 문법을 늘리지 않고 핸들러 ctx에 발화한 DOM `Event`를 그대로 넘긴다(`ctx.event`,
   vm.ts dispatch). 값은 `event.target.value`로 읽고, 필요하면 `set`으로 store에 되먹여
   형제 보간을 갱신한다 - 입력 요소 자신은 재대입하지 않는 **uncontrolled** 방식이다(DOM이 표시값의

@@ -45,7 +45,7 @@ pub enum CodegenErrorKind {
         want: Box<Type>,
         got: Box<Type>,
     },
-    /// @for 회차변수 이름이 prop 또는 바깥 회차변수와 겹친다. 섀도잉을 막아 이름 조회를
+    /// @for 회차변수 이름이 prop 또는 바깥 회차변수와 겹친다. shadowing을 막아 이름 조회를
     /// 순서 무관하게(매치 최대 하나) 유지한다 - 다른 이름을 쓰라는 컴파일 에러.
     DuplicateBinding(String),
     /// `@for (x of arr)`의 count가 배열도 숫자도 아니다(bool/객체 등 - 반복 횟수로 못 쓴다).
@@ -426,6 +426,10 @@ fn generate_comp(
         // 같은 수명이다(DECISIONS.md "표현식 테이블 - 컴포넌트 소유 + 후위 표기 채택").
         let mut next_slot_placeholder_index = 0u16;
         let mut exprs = Vec::new();
+        // derived는 사용처에 펼쳐져 어디서도 안 읽히면 코드에 안 닿는다 - 본문 오류를 놓치지 않게 따로 본다.
+        for derived in &comp.derived {
+            check_derived_body(&derived.expr, &comp.props)?;
+        }
         for node in &comp.template {
             emit_node(
                 node,
@@ -607,6 +611,20 @@ fn arg_to_field(
     })
 }
 
+/// 펼친 derived 본문의 이름과 타입을 검사한다. 값은 어디에도 싣지 않는다.
+fn check_derived_body(value: &Expr, props: &[Prop]) -> Result<(), CodegenError> {
+    match value {
+        Expr::Lit(..) | Expr::List(..) => {}
+        Expr::Unary(..) | Expr::Binary(..) | Expr::Ternary(..) => {
+            expr_type(value, props, &[])?;
+        }
+        _ => {
+            path_type(value, props, &[])?;
+        }
+    }
+    Ok(())
+}
+
 /// 슬롯 하나로 접히지 않는 값(연산자, 인덱스 접근, `.length`)을 표현식 테이블에 싣는다.
 /// 결과가 원시면 값까지, 객체/배열이면 시작 leafIndex까지 낸다 - 런타임이 거기서부터 조립한다.
 fn expr_field_value(
@@ -680,7 +698,8 @@ struct ForScope<'a> {
     pending: &'a [u16],
     depth_base: u16,
     /// 이 지점에서 보이는 @for 회차변수들(바깥->안쪽 누적). props와 별개 scope 층 -
-    /// 이름 조회는 props보다 먼저 봐(안쪽 우선/섀도잉), 값 kind는 다르다(회차값은 런타임 RAW).
+    /// 이름 조회는 props보다 먼저 보지만 이름이 겹치면 shadowing이라 에러(DuplicateBinding)여서 순서는
+    /// 결과를 바꾸지 않는다. 값 kind는 다르다(회차값은 런타임 RAW).
     /// 컴포넌트 경계(RENDER)에서 소멸 - 자식 def는 자기 ROOT부터(pending과 동일 수명).
     for_vars: &'a [ForVar],
 }
@@ -1607,7 +1626,7 @@ fn emit_node(
             count,
             body,
         } => {
-            // 이름 충돌 검사(섀도잉 금지 - 조회를 순서 무관하게 유지). item/index 둘 다 props/바깥 회차변수와
+            // 이름 충돌 검사(shadowing 금지 - 조회를 순서 무관하게 유지). item/index 둘 다 props/바깥 회차변수와
             // 안 겹쳐야 한다. item==index도 금지(같은 이름 두 슬롯).
             let mut names: Vec<&Ident> = vec![item];
             if let Some(idx) = index {

@@ -901,6 +901,23 @@ mod tests {
         );
     }
 
+    /// payload 값이 derived면 펼친 식의 결과 타입으로 나온다.
+    #[test]
+    fn payload_derived_uses_the_result_type_of_its_expr() {
+        let out = dts(r#"
+            component C {
+              props { n: number }
+              derived { big = n > 9 }
+              events { E({ big }) }
+              template { button(@click:E /) }
+            }
+        "#);
+        assert!(
+            out.contains("THandler<{ big: boolean }"),
+            "실제 출력:\n{out}"
+        );
+    }
+
     /// payload 변수가 객체/배열 prop이면 그 구조가 통째로 나온다(원시로 납작해지지 않는다).
     #[test]
     fn payload_var_object_and_array_type() {
